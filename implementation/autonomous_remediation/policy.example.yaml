@@ -1,0 +1,64 @@
+version: 1
+
+default_outcome: block
+
+requirements:
+  client_scope_required: true
+  device_identity_required: true
+  idempotency_key_required: true
+  execution_timeout_required: true
+  verification_required: true
+  rollback_or_escalation_required: true
+  maintenance_window_enforced: true
+  provider_success_requires_independent_verification: true
+
+pilot:
+  maximum_autonomy: approved_execute
+  automatic_ticket_close: false
+  client_confirmation_required_for_user_visible_symptoms: true
+
+rules:
+  - id: approved-quickbooks-update-workstation
+    description: Permit a technician-approved QuickBooks update on a single workstation.
+    capability: drmm.software.quickbooks.update
+    device_role: workstation
+    maximum_targets: 1
+    outcome: require_approval
+    autonomy_level: approved_execute
+    required_approver_roles:
+      - technician
+    conditions:
+      authoritative_vendor_evidence: true
+      installed_version_confirmed: true
+      approved_component_only: true
+      active_user_warning_required: true
+      company_file_backup_state_known: true
+    verification:
+      capability: drmm.software.quickbooks.verify
+      checks:
+        - installed_version
+        - relevant_services_running
+        - update_exit_code
+    on_failure:
+      action: escalate
+      create_high_priority_internal_note: true
+
+  - id: block-server-software-update-pilot
+    description: Block autonomous line-of-business application updates on servers during the pilot.
+    capability_pattern: drmm.software.*.update
+    device_role: server
+    outcome: block
+    autonomy_level: prohibited
+
+promotion:
+  self_approval_allowed: false
+  minimum_successful_executions: 25
+  minimum_observation_days: 30
+  minimum_verified_success_rate: 0.98
+  maximum_rollback_rate: 0.01
+  maximum_unplanned_intervention_rate: 0.02
+  required_approver_roles:
+    - technology_steward
+    - service_manager
+  review_interval_days: 90
+  retirement_criteria_required: true
