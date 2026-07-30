@@ -40,7 +40,9 @@ See the [02-Canonical-Models](02-Canonical-Models/) directory for approved model
 The Jason Kernel is being specified and built through working vertical slices.
 
 - [JKD-001 — Identity and Authority Service](03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md)
-- JKD-002 — Evidence and Memory Service — next
+- [JKD-002 — Evidence and Memory Service](03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md)
+
+The next deliverable is the concrete CAP-001 input/output contract and workflow state machine. It will join identity, authority, evidence, memory, reasoning, and communication into the first implementable end-to-end capability.
 
 ## Build Standards
 
