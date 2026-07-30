@@ -46,36 +46,43 @@ The Jason Kernel is being specified and built through working vertical slices.
 
 - [CAP-001 — Professional Ticket Investigation](03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md)
 - [CAP-001 Reference Implementation](implementation/cap-001/README.md)
+- [Internal OpenAPI 0.1](implementation/openapi/jason-internal-v0.1.yaml)
 
-CAP-001 Version 0.1 is read-only and recommendation-only. The repository now includes machine-readable contracts, the first auditable workflow state machine, and executable transition tests.
+CAP-001 Version 0.1 is read-only and recommendation-only.
 
-Current implementation artifacts include:
+Current executable artifacts include:
 
-- Investigation request JSON Schema
-- Normalized case package JSON Schema
-- Structured reasoning result JSON Schema
-- Technician response JSON Schema
-- Recorded outcome JSON Schema
-- Read-only workflow transition implementation
-- Initial fail-closed contract tests
+- five versioned JSON Schema contracts;
+- contract validation helpers;
+- an auditable workflow state machine;
+- provider-neutral adapter protocols;
+- a read-only orchestration service;
+- deterministic evidence, confidence, risk, and approval quality gates;
+- unit, isolation, and end-to-end tests;
+- a GitHub Actions validation pipeline.
 
-The next engineering increment is schema validation, deterministic quality gates, provider adapter protocols, and an in-memory end-to-end fixture runner.
-
-## Build Standards
+## Engineering Governance
 
 - [J-401 — Adaptive Build Method](04-Standards/J-401-Adaptive-Build-Method.md)
+- [J-402 — Capability Definition of Done](04-Standards/J-402-Capability-Definition-of-Done.md)
+- [ADR-001 — Build Jason Through Governed Vertical Slices](05-ADR/ADR-001-Vertical-Slice-First.md)
 
 The project uses concrete, governed vertical slices before extracting broad frameworks. Architecture remains authoritative but evolves when implementation evidence reveals a durable lesson.
+
+## Documentation Site
+
+The repository includes a MkDocs Material configuration and documentation home page. Build locally with:
+
+```bash
+python -m pip install "mkdocs-material>=9.5,<10"
+mkdocs serve
+```
 
 ## Capability Roadmap
 
 - [Jason Capability Register](06-Roadmaps/Jason-Capability-Register.md)
 
-The first active vertical slice is:
-
-**CAP-001 — Professional Ticket Investigation**
-
-Version 0.1 will establish identity and client context, preserve evidence, distinguish observation from inference, rank hypotheses, produce a technician-facing recommendation, and record the outcome and learning candidate.
+The first active vertical slice is **CAP-001 — Professional Ticket Investigation**. It establishes identity and client context, preserves evidence, distinguishes observation from inference, ranks hypotheses, applies deterministic gates, produces a technician-facing recommendation, and records outcome feedback without performing operational changes.
 
 ## Documentation Structure
 
@@ -87,7 +94,9 @@ Version 0.1 will establish identity and client context, preserve evidence, disti
 05-ADR/              Architecture Decision Records
 06-Roadmaps/         Capability registers and approved development roadmaps
 07-Operations/       Operational procedures and runbooks
-implementation/      Executable vertical slices, schemas, tests, and adapters
+docs/                Generated documentation entry points
+implementation/      Executable vertical slices, schemas, tests, adapters, and APIs
+.github/workflows/   Continuous validation
 99-Archive/          Superseded and historical records retained for continuity
 ```
 
@@ -103,4 +112,4 @@ A working governed capability is more valuable than a perfect speculative framew
 
 The foundation and initial canonical architecture are sufficiently mature to support implementation.
 
-Project Jason is now in the **CAP-001 executable skeleton phase**. The next work is to validate the schemas against fixtures, implement deterministic output quality gates, formalize provider adapter boundaries, and run a complete read-only investigation without external side effects.
+Project Jason is now in the **CAP-001 governed reference implementation phase**. The next build increment is a real provider-backed read-only pilot harness with explicit identity validation, persisted audit events, outcome recording, and representative sanitized Autotask/Datto/IT Glue fixtures.
