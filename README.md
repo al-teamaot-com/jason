@@ -1,43 +1,86 @@
 # Jason
 
-Jason is TeamAOT's operational platform.
+Jason is TeamAOT's governed operational platform and professional decision-support architecture.
 
-Its mission is to help TeamAOT deliver dependable, secure, compliant, efficient, and consistent service to its clients while preserving human authority, architectural discipline, explainability, and auditability.
+Its mission is to help TeamAOT deliver dependable, secure, compliant, efficient, and consistent service to its clients while preserving human authority, architectural discipline, explainability, auditability, organizational attention, and institutional memory.
 
 ## Source of Truth
 
 This repository is the authoritative record for Project Jason.
 
-Approved project documentation, architectural decisions, component charters, standards, roadmaps, and operational guidance shall be maintained here rather than relying on conversation history or any individual contributor.
+Approved project documentation, architectural decisions, component charters, standards, roadmaps, implementation specifications, and operational guidance shall be maintained here rather than relying on conversation history or any individual contributor.
 
 ## Foundation
 
 - [J-001 — The Jason Manifesto](01-Foundation/J-001-Manifesto.md)
 - [J-002 — The Jason Constitution](01-Foundation/J-002-Constitution.md)
+- [J-003 — Professional Operating Principles](01-Foundation/J-003-Professional-Operating-Principles.md)
 
 Planned foundation documents:
 
-- J-003 — The Jason Canon
 - J-004 — Architecture Overview
 - J-005 — Governance Model
+
+## Canonical Models
+
+Canonical models define Jason's provider-neutral understanding of organizational reality.
+
+Current models include:
+
+- Organization Model
+- State Model
+- Object Model
+- Relationship Model
+- Event Model
+
+See the [02-Canonical-Models](02-Canonical-Models/) directory for approved model documents.
+
+## Kernel Design
+
+The Jason Kernel is being specified and built through working vertical slices.
+
+- [JKD-001 — Identity and Authority Service](03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md)
+- JKD-002 — Evidence and Memory Service — next
+
+## Build Standards
+
+- [J-401 — Adaptive Build Method](04-Standards/J-401-Adaptive-Build-Method.md)
+
+The project uses concrete, governed vertical slices before extracting broad frameworks. Architecture remains authoritative but evolves when implementation evidence reveals a durable lesson.
+
+## Capability Roadmap
+
+- [Jason Capability Register](06-Roadmaps/Jason-Capability-Register.md)
+
+The first active vertical slice is:
+
+**CAP-001 — Professional Ticket Investigation**
+
+Version 0.1 is recommendation-only. It will establish identity and client context, preserve evidence, distinguish observation from inference, rank hypotheses, produce a technician-facing recommendation, and record the outcome and learning candidate.
 
 ## Documentation Structure
 
 ```text
-01-Foundation/    Mission, Constitution, Canon, architecture overview, governance
-02-Architecture/  Enduring platform architecture and boundaries
-03-Components/    Component charters and responsibilities
-04-Standards/     Architectural and engineering standards
-05-ADR/           Architecture Decision Records
-06-Roadmaps/      Approved development and capability roadmaps
-07-Operations/    Operational procedures and runbooks
-99-Archive/       Superseded and historical records retained for continuity
+01-Foundation/       Mission, Constitution, professional principles, governance
+02-Canonical-Models/ Enduring provider-neutral organizational models
+03-Components/       Kernel and component specifications
+04-Standards/        Architectural and engineering standards
+05-ADR/              Architecture Decision Records
+06-Roadmaps/         Capability registers and approved development roadmaps
+07-Operations/       Operational procedures and runbooks
+99-Archive/          Superseded and historical records retained for continuity
 ```
 
-## Governing Rule
+## Governing Rules
 
-If a proposed architectural decision cannot be justified by the Manifesto or Constitution, the decision must be reconsidered or the foundation must be deliberately amended before proceeding.
+If a proposed architectural decision cannot be justified by the Manifesto, Constitution, canonical models, or approved standards, the decision must be reconsidered or the foundation must be deliberately amended before proceeding.
+
+Agents shall never invoke or communicate with other agents directly. All inter-agent coordination shall pass through the central orchestration layer.
+
+A working governed capability is more valuable than a perfect speculative framework. A broader framework should be extracted only after real capabilities reveal a stable common pattern.
 
 ## Current Status
 
-The project is in its foundation and architecture phase. Implementation details are intentionally deferred until the mission, governing principles, responsibilities, and architectural boundaries are stable.
+The foundation and initial canonical architecture are sufficiently mature to begin implementation.
+
+Project Jason is now in the **Kernel Build 0.1** phase. Architecture will continue to evolve through versioned, evidence-based adjustments as working capabilities reveal real requirements, constraints, risks, and opportunities for simplification.
