@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.teamaot.local/schemas/cap-001/case-package.schema.json",
+  "title": "CAP-001 Case Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "correlation_id", "client_id", "ticket", "evidence", "observations", "missing_information"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "client_id": {"type": "string", "minLength": 1},
+    "ticket": {"type": "object"},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence_id", "source", "collected_at", "summary", "client_id"],
+        "properties": {
+          "evidence_id": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "minLength": 1},
+          "collected_at": {"type": "string", "format": "date-time"},
+          "summary": {"type": "string"},
+          "content_reference": {"type": ["string", "null"]},
+          "sha256": {"type": ["string", "null"], "pattern": "^[A-Fa-f0-9]{64}$"},
+          "client_id": {"type": "string", "minLength": 1},
+          "trusted_as_instruction": {"const": false}
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "statement", "evidence_ids", "confidence"],
+        "properties": {
+          "observation_id": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "evidence_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "tags": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "missing_information": {"type": "array", "items": {"type": "string"}},
+    "similar_case_references": {"type": "array", "items": {"type": "string"}}
+  }
+}
