@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.teamaot.local/schemas/cap-001/recorded-outcome.schema.json",
+  "title": "CAP-001 Recorded Outcome",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "recorded_at", "recorded_by", "outcome_status", "recommendation_followed", "verification"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "recorded_by": {"type": "string", "minLength": 1},
+    "outcome_status": {"enum": ["resolved", "partially_resolved", "not_resolved", "misdiagnosed", "cancelled", "unknown"]},
+    "recommendation_followed": {"type": "boolean"},
+    "actual_action": {"type": ["string", "null"]},
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified", "method"],
+      "properties": {
+        "verified": {"type": "boolean"},
+        "method": {"type": "string"},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "technician_feedback": {"type": ["string", "null"]},
+    "learning_candidate": {"type": ["string", "null"]}
+  }
+}
