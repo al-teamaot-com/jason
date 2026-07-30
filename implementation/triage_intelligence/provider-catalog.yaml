@@ -1,0 +1,56 @@
+schema_version: 1
+service: triage_intelligence
+mode: read_only
+human_review_required: true
+
+providers:
+  - id: platform_intelligence
+    status: scaffold
+    purpose: Vendor releases, feature changes, removals, deprecations, known issues, and mitigations.
+    initial_sources:
+      - Microsoft Windows release health
+      - Microsoft 365 roadmap and message center
+      - Microsoft Learn and support documentation
+    evidence_scope: global_or_product
+
+  - id: historical_intelligence
+    status: planned
+    purpose: Similar AOT tickets, confirmed causes, successful resolutions, and recurrence patterns.
+    initial_connectors:
+      - autotask_readonly
+    evidence_scope: organization_and_client_scoped
+
+  - id: environment_intelligence
+    status: planned
+    purpose: Device versions, installed updates, policy, licensing, health, and configuration evidence.
+    initial_connectors:
+      - datto_rmm_readonly
+      - microsoft_graph_readonly
+    evidence_scope: organization_and_client_scoped
+
+  - id: change_intelligence
+    status: planned
+    purpose: Recent deployments, patch installations, policy changes, configuration drift, and incidents.
+    evidence_scope: organization_and_client_scoped
+
+  - id: knowledge_intelligence
+    status: planned
+    purpose: Approved vendor documentation, IT Glue standards, and operating procedures.
+    initial_connectors:
+      - it_glue_readonly
+      - knowledge_steward
+    evidence_scope: global_organization_or_client
+
+  - id: risk_intelligence
+    status: planned
+    purpose: Security, compliance, business impact, urgency, and escalation evidence.
+    evidence_scope: organization_and_client_scoped
+
+policy:
+  authoritative_sources_preferred: true
+  stale_evidence_must_be_labeled: true
+  cross_client_raw_evidence_forbidden: true
+  aggregated_pattern_data_allowed_only_by_policy: true
+  expected_behavior_never_auto_closes_ticket: true
+  provider_failure_must_be_reported: true
+  recommendation_requires_evidence_references: true
