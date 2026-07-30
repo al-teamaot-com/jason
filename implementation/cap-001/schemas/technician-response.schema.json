@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.teamaot.local/schemas/cap-001/technician-response.schema.json",
+  "title": "CAP-001 Technician Response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "status", "summary", "recommended_action", "confidence", "risk", "evidence_references"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "case_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["recommendation_ready", "more_information_required", "escalation_required", "unable_to_investigate"]},
+    "summary": {"type": "string", "minLength": 1},
+    "recommended_action": {"type": "string", "minLength": 1},
+    "why": {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "risk": {"enum": ["low", "medium", "high", "critical"]},
+    "approval_required": {"type": "boolean", "default": false},
+    "missing_information": {"type": "array", "items": {"type": "string"}},
+    "evidence_references": {"type": "array", "items": {"type": "string"}},
+    "technical_detail": {"type": "object"},
+    "proposed_client_communication": {"type": ["string", "null"]}
+  }
+}
