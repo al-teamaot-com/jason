@@ -7,13 +7,19 @@
 - Vendor and implementation independence — established
 - Common-language and lexicon direction — established
 
-## Canonical Models Phase
+## Jason's World — Canonical Models Phase
 
 1. **J-120 Organizational Model — approved foundation model**
-2. J-117 Object Model — next
-3. J-116 State Model
+2. **J-117 Object Model — approved foundation model**
+3. J-116 State Model — next
 4. J-118 Relationship Model
 5. J-119 Event Model
+
+## Phase Principle
+
+**Model the business, not the software.**
+
+Jason represents durable MSP business concepts independently of the products, APIs, databases, and providers used to implement them.
 
 ## Dependency Rule
 
