@@ -11,8 +11,8 @@
 
 1. **J-120 Organizational Model — approved foundation model**
 2. **J-117 Object Model — approved foundation model**
-3. J-116 State Model — next
-4. J-118 Relationship Model
+3. **J-116 State Model — approved foundation model**
+4. J-118 Relationship Model — next
 5. J-119 Event Model
 
 ## Phase Principle
