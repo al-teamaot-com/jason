@@ -1,33 +1,45 @@
 {
-  "schema_version": "0.1",
-  "dependencies": [
+  "schema_version": "0.2",
+  "core_dependencies": [
     {
       "name": "python",
       "required": true,
       "minimum_version": "3.12",
       "check_command": "python3 --version",
       "install_policy": "explicit"
-    },
-    {
-      "name": "docker",
-      "required": true,
-      "minimum_version": "24.0",
-      "check_command": "docker --version",
-      "install_policy": "explicit"
-    },
-    {
-      "name": "docker-compose-plugin",
-      "required": true,
-      "minimum_version": "2.20",
-      "check_command": "docker compose version",
-      "install_policy": "explicit"
-    },
-    {
-      "name": "openbao",
-      "required": true,
-      "deployment": "container",
-      "image": "ghcr.io/openbao/openbao:2.6",
-      "install_policy": "managed_container"
     }
-  ]
+  ],
+  "secrets_provider_profiles": {
+    "external": {
+      "description": "Use a separately managed secrets platform through a Jason provider adapter.",
+      "managed_dependencies": []
+    },
+    "none": {
+      "description": "No runtime secrets platform. Allowed only for synthetic tests.",
+      "managed_dependencies": []
+    },
+    "openbao": {
+      "description": "Optional self-hosted reference implementation, not a Jason architectural dependency.",
+      "managed_dependencies": [
+        {
+          "name": "docker",
+          "minimum_version": "24.0",
+          "check_command": "docker --version",
+          "install_policy": "explicit"
+        },
+        {
+          "name": "docker-compose-plugin",
+          "minimum_version": "2.20",
+          "check_command": "docker compose version",
+          "install_policy": "explicit"
+        },
+        {
+          "name": "openbao",
+          "deployment": "container",
+          "image": "ghcr.io/openbao/openbao:2.6",
+          "install_policy": "managed_container"
+        }
+      ]
+    }
+  }
 }
