@@ -24,6 +24,24 @@ class MemoryProvider(Protocol):
 
     def record_result(self, reasoning_result: dict[str, Any]) -> None: ...
 
+    def record_outcome(self, outcome: dict[str, Any]) -> None: ...
+
 
 class AuditProvider(Protocol):
     def append(self, event_type: str, payload: dict[str, Any]) -> None: ...
+
+
+class TransitionProvider(Protocol):
+    def record_transition(
+        self,
+        *,
+        correlation_id: str,
+        from_state: str,
+        to_state: str,
+        reason: str,
+        case_id: str | None = None,
+    ) -> None: ...
+
+
+class ContextValidator(Protocol):
+    def validate(self, request: dict[str, Any]) -> Any: ...
