@@ -2,6 +2,8 @@ site_name: Project Jason
 site_description: TeamAOT's governed operational platform and professional decision-support architecture
 repo_name: al-teamaot-com/jason
 repo_url: https://github.com/al-teamaot-com/jason
+docs_dir: .
+site_dir: site
 theme:
   name: material
 nav:
@@ -30,3 +32,7 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
+exclude_docs: |
+  implementation/
+  .github/
+  site/
