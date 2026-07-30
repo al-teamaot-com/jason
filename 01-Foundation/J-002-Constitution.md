@@ -1,6 +1,6 @@
 # J-002 — The Jason Constitution
 
-**Version:** Draft 0.2  
+**Version:** Draft 0.3  
 **Status:** Approved foundation draft
 
 ## Purpose
@@ -39,13 +39,25 @@ Implementation realizes architecture.
 
 Implementation choices shall support the architecture rather than define it.
 
-## Article IV — Independence
+## Article IV — Independence and Capability Abstraction
 
 Jason shall remain independent of any single external dependency, provider, method, or implementation choice.
+
+Jason shall describe what it needs in terms of enduring capabilities rather than particular products, providers, or tools.
+
+External systems shall participate through governed, clearly defined, and replaceable boundaries.
+
+Core workflows should request named capabilities without depending upon the unique identity, terminology, or internal behavior of the party currently providing them.
+
+A current provider is an implementation of a capability; it is not the definition of that capability.
+
+New, improved, or future providers should be adoptable without requiring fundamental changes to Jason's mission, governance, or core operating model.
 
 Every major capability shall be replaceable without changing Jason's identity, mission, or governing principles.
 
 No dependency shall be allowed to become inseparable from Jason merely because it is convenient, familiar, or currently preferred.
+
+Foundational and architectural documents shall remain provider-neutral. Specific implementation choices shall be documented separately and shall not be mistaken for enduring architectural requirements.
 
 ## Article V — Integration Before Innovation
 
