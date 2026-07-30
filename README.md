@@ -45,10 +45,21 @@ The Jason Kernel is being specified and built through working vertical slices.
 ## Active Vertical Slice
 
 - [CAP-001 — Professional Ticket Investigation](03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md)
+- [CAP-001 Reference Implementation](implementation/cap-001/README.md)
 
-CAP-001 is the first complete implementation contract. Version 0.1 is read-only and recommendation-only. It defines the invocation contract, evidence plan, workflow state machine, reasoning schema, deterministic quality gates, progressive-disclosure response, outcome feedback, security requirements, test fixtures, metrics, and implementation sequence.
+CAP-001 Version 0.1 is read-only and recommendation-only. The repository now includes machine-readable contracts, the first auditable workflow state machine, and executable transition tests.
 
-The immediate engineering deliverable is the initial CAP-001 code skeleton and executable contract tests.
+Current implementation artifacts include:
+
+- Investigation request JSON Schema
+- Normalized case package JSON Schema
+- Structured reasoning result JSON Schema
+- Technician response JSON Schema
+- Recorded outcome JSON Schema
+- Read-only workflow transition implementation
+- Initial fail-closed contract tests
+
+The next engineering increment is schema validation, deterministic quality gates, provider adapter protocols, and an in-memory end-to-end fixture runner.
 
 ## Build Standards
 
@@ -76,6 +87,7 @@ Version 0.1 will establish identity and client context, preserve evidence, disti
 05-ADR/              Architecture Decision Records
 06-Roadmaps/         Capability registers and approved development roadmaps
 07-Operations/       Operational procedures and runbooks
+implementation/      Executable vertical slices, schemas, tests, and adapters
 99-Archive/          Superseded and historical records retained for continuity
 ```
 
@@ -89,6 +101,6 @@ A working governed capability is more valuable than a perfect speculative framew
 
 ## Current Status
 
-The foundation and initial canonical architecture are sufficiently mature to begin implementation.
+The foundation and initial canonical architecture are sufficiently mature to support implementation.
 
-Project Jason is now in the **CAP-001 implementation phase**. The next work is to create machine-readable schemas, the read-only orchestrator state machine, provider adapter boundaries, and executable test fixtures defined by the CAP-001 contract.
+Project Jason is now in the **CAP-001 executable skeleton phase**. The next work is to validate the schemas against fixtures, implement deterministic output quality gates, formalize provider adapter boundaries, and run a complete read-only investigation without external side effects.
