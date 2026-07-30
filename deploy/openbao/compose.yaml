@@ -1,0 +1,26 @@
+services:
+  openbao:
+    image: ${OPENBAO_IMAGE:-ghcr.io/openbao/openbao:2.6}
+    container_name: jason-openbao
+    restart: unless-stopped
+    cap_add:
+      - IPC_LOCK
+    command: server -config=/openbao/config/openbao.hcl
+    ports:
+      - "127.0.0.1:${OPENBAO_PORT:-8200}:8200"
+    volumes:
+      - ./config:/openbao/config:ro
+      - openbao-data:/openbao/data
+      - openbao-audit:/openbao/audit
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  openbao-data:
+  openbao-audit:
