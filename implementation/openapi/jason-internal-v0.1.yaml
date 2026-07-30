@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: Jason Internal Capability API
+  version: 0.1.0
+  description: Provider-neutral internal API for governed Jason capabilities. Version 0.1 exposes CAP-001 as read-only and recommendation-only.
+servers:
+  - url: https://jason.internal.example/v0.1
+paths:
+  /capabilities/ticket-investigation/runs:
+    post:
+      operationId: startTicketInvestigation
+      summary: Start a governed professional ticket investigation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../cap-001/schemas/investigation-request.schema.json
+      responses:
+        '202':
+          description: Investigation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [run_id, correlation_id, state]
+                properties:
+                  run_id: {type: string}
+                  correlation_id: {type: string}
+                  state:
+                    enum: [received, context_validated, evidence_collected, case_normalized, reasoning_complete, quality_gated, response_ready, outcome_pending, complete, more_information_required, escalation_required, rejected]
+        '400': {description: Contract validation failed}
+        '403': {description: Authority or client boundary denied}
+        '409': {description: Conflicting or duplicate invocation}
+  /capabilities/ticket-investigation/runs/{run_id}:
+    get:
+      operationId: getTicketInvestigation
+      summary: Retrieve investigation state and authorized result
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current state and result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [run_id, correlation_id, state]
+                properties:
+                  run_id: {type: string}
+                  correlation_id: {type: string}
+                  state: {type: string}
+                  response:
+                    oneOf:
+                      - $ref: ../cap-001/schemas/technician-response.schema.json
+                      - type: 'null'
+                  quality_findings:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, severity, message]
+                      properties:
+                        code: {type: string}
+                        severity: {enum: [warning, error]}
+                        message: {type: string}
+        '403': {description: Client boundary denied}
+        '404': {description: Run not found}
+  /capabilities/ticket-investigation/runs/{run_id}/outcomes:
+    post:
+      operationId: recordTicketInvestigationOutcome
+      summary: Record verified human outcome without rewriting prior evidence or reasoning
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../cap-001/schemas/recorded-outcome.schema.json
+      responses:
+        '201': {description: Outcome recorded}
+        '400': {description: Contract validation failed}
+        '403': {description: Authority or client boundary denied}
+        '404': {description: Run not found}
+components:
+  securitySchemes:
+    executionContext:
+      type: http
+      scheme: bearer
+      bearerFormat: JasonExecutionContext
+security:
+  - executionContext: []
