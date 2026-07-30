@@ -1,0 +1,116 @@
+workflow:
+  id: autotask-drmm-governed-remediation
+  version: 0.1.0
+  mode: scaffold
+  owner: Technology Steward
+
+trigger:
+  source: autotask
+  event: ticket.created_or_updated
+  filters:
+    - ticket.status: open
+    - configuration_item_required: true
+    - client_scope_required: true
+
+stages:
+  - id: ingest
+    capability: autotask.ticket.get
+    mode: read
+    outputs: [ticket, client_scope, device_refs]
+
+  - id: triage
+    capability: triage.ticket.assess
+    mode: read
+    requires: [ticket]
+    outputs: [assessment, evidence_refs, confidence]
+
+  - id: policy
+    capability: remediation.policy.evaluate
+    mode: deterministic
+    requires: [assessment, client_scope, device_refs]
+    outcomes: [block, recommend_only, approval_required, autonomous_allowed]
+    constraints:
+      autonomous_allowed: false
+      pilot_requires_approval: true
+
+  - id: approval
+    capability: approval.request
+    channel: teams
+    fallback_channel: telegram
+    binds_to:
+      - plan_hash
+      - ticket_id
+      - client_id
+      - device_id
+      - component_id
+    expires_minutes: 60
+
+  - id: execute
+    capability: drmm.component.run
+    mode: write
+    requires: [valid_approval]
+    constraints:
+      approved_components_only: true
+      one_endpoint_only: true
+      servers_blocked: true
+      idempotency_required: true
+      timeout_minutes: 45
+    outputs: [drmm_job_id, output_reference, execution_status]
+
+  - id: verify
+    capability: remediation.verify
+    mode: read
+    independent_from_execution: true
+    required_checks:
+      - expected_version
+      - required_services
+      - recent_application_errors
+    failure_outcome: escalate
+
+  - id: document
+    capability: autotask.ticket.note.add
+    mode: write
+    requires: [execution_status, verification_result]
+    include:
+      - diagnosis
+      - evidence_references
+      - approved_plan
+      - approver
+      - drmm_job_id
+      - update_log_reference
+      - verification_results
+
+  - id: follow_up
+    capability: communication.follow_up.request
+    broker: communication_broker
+    requires: [verification_passed]
+    preferred_channels: [phone, email]
+    phone_behavior:
+      initial_mode: notification_and_confirmation
+      conversational_ai_enabled: false
+    no_answer_fallback: email
+
+  - id: learn
+    capability: remediation.outcome.record
+    mode: write
+    records:
+      - issue_pattern
+      - product_and_version
+      - action
+      - success
+      - technician_intervention
+      - elapsed_time
+      - client_confirmation
+
+terminal_states:
+  - completed
+  - escalated
+  - blocked
+  - cancelled
+
+non_goals:
+  - automatic_ticket_closure
+  - self_promotion_of_permissions
+  - unapproved_component_execution
+  - cross_client_evidence_disclosure
+  - server_updates_during_pilot
