@@ -42,7 +42,13 @@ The Jason Kernel is being specified and built through working vertical slices.
 - [JKD-001 — Identity and Authority Service](03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md)
 - [JKD-002 — Evidence and Memory Service](03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md)
 
-The next deliverable is the concrete CAP-001 input/output contract and workflow state machine. It will join identity, authority, evidence, memory, reasoning, and communication into the first implementable end-to-end capability.
+## Active Vertical Slice
+
+- [CAP-001 — Professional Ticket Investigation](03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md)
+
+CAP-001 is the first complete implementation contract. Version 0.1 is read-only and recommendation-only. It defines the invocation contract, evidence plan, workflow state machine, reasoning schema, deterministic quality gates, progressive-disclosure response, outcome feedback, security requirements, test fixtures, metrics, and implementation sequence.
+
+The immediate engineering deliverable is the initial CAP-001 code skeleton and executable contract tests.
 
 ## Build Standards
 
@@ -58,14 +64,14 @@ The first active vertical slice is:
 
 **CAP-001 — Professional Ticket Investigation**
 
-Version 0.1 is recommendation-only. It will establish identity and client context, preserve evidence, distinguish observation from inference, rank hypotheses, produce a technician-facing recommendation, and record the outcome and learning candidate.
+Version 0.1 will establish identity and client context, preserve evidence, distinguish observation from inference, rank hypotheses, produce a technician-facing recommendation, and record the outcome and learning candidate.
 
 ## Documentation Structure
 
 ```text
 01-Foundation/       Mission, Constitution, professional principles, governance
 02-Canonical-Models/ Enduring provider-neutral organizational models
-03-Components/       Kernel and component specifications
+03-Components/       Kernel and capability specifications
 04-Standards/        Architectural and engineering standards
 05-ADR/              Architecture Decision Records
 06-Roadmaps/         Capability registers and approved development roadmaps
@@ -85,4 +91,4 @@ A working governed capability is more valuable than a perfect speculative framew
 
 The foundation and initial canonical architecture are sufficiently mature to begin implementation.
 
-Project Jason is now in the **Kernel Build 0.1** phase. Architecture will continue to evolve through versioned, evidence-based adjustments as working capabilities reveal real requirements, constraints, risks, and opportunities for simplification.
+Project Jason is now in the **CAP-001 implementation phase**. The next work is to create machine-readable schemas, the read-only orchestrator state machine, provider adapter boundaries, and executable test fixtures defined by the CAP-001 contract.
