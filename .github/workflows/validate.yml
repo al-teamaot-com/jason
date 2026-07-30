@@ -29,6 +29,18 @@ jobs:
       - name: Test
         run: pytest
 
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install documentation tools
+        run: python -m pip install "mkdocs-material>=9.5,<10"
+      - name: Build documentation
+        run: mkdocs build --strict
+
   repository-hygiene:
     runs-on: ubuntu-latest
     steps:
