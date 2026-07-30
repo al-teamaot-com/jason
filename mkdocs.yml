@@ -1,0 +1,32 @@
+site_name: Project Jason
+site_description: TeamAOT's governed operational platform and professional decision-support architecture
+repo_name: al-teamaot-com/jason
+repo_url: https://github.com/al-teamaot-com/jason
+theme:
+  name: material
+nav:
+  - Home: docs/index.md
+  - Foundation:
+      - Manifesto: 01-Foundation/J-001-Manifesto.md
+      - Constitution: 01-Foundation/J-002-Constitution.md
+      - Professional Operating Principles: 01-Foundation/J-003-Professional-Operating-Principles.md
+  - Kernel:
+      - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
+      - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
+  - Capabilities:
+      - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
+  - Standards:
+      - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
+      - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
+  - Decisions:
+      - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
+  - Roadmap:
+      - Capability Register: 06-Roadmaps/Jason-Capability-Register.md
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
