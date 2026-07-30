@@ -1,0 +1,74 @@
+schema_version: "0.1"
+principles:
+  - connectors_do_not_require_ai
+  - agents_never_call_connectors_directly
+  - capabilities_are_named_and_registered
+  - credentials_are_resolved_by_logical_secret_name
+  - all_calls_are_client_scoped_authorized_and_audited
+connectors:
+  openclaw:
+    status: foundation_built
+    priority: 1
+    next:
+      - production_transport
+      - signed_requests_or_mtls
+      - identity_mapping
+      - health_and_capability_discovery
+  autotask:
+    status: foundation_built
+    priority: 2
+    mode: read_only
+    secret: autotask.readonly
+    capabilities:
+      - autotask.ticket.get
+      - autotask.ticket.search
+      - autotask.ticket.notes.list
+      - autotask.company.get
+      - autotask.contact.get
+      - autotask.configuration_item.get
+  datto_rmm:
+    status: foundation_built
+    priority: 3
+    mode: read_only
+    secret: datto_rmm.readonly
+    capabilities:
+      - datto_rmm.device.get
+      - datto_rmm.device.search
+      - datto_rmm.alerts.list
+      - datto_rmm.patch_status.get
+      - datto_rmm.component_results.list
+  it_glue:
+    status: foundation_built
+    priority: 4
+    mode: read_only
+    secret: it_glue.readonly
+    capabilities:
+      - it_glue.organization.get
+      - it_glue.configuration.search
+      - it_glue.flexible_asset.search
+      - it_glue.document.get
+      - it_glue.relationships.list
+  n8n:
+    status: foundation_built
+    priority: 5
+    mode: approved_workflows_only
+    secret: n8n.runtime
+    capabilities:
+      - n8n.workflow.invoke
+      - n8n.workflow.status
+      - n8n.execution.get
+  postgres:
+    status: partial
+    priority: 6
+  microsoft_graph:
+    status: planned
+    priority: 7
+  teams_approvals:
+    status: planned
+    priority: 8
+  opentelemetry:
+    status: planned
+    priority: 9
+  object_storage:
+    status: planned
+    priority: 10
