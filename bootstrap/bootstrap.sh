@@ -3,19 +3,25 @@ set -euo pipefail
 
 MODE="check"
 PROFILE="pilot"
+SECRETS_PROVIDER="external"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: ./bootstrap/bootstrap.sh [--check|--install-missing|--start] [--profile pilot]
+Usage: ./bootstrap/bootstrap.sh [--check|--install-missing|--start] [--profile pilot] [--secrets-provider external|openbao|none]
 
 Modes:
   --check            Report missing prerequisites without changing the host.
   --install-missing  Install supported host prerequisites after explicit approval.
-  --start            Validate prerequisites and start managed dependencies.
+  --start            Validate prerequisites and start only explicitly selected managed dependencies.
 
-The bootstrap never initializes, unseals, or writes secrets to OpenBao.
-Those actions require a separate authorized ceremony.
+Secrets providers:
+  external           Use an externally managed secrets service. This is the default.
+  openbao            Start the repository's optional OpenBao reference deployment.
+  none               Start no secrets service. Suitable only for tests using synthetic providers.
+
+The bootstrap never initializes, unseals, authenticates to, or writes secrets into any provider.
+Provider enrollment and secret population require a separate authorized process.
 EOF
 }
 
@@ -28,6 +34,7 @@ while [ "$#" -gt 0 ]; do
     --install-missing) MODE="install" ;;
     --start) MODE="start" ;;
     --profile) shift; PROFILE="${1:-}" ;;
+    --secrets-provider) shift; SECRETS_PROVIDER="${1:-}" ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown argument: $1" ;;
   esac
@@ -35,12 +42,19 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$PROFILE" = "pilot" ] || fail "Only the pilot profile is currently approved."
+case "$SECRETS_PROVIDER" in
+  external|openbao|none) ;;
+  *) fail "Unsupported secrets provider: $SECRETS_PROVIDER" ;;
+esac
 
 missing=()
 command -v python3 >/dev/null 2>&1 || missing+=(python3)
-command -v docker >/dev/null 2>&1 || missing+=(docker)
-if command -v docker >/dev/null 2>&1; then
-  docker compose version >/dev/null 2>&1 || missing+=(docker-compose-plugin)
+
+if [ "$SECRETS_PROVIDER" = "openbao" ]; then
+  command -v docker >/dev/null 2>&1 || missing+=(docker)
+  if command -v docker >/dev/null 2>&1; then
+    docker compose version >/dev/null 2>&1 || missing+=(docker-compose-plugin)
+  fi
 fi
 
 install_ubuntu_dependencies() {
@@ -48,8 +62,11 @@ install_ubuntu_dependencies() {
   [ "$(id -u)" -eq 0 ] || fail "Run --install-missing with sudo."
   log "Installing approved host prerequisites."
   apt-get update
-  apt-get install -y ca-certificates curl python3 python3-venv docker.io docker-compose-v2
-  systemctl enable --now docker
+  apt-get install -y ca-certificates curl python3 python3-venv
+  if [ "$SECRETS_PROVIDER" = "openbao" ]; then
+    apt-get install -y docker.io docker-compose-v2
+    systemctl enable --now docker
+  fi
 }
 
 if [ "${#missing[@]}" -gt 0 ]; then
@@ -67,15 +84,26 @@ if sys.version_info < (3, 12):
     raise SystemExit("Python 3.12 or newer is required.")
 PY
 
-docker info >/dev/null 2>&1 || fail "Docker is installed but unavailable to this user or the daemon is stopped."
-docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is unavailable."
+if [ "$SECRETS_PROVIDER" = "openbao" ]; then
+  docker info >/dev/null 2>&1 || fail "Docker is installed but unavailable to this user or the daemon is stopped."
+  docker compose version >/dev/null 2>&1 || fail "Docker Compose plugin is unavailable."
+fi
 
 if [ "$MODE" = "check" ] || [ "$MODE" = "install" ]; then
-  log "Prerequisite check passed. No secrets service was initialized or started."
+  log "Prerequisite check passed for secrets provider: $SECRETS_PROVIDER."
   exit 0
 fi
 
-log "Starting OpenBao pilot dependency."
-docker compose -f "$ROOT_DIR/deploy/openbao/compose.yaml" up -d
-log "OpenBao container started on loopback only."
-log "Initialization and unseal remain intentionally manual and governed."
+case "$SECRETS_PROVIDER" in
+  openbao)
+    log "Starting optional OpenBao reference deployment."
+    docker compose -f "$ROOT_DIR/deploy/openbao/compose.yaml" up -d
+    log "OpenBao container started on loopback only. Initialization and unseal remain manual and governed."
+    ;;
+  external)
+    log "External secrets provider selected. No secrets service will be installed or started."
+    ;;
+  none)
+    log "No secrets provider selected. Only synthetic or test providers may be used."
+    ;;
+esac
