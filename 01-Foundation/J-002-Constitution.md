@@ -1,13 +1,13 @@
 # J-002 — The Jason Constitution
 
-**Version:** Draft 0.1  
+**Version:** Draft 0.2  
 **Status:** Approved foundation draft
 
 ## Purpose
 
 The Constitution establishes the enduring principles that govern the Jason project.
 
-These principles define the character of Jason rather than its implementation. Technologies, vendors, programming languages, artificial intelligence models, and operational processes may change over time. The principles contained within this Constitution are intended to remain stable.
+These principles define the character of Jason rather than its implementation. Methods, products, providers, tools, and operating practices may change over time. The principles contained within this Constitution are intended to remain stable.
 
 Every architectural decision, implementation, and future enhancement shall be evaluated against this Constitution.
 
@@ -15,7 +15,7 @@ Every architectural decision, implementation, and future enhancement shall be ev
 
 Every decision shall support Jason's mission of enabling TeamAOT to better serve its clients.
 
-No technical decision shall take precedence over the mission.
+No implementation decision shall take precedence over the mission.
 
 When competing alternatives exist, preference shall be given to the option that best supports TeamAOT's ability to deliver dependable, secure, compliant, efficient, and consistent service.
 
@@ -37,27 +37,21 @@ Architecture defines intent.
 
 Implementation realizes architecture.
 
-Technology choices shall support the architecture rather than define it.
+Implementation choices shall support the architecture rather than define it.
 
-## Article IV — Technology Independence
+## Article IV — Independence
 
-Jason shall remain independent of any:
+Jason shall remain independent of any single external dependency, provider, method, or implementation choice.
 
-- vendor
-- programming language
-- cloud provider
-- artificial intelligence model
-- database
-- communication protocol
-- implementation technology
+Every major capability shall be replaceable without changing Jason's identity, mission, or governing principles.
 
-Every major capability shall be replaceable without changing Jason's identity.
+No dependency shall be allowed to become inseparable from Jason merely because it is convenient, familiar, or currently preferred.
 
 ## Article V — Integration Before Innovation
 
-Jason shall first seek to leverage existing capabilities within approved platforms before introducing custom functionality.
+Jason shall first seek to leverage existing approved capabilities before introducing something new.
 
-Custom development requires clear justification.
+New custom capability requires clear justification.
 
 Every custom capability should have a documented purpose, review process, and retirement criteria.
 
@@ -79,7 +73,7 @@ Institutional knowledge is one of TeamAOT's most valuable assets.
 
 Jason shall preserve, organize, and make knowledge available in ways that improve operational consistency and reduce dependence upon individual experience.
 
-Knowledge shall outlive individuals, technologies, and implementations.
+Knowledge shall outlive individuals, methods, products, and implementations.
 
 ## Article VIII — Explainability
 
@@ -124,9 +118,9 @@ Evolution shall be deliberate.
 
 Every significant change should improve the platform's ability to fulfill its mission while preserving architectural integrity.
 
-Technology shall be continually evaluated for opportunities to simplify the system, reduce unnecessary custom functionality, and improve long-term sustainability.
+Dependencies and practices shall be continually evaluated for opportunities to simplify the system, reduce unnecessary custom functionality, and improve long-term sustainability.
 
-A Technology Steward governance role shall monitor dependent platforms for new capabilities, deprecations, API changes, and opportunities to simplify Jason.
+A Stewardship role shall monitor important dependencies, changes, risks, and opportunities to simplify Jason.
 
 ## Article XII — Institutional Memory
 
@@ -160,7 +154,45 @@ Expansion shall preserve existing architectural principles.
 
 Growth should increase capability without increasing unnecessary complexity.
 
-## Article XV — Trust
+Jason should be able to evolve in parts rather than requiring the whole to be rebuilt whenever needs change.
+
+## Article XV — Continuity and Resilience
+
+Jason shall be designed to continue serving its mission when individual parts, dependencies, or expected conditions are unavailable.
+
+The loss or failure of one part should not unnecessarily cause the loss of the whole.
+
+Where full operation is not possible, Jason should fail safely, preserve essential knowledge and authority, and continue in a clear and controlled reduced state whenever practical.
+
+Recovery shall restore not only operation, but also identity, policy, context, accountability, and institutional memory.
+
+Continuity shall be considered during design rather than added only after failure occurs.
+
+## Article XVI — Modularity and Reversibility
+
+Jason shall be composed of clearly bounded capabilities that can be added, replaced, suspended, or removed without unnecessary disruption to the whole.
+
+The relationship between parts shall be explicit and governed.
+
+No part should possess more authority, knowledge, or responsibility than it requires to fulfill its purpose.
+
+Changes should be reversible whenever practical.
+
+The ability to replace a part shall be treated as evidence of sound design, not as disloyalty to the current choice.
+
+## Article XVII — Living Documentation
+
+Documentation is part of the work, not a separate activity performed afterward.
+
+Significant decisions, changes, assumptions, responsibilities, dependencies, and lessons learned shall be recorded as they occur.
+
+A capability is not complete merely because it operates. It must also be understandable, supportable, reviewable, and capable of being transferred to future contributors.
+
+Jason's records should evolve alongside Jason so that its documented state remains a faithful representation of its intended and actual state.
+
+Documentation requirements shall be proportionate to significance, risk, complexity, and long-term value.
+
+## Article XVIII — Trust
 
 Trust is earned through consistent behavior.
 
@@ -191,6 +223,6 @@ Architectures may evolve.
 
 Implementations will evolve.
 
-Technologies will evolve.
+Methods and dependencies will evolve.
 
 The mission and principles established here are intended to guide those changes so that Jason remains true to its purpose while continuing to grow.
