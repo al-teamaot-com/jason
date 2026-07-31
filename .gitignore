@@ -55,3 +55,7 @@ Thumbs.db
 # Generated build artifacts
 .build/
 site/
+
+# Local Python virtual environments
+.venv/
+.venv-*/
