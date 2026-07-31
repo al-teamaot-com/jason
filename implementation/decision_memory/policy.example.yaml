@@ -1,0 +1,54 @@
+decision_memory:
+  enabled: true
+  default_mode: review
+  audit_every_lookup: true
+  model_bypass_allowed_only_for: exact_or_verified_pattern
+
+  reuse_thresholds:
+    minimum_verified_successes: 3
+    minimum_success_rate: 0.90
+    suspend_after_consecutive_failures: 2
+
+  pilot:
+    alert_types:
+      - patch.missing
+    allowed_device_roles:
+      - workstation
+    excluded_device_roles:
+      - server
+      - domain_controller
+    prohibited_domains:
+      - identity
+      - firewall
+      - security_incident
+      - compliance
+      - permissions
+
+  scope:
+    cross_organization_reuse: false
+    cross_client_reuse:
+      patterns: true
+      client_sensitive_facts: false
+
+  validity:
+    require_expiration: true
+    maximum_days_without_review: 90
+    invalidate_on:
+      - platform_version_change
+      - vendor_advisory_conflict
+      - remediation_component_change
+      - policy_change
+      - repeated_failure
+
+  execution:
+    memory_grants_authority: false
+    require_current_remediation_policy: true
+    require_normal_scope_validation: true
+    require_normal_approval: true
+    require_post_action_verification: true
+    automatic_ticket_closure: false
+
+  promotion:
+    similar_case_to_pattern_requires_human_approval: true
+    pattern_scope_expansion_requires_human_approval: true
+    auto_generated_records_start_as: draft
