@@ -1,0 +1,57 @@
+# =============================================================================
+# Project Jason - Runtime State (Never Commit)
+# =============================================================================
+
+# Secrets
+.env
+.env.*
+**/*.env
+!.env.example
+**/secrets/
+**/secret-id
+**/role-id
+**/init.json
+**/*credential*.json
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+
+# OpenBao runtime
+**/data/
+**/audit/
+**/logs/
+**/certs/
+
+# Snapshots
+**/*.snap
+**/*.snap.sha256
+**/*.sha256
+
+# Runtime state
+backups/
+**/backups/
+tmp/
+**/tmp/
+var/
+**/var/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated build artifacts
+.build/
+site/
