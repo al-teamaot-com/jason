@@ -1,10 +1,50 @@
 # JKD-003 — Secrets Broker
 
+**Version:** 0.2
+**Status:** Draft for governed review
+**Owner:** Jason Architecture Authority
+
 ## Purpose
 
 The Secrets Broker gives Jason a provider-neutral way to obtain narrowly scoped secret material at runtime without embedding vendor-specific vault behavior in capabilities, orchestrators, or provider adapters.
 
 OpenBao, HashiCorp Vault, Azure Key Vault, AWS Secrets Manager, 1Password Connect, CyberArk, Kubernetes Secrets, and future platforms are implementations behind this boundary. None is part of Jason's constitutional architecture.
+
+## Architectural boundary
+
+Jason maintains two independent chains that intersect only at the authorized connector execution context.
+
+### Authority chain
+
+```text
+Requester
+  ↓
+Orchestrator
+  ↓
+Identity and authority evaluation
+  ↓
+Policy and approval
+  ↓
+Authorized connector invocation
+```
+
+### Secret chain
+
+```text
+Authorized connector execution context
+  ↓
+Secrets Broker
+  ↓
+Configured secret provider
+  ↓
+Least-privilege credential
+```
+
+The orchestrator authorizes work but must not retrieve, possess, transmit, log, or expose secret values.
+
+The Secrets Broker resolves secret material but must not authorize business operations.
+
+A connector may use secret material only while executing an already authorized operation.
 
 ## Governing rules
 
