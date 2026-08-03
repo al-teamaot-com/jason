@@ -27,7 +27,6 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "username",
             "secret",
             "integration_code",
-            "zone_url",
         }
     ),
 }

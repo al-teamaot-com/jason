@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from connectors.core.contracts import (
     AuditSink,
+    ConnectorConfigurationError,
     ConnectorRequest,
     ConnectorResult,
     HttpTransport,
@@ -33,7 +34,25 @@ class AutotaskConnector:
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         require_capability(request, self.capabilities)
         credentials = self._secrets.resolve("autotask.readonly", request.context)
-        base_url = credentials["zone_url"].rstrip("/")
+
+        zone_information = self._transport.request(
+            method="GET",
+            url=(
+                "https://webservices.autotask.net/"
+                "atservicesrest/v1.0/zoneInformation"
+            ),
+            headers={"Accept": "application/json"},
+            params={"user": credentials["username"]},
+            timeout_seconds=30.0,
+        )
+
+        discovered_url = zone_information.get("url")
+        if not isinstance(discovered_url, str) or not discovered_url.strip():
+            raise ConnectorConfigurationError(
+                "Autotask zone discovery returned an invalid API URL."
+            )
+
+        base_url = discovered_url.rstrip("/")
         headers = {
             "ApiIntegrationCode": credentials["integration_code"],
             "UserName": credentials["username"],

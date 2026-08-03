@@ -78,7 +78,6 @@ def test_resolves_autotask_secret_without_exposing_extra_fields() -> None:
                             "username": "api-user",
                             "secret": "api-secret",
                             "integration_code": "integration-code",
-                            "zone_url": "https://example.invalid",
                             "unexpected": "must-not-be-returned",
                         }
                     }
@@ -112,7 +111,6 @@ def test_resolves_autotask_secret_without_exposing_extra_fields() -> None:
         "integration_code": "integration-code",
         "secret": "api-secret",
         "username": "api-user",
-        "zone_url": "https://example.invalid",
     }
 
     login_request = requests[0]
@@ -171,7 +169,6 @@ def test_missing_required_field_fails_without_value_disclosure() -> None:
                     "data": {
                         "username": "api-user",
                         "secret": "super-sensitive-secret",
-                        "integration_code": "integration-code",
                     }
                 }
             }
@@ -198,7 +195,7 @@ def test_missing_required_field_fails_without_value_disclosure() -> None:
 
     message = str(exc_info.value)
 
-    assert "zone_url" in message
+    assert "integration_code" in message
     assert "super-sensitive-secret" not in message
     assert "temporary-token" not in message
 
