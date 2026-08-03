@@ -59,3 +59,6 @@ site/
 # Local Python virtual environments
 .venv/
 .venv-*/
+
+# Python package build metadata
+*.egg-info/
