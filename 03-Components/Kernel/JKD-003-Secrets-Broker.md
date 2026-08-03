@@ -150,10 +150,18 @@ Expected fields:
 
 ### `it_glue.readonly`
 
+Approved provider path:
+
+`secret/data/connectors/it-glue/production/read-only`
+
 Expected fields:
 
-- provider-defined read-only API identity fields
-- regional endpoint when required
+- `api_key`
+
+The secret must contain only the provider API key.
+
+The IT Glue API base URL is non-secret provider configuration and
+must not be stored in OpenBao.
 
 ## Definition of Done
 

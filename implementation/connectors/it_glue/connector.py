@@ -13,6 +13,7 @@ from connectors.core.contracts import ConnectorRequest
 class ItGlueConnector(ConnectorBase):
     provider_name = "it_glue"
     logical_secret = "it_glue.readonly"
+    base_url = "https://api.itglue.com"
 
     capabilities = frozenset(
         {
@@ -38,7 +39,7 @@ class ItGlueConnector(ConnectorBase):
 
         return PreparedRequest(
             method=method,
-            url=f"{credentials['base_url'].rstrip('/')}{path}",
+            url=f"{self.base_url.rstrip('/')}{path}",
             headers={
                 "x-api-key": credentials["api_key"],
                 "Accept": "application/vnd.api+json",
