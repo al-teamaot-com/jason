@@ -1,7 +1,7 @@
 # JIS Milestone Closeout Policy
 
-**Status:** Active engineering procedure  
-**Owner:** Jason Architecture Authority  
+**Status:** Active engineering procedure
+**Owner:** Jason Architecture Authority
 **Applies to:** Major Project Jason implementation milestones
 
 ## Purpose

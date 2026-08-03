@@ -1,6 +1,6 @@
 # ADR-0005: Use OpenBao-Backed Logical Secret Resolution
 
-**Status:** Accepted  
+**Status:** Accepted
 **Decision date:** 2026-08-03
 
 ## Context

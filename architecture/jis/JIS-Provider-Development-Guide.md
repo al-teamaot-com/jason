@@ -1,9 +1,9 @@
 # Jason Integration SDK Provider Development Guide
 
-**Name:** Jason Integration SDK  
-**Abbreviation:** JIS  
-**Status:** Active engineering guidance  
-**Owner:** Jason Architecture Authority  
+**Name:** Jason Integration SDK
+**Abbreviation:** JIS
+**Status:** Active engineering guidance
+**Owner:** Jason Architecture Authority
 **Applies to:** All external platform integrations developed for Project Jason
 
 ## 1. Purpose
@@ -43,7 +43,7 @@ Where requirements conflict, the Jason Constitution and approved architecture de
 
 ## 3. Architectural Placement
 
-User Interfaces  
+User Interfaces
 CLI / Platform API / Teams / OpenClaw / n8n
 
 ↓

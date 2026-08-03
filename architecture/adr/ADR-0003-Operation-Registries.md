@@ -1,6 +1,6 @@
 # ADR-0003: Use Declarative Operation Registries
 
-**Status:** Accepted  
+**Status:** Accepted
 **Decision date:** 2026-08-03
 
 ## Context

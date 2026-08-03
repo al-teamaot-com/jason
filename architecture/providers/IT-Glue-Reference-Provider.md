@@ -1,6 +1,6 @@
 # IT Glue Reference Provider
 
-**Status:** Identity provisioned; production credential validation pending  
+**Status:** Identity provisioned; production credential validation pending
 **Role:** Second JIS reference provider
 
 ## Purpose

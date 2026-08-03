@@ -1,6 +1,6 @@
 # ADR-0001: Establish the Jason Integration SDK
 
-**Status:** Accepted  
+**Status:** Accepted
 **Decision date:** 2026-08-03
 
 ## Context

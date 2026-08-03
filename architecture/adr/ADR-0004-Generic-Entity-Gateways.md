@@ -1,6 +1,6 @@
 # ADR-0004: Use Governed Generic Entity Gateways
 
-**Status:** Accepted  
+**Status:** Accepted
 **Decision date:** 2026-08-03
 
 ## Context

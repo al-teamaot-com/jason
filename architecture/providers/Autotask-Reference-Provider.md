@@ -1,6 +1,6 @@
 # Autotask Reference Provider
 
-**Status:** Production validated  
+**Status:** Production validated
 **Role:** JIS reference provider
 
 ## Purpose

@@ -4,11 +4,11 @@ Use this template when creating or materially revising a Jason Integration SDK p
 
 ## 1. Provider Identity
 
-**Provider name:**  
-**External platform:**  
-**Provider owner:**  
-**Technology Steward:**  
-**Environment:**  
+**Provider name:**
+**External platform:**
+**Provider owner:**
+**Technology Steward:**
+**Environment:**
 **Status:** Proposed / Foundation / Production Validated / Active / Retired
 
 ## 2. Purpose
@@ -19,11 +19,11 @@ Describe the business requirement and the outcomes this provider enables.
 
 ### Included
 
-- 
+-
 
 ### Excluded
 
-- 
+-
 
 ## 4. Official Platform References
 
@@ -43,11 +43,11 @@ Document:
 
 ## 6. Logical Secrets
 
-**Logical read secret:**  
-**Logical write secret:**  
-**OpenBao path:**  
-**Approved fields:**  
-**Bootstrap identity path:**  
+**Logical read secret:**
+**Logical write secret:**
+**OpenBao path:**
+**Approved fields:**
+**Bootstrap identity path:**
 
 Do not include credential values.
 
@@ -131,7 +131,7 @@ Do not record secrets, tokens, private keys, or sensitive client data.
 
 ## 15. Known Limitations
 
-- 
+-
 
 ## 16. Operational Procedures
 
@@ -146,9 +146,9 @@ Reference:
 
 ## 17. Technology Steward Review
 
-**Review interval:**  
-**Vendor-change sources:**  
-**Retirement criteria for custom code:**  
+**Review interval:**
+**Vendor-change sources:**
+**Retirement criteria for custom code:**
 
 ## 18. Completion Checklist
 
