@@ -13,7 +13,27 @@ class OperationDefinition:
     optional_parameters: frozenset[str] = frozenset()
 
 
+APPROVED_IT_GLUE_ENTITIES: Mapping[str, str] = {
+    "Organizations": "organizations",
+    "Configurations": "configurations",
+    "FlexibleAssets": "flexible_assets",
+    "Documents": "documents",
+    "Contacts": "contacts",
+    "Locations": "locations",
+}
+
+
 IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
+    "it_glue.entity.get": OperationDefinition(
+        method="GET",
+        path_template="/{entity_path}/{entity_id}",
+        path_arguments=("entity_path", "entity_id"),
+    ),
+    "it_glue.entity.query": OperationDefinition(
+        method="GET",
+        path_template="/{entity_path}",
+        path_arguments=("entity_path",),
+    ),
     "it_glue.organization.get": OperationDefinition(
         method="GET",
         path_template="/organizations/{organization_id}",
@@ -68,9 +88,29 @@ def resolve_operation(
             f"Unsupported capability: {capability}"
         )
 
-    path_values: dict[str, int] = {}
+    path_values: dict[str, str | int] = {}
 
     for argument_name in definition.path_arguments:
+        if argument_name == "entity_path":
+            entity = arguments.get("entity")
+
+            if not isinstance(entity, str):
+                raise ValueError(
+                    "Required argument is missing: entity"
+                )
+
+            entity_path = APPROVED_IT_GLUE_ENTITIES.get(
+                entity
+            )
+
+            if entity_path is None:
+                raise ValueError(
+                    f"IT Glue entity is not approved: {entity!r}"
+                )
+
+            path_values[argument_name] = entity_path
+            continue
+
         if argument_name not in arguments:
             raise ValueError(
                 f"Required argument is missing: {argument_name}"
@@ -113,6 +153,58 @@ def resolve_operation(
             )
 
         params[provider_name] = value
+
+    if capability == "it_glue.entity.query":
+        filters = arguments.get("filters", {})
+
+        if not isinstance(filters, Mapping):
+            raise ValueError(
+                "IT Glue query filters must be a mapping."
+            )
+
+        for field_name, value in filters.items():
+            if (
+                not isinstance(field_name, str)
+                or not field_name.strip()
+            ):
+                raise ValueError(
+                    "IT Glue query filter names must be "
+                    "non-empty strings."
+                )
+
+            params[f"filter[{field_name}]"] = value
+
+        page_number = arguments.get("page_number")
+        if page_number is not None:
+            try:
+                page_number = int(page_number)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "page_number must be an integer."
+                ) from error
+
+            if page_number < 1:
+                raise ValueError(
+                    "page_number must be at least 1."
+                )
+
+            params["page[number]"] = page_number
+
+        page_size = arguments.get("page_size")
+        if page_size is not None:
+            try:
+                page_size = int(page_size)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "page_size must be an integer."
+                ) from error
+
+            if not 1 <= page_size <= 1000:
+                raise ValueError(
+                    "page_size must be between 1 and 1000."
+                )
+
+            params["page[size]"] = page_size
 
     return (
         definition.method,

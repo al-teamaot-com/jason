@@ -16,6 +16,8 @@ class ItGlueConnector(ConnectorBase):
 
     capabilities = frozenset(
         {
+            "it_glue.entity.get",
+            "it_glue.entity.query",
             "it_glue.organization.get",
             "it_glue.configuration.search",
             "it_glue.flexible_asset.search",
