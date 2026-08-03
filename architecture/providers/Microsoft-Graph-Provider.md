@@ -294,3 +294,23 @@ The first provider implementation is not production validated until:
 - no write access is granted;
 - no secret value is exposed;
 - offboarding is tested.
+
+## 16. Application Identity and Token Acquisition
+
+The Directory Read profile uses an AOT-owned multitenant confidential
+application with a certificate credential.
+
+Token acquisition must:
+
+- use the validated tenant ID from the Kernel Client Boundary Registry;
+- use Microsoft Graph `.default` scope only;
+- use MSAL rather than custom OAuth implementation;
+- use an in-memory application-token cache only;
+- reject boundaries that are not active and validated;
+- prevent token reuse across clients or tenants;
+- prevent token, certificate, or private-key disclosure;
+- invalidate cached access following offboarding or certificate rotation.
+
+The authoritative design is:
+
+`Microsoft-Graph-Application-Identity.md`

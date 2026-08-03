@@ -170,3 +170,26 @@ When automated onboarding cannot complete, Jason should generate a concise escal
 - recommended next action.
 
 No token, secret, authorization code, or private key may appear in the package.
+
+## Application Credential Handling
+
+The technician onboarding workflow does not ask the technician or
+client administrator for an application credential.
+
+Jason's AOT-owned certificate identity is provisioned centrally.
+
+The technician:
+
+- selects the client;
+- confirms the domain and access profile;
+- completes the administrator-consent workflow;
+- reviews the validation result.
+
+The technician does not:
+
+- create a client secret;
+- upload a certificate;
+- copy a private key;
+- copy an access token;
+- manage token caching;
+- enter the application ID manually during ordinary onboarding.
