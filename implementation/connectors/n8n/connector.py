@@ -2,12 +2,30 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from connectors.core.contracts import AuditSink, ConnectorAuthorizationError, ConnectorRequest, ConnectorResult, HttpTransport, SecretResolver, require_capability
+from connectors.core.connector_base import (
+    ConnectorBase,
+    PreparedRequest,
+)
+from connectors.core.contracts import (
+    AuditSink,
+    ConnectorAuthorizationError,
+    ConnectorRequest,
+    HttpTransport,
+    SecretResolver,
+)
 
 
-class N8nConnector:
+class N8nConnector(ConnectorBase):
     provider_name = "n8n"
-    capabilities = frozenset({"n8n.workflow.invoke", "n8n.workflow.status", "n8n.execution.get"})
+    logical_secret = "n8n.runtime"
+
+    capabilities = frozenset(
+        {
+            "n8n.workflow.invoke",
+            "n8n.workflow.status",
+            "n8n.execution.get",
+        }
+    )
 
     def __init__(
         self,
@@ -16,36 +34,89 @@ class N8nConnector:
         audit: AuditSink,
         approved_workflows: Mapping[str, str],
     ) -> None:
-        self._secrets = secrets
-        self._transport = transport
-        self._audit = audit
+        super().__init__(
+            secrets=secrets,
+            transport=transport,
+            audit=audit,
+        )
         self._approved_workflows = dict(approved_workflows)
 
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        require_capability(request, self.capabilities)
-        credentials = self._secrets.resolve("n8n.runtime", request.context)
-        base_url = credentials["base_url"].rstrip("/")
-        headers = {"X-N8N-API-KEY": credentials["api_key"], "Accept": "application/json"}
-        capability = request.context.capability
+    def prepare_request(
+        self,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+    ) -> PreparedRequest:
+        method, path, body = self._resolve_operation(
+            request.context.capability,
+            request.arguments,
+        )
 
+        return PreparedRequest(
+            method=method,
+            url=f"{credentials['base_url'].rstrip('/')}{path}",
+            headers={
+                "X-N8N-API-KEY": credentials["api_key"],
+                "Accept": "application/json",
+            },
+            json=body,
+            audit_operation=path,
+        )
+
+    def _resolve_operation(
+        self,
+        capability: str,
+        arguments: Mapping[str, Any],
+    ) -> tuple[str, str, Mapping[str, Any] | None]:
         if capability == "n8n.workflow.invoke":
-            logical_name = str(request.arguments.get("workflow", ""))
-            workflow_id = self._approved_workflows.get(logical_name)
-            if not workflow_id:
-                raise ConnectorAuthorizationError("Workflow is not approved for Jason invocation.")
-            method, path, body = "POST", f"/api/v1/workflows/{workflow_id}/run", {"data": dict(request.arguments.get("input", {}))}
-        elif capability == "n8n.workflow.status":
-            logical_name = str(request.arguments.get("workflow", ""))
-            workflow_id = self._approved_workflows.get(logical_name)
-            if not workflow_id:
-                raise ConnectorAuthorizationError("Workflow is not approved for Jason inspection.")
-            method, path, body = "GET", f"/api/v1/workflows/{workflow_id}", None
-        elif capability == "n8n.execution.get":
-            method, path, body = "GET", f"/api/v1/executions/{int(request.arguments['execution_id'])}", None
-        else:
-            raise ConnectorAuthorizationError("Unsupported n8n capability.")
+            logical_name = str(
+                arguments.get("workflow", "")
+            )
+            workflow_id = self._approved_workflows.get(
+                logical_name
+            )
 
-        self._audit.record("connector.requested", request.context, {"provider": self.provider_name, "operation": path})
-        payload = self._transport.request(method=method, url=f"{base_url}{path}", headers=headers, json=body)
-        self._audit.record("connector.completed", request.context, {"provider": self.provider_name})
-        return ConnectorResult(capability, self.provider_name, payload)
+            if not workflow_id:
+                raise ConnectorAuthorizationError(
+                    "Workflow is not approved for Jason invocation."
+                )
+
+            return (
+                "POST",
+                f"/api/v1/workflows/{workflow_id}/run",
+                {
+                    "data": dict(
+                        arguments.get("input", {})
+                    )
+                },
+            )
+
+        if capability == "n8n.workflow.status":
+            logical_name = str(
+                arguments.get("workflow", "")
+            )
+            workflow_id = self._approved_workflows.get(
+                logical_name
+            )
+
+            if not workflow_id:
+                raise ConnectorAuthorizationError(
+                    "Workflow is not approved for Jason inspection."
+                )
+
+            return (
+                "GET",
+                f"/api/v1/workflows/{workflow_id}",
+                None,
+            )
+
+        if capability == "n8n.execution.get":
+            return (
+                "GET",
+                "/api/v1/executions/"
+                f"{int(arguments['execution_id'])}",
+                None,
+            )
+
+        raise ConnectorAuthorizationError(
+            "Unsupported n8n capability."
+        )
