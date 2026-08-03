@@ -137,7 +137,9 @@ Expected fields:
 - `username`
 - `secret`
 - `integration_code`
-- `zone_url`
+
+The Autotask connector discovers the appropriate REST API zone at runtime
+using the unauthenticated `zoneInformation` endpoint and the API username.
 
 ### `datto_rmm.readonly`
 
