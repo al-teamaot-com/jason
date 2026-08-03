@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jason-cli"
+version = "0.1.0"
+description = "Project Jason command-line interface"
+requires-python = ">=3.12"
+dependencies = [
+  "jason-connectors==0.1.0",
+]
+
+[project.scripts]
+jason = "jason_cli.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<10"]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "src",
+  "../",
+]
+testpaths = ["tests"]
+addopts = "-q"
