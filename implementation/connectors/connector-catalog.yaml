@@ -66,8 +66,15 @@ connectors:
     status: partial
     priority: 6
   microsoft_graph:
-    status: planned
+    status: design
     priority: 7
+    mode: directory_read_onboarding
+    next:
+      - multitenant_app_registration
+      - directory_read_permission_profile
+      - tenant_registry
+      - guided_admin_consent
+      - production_validation
   teams_approvals:
     status: planned
     priority: 8
