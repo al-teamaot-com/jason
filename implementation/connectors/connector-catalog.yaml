@@ -20,6 +20,9 @@ connectors:
     mode: read_only
     secret: autotask.readonly
     capabilities:
+      - autotask.entity.describe
+      - autotask.entity.get
+      - autotask.entity.query
       - autotask.ticket.get
       - autotask.ticket.search
       - autotask.ticket.notes.list

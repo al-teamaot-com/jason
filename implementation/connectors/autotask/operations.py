@@ -12,7 +12,39 @@ class OperationDefinition:
     query_argument: str | None = None
 
 
+APPROVED_AUTOTASK_ENTITIES = frozenset(
+    {
+        "Tickets",
+        "Companies",
+        "Contacts",
+        "ConfigurationItems",
+        "Invoices",
+        "PurchaseOrders",
+        "Projects",
+        "Contracts",
+        "Resources",
+        "Opportunities",
+    }
+)
+
+
 AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
+    "autotask.entity.describe": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/entityInformation",
+        path_arguments=("entity",),
+    ),
+    "autotask.entity.get": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/{entity_id}",
+        path_arguments=("entity", "entity_id"),
+    ),
+    "autotask.entity.query": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/query",
+        path_arguments=("entity",),
+        query_argument="search",
+    ),
     "autotask.ticket.get": OperationDefinition(
         method="GET",
         path_template="/V1.0/Tickets/{ticket_id}",
@@ -60,13 +92,27 @@ def resolve_operation(
             f"Unsupported capability: {capability}"
         )
 
-    path_values: dict[str, int] = {}
+    path_values: dict[str, str | int] = {}
 
     for argument_name in definition.path_arguments:
         if argument_name not in arguments:
             raise ValueError(
                 f"Required argument is missing: {argument_name}"
             )
+
+        if argument_name == "entity":
+            entity = arguments[argument_name]
+
+            if (
+                not isinstance(entity, str)
+                or entity not in APPROVED_AUTOTASK_ENTITIES
+            ):
+                raise ValueError(
+                    f"Autotask entity is not approved: {entity!r}"
+                )
+
+            path_values[argument_name] = entity
+            continue
 
         try:
             path_values[argument_name] = int(

@@ -19,6 +19,9 @@ class AutotaskConnector(ConnectorBase):
 
     capabilities = frozenset(
         {
+            "autotask.entity.describe",
+            "autotask.entity.get",
+            "autotask.entity.query",
             "autotask.ticket.get",
             "autotask.ticket.search",
             "autotask.ticket.notes.list",
