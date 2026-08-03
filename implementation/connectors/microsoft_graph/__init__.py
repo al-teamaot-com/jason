@@ -1,3 +1,9 @@
+from connectors.microsoft_graph.onboarding import (
+    MicrosoftOnboardingCompletion,
+    MicrosoftOnboardingOrchestrator,
+    MicrosoftOnboardingSession,
+)
+
 from connectors.microsoft_graph.consent import (
     MicrosoftAdminConsentRequest,
     MicrosoftAdminConsentResult,
@@ -10,6 +16,9 @@ from connectors.microsoft_graph.consent import (
 )
 
 __all__ = [
+    "MicrosoftOnboardingCompletion",
+    "MicrosoftOnboardingOrchestrator",
+    "MicrosoftOnboardingSession",
     "MicrosoftAdminConsentRequest",
     "MicrosoftAdminConsentResult",
     "MicrosoftConsentConfiguration",
