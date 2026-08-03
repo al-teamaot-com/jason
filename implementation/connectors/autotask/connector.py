@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from connectors.core.connector_base import (
+    ConnectorBase,
+    PreparedRequest,
+)
 from connectors.core.contracts import (
-    AuditSink,
     ConnectorConfigurationError,
     ConnectorRequest,
-    ConnectorResult,
-    HttpTransport,
-    SecretResolver,
-    require_capability,
 )
 
 
-class AutotaskConnector:
+class AutotaskConnector(ConnectorBase):
     provider_name = "autotask"
+    logical_secret = "autotask.readonly"
+
     capabilities = frozenset(
         {
             "autotask.ticket.get",
@@ -26,15 +27,11 @@ class AutotaskConnector:
         }
     )
 
-    def __init__(self, secrets: SecretResolver, transport: HttpTransport, audit: AuditSink) -> None:
-        self._secrets = secrets
-        self._transport = transport
-        self._audit = audit
-
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        require_capability(request, self.capabilities)
-        credentials = self._secrets.resolve("autotask.readonly", request.context)
-
+    def prepare_request(
+        self,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+    ) -> PreparedRequest:
         zone_information = self._transport.request(
             method="GET",
             url=(
@@ -47,45 +44,90 @@ class AutotaskConnector:
         )
 
         discovered_url = zone_information.get("url")
-        if not isinstance(discovered_url, str) or not discovered_url.strip():
+
+        if (
+            not isinstance(discovered_url, str)
+            or not discovered_url.strip()
+        ):
             raise ConnectorConfigurationError(
                 "Autotask zone discovery returned an invalid API URL."
             )
 
-        base_url = discovered_url.rstrip("/")
-        headers = {
-            "ApiIntegrationCode": credentials["integration_code"],
-            "UserName": credentials["username"],
-            "Secret": credentials["secret"],
-            "Accept": "application/json",
-        }
-        method, path, params = self._resolve_operation(request.context.capability, request.arguments)
-        self._audit.record("connector.requested", request.context, {"provider": self.provider_name, "operation": path})
-        payload = self._transport.request(
+        method, path, params = self._resolve_operation(
+            request.context.capability,
+            request.arguments,
+        )
+
+        return PreparedRequest(
             method=method,
-            url=f"{base_url}{path}",
-            headers=headers,
+            url=f"{discovered_url.rstrip('/')}{path}",
+            headers={
+                "ApiIntegrationCode": credentials["integration_code"],
+                "UserName": credentials["username"],
+                "Secret": credentials["secret"],
+                "Accept": "application/json",
+            },
             params=params,
             timeout_seconds=30.0,
+            audit_operation=path,
         )
-        self._audit.record("connector.completed", request.context, {"provider": self.provider_name})
-        return ConnectorResult(request.context.capability, self.provider_name, payload)
 
     @staticmethod
-    def _resolve_operation(capability: str, arguments: Mapping[str, Any]) -> tuple[str, str, Mapping[str, Any] | None]:
+    def _resolve_operation(
+        capability: str,
+        arguments: Mapping[str, Any],
+    ) -> tuple[str, str, Mapping[str, Any] | None]:
         if capability == "autotask.ticket.get":
-            return "GET", f"/V1.0/Tickets/{int(arguments['ticket_id'])}", None
+            return (
+                "GET",
+                f"/V1.0/Tickets/{int(arguments['ticket_id'])}",
+                None,
+            )
+
         if capability == "autotask.ticket.notes.list":
-            return "GET", f"/V1.0/Tickets/{int(arguments['ticket_id'])}/Notes", None
+            return (
+                "GET",
+                f"/V1.0/Tickets/{int(arguments['ticket_id'])}/Notes",
+                None,
+            )
+
         if capability == "autotask.company.get":
-            return "GET", f"/V1.0/Companies/{int(arguments['company_id'])}", None
+            return (
+                "GET",
+                f"/V1.0/Companies/{int(arguments['company_id'])}",
+                None,
+            )
+
         if capability == "autotask.contact.get":
-            return "GET", f"/V1.0/Contacts/{int(arguments['contact_id'])}", None
+            return (
+                "GET",
+                f"/V1.0/Contacts/{int(arguments['contact_id'])}",
+                None,
+            )
+
         if capability == "autotask.configuration_item.get":
-            return "GET", f"/V1.0/ConfigurationItems/{int(arguments['configuration_item_id'])}", None
+            return (
+                "GET",
+                "/V1.0/ConfigurationItems/"
+                f"{int(arguments['configuration_item_id'])}",
+                None,
+            )
+
         if capability == "autotask.ticket.search":
             query = arguments.get("search")
+
             if not isinstance(query, str) or not query.strip():
-                raise ValueError("A non-empty structured Autotask search expression is required.")
-            return "GET", "/V1.0/Tickets/query", {"search": query}
-        raise ValueError(f"Unsupported capability: {capability}")
+                raise ValueError(
+                    "A non-empty structured Autotask "
+                    "search expression is required."
+                )
+
+            return (
+                "GET",
+                "/V1.0/Tickets/query",
+                {"search": query},
+            )
+
+        raise ValueError(
+            f"Unsupported capability: {capability}"
+        )
