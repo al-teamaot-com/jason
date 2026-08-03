@@ -7,14 +7,20 @@ from jason_cli import __main__
 from jason_cli import autotask
 
 
-def test_describe_command(monkeypatch, capsys) -> None:
-    calls = []
-
+def test_describe_uses_human_readable_output(
+    monkeypatch,
+    capsys,
+) -> None:
     def fake_execute(**kwargs):
-        calls.append(kwargs)
         return {
-            "entity": "Invoices",
-            "supportsQuery": True,
+            "info": {
+                "name": "Ticket",
+                "canQuery": True,
+                "canCreate": True,
+                "canUpdate": True,
+                "canDelete": False,
+                "userAccessForQuery": "All",
+            }
         }
 
     monkeypatch.setattr(
@@ -24,27 +30,67 @@ def test_describe_command(monkeypatch, capsys) -> None:
     )
 
     result = __main__.main(
-        ["autotask", "describe", "Invoices"]
+        ["autotask", "describe", "Tickets"]
+    )
+
+    output = capsys.readouterr().out
+
+    assert result == 0
+    assert "Autotask entity: Tickets" in output
+    assert "Supports Query: Yes" in output
+    assert "Current Query Access: All" in output
+
+
+def test_describe_json_output(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_execute(**kwargs):
+        return {
+            "info": {
+                "name": "Ticket",
+                "canQuery": True,
+            }
+        }
+
+    monkeypatch.setattr(
+        autotask,
+        "execute_autotask",
+        fake_execute,
+    )
+
+    result = __main__.main(
+        [
+            "autotask",
+            "describe",
+            "Tickets",
+            "--json",
+        ]
     )
 
     assert result == 0
-    assert calls[0]["capability"] == (
-        "autotask.entity.describe"
-    )
-    assert calls[0]["arguments"] == {
-        "entity": "Invoices"
-    }
 
     output = json.loads(capsys.readouterr().out)
-    assert output["entity"] == "Invoices"
+    assert output["info"]["name"] == "Ticket"
 
 
-def test_get_command(monkeypatch) -> None:
+def test_get_uses_compact_output(
+    monkeypatch,
+    capsys,
+) -> None:
     calls = []
 
     def fake_execute(**kwargs):
         calls.append(kwargs)
-        return {"item": {"id": 134952}}
+        return {
+            "item": {
+                "id": 134952,
+                "ticketNumber": "T20260630.0016",
+                "title": "Synthetic ticket",
+                "status": 1,
+                "description": "Not printed by default.",
+            }
+        }
 
     monkeypatch.setattr(
         autotask,
@@ -61,22 +107,58 @@ def test_get_command(monkeypatch) -> None:
         ]
     )
 
+    output = capsys.readouterr().out
+
     assert result == 0
     assert calls[0]["capability"] == (
         "autotask.entity.get"
     )
-    assert calls[0]["arguments"] == {
-        "entity": "Tickets",
-        "entity_id": 134952,
-    }
+    assert "Ticket Number: T20260630.0016" in output
+    assert "Title: Synthetic ticket" in output
+    assert "Not printed by default." not in output
 
 
-def test_query_command(
+def test_get_json_output(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_execute(**kwargs):
+        return {
+            "item": {
+                "id": 134952,
+                "description": "Full response",
+            }
+        }
+
+    monkeypatch.setattr(
+        autotask,
+        "execute_autotask",
+        fake_execute,
+    )
+
+    result = __main__.main(
+        [
+            "autotask",
+            "get",
+            "Tickets",
+            "134952",
+            "--json",
+        ]
+    )
+
+    assert result == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["item"]["description"] == (
+        "Full response"
+    )
+
+
+def test_query_uses_compact_output(
     monkeypatch,
     tmp_path: Path,
+    capsys,
 ) -> None:
-    calls = []
-
     search_file = tmp_path / "query.json"
     search_file.write_text(
         json.dumps(
@@ -95,8 +177,20 @@ def test_query_command(
     )
 
     def fake_execute(**kwargs):
-        calls.append(kwargs)
-        return {"items": []}
+        return {
+            "items": [
+                {
+                    "id": 134952,
+                    "ticketNumber": "T20260630.0016",
+                    "title": "Synthetic ticket",
+                    "description": "Not printed.",
+                }
+            ],
+            "pageDetails": {
+                "count": 1,
+                "requestCount": 10,
+            },
+        }
 
     monkeypatch.setattr(
         autotask,
@@ -114,18 +208,12 @@ def test_query_command(
         ]
     )
 
-    assert result == 0
-    assert calls[0]["capability"] == (
-        "autotask.entity.query"
-    )
-    assert calls[0]["arguments"]["entity"] == (
-        "Tickets"
-    )
+    output = capsys.readouterr().out
 
-    parsed_search = json.loads(
-        calls[0]["arguments"]["search"]
-    )
-    assert parsed_search["MaxRecords"] == 10
+    assert result == 0
+    assert "Matches returned: 1" in output
+    assert "Ticket Number: T20260630.0016" in output
+    assert "Not printed." not in output
 
 
 def test_invalid_search_file_returns_error(

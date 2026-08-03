@@ -38,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Describe an approved Autotask entity.",
     )
     describe.add_argument("entity")
+    describe.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Print the complete JSON response.",
+    )
 
     get = commands.add_parser(
         "get",
@@ -45,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     get.add_argument("entity")
     get.add_argument("entity_id", type=int)
+    get.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Print the complete JSON response.",
+    )
 
     query = commands.add_parser(
         "query",
@@ -55,6 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--search-file",
         required=True,
         type=Path,
+    )
+    query.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Print the complete JSON response.",
     )
 
     return parser
@@ -67,18 +85,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if arguments.platform == "autotask":
             if arguments.command == "describe":
-                return run_describe(arguments.entity)
+                return run_describe(
+                    arguments.entity,
+                    json_output=arguments.json_output,
+                )
 
             if arguments.command == "get":
                 return run_get(
                     arguments.entity,
                     arguments.entity_id,
+                    json_output=arguments.json_output,
                 )
 
             if arguments.command == "query":
                 return run_query(
                     arguments.entity,
                     arguments.search_file,
+                    json_output=arguments.json_output,
                 )
 
         parser.error("Unsupported command.")
