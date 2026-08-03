@@ -18,7 +18,12 @@ class OpenBaoSecretResolutionError(RuntimeError):
 
 
 DEFAULT_MAPPINGS: Mapping[str, str] = {
-    "autotask.readonly": "secret/data/connectors/autotask/production/read-only",
+    "autotask.readonly": (
+        "secret/data/connectors/autotask/production/read-only"
+    ),
+    "it_glue.readonly": (
+        "secret/data/connectors/it-glue/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -27,6 +32,11 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "username",
             "secret",
             "integration_code",
+        }
+    ),
+    "it_glue.readonly": frozenset(
+        {
+            "api_key",
         }
     ),
 }
