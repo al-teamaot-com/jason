@@ -1,3 +1,18 @@
+from connectors.microsoft_graph.token import (
+    GRAPH_DEFAULT_SCOPE,
+    MICROSOFT_AUTHORITY_HOST,
+    MicrosoftApplicationToken,
+    MicrosoftApplicationTokenProvider,
+    MicrosoftBoundaryError,
+    MicrosoftCertificateCredential,
+    MicrosoftCredentialError,
+    MicrosoftCredentialSource,
+    MicrosoftTokenAcquisitionError,
+    MicrosoftTokenError,
+    MsalCertificateTokenProvider,
+    default_msal_application_factory,
+)
+
 from connectors.microsoft_graph.onboarding import (
     MicrosoftOnboardingCompletion,
     MicrosoftOnboardingOrchestrator,
@@ -16,6 +31,18 @@ from connectors.microsoft_graph.consent import (
 )
 
 __all__ = [
+    "GRAPH_DEFAULT_SCOPE",
+    "MICROSOFT_AUTHORITY_HOST",
+    "MicrosoftApplicationToken",
+    "MicrosoftApplicationTokenProvider",
+    "MicrosoftBoundaryError",
+    "MicrosoftCertificateCredential",
+    "MicrosoftCredentialError",
+    "MicrosoftCredentialSource",
+    "MicrosoftTokenAcquisitionError",
+    "MicrosoftTokenError",
+    "MsalCertificateTokenProvider",
+    "default_msal_application_factory",
     "MicrosoftOnboardingCompletion",
     "MicrosoftOnboardingOrchestrator",
     "MicrosoftOnboardingSession",

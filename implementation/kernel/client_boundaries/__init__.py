@@ -1,6 +1,7 @@
 from kernel.client_boundaries.contracts import (
     BoundaryStatus,
     ClientBoundary,
+    ClientBoundaryRepository,
     OnboardingTransaction,
     SignedOnboardingState,
     TransactionStatus,
@@ -23,6 +24,7 @@ __all__ = [
     "BoundaryConflictError",
     "BoundaryStatus",
     "ClientBoundary",
+    "ClientBoundaryRepository",
     "ClientBoundaryService",
     "InMemoryClientBoundaryRepository",
     "InMemoryOnboardingTransactionRepository",
