@@ -7,8 +7,9 @@
     "requester_id": "fixture-technician-001",
     "organization_id": "aot",
     "client_id": "fixture-client-001",
-    "capability": "ticket.investigate",
+    "capability": "operations.ticket.investigate",
     "maximum_mode": "recommend",
+            "execution_mode": "deterministic",
     "expires_at": "2099-12-31T23:59:59Z"
   },
   "ticket": {

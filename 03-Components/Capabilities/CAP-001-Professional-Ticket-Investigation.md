@@ -80,14 +80,15 @@ The following rules are mandatory:
 
 ```json
 {
-  "capability": "ticket.investigate",
+  "capability": "operations.ticket.investigate",
   "version": "0.1",
   "correlation_id": "corr_...",
   "requester_context": {
     "identity_id": "idn_...",
     "organization_id": "org_aot",
     "client_id": "client_...",
-    "requested_mode": "recommend"
+    "requested_mode": "recommend",
+    "execution_mode": "deterministic"
   },
   "ticket": {
     "provider": "autotask",

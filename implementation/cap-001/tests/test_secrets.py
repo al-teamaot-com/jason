@@ -14,7 +14,7 @@ def _request(name: str = "autotask.readonly") -> SecretRequest:
         purpose="historical ticket investigation",
         execution_context_id="ctx-1",
         requester_id="tech-1",
-        capability="ticket.investigate",
+        capability="operations.ticket.investigate",
         correlation_id="corr-1",
         client_id="client-1",
     )

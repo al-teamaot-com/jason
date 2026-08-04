@@ -110,8 +110,22 @@ def test_rejects_tampered_state() -> None:
     service, _, _ = build_service()
     _, state = begin(service)
 
-    tampered = state.value[:-1] + (
-        "A" if state.value[-1] != "A" else "B"
+    encoded_payload, encoded_signature = state.value.split(
+        ".",
+        maxsplit=1,
+    )
+
+    replacement = (
+        "A"
+        if encoded_payload[0] != "A"
+        else "B"
+    )
+
+    tampered = (
+        replacement
+        + encoded_payload[1:]
+        + "."
+        + encoded_signature
     )
 
     with pytest.raises(

@@ -110,7 +110,7 @@ Authority is always scoped.
 authority_grant:
   id: "grant_..."
   subject_id: "idn_..."
-  capability: "ticket.investigate"
+  capability: "operations.ticket.investigate"
 
   scope:
     organization_id: "org_aot"
@@ -164,7 +164,7 @@ execution_context:
     tenant_id: "tenant_edgewater"
 
   capability:
-    name: "ticket.investigate"
+    name: "operations.ticket.investigate"
     requested_mode: "recommend"
 
   authority:

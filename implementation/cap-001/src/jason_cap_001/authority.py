@@ -43,10 +43,19 @@ class ExecutionContextValidator:
         context = request["execution_context"]
         ticket = request["ticket"]
 
-        if context["capability"] != "ticket.investigate":
+        if context["capability"] != "operations.ticket.investigate":
             raise ContextValidationError("Execution context does not authorize CAP-001.")
         if context["maximum_mode"] not in {"observe", "recommend"}:
             raise ContextValidationError("Execution context exceeds CAP-001 Version 0.1 authority.")
+        if context["execution_mode"] not in {
+            "deterministic",
+            "local_ai",
+            "hosted_ai",
+            "human",
+        }:
+            raise ContextValidationError(
+                "Execution context contains an unsupported execution mode."
+            )
         if context["client_id"] != ticket["client_id"]:
             raise ContextValidationError("Ticket and execution context client scopes differ.")
 
