@@ -578,3 +578,29 @@ JKD-004 is ready for production implementation when:
 - audit requirements are defined;
 - initial test cases are approved;
 - the design passes architectural review.
+
+## 26. Execution Provider Registry Dependency
+
+The Execution Policy Engine consumes candidate-provider records from
+`JKD-005 — Execution Provider Registry`.
+
+The engine does not hardcode provider or model names.
+
+Before a provider can be considered, the provider registry must confirm:
+
+- immutable provider identity;
+- compatible provider type and execution mode;
+- supported capability;
+- supported data classification;
+- acceptable lifecycle state;
+- acceptable approval state;
+- acceptable health state;
+- compatible region and limits;
+- pricing-profile linkage;
+- current governance metadata.
+
+The provider registry establishes candidate eligibility.
+
+The Execution Policy Engine remains authoritative for final selection,
+budget enforcement, data-handling policy, approval requirements,
+failover, and denial.
