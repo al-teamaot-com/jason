@@ -80,7 +80,7 @@ Jason currently maintains several related artifacts.
 - Audit Recording;
 - External-System Interaction.
 
-These use identifiers such as `CAP-001`.
+These use identifiers such as `JAC-001`.
 
 They define architectural requirements and do not necessarily represent individual runtime operations.
 

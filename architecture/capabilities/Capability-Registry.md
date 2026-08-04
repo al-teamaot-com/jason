@@ -13,7 +13,7 @@ Primary references:
 
 The registry distinguishes:
 
-- architectural capability IDs such as `CAP-006`; and
+- architectural capability IDs such as `JAC-006`; and
 - invokable canonical capability names such as `governance.action.evaluate`.
 
 Architectural IDs describe enduring Jason capability classes.

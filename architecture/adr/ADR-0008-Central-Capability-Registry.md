@@ -30,7 +30,7 @@ metadata.
 
 The project currently uses two related forms of capability identification:
 
-1. architectural capability IDs such as `CAP-001`, defined by
+1. architectural capability IDs such as `JAC-001`, defined by
    `02-Architecture/J-101-Capability-Registry.md`; and
 2. invokable canonical capability names such as
    `governance.action.evaluate`, defined by the Jason Capability Catalog.
@@ -139,7 +139,7 @@ authoritative catalog of business and platform functions.
 Rejected because technical methods do not establish approval, governance,
 risk, evidence, contract stability, or business justification.
 
-### Use only architectural IDs such as `CAP-001`
+### Use only architectural IDs such as `JAC-001`
 
 Rejected because architectural capability classes do not uniquely identify
 the versioned operations requested during runtime.
