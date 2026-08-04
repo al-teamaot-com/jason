@@ -363,7 +363,44 @@ The foundation is acceptable when:
 10. tests pass independently of any live provider;
 11. documentation and implementation remain aligned.
 
-## 16. References
+## 16. Foundation Implementation Status
+
+The first in-memory Capability Registry foundation is implemented under:
+
+`implementation/kernel/capabilities/`
+
+The implementation includes:
+
+- immutable canonical capability name and version identity;
+- lifecycle, risk, and idempotency enums;
+- approval, evidence, stewardship, and query contracts;
+- canonical capability-name validation;
+- dotted numeric version validation and deterministic ordering;
+- architectural capability ID validation using `JAC-###`;
+- self-dependency rejection;
+- in-memory registration, retrieval, and deterministic listing;
+- duplicate name-and-version protection;
+- current-version resolution;
+- lifecycle, architectural-ID, execution-mode, and risk filtering;
+- governed lifecycle changes;
+- pilot and active governance validation;
+- focused Capability Registry tests;
+- full Kernel regression coverage.
+
+The implementation does not include:
+
+- persistence;
+- full JSON Schema validation;
+- aliases;
+- circular-dependency detection;
+- automatic provider synchronization;
+- planner or orchestrator integration;
+- Execution Policy Engine integration;
+- audit persistence;
+- dynamic discovery;
+- live execution.
+
+## 17. References
 
 - `02-Architecture/J-101-Capability-Registry.md`
 - `04-Standards/J-402-Capability-Definition-of-Done.md`

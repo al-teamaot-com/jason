@@ -29,4 +29,10 @@ or execution.
 
 Architecture defined.
 
-Kernel implementation not yet started.
+The first in-memory Kernel foundation is implemented under:
+
+`implementation/kernel/capabilities/`
+
+It provides contracts, validation, registration, lookup, filtering, deterministic version resolution, governed lifecycle changes, and focused tests.
+
+Persistence and runtime execution integration remain deferred.
