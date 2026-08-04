@@ -477,3 +477,32 @@ JKD-005 is ready for production implementation when:
 - audit requirements are defined;
 - initial tests are approved;
 - the design passes architectural review.
+
+## 28. Foundation Implementation Status
+
+The in-memory foundation is implemented.
+
+The current implementation includes:
+
+- provider-neutral contracts;
+- immutable provider IDs;
+- provider type, lifecycle, health, and approval enums;
+- provider limits and feature metadata;
+- mandatory stewardship metadata;
+- duplicate provider protection;
+- provider lookup and listing;
+- candidate filtering by capability, execution mode, classification,
+  region, health, approval, and lifecycle;
+- governed health, approval, and lifecycle updates;
+- production-eligibility validation for available providers;
+- focused Kernel tests.
+
+The current implementation does not include:
+
+- persistence;
+- live provider health probes;
+- automatic discovery;
+- secrets or credentials;
+- live provider calls;
+- audit persistence;
+- provider-selection integration with JKD-004.
