@@ -204,10 +204,19 @@ def test_rejects_tampered_signed_state() -> None:
     orchestrator, _, _ = build_orchestrator()
     session = begin(orchestrator)
 
-    tampered = session.signed_state[:-1] + (
+    encoded_payload, encoded_signature = (
+        session.signed_state.split(".", maxsplit=1)
+    )
+
+    replacement = (
         "A"
-        if session.signed_state[-1] != "A"
+        if encoded_signature[0] != "A"
         else "B"
+    )
+
+    tampered = (
+        f"{encoded_payload}."
+        f"{replacement}{encoded_signature[1:]}"
     )
 
     with pytest.raises(
