@@ -17,7 +17,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 ## Core Capabilities
 
-### CAP-001 — Reasoning
+### JAC-001 — Reasoning
 
 **Purpose:** Analyze information and produce structured conclusions, recommendations, classifications, or decisions.
 
@@ -33,7 +33,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-002 — Orchestration
+### JAC-002 — Orchestration
 
 **Purpose:** Coordinate work, route capability requests, transfer authorized context, manage execution state, and assemble final results.
 
@@ -49,7 +49,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-003 — Identity Resolution
+### JAC-003 — Identity Resolution
 
 **Purpose:** Resolve people, organizations, systems, services, and acting principals into durable Jason identities.
 
@@ -65,7 +65,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-004 — Context Management
+### JAC-004 — Context Management
 
 **Purpose:** Maintain and deliver the minimum authorized information required to perform work consistently.
 
@@ -81,7 +81,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-005 — Knowledge Retrieval
+### JAC-005 — Knowledge Retrieval
 
 **Purpose:** Locate and return authoritative knowledge, evidence, records, and artifacts relevant to an authorized request.
 
@@ -97,7 +97,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-006 — Policy Evaluation
+### JAC-006 — Policy Evaluation
 
 **Purpose:** Determine whether a requested action, information use, or decision is permitted and what controls apply.
 
@@ -113,7 +113,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-007 — Approval
+### JAC-007 — Approval
 
 **Purpose:** Obtain and validate required human authorization before controlled actions proceed.
 
@@ -129,7 +129,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-008 — Audit Recording
+### JAC-008 — Audit Recording
 
 **Purpose:** Create durable records of significant requests, decisions, actions, approvals, failures, evidence, and outcomes.
 
@@ -145,7 +145,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-009 — Communication
+### JAC-009 — Communication
 
 **Purpose:** Exchange governed information with people and external systems.
 
@@ -161,7 +161,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-010 — Monitoring
+### JAC-010 — Monitoring
 
 **Purpose:** Observe the health, availability, performance, and policy state of Jason and its dependencies.
 
@@ -177,7 +177,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-011 — Scheduling
+### JAC-011 — Scheduling
 
 **Purpose:** Initiate authorized work at a defined time, cadence, or governed condition.
 
@@ -193,7 +193,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-012 — Secure Storage
+### JAC-012 — Secure Storage
 
 **Purpose:** Preserve Jason state, artifacts, evidence, configuration, and references with appropriate protection and lifecycle controls.
 
@@ -209,7 +209,7 @@ Capabilities are enduring architectural requirements. Implementations are replac
 
 **Status:** Required.
 
-### CAP-013 — External-System Interaction
+### JAC-013 — External-System Interaction
 
 **Purpose:** Read from and act upon external systems through governed, replaceable connector implementations.
 
