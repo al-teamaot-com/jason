@@ -193,3 +193,32 @@ The technician does not:
 - copy an access token;
 - manage token caching;
 - enter the application ID manually during ordinary onboarding.
+
+## Current Implementation Status
+
+The internal onboarding foundation now supports:
+
+- creation of a Kernel onboarding transaction;
+- signed, expiring, single-use state;
+- tenant-specific Microsoft administrator-consent URLs;
+- safe consent callback parsing;
+- tenant UUID validation;
+- duplicate client and tenant protection;
+- creation of a pending client-boundary record;
+- certificate-based token-provider contracts;
+- rejection of boundaries that are not validated.
+
+The technician-facing CLI command is not yet implemented.
+
+The workflow is therefore not yet available for routine technician use.
+
+Before release, Jason still requires:
+
+- durable transaction and boundary storage;
+- production callback hosting;
+- OpenBao-backed certificate resolution;
+- production application registration;
+- automated token and Graph validation;
+- plain-language CLI output;
+- controlled offboarding;
+- operational documentation.

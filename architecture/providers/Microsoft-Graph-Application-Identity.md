@@ -333,3 +333,105 @@ The following remain out of scope:
 - Exchange, Teams, SharePoint, Security, or Intune profiles;
 - mutation identities;
 - write permissions.
+
+## 17. Implementation Status
+
+The certificate-backed token-provider foundation is implemented.
+
+The current implementation provides:
+
+- `MicrosoftCertificateCredential`;
+- `MicrosoftCredentialSource`;
+- `MicrosoftApplicationToken`;
+- `MicrosoftApplicationTokenProvider`;
+- `MsalCertificateTokenProvider`;
+- tenant-specific Microsoft authorities;
+- Microsoft Graph `.default` scope enforcement;
+- validated Kernel boundary enforcement;
+- profile enforcement;
+- application and tenant identifier validation;
+- credential-generation-aware MSAL application caching;
+- per-client cache invalidation;
+- safe Microsoft and credential error translation;
+- dependency injection for Microsoft-free automated testing.
+
+The implementation uses MSAL for confidential-client token acquisition
+and application-token caching.
+
+No Microsoft Graph resource endpoint is called by the token provider.
+
+## 18. Kernel Boundary Lifecycle Behavior
+
+Token acquisition uses the Kernel Client Boundary Registry as the
+authoritative source of client-to-tenant mappings.
+
+| Boundary state | Token-provider behavior |
+|---|---|
+| `validated` | Eligible for token acquisition when the provider, profile, application ID, and tenant ID are approved |
+| `pending` | Rejected as not validated |
+| `failed` | Treated as having no active usable boundary |
+| `revoked` | Treated as having no active usable boundary |
+| `offboarded` | Treated as having no active usable boundary |
+
+The Microsoft provider does not redefine the Kernel lifecycle model.
+
+## 19. Implemented Safe Error Classifications
+
+The token provider currently emits safe classifications including:
+
+- `MICROSOFT_BOUNDARY_NOT_FOUND`
+- `MICROSOFT_BOUNDARY_NOT_VALIDATED`
+- `MICROSOFT_PROFILE_NOT_APPROVED`
+- `MICROSOFT_BOUNDARY_IDENTIFIER_INVALID`
+- `MICROSOFT_CREDENTIAL_RESOLUTION_FAILED`
+- `MICROSOFT_CERTIFICATE_REJECTED`
+- `MICROSOFT_APPLICATION_NOT_FOUND`
+- `MICROSOFT_CONSENT_REQUIRED`
+- `MICROSOFT_PERMISSION_DENIED`
+- `MICROSOFT_TOKEN_SERVICE_UNAVAILABLE`
+- `MICROSOFT_TOKEN_RESPONSE_INVALID`
+- `MICROSOFT_TOKEN_ACQUISITION_FAILED`
+
+Raw access tokens, credential values, Microsoft diagnostic
+descriptions, and private-key material are not included in these
+errors.
+
+## 20. Cache Isolation and Invalidation
+
+The implementation caches MSAL confidential-client application
+instances in memory.
+
+The cache key includes:
+
+- application ID;
+- Microsoft tenant ID;
+- approved scope;
+- credential generation.
+
+This prevents application instances and token caches from being reused
+across tenants, applications, scopes, or certificate generations.
+
+`invalidate_client()` removes matching local application instances and
+asks MSAL to remove cached client tokens.
+
+Local cache invalidation does not claim to revoke an already issued
+Microsoft access token remotely.
+
+## 21. Remaining Work
+
+The token-provider foundation is not yet production ready.
+
+Remaining work includes:
+
+1. finalize the OpenBao certificate secret contract;
+2. implement the OpenBao-backed Microsoft credential source;
+3. create the AOT-owned multitenant application registration;
+4. generate and register the production certificate;
+5. configure the approved Directory Read application permissions;
+6. complete administrator consent in a controlled test tenant;
+7. persist Kernel boundary and onboarding records outside memory;
+8. perform live token acquisition without displaying the token;
+9. implement the first narrow Graph read capability;
+10. validate offboarding and cache invalidation;
+11. record production-validation evidence;
+12. complete Microsoft milestone closeout.

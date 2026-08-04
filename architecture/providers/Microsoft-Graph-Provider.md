@@ -314,3 +314,32 @@ Token acquisition must:
 The authoritative design is:
 
 `Microsoft-Graph-Application-Identity.md`
+
+## 17. Current Implementation Status
+
+The Microsoft Graph provider foundation currently includes:
+
+- technician onboarding design;
+- tenant-specific administrator-consent URL generation;
+- signed and expiring Kernel onboarding state;
+- administrator-consent callback validation;
+- Microsoft onboarding orchestration;
+- provider-independent client-boundary records;
+- certificate credential contracts;
+- MSAL-backed application-token acquisition;
+- validated-boundary enforcement;
+- tenant-isolated in-memory token caching;
+- safe token-error translation.
+
+The following are not yet implemented:
+
+- OpenBao-backed certificate retrieval;
+- production Microsoft application registration;
+- persistent client-boundary storage;
+- live tenant onboarding;
+- Microsoft Graph resource operations;
+- CLI onboarding commands;
+- production validation.
+
+The provider remains read-only by design. No mutation identity or write
+permission has been introduced.
