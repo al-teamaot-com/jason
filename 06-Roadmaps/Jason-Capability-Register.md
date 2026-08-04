@@ -12,6 +12,14 @@ Every capability must have a documented purpose, scope, authority model, evidenc
 
 Capabilities are expressed independently of the provider currently implementing them.
 
+## Current milestone status
+
+[M-001 — Kernel Foundation](../10-Milestones/M-001-Kernel-Foundation.md) is complete.
+
+The stable Kernel now governs capability identity, provider eligibility, execution policy, and capability resolution. CAP-001 has proven the first real capability path through those services before evidence collection begins.
+
+Future entries should use the stable Kernel surface rather than create capability-specific governance, provider-selection, or policy logic.
+
 ## Capability maturity stages
 
 1. **Observe** — collect and organize evidence; do not recommend or act.
@@ -26,7 +34,8 @@ No capability is born autonomous. Authority is earned through demonstrated compe
 
 | Field | Requirement |
 |---|---|
-| Capability ID | Stable canonical identifier |
+| Capability ID | Stable roadmap identifier |
+| Canonical capability name | Versioned invokable name governed by the Capability Registry |
 | Name | Human-readable name |
 | Purpose | Organizational outcome it supports |
 | Business justification | Why the capability should exist |
@@ -36,6 +45,7 @@ No capability is born autonomous. Authority is earned through demonstrated compe
 | Required evidence | Minimum evidence needed for reliable operation |
 | Applicable policies | Governing policies and standards |
 | Authority | Maximum permitted mode and required approver classes |
+| Technical execution modes | Permitted Kernel execution modes |
 | Risk level | Low, Medium, High, or Critical |
 | Current maturity stage | Observe through Governed Optimization |
 | Success metrics | Evidence that the capability is effective |
@@ -53,24 +63,38 @@ No capability is born autonomous. Authority is earned through demonstrated compe
 | Field | Definition |
 |---|---|
 | Capability ID | `CAP-001` |
+| Canonical capability name | `operations.ticket.investigate` |
 | Name | Professional Ticket Investigation |
 | Purpose | Give an AOT technician a useful, evidence-grounded assessment and next action from an operational ticket. |
-| Business justification | Ticket investigation is frequent, representative of AOT operations, and exercises the kernel end to end. |
+| Business justification | Ticket investigation is frequent, representative of AOT operations, and exercises the Kernel end to end. |
 | Competencies | Observe, normalize, correlate, investigate, rank hypotheses, explain, recommend, communicate, remember, learn. |
 | Inputs | Ticket identity, title, description, client, configuration item, attachments, diagnostic output, requester context, permitted related records. |
 | Outputs | Situation summary, missing information, observations, ranked hypotheses, recommendation, confidence, risk, approval needs, evidence references, proposed communication, learning candidate. |
 | Required evidence | Original ticket content, authoritative client and asset mapping, relevant diagnostics, source and collection timestamps, provenance, integrity metadata where applicable. |
 | Applicable policies | Client isolation, evidence before inference, lowest-risk successful action, progressive disclosure, authority before execution. |
-| Authority | Version 0.1 maximum mode is `recommend`. No operational execution. |
+| Authority | Version 0.1 maximum business mode is `recommend`. No operational execution. |
+| Technical execution modes | Initial proof uses `deterministic`; additional modes require governed provider and policy approval. |
 | Risk level | Medium overall; individual recommendations may be Low through Critical. |
 | Current maturity stage | Recommend |
 | Success metrics | Time to useful answer, technician acceptance rate, evidence citation completeness, false-confidence rate, cross-client leakage rate, escalation appropriateness, outcome confirmation rate. |
-| Failure behavior | State what is missing, reduce confidence, recommend the smallest evidence-gathering step, and never fabricate. |
-| Steward | To be assigned before pilot. |
+| Failure behavior | Fail closed before evidence collection when authority or governed resolution is denied; otherwise state what is missing, reduce confidence, recommend the smallest evidence-gathering step, and never fabricate. |
+| Steward | Jason Architecture Authority for the foundation proof; operational steward must be assigned before pilot. |
 | Review interval | Every sprint during pilot; monthly after stabilization. |
 | Retirement criteria | Retire or simplify when a dependable approved platform capability provides equivalent outcomes with lower maintenance and risk. |
-| Provider implementations | Initial implementation may use Autotask, Datto RMM, IT Glue, and an approved reasoning model through replaceable connectors. |
-| Status | Building |
+| Provider implementations | Current proof uses in-memory governed registry records. Pilot providers may include approved Autotask, Datto RMM, IT Glue, and reasoning-provider adapters. |
+| Status | Building — Kernel integration proven; provider-backed pilot remains deferred. |
+
+## Proven CAP-001 foundation behavior
+
+CAP-001 now:
+
+1. validates its bounded execution context;
+2. submits the canonical capability request to JKD-007;
+3. resolves through the Capability Registry and Execution Provider Registry;
+4. receives the authoritative Execution Policy decision;
+5. requires a governed execution plan before evidence collection;
+6. fails closed when authority or resolution is denied;
+7. remains read-only and recommendation-only.
 
 ## Planned vertical slices
 
@@ -78,7 +102,7 @@ The order below is provisional and should be changed when implementation evidenc
 
 | ID | Capability | Initial stage | Purpose |
 |---|---|---:|---|
-| CAP-001 | Professional Ticket Investigation | Recommend | First end-to-end kernel slice |
+| CAP-001 | Professional Ticket Investigation | Recommend | Proven first governed Kernel slice; next work is controlled provider-backed pilot preparation |
 | CAP-002 | Disk Health Investigation | Recommend | Exercise structured diagnostics and bounded technical reasoning |
 | CAP-003 | Microsoft 365 Mail Investigation | Recommend | Test a different provider and evidence domain |
 | CAP-004 | Backup Failure Investigation | Recommend | Exercise time-sensitive operational evidence and escalation |
@@ -97,7 +121,11 @@ A proposed capability should not enter the register unless:
 6. Success and failure can be measured.
 7. A simpler approved platform capability has been considered first.
 8. A steward, review interval, and retirement criteria can be assigned.
+9. Its canonical capability name and permitted execution modes conform to the stable Kernel contracts.
+10. It cannot bypass governed capability resolution or execution policy.
 
 ## Review rule
 
 The register is a living governance artifact. Changes should be based on operating evidence, platform changes, risk, or lessons learned rather than novelty or architectural speculation.
+
+Following M-001, the default is to extend Jason with governed capabilities outside the Kernel. Shared Kernel changes require evidence that the stable boundary is incomplete and must follow the change-control requirements in the milestone declaration.
