@@ -7,7 +7,9 @@ name = "jason-connectors"
 version = "0.1.0"
 description = "Project Jason shared connector runtime and providers"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "msal>=1.35,<2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<10"]
