@@ -45,3 +45,12 @@ class TransitionProvider(Protocol):
 
 class ContextValidator(Protocol):
     def validate(self, request: dict[str, Any]) -> Any: ...
+
+
+class ResolutionAuthorizer(Protocol):
+    def authorize(
+        self,
+        request: dict[str, Any],
+        *,
+        authority_allowed: bool,
+    ) -> Any: ...

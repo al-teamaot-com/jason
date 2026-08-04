@@ -4,41 +4,140 @@
   "title": "CAP-001 Investigation Request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "request_id", "correlation_id", "execution_context", "ticket"],
+  "required": [
+    "schema_version",
+    "request_id",
+    "correlation_id",
+    "execution_context",
+    "ticket"
+  ],
   "properties": {
-    "schema_version": {"const": "0.1"},
-    "request_id": {"type": "string", "minLength": 1},
-    "correlation_id": {"type": "string", "minLength": 1},
+    "schema_version": {
+      "const": "0.1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "execution_context": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["context_id", "requester_id", "organization_id", "client_id", "capability", "maximum_mode", "expires_at"],
+      "required": [
+        "context_id",
+        "requester_id",
+        "organization_id",
+        "client_id",
+        "capability",
+        "maximum_mode",
+        "execution_mode",
+        "expires_at"
+      ],
       "properties": {
-        "context_id": {"type": "string", "minLength": 1},
-        "requester_id": {"type": "string", "minLength": 1},
-        "organization_id": {"type": "string", "minLength": 1},
-        "client_id": {"type": "string", "minLength": 1},
-        "capability": {"const": "ticket.investigate"},
-        "maximum_mode": {"enum": ["observe", "recommend"]},
-        "expires_at": {"type": "string", "format": "date-time"}
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requester_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "organization_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability": {
+          "const": "operations.ticket.investigate"
+        },
+        "maximum_mode": {
+          "enum": [
+            "observe",
+            "recommend"
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "execution_mode": {
+          "enum": [
+            "deterministic",
+            "local_ai",
+            "hosted_ai",
+            "human"
+          ]
+        }
       }
     },
     "ticket": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "external_id", "title", "description", "client_id", "created_at"],
+      "required": [
+        "provider",
+        "external_id",
+        "title",
+        "description",
+        "client_id",
+        "created_at"
+      ],
       "properties": {
-        "provider": {"type": "string", "minLength": 1},
-        "external_id": {"type": "string", "minLength": 1},
-        "title": {"type": "string", "minLength": 1},
-        "description": {"type": "string"},
-        "client_id": {"type": "string", "minLength": 1},
-        "configuration_item_id": {"type": ["string", "null"]},
-        "requester_identity_id": {"type": ["string", "null"]},
-        "created_at": {"type": "string", "format": "date-time"},
-        "attachments": {"type": "array", "items": {"type": "string"}}
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "external_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configuration_item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requester_identity_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
-    "requested_depth": {"enum": ["initial", "standard", "extended"], "default": "standard"}
+    "requested_depth": {
+      "enum": [
+        "initial",
+        "standard",
+        "extended"
+      ],
+      "default": "standard"
+    }
   }
 }

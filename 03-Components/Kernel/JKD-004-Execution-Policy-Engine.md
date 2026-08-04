@@ -126,7 +126,7 @@ execution_decision:
   correlation_id: corr_...
   outcome: allowed | allowed_limited | approval_required | human_required | denied
   execution_mode: deterministic | local_ai | hosted_ai | human | none
-  capability: ticket.investigate
+  capability: operations.ticket.investigate
   capability_version: "0.1"
   reason_codes: []
   policy_ids: []
@@ -166,7 +166,7 @@ execution_plan:
   execution_id: exec_...
   correlation_id: corr_...
   execution_mode: deterministic | local_ai | hosted_ai | human
-  capability: ticket.investigate
+  capability: operations.ticket.investigate
   capability_version: "0.1"
   provider:
     provider_id: openai
@@ -300,7 +300,7 @@ cost_record:
   correlation_id: corr_...
   tenant_id: tenant_...
   client_id: client_...
-  capability: ticket.investigate
+  capability: operations.ticket.investigate
   execution_mode: hosted_ai
   provider_id: openai
   model_id: approved-model

@@ -9,6 +9,7 @@ from .adapters import (
     EvidenceProvider,
     MemoryProvider,
     ReasoningProvider,
+    ResolutionAuthorizer,
     TransitionProvider,
 )
 from .quality import QualityGateResult, evaluate_reasoning_result
@@ -39,6 +40,7 @@ class InvestigationService:
         reasoning: ReasoningProvider,
         memory: MemoryProvider,
         audit: AuditProvider,
+        resolution: ResolutionAuthorizer,
         context_validator: ContextValidator | None = None,
         transitions: TransitionProvider | None = None,
     ) -> None:
@@ -46,6 +48,7 @@ class InvestigationService:
         self._reasoning = reasoning
         self._memory = memory
         self._audit = audit
+        self._resolution = resolution
         self._context_validator = context_validator
         self._transitions = transitions
 
@@ -84,11 +87,20 @@ class InvestigationService:
         correlation_id = request["correlation_id"]
         case_id = f"case-{request['request_id']}"
 
+        authority_allowed = False
+
         try:
             if self._context_validator is not None:
-                self._context_validator.validate(request)
+                context_decision = self._context_validator.validate(
+                    request
+                )
+                authority_allowed = context_decision.allowed
             elif context["client_id"] != ticket["client_id"]:
-                raise PermissionError("Ticket and execution context client scopes differ.")
+                raise PermissionError(
+                    "Ticket and execution context client scopes differ."
+                )
+            else:
+                authority_allowed = True
         except PermissionError as exc:
             self._transition(
                 workflow,
@@ -126,7 +138,49 @@ class InvestigationService:
             },
         )
 
-        evidence = self._evidence.collect(request, client_id=context["client_id"])
+        try:
+            resolution = self._resolution.authorize(
+                request,
+                authority_allowed=authority_allowed,
+            )
+        except PermissionError as exc:
+            self._transition(
+                workflow,
+                WorkflowState.REJECTED,
+                str(exc),
+                correlation_id=correlation_id,
+                case_id=case_id,
+            )
+            self._audit.append(
+                "capability.resolution_rejected",
+                {
+                    "correlation_id": correlation_id,
+                    "case_id": case_id,
+                    "client_id": context["client_id"],
+                    "reason": str(exc),
+                },
+            )
+            raise
+
+        plan = resolution.execution_plan
+        self._audit.append(
+            "capability.resolved",
+            {
+                "correlation_id": correlation_id,
+                "case_id": case_id,
+                "client_id": context["client_id"],
+                "capability": plan.capability,
+                "capability_version": plan.capability_version,
+                "execution_mode": plan.execution_mode.value,
+                "provider_id": plan.provider_id,
+                "policy_ids": list(plan.policy_ids),
+            },
+        )
+
+        evidence = self._evidence.collect(
+            request,
+            client_id=context["client_id"],
+        )
         if any(item.get("client_id") != context["client_id"] for item in evidence):
             self._transition(
                 workflow,

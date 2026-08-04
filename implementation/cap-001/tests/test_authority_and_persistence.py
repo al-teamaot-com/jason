@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,8 +25,9 @@ def request(*, client_id: str = "client-001", expires_at: str = "2099-01-01T00:0
             "requester_id": "tech-001",
             "organization_id": "aot",
             "client_id": client_id,
-            "capability": "ticket.investigate",
+            "capability": "operations.ticket.investigate",
             "maximum_mode": "recommend",
+            "execution_mode": "deterministic",
             "expires_at": expires_at,
         },
         "ticket": {
@@ -86,6 +88,30 @@ class Reasoning:
         }
 
 
+class Resolution:
+    def authorize(
+        self,
+        request: dict,
+        *,
+        authority_allowed: bool,
+    ):
+        assert authority_allowed is True
+
+        return SimpleNamespace(
+            execution_plan=SimpleNamespace(
+                capability="operations.ticket.investigate",
+                capability_version="0.1",
+                execution_mode=SimpleNamespace(
+                    value=request["execution_context"][
+                        "execution_mode"
+                    ]
+                ),
+                provider_id="deterministic-test-provider",
+                policy_ids=("cap-001-read-only-v0.1",),
+            )
+        )
+
+
 def test_validator_rejects_expired_context() -> None:
     validator = ExecutionContextValidator(
         StaticAuthorityResolver(frozenset({("tech-001", "client-001")})),
@@ -111,6 +137,7 @@ def test_investigation_persists_case_result_transitions_and_audit() -> None:
         reasoning=Reasoning(),
         memory=store,
         audit=store,
+        resolution=Resolution(),
         context_validator=validator,
         transitions=store,
     )
@@ -123,5 +150,6 @@ def test_investigation_persists_case_result_transitions_and_audit() -> None:
     assert len(store.list_transitions("corr-001")) == 6
     event_types = [event["event_type"] for event in store.list_audit_events("corr-001")]
     assert "execution_context.validated" in event_types
+    assert "capability.resolved" in event_types
     assert "capability.recommendation_ready" in event_types
     assert event_types.count("workflow.transitioned") == 6

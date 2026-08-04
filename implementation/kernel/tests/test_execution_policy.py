@@ -55,7 +55,7 @@ def request(
     return ExecutionRequest(
         execution_id="exec_001",
         correlation_id="corr_001",
-        capability="ticket.investigate",
+        capability="operations.ticket.investigate",
         capability_version="0.1",
         tenant_id="tenant_client",
         client_id="client_001",

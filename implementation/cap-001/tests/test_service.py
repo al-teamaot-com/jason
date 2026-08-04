@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,6 +72,37 @@ class AuditStub:
         self.events.append((event_type, payload))
 
 
+class ResolutionStub:
+    def __init__(self, *, reject: bool = False) -> None:
+        self.reject = reject
+        self.calls: list[tuple[dict, bool]] = []
+
+    def authorize(
+        self,
+        request: dict,
+        *,
+        authority_allowed: bool,
+    ):
+        self.calls.append((request, authority_allowed))
+
+        if self.reject:
+            raise PermissionError("Kernel resolution denied CAP-001.")
+
+        return SimpleNamespace(
+            execution_plan=SimpleNamespace(
+                capability="operations.ticket.investigate",
+                capability_version="0.1",
+                execution_mode=SimpleNamespace(
+                    value=request["execution_context"][
+                        "execution_mode"
+                    ]
+                ),
+                provider_id="deterministic-test-provider",
+                policy_ids=("cap-001-read-only-v0.1",),
+            )
+        )
+
+
 def request_fixture() -> dict:
     return {
         "schema_version": "0.1",
@@ -81,8 +113,9 @@ def request_fixture() -> dict:
             "requester_id": "person-1",
             "organization_id": "aot",
             "client_id": "client-1",
-            "capability": "ticket.investigate",
+            "capability": "operations.ticket.investigate",
             "maximum_mode": "recommend",
+            "execution_mode": "deterministic",
             "expires_at": "2026-07-31T14:00:00Z",
         },
         "ticket": {
@@ -103,7 +136,14 @@ def request_fixture() -> dict:
 def test_end_to_end_read_only_recommendation() -> None:
     memory = MemoryStub()
     audit = AuditStub()
-    service = InvestigationService(evidence=EvidenceStub(), reasoning=ReasoningStub(), memory=memory, audit=audit)
+    resolution = ResolutionStub()
+    service = InvestigationService(
+        evidence=EvidenceStub(),
+        reasoning=ReasoningStub(),
+        memory=memory,
+        audit=audit,
+        resolution=resolution,
+    )
 
     run = service.investigate(request_fixture())
 
@@ -112,12 +152,49 @@ def test_end_to_end_read_only_recommendation() -> None:
     assert len(memory.cases) == 1
     assert len(memory.results) == 1
     assert audit.events[-1][0] == "capability.recommendation_ready"
+    assert resolution.calls == [(request_fixture(), True)]
+    assert any(
+        event_type == "capability.resolved"
+        for event_type, _ in audit.events
+    )
 
 
 def test_client_scope_mismatch_fails_closed() -> None:
     request = deepcopy(request_fixture())
     request["ticket"]["client_id"] = "client-2"
-    service = InvestigationService(evidence=EvidenceStub(), reasoning=ReasoningStub(), memory=MemoryStub(), audit=AuditStub())
+    service = InvestigationService(
+        evidence=EvidenceStub(),
+        reasoning=ReasoningStub(),
+        memory=MemoryStub(),
+        audit=AuditStub(),
+        resolution=ResolutionStub(),
+    )
 
     with pytest.raises(PermissionError):
         service.investigate(request)
+
+
+def test_kernel_resolution_rejection_fails_closed() -> None:
+    audit = AuditStub()
+    service = InvestigationService(
+        evidence=EvidenceStub(),
+        reasoning=ReasoningStub(),
+        memory=MemoryStub(),
+        audit=audit,
+        resolution=ResolutionStub(reject=True),
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match="Kernel resolution denied",
+    ):
+        service.investigate(request_fixture())
+
+    assert any(
+        event_type == "capability.resolution_rejected"
+        for event_type, _ in audit.events
+    )
+    assert not any(
+        event_type == "capability.recommendation_ready"
+        for event_type, _ in audit.events
+    )
