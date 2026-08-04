@@ -40,7 +40,7 @@ CAP-001 Investigation Workflow
 
 1. Read the Manifesto and Constitution.
 2. Review the Professional Operating Principles.
-3. Read [M-001 — Kernel Foundation](../10-Milestones/M-001-Kernel-Foundation.md).
+3. Read [M-001 — Kernel Foundation](10-Milestones/M-001-Kernel-Foundation.md).
 4. Review JKD-001 through JKD-007 for Kernel service boundaries.
 5. Review CAP-001 for the first proven governed capability contract.
 6. Use J-402 when assessing whether a capability is ready for pilot.
