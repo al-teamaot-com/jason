@@ -1,7 +1,7 @@
 # JKD-004 — Execution Policy Engine
 
-**Status:** Proposed foundation design  
-**Owner:** Jason Architecture Authority  
+**Status:** Proposed foundation design
+**Owner:** Jason Architecture Authority
 **Applies to:** All governed execution requests, including deterministic workflows, local AI, hosted AI, human approval, human execution, and denied execution
 
 ## 1. Purpose
