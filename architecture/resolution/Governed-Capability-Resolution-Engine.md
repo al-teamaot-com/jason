@@ -54,12 +54,16 @@ outcome and any governed execution plan.
 
 Architecture defined.
 
-Kernel implementation not yet started.
+The first stateless Kernel foundation is implemented under:
 
-The first implementation will be in-memory and deterministic. It will
-include request and result contracts, capability resolution, provider
-candidate discovery and translation, policy invocation, structured denial
-outcomes, and focused Kernel tests.
+`implementation/kernel/resolution/`
+
+It provides request and result contracts, capability resolution, provider
+candidate discovery and deterministic translation, policy invocation,
+structured non-execution outcomes, governed execution-plan return, and
+focused Kernel tests.
+
+The engine owns no repository or persistent state.
 
 Persistence, dependency graph planning, dynamic discovery, live execution,
 retries, fallback execution, audit persistence, Orchestration integration,

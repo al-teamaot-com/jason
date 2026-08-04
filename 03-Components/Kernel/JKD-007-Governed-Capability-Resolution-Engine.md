@@ -318,7 +318,45 @@ The foundation is acceptable when:
 12. tests pass independently of live providers;
 13. documentation and implementation remain aligned.
 
-## 17. References
+## 17. Foundation Implementation Status
+
+The first stateless Governed Capability Resolution Engine foundation is
+implemented under:
+
+`implementation/kernel/resolution/`
+
+The implementation includes:
+
+- immutable resolution request and result contracts;
+- deterministic exact-version and current-version capability resolution;
+- capability lifecycle and execution-mode validation;
+- tenant and client isolation checks;
+- explicit pilot capability and provider controls;
+- provider candidate discovery through the Execution Provider Registry;
+- deterministic provider-to-policy candidate translation;
+- Execution Policy Engine invocation;
+- structured unresolved, denied, approval-required, human-required, and
+  resolved outcomes;
+- governed execution-plan return only when supplied by policy;
+- deterministic provider ordering;
+- focused JKD-007 tests;
+- full Kernel regression coverage.
+
+The Resolution Engine is stateless and contains no repository.
+
+The implementation does not include:
+
+- persistence;
+- dependency graph planning;
+- dynamic discovery;
+- live provider execution;
+- retries or fallback execution;
+- optimization beyond existing policy behavior;
+- audit persistence;
+- Orchestration integration;
+- external API exposure.
+
+## 18. References
 
 - `03-Components/Kernel/JKD-004-Execution-Policy-Engine.md`
 - `03-Components/Kernel/JKD-005-Execution-Provider-Registry.md`
