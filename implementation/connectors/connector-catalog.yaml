@@ -66,14 +66,15 @@ connectors:
     status: partial
     priority: 6
   microsoft_graph:
-    status: design
+    status: foundation_built
     priority: 7
     mode: directory_read_onboarding
     next:
+      - openbao_certificate_credential_source
       - multitenant_app_registration
       - directory_read_permission_profile
-      - tenant_registry
-      - guided_admin_consent
+      - persistent_client_boundary_registry
+      - first_graph_read_capability
       - production_validation
   teams_approvals:
     status: planned
