@@ -12,3 +12,14 @@ Primary references:
 The first implementation is intentionally in-memory and contains no
 credentials, live provider calls, persistence, or uncontrolled
 discovery.
+
+## Foundation Status
+
+The first in-memory registry foundation is implemented under:
+
+`implementation/kernel/execution_providers/`
+
+It provides contracts, registry operations, candidate filtering,
+governance validation, and focused tests.
+
+Provider selection is not yet wired into the Execution Policy Engine.
