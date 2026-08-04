@@ -1,8 +1,8 @@
 # M-001 — Kernel Foundation
 
-**Version:** 0.1.0  
-**Status:** Complete  
-**Owner:** Jason Architecture Authority  
+**Version:** 0.1.0
+**Status:** Complete
+**Owner:** Jason Architecture Authority
 **Completion evidence:** CAP-001 governed Kernel integration
 
 ## 1. Purpose

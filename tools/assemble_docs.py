@@ -23,6 +23,7 @@ CANONICAL_DIRECTORIES = (
     "07-Roadmap",
     "08-Session-Records",
     "09-Architecture-Journal",
+    "10-Milestones",
 )
 
 PUBLISHING_DIRECTORIES = (
