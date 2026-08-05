@@ -93,6 +93,8 @@ def build_validation_steps(repository_root: Path) -> tuple[ValidationStep, ...]:
             step_id="cap-001-tests",
             description="Run CAP-001 tests",
             command=(
+                "env",
+                "PYTHONPATH=src:..",
                 test_python,
                 "-m",
                 "pytest",
