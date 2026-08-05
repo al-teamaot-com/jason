@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tools.documentation_readiness import DocumentationReadinessError
 from tools.release_pipeline import (
     ReleasePipeline,
     ReleasePipelineError,
@@ -15,6 +16,23 @@ from tools.restore_verification import RestoreVerificationError
 
 
 COMMIT = "a" * 40
+
+
+class DocumentationGate:
+    def __init__(self, root: Path, *, fail: bool = False) -> None:
+        self.root = root
+        self.fail = fail
+
+    def verify(self, version: str, *, release_name: str):
+        if self.fail:
+            raise DocumentationReadinessError("documentation missing")
+        normalized = version if version.startswith("v") else f"v{version}"
+        return SimpleNamespace(
+            version=normalized,
+            release_name=release_name,
+            status="Complete",
+            record_path=Path("10-Milestones/M-TEST.md"),
+        )
 
 
 class Validator:
@@ -85,6 +103,7 @@ class Verifier:
 def pipeline(
     tmp_path: Path,
     *,
+    documentation_fail: bool = False,
     validation_fail: bool = False,
     package_fail: bool = False,
     restore_fail: bool = False,
@@ -93,6 +112,10 @@ def pipeline(
     return ReleasePipeline(
         tmp_path,
         tmp_path / "recovery",
+        documentation_gate_factory=lambda root: DocumentationGate(
+            root,
+            fail=documentation_fail,
+        ),
         validator_factory=lambda root: Validator(
             root,
             fail=validation_fail,
@@ -119,7 +142,16 @@ def test_release_pipeline_approves_complete_release(tmp_path: Path) -> None:
     assert result.version == "v0.1.2"
     assert result.commit == COMMIT
     assert result.release_name == "Release Orchestrator"
+    assert result.documentation_result.status == "Complete"
     assert result.package_directory == tmp_path / "recovery" / "v0.1.2"
+
+
+def test_documentation_failure_stops_pipeline(tmp_path: Path) -> None:
+    with pytest.raises(ReleasePipelineError, match="documentation-readiness"):
+        pipeline(tmp_path, documentation_fail=True).run(
+            "v0.1.2",
+            release_name="Release Orchestrator",
+        )
 
 
 def test_validation_failure_stops_pipeline(tmp_path: Path) -> None:
