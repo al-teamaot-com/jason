@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 from typing import Callable, Sequence
@@ -35,27 +36,21 @@ SAFE_COMMANDS = (
     ("systemctl", "show", "jason-openbao-backup.timer", "--property=LoadState,ActiveState,FragmentPath,NextElapseUSecRealtime", "--no-pager"),
     ("systemctl", "show", "openbao.service", "--property=LoadState,ActiveState,FragmentPath,ExecStart", "--no-pager"),
     ("systemctl", "show", "vault.service", "--property=LoadState,ActiveState,FragmentPath,ExecStart", "--no-pager"),
-    ("docker", "ps", "--all", "--format", "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"),
-    ("podman", "ps", "--all", "--format", "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"),
-    ("ps", "-eo", "pid=,comm=,args="),
+    ("docker", "ps", "--all", "--filter", "name=^/openbao$", "--format", "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"),
+    ("docker", "inspect", "openbao", "--format", "name={{.Name}} image={{.Config.Image}} status={{.State.Status}} mounts={{range .Mounts}}{{.Type}}:{{.Source}}->{{.Destination}};{{end}}"),
+    ("podman", "ps", "--all", "--filter", "name=^openbao$", "--format", "{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}"),
 )
 
-SENSITIVE_MARKERS = (
-    "token=",
-    "password=",
-    "secret=",
-    "root_token",
-    "unseal",
-    "recovery_key",
-    "client_secret",
+SENSITIVE_PATTERNS = (
+    re.compile(r"(?i)(?:^|\s)(?:root[_ -]?token|unseal[_ -]?key|recovery[_ -]?key|password|client[_ -]?secret|secret)\s*[=:]\s*\S+"),
+    re.compile(r"(?i)(?:^|\s)(?:token)\s*[=:]\s*\S+"),
 )
 
 
 def _redact(text: str) -> str:
     safe_lines: list[str] = []
     for raw_line in text.splitlines():
-        lowered = raw_line.lower()
-        if any(marker in lowered for marker in SENSITIVE_MARKERS):
+        if any(pattern.search(raw_line) for pattern in SENSITIVE_PATTERNS):
             safe_lines.append("[REDACTED SENSITIVE LINE]")
         else:
             safe_lines.append(raw_line[:1000])
