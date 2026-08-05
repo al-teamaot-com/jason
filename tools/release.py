@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the governed Jason release pipeline.",
     )
-    parser.add_argument("version", help="Release version, such as v0.1.2")
+    parser.add_argument("version", help="Release version, such as v0.1.4")
     parser.add_argument("release_name", help="Human-readable release name")
     parser.add_argument(
         "--destination",
@@ -51,6 +51,7 @@ def main() -> int:
         print("Release status: DENIED")
         return 1
 
+    print("PASS  documentation-readiness: Approved release record verified")
     print("PASS  validation: Release validation approved")
     print("PASS  recovery-package: Recovery package created and verified")
     print("PASS  restore-verification: Restored repository validation approved")
@@ -58,6 +59,7 @@ def main() -> int:
     print("=== JASON RELEASE SUMMARY ===")
     print(f"Version: {result.version}")
     print(f"Release: {result.release_name}")
+    print(f"Documentation: {result.documentation_result.record_path}")
     print(f"Commit: {result.commit}")
     print(f"Recovery: {result.package_directory}")
     print("Release status: APPROVED")
