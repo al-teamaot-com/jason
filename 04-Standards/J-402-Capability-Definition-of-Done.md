@@ -71,10 +71,27 @@ A Jason capability is not complete merely because it returns a result. Completio
 ### Operations
 
 - Installation, configuration, health, rollback, and troubleshooting instructions exist.
+- Every external operational dependency has a canonical deployment record containing verified concrete values for the active environment.
+- Executable paths, service or container identities, endpoints, configuration locations, authentication methods, backup locations, and health commands are documented where applicable.
+- Required deployment-record fields are not blank, guessed, or deferred to an operator prompt.
+- Unknown infrastructure facts are marked `UNVERIFIED` and block dependent live execution.
+- Operator commands are complete and use documented values; they do not ask the operator to discover infrastructure Jason owns.
+- Documentation distinguishes intended architecture from verified deployed state.
 - Logs are structured and contain no prohibited data.
 - A named human owner can support the capability.
 - Removal or replacement can occur without destroying required records.
 
+### Operational dependency readiness
+
+Before pilot or live-provider execution:
+
+- dependency deployment records pass automated readiness checks;
+- required wrappers and health commands exist at documented paths;
+- backup and restore evidence is current for self-hosted stateful dependencies;
+- provider-specific mappings are documented outside capability code;
+- the dependent capability fails closed when a deployment record is incomplete;
+- any exception is owner-approved, time-bounded, and recorded before execution.
+
 ## Approval rule
 
-A capability may enter pilot only after all mandatory items are satisfied or a time-bounded, owner-approved exception is recorded. It may not gain execution authority while material identity, isolation, evidence, quality-gate, or audit requirements remain incomplete.
+A capability may enter pilot only after all mandatory items are satisfied or a time-bounded, owner-approved exception is recorded. It may not gain execution authority while material identity, isolation, evidence, quality-gate, audit, or operational dependency requirements remain incomplete.
