@@ -15,6 +15,7 @@ nav:
   - Milestones:
       - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
       - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
+      - M-003 Release Governance Hardening: 10-Milestones/M-003-Release-Governance-Hardening.md
   - Kernel:
       - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
       - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
