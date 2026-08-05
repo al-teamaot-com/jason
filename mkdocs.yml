@@ -24,6 +24,8 @@ nav:
       - Execution Provider Registry: 03-Components/Kernel/JKD-005-Execution-Provider-Registry.md
       - Capability Registry: 03-Components/Kernel/JKD-006-Capability-Registry.md
       - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
+  - Infrastructure:
+      - INF-001 Secret Provider Foundation: 03-Components/Infrastructure/INF-001-Secret-Provider-Foundation.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
@@ -33,6 +35,8 @@ nav:
       - CAP-001 Autotask Live-Read Validation: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Validation.md
       - CAP-001 Autotask Live-Read Command: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
+      - Bootstrap and Secrets Management: 07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md
+      - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:
