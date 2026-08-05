@@ -13,6 +13,7 @@ from .autotask_live_read_validation import (
 )
 from .autotask_production_transport import build_autotask_ticket_transport
 from .autotask_ticket_provider import AutotaskTicketProvider
+from .secret_provider_readiness import require_deployment_ready
 
 
 class CommandSecretBrokerError(RuntimeError):
@@ -21,11 +22,7 @@ class CommandSecretBrokerError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CommandSecretBroker:
-    """Resolve one secret reference through an external broker command.
-
-    The command is executed without a shell and receives the reference as its only
-    argument. Secret values are returned in memory and are never logged here.
-    """
+    """Resolve one secret reference through an external broker command."""
 
     executable: Path
     timeout_seconds: float = 10.0
@@ -78,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--integration-code-reference", required=True)
     parser.add_argument("--secret-command", type=Path, required=True)
     parser.add_argument(
+        "--deployment-record",
+        type=Path,
+        default=Path("07-Operations/Jason-Secret-Provider-Deployment-Record.md"),
+        help="Canonical INF-001 deployment record used to authorize live binding.",
+    )
+    parser.add_argument(
         "--live-read",
         action="store_true",
         help="Explicitly acknowledge that one live, read-only Autotask request may occur.",
@@ -85,7 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Validate configuration without resolving secrets or contacting Autotask.",
+        help="Validate command configuration without resolving secrets or contacting Autotask.",
     )
     return parser
 
@@ -121,6 +124,8 @@ def run(args: argparse.Namespace) -> Path | None:
         return None
     if not args.live_read:
         raise PermissionError("Live read requires the explicit --live-read acknowledgement.")
+
+    require_deployment_ready(args.deployment_record)
 
     broker = CommandSecretBroker(executable=args.secret_command)
     credentials = AutotaskCredentialReferences(
@@ -158,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.exit(1, f"DENIED: {exc}\n")
 
     if args.check_only:
-        print("APPROVED: Configuration validated; no secrets resolved and no network call made.")
+        print("APPROVED: Command configuration validated; no secrets resolved and no network call made.")
     else:
         print("APPROVED: Read-only Autotask validation completed.")
         print(f"Evidence: {output}")
