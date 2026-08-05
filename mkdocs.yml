@@ -30,6 +30,7 @@ nav:
       - CAP-001 Autotask Read Adapter: 03-Components/Capabilities/CAP-001-Autotask-Read-Adapter.md
       - CAP-001 Autotask HTTP Transport: 03-Components/Capabilities/CAP-001-Autotask-HTTP-Transport.md
       - CAP-001 Autotask Production Transport: 03-Components/Capabilities/CAP-001-Autotask-Production-Transport.md
+      - CAP-001 Autotask Live-Read Validation: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Validation.md
   - Operations:
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
