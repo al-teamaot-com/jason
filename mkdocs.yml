@@ -26,6 +26,7 @@ nav:
       - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
   - Infrastructure:
       - INF-001 Secret Provider Foundation: 03-Components/Infrastructure/INF-001-Secret-Provider-Foundation.md
+      - INF-001 OpenBao Deployment Verification: 03-Components/Infrastructure/INF-001-OpenBao-Deployment-Verification.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
