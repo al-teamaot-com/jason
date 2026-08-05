@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
 
-from release_pipeline import ReleasePipeline, ReleasePipelineError
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.release_pipeline import ReleasePipeline, ReleasePipelineError
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,12 +35,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    repository_root = Path(__file__).resolve().parents[1]
 
     print("=== JASON GOVERNED RELEASE PIPELINE ===")
     try:
         result = ReleasePipeline(
-            repository_root,
+            REPOSITORY_ROOT,
             args.destination,
         ).run(
             args.version,
