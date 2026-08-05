@@ -41,6 +41,19 @@ def test_validation_step_order_is_deterministic(tmp_path: Path) -> None:
     )
 
 
+def test_cap_001_step_includes_kernel_import_path(tmp_path: Path) -> None:
+    step = next(
+        item
+        for item in build_validation_steps(tmp_path)
+        if item.step_id == "cap-001-tests"
+    )
+
+    assert step.command[:2] == (
+        "env",
+        "PYTHONPATH=src:..",
+    )
+
+
 def test_successful_validation_returns_all_results(tmp_path: Path) -> None:
     calls: list[tuple[tuple[str, ...], Path]] = []
 
