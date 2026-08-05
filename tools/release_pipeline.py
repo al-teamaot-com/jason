@@ -14,6 +14,11 @@ from tools.recovery_package import (
     RecoveryPackageError,
     RecoveryPackageResult,
 )
+from tools.release_evidence import (
+    ReleaseEvidenceError,
+    ReleaseEvidenceResult,
+    ReleaseEvidenceWriter,
+)
 from tools.release_validation import (
     ReleaseValidationError,
     ReleaseValidator,
@@ -42,10 +47,11 @@ class ReleasePipelineResult:
     validation_results: tuple[ValidationStepResult, ...]
     package_result: RecoveryPackageResult
     restore_result: RestoreVerificationResult
+    evidence_result: ReleaseEvidenceResult
 
 
 class ReleasePipeline:
-    """Coordinate documentation, validation, recovery, and restore verification."""
+    """Coordinate documentation, validation, recovery, restore, and evidence."""
 
     def __init__(
         self,
@@ -62,6 +68,9 @@ class ReleasePipeline:
         restore_verifier_factory: Callable[
             [Path], RecoveryRestoreVerifier
         ] = RecoveryRestoreVerifier,
+        evidence_writer_factory: Callable[
+            [Path], ReleaseEvidenceWriter
+        ] = ReleaseEvidenceWriter,
     ) -> None:
         self._repository_root = repository_root.resolve()
         self._destination_root = destination_root.expanduser().resolve()
@@ -69,6 +78,7 @@ class ReleasePipeline:
         self._validator_factory = validator_factory
         self._package_builder_factory = package_builder_factory
         self._restore_verifier_factory = restore_verifier_factory
+        self._evidence_writer_factory = evidence_writer_factory
 
     def run(
         self,
@@ -80,14 +90,10 @@ class ReleasePipeline:
         try:
             documentation_result = self._documentation_gate_factory(
                 self._repository_root
-            ).verify(
-                version,
-                release_name=release_name,
-            )
+            ).verify(version, release_name=release_name)
         except DocumentationReadinessError as error:
             raise ReleasePipelineError(
-                "documentation-readiness",
-                str(error),
+                "documentation-readiness", str(error)
             ) from error
 
         try:
@@ -95,10 +101,7 @@ class ReleasePipeline:
                 self._repository_root
             ).validate()
         except ReleaseValidationError as error:
-            raise ReleasePipelineError(
-                "validation",
-                str(error),
-            ) from error
+            raise ReleasePipelineError("validation", str(error)) from error
 
         try:
             package_result = self._package_builder_factory(
@@ -111,8 +114,7 @@ class ReleasePipeline:
             )
         except (RecoveryPackageError, ValueError) as error:
             raise ReleasePipelineError(
-                "recovery-package",
-                str(error),
+                "recovery-package", str(error)
             ) from error
 
         try:
@@ -121,8 +123,7 @@ class ReleasePipeline:
             ).verify(package_result.destination)
         except RestoreVerificationError as error:
             raise ReleasePipelineError(
-                "restore-verification",
-                str(error),
+                "restore-verification", str(error)
             ) from error
 
         if restore_result.commit != package_result.commit:
@@ -130,6 +131,25 @@ class ReleasePipeline:
                 "restore-verification",
                 "Restored commit does not match the recovery package commit.",
             )
+
+        try:
+            evidence_result = self._evidence_writer_factory(
+                self._repository_root
+            ).write(
+                version=package_result.version,
+                release_name=release_name.strip(),
+                commit=package_result.commit,
+                package_directory=package_result.destination,
+                documentation_path=documentation_result.record_path,
+                validation_step_ids=(
+                    result.step_id for result in validation_results
+                ),
+                restored_commit=restore_result.commit,
+            )
+        except ReleaseEvidenceError as error:
+            raise ReleasePipelineError(
+                "release-evidence", str(error)
+            ) from error
 
         return ReleasePipelineResult(
             version=package_result.version,
@@ -140,4 +160,5 @@ class ReleasePipeline:
             validation_results=validation_results,
             package_result=package_result,
             restore_result=restore_result,
+            evidence_result=evidence_result,
         )
