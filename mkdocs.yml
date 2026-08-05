@@ -27,6 +27,7 @@ nav:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
   - Operations:
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
+      - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:
       - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
       - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
