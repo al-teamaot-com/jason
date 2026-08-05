@@ -27,6 +27,7 @@ The pipeline reduces human memory requirements without weakening governance.
 9. Existing recovery directories are never overwritten.
 10. Package creation is atomic: incomplete staging output is removed on failure.
 11. A recovery package is not approved until a disposable restored repository passes release validation.
+12. The release orchestrator coordinates existing components and does not duplicate their business logic.
 
 ## 3. Pipeline Boundary
 
@@ -43,13 +44,13 @@ Repository and Test Validation
 Documentation Validation
     |
     v
-Release Evidence Generation
-    |
-    v
 Recovery Package Creation
     |
     v
 Restore Simulation and Validation
+    |
+    v
+Governed Release Summary
     |
     v
 Tag and Publish
@@ -84,7 +85,7 @@ By default, output is written to `~/Jason-Recovery/<version>/` and contains a co
 
 The builder refuses to overwrite existing release directories, excludes generated environments and repository metadata from the source archive, verifies the bundle, stages output atomically, and removes incomplete staging output on failure.
 
-## 6. Restore Simulation Foundation
+## 6. Implemented Restore Simulation Foundation
 
 The restore verification command is:
 
@@ -93,24 +94,37 @@ python3 tools/verify_recovery_restore.py \
   ~/Jason-Recovery/v0.2.0
 ```
 
-The verifier:
+The verifier clones the generated bundle into a disposable workspace, checks out the exact manifest commit, attaches approved local validation environments through ignored symbolic links, runs the restored repository's own release validation command, and removes the workspace by default.
 
-- reads the release manifest;
-- locates the versioned Git bundle;
-- creates a disposable workspace;
-- clones the repository from the bundle without using the network;
-- checks out the exact commit recorded in the manifest;
-- verifies the restored `HEAD` matches the recorded commit;
-- attaches the approved local test and documentation environments by ignored symbolic links;
-- executes the restored repository's own `tools/validate_release.py` command;
-- removes the disposable workspace unless retention is explicitly requested;
-- fails closed when the manifest, bundle, commit, clone, checkout, or validation is invalid.
+## 7. Release Orchestrator Foundation
 
-The environment links are only validation dependencies. They are excluded through the restored repository's local `.git/info/exclude` and do not modify tracked content.
+The governed release command is:
 
-For troubleshooting, a caller may supply `--workspace` and `--retain-workspace`. Production release workflows should normally use automatic cleanup.
+```bash
+python3 tools/release.py \
+  v0.2.0 \
+  "Release Name"
+```
 
-## 7. Deferred Scope
+The orchestrator is intentionally thin. It coordinates, in order:
+
+1. the existing `ReleaseValidator`;
+2. the existing `RecoveryPackageBuilder`;
+3. the existing `RecoveryRestoreVerifier`;
+4. exact commit comparison between the package and restored repository;
+5. a concise final release summary.
+
+The orchestrator:
+
+- emits one final approved result only after every stage succeeds;
+- identifies the failed stage when a component denies the release;
+- returns a nonzero process exit on failure;
+- does not reimplement validation, package, checksum, or restore logic;
+- does not create or push tags;
+- does not publish a GitHub release;
+- does not overwrite an existing recovery package.
+
+## 8. Deferred Scope
 
 The foundation does not yet:
 
@@ -121,35 +135,36 @@ The foundation does not yet:
 - enforce external approvals;
 - update a `latest` recovery pointer;
 - publish test logs or a rendered release report;
-- combine validation, package creation, restore verification, tagging, and publication into one final release command.
+- emit a separate machine-readable final release report.
 
-## 8. Failure Behavior
+## 9. Failure Behavior
 
 The pipeline fails closed.
 
 It must not create a release tag, publish a release, overwrite a recovery package, retain an apparently complete failed package, or approve an unverified restore.
 
-Error output must identify the failed step and preserve enough context for remediation without exposing secrets.
+Error output must identify the failed stage and preserve enough context for remediation without exposing secrets.
 
-## 9. Change Control
+## 10. Change Control
 
 Changes that weaken a required gate, alter release authority, permit releases from dirty or unsynchronized branches, overwrite recovery artifacts, or bypass restore verification require architectural review and an ADR.
 
-## 10. Restore Simulation Acceptance Criteria
+## 11. Release Orchestrator Acceptance Criteria
 
-The restore simulation foundation is complete when:
+The orchestrator foundation is complete when:
 
-1. one command restores a package into a disposable workspace;
-2. the clone uses the generated Git bundle rather than a remote repository;
-3. the restored commit exactly matches the release manifest;
-4. the restored repository executes its own release validation command;
-5. failed clone, checkout, commit verification, or validation stops the process;
-6. disposable workspaces are removed by default;
-7. optional retention is explicit;
-8. focused tests cover missing evidence, workspace conflicts, successful sequencing, and command failure;
-9. existing Kernel, CAP-001, J-900, and strict documentation validations remain passing.
+1. one command coordinates validation, package creation, and restore verification;
+2. the orchestrator reuses existing tested components rather than duplicating their logic;
+3. stage ordering is deterministic;
+4. validation failure prevents package creation;
+5. package failure prevents restore verification;
+6. restore failure denies the release;
+7. the restored commit must equal the package commit;
+8. successful execution prints version, release name, commit, recovery location, and approved status;
+9. focused tests cover success and every fail-closed stage;
+10. existing Kernel, CAP-001, J-900, and strict documentation validations remain passing.
 
-## 11. References
+## 12. References
 
 - `10-Milestones/M-001-Kernel-Foundation.md`
 - `04-Standards/J-401-Adaptive-Build-Method.md`

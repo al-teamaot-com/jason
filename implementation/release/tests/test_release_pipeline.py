@@ -1,0 +1,154 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from tools.release_pipeline import (
+    ReleasePipeline,
+    ReleasePipelineError,
+)
+from tools.release_validation import ReleaseValidationError, ValidationStepResult
+from tools.recovery_package import RecoveryPackageError
+from tools.restore_verification import RestoreVerificationError
+
+
+COMMIT = "a" * 40
+
+
+class Validator:
+    def __init__(self, root: Path, *, fail: bool = False) -> None:
+        self.root = root
+        self.fail = fail
+
+    def validate(self):
+        result = ValidationStepResult(
+            step_id="test",
+            description="Test validation",
+            command=("true",),
+            return_code=1 if self.fail else 0,
+            output="failed" if self.fail else "",
+        )
+        if self.fail:
+            raise ReleaseValidationError(result)
+        return (result,)
+
+
+class Builder:
+    def __init__(
+        self,
+        root: Path,
+        destination: Path,
+        *,
+        fail: bool = False,
+    ) -> None:
+        self.root = root
+        self.destination = destination
+        self.fail = fail
+
+    def build(self, version: str, *, release_name: str, ref: str):
+        if self.fail:
+            raise RecoveryPackageError("package failed")
+        normalized = version if version.startswith("v") else f"v{version}"
+        return SimpleNamespace(
+            version=normalized,
+            commit=COMMIT,
+            destination=self.destination / normalized,
+        )
+
+
+class Verifier:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        fail: bool = False,
+        commit: str = COMMIT,
+    ) -> None:
+        self.root = root
+        self.fail = fail
+        self.commit = commit
+
+    def verify(self, package_directory: Path):
+        if self.fail:
+            raise RestoreVerificationError("restore failed")
+        return SimpleNamespace(
+            version=package_directory.name,
+            commit=self.commit,
+            bundle=package_directory / "bundle",
+            restored_repository=package_directory / "restored",
+            validation_output="approved",
+        )
+
+
+def pipeline(
+    tmp_path: Path,
+    *,
+    validation_fail: bool = False,
+    package_fail: bool = False,
+    restore_fail: bool = False,
+    restored_commit: str = COMMIT,
+) -> ReleasePipeline:
+    return ReleasePipeline(
+        tmp_path,
+        tmp_path / "recovery",
+        validator_factory=lambda root: Validator(
+            root,
+            fail=validation_fail,
+        ),
+        package_builder_factory=lambda root, destination: Builder(
+            root,
+            destination,
+            fail=package_fail,
+        ),
+        restore_verifier_factory=lambda root: Verifier(
+            root,
+            fail=restore_fail,
+            commit=restored_commit,
+        ),
+    )
+
+
+def test_release_pipeline_approves_complete_release(tmp_path: Path) -> None:
+    result = pipeline(tmp_path).run(
+        "0.1.2",
+        release_name="Release Orchestrator",
+    )
+
+    assert result.version == "v0.1.2"
+    assert result.commit == COMMIT
+    assert result.release_name == "Release Orchestrator"
+    assert result.package_directory == tmp_path / "recovery" / "v0.1.2"
+
+
+def test_validation_failure_stops_pipeline(tmp_path: Path) -> None:
+    with pytest.raises(ReleasePipelineError, match="validation"):
+        pipeline(tmp_path, validation_fail=True).run(
+            "v0.1.2",
+            release_name="Release Orchestrator",
+        )
+
+
+def test_package_failure_stops_pipeline(tmp_path: Path) -> None:
+    with pytest.raises(ReleasePipelineError, match="recovery-package"):
+        pipeline(tmp_path, package_fail=True).run(
+            "v0.1.2",
+            release_name="Release Orchestrator",
+        )
+
+
+def test_restore_failure_stops_pipeline(tmp_path: Path) -> None:
+    with pytest.raises(ReleasePipelineError, match="restore-verification"):
+        pipeline(tmp_path, restore_fail=True).run(
+            "v0.1.2",
+            release_name="Release Orchestrator",
+        )
+
+
+def test_restored_commit_must_match_package_commit(tmp_path: Path) -> None:
+    with pytest.raises(ReleasePipelineError, match="does not match"):
+        pipeline(tmp_path, restored_commit="b" * 40).run(
+            "v0.1.2",
+            release_name="Release Orchestrator",
+        )
