@@ -1,7 +1,7 @@
 # J-901 — Release Governance Hardening
 
-**Version:** 0.2
-**Status:** Foundation in progress
+**Version:** 0.3
+**Status:** Foundation complete
 **Owner:** Jason Architecture Authority
 **Applies to:** Governed Jason release preparation and evidence readiness
 
@@ -27,7 +27,7 @@ A compliant release record includes:
 
 ```text
 **Version:** 0.1.4
-**Release Name:** Release Governance Hardening
+**Release Name:** J-901 Release Governance Hardening
 **Status:** Complete
 **Owner:** Jason Architecture Authority
 ```
@@ -77,26 +77,43 @@ The pipeline fails closed when documentation is missing or inconsistent, a requi
 
 No approved result may be emitted without both release evidence artifacts.
 
-## 6. Deferred Scope
+## 6. Foundation Completion
 
-This foundation does not yet create tags, publish GitHub Releases, upload evidence externally, sign artifacts, or enforce external approval identities.
+The J-901 foundation is complete when merged with milestone record M-003. The completed foundation provides:
 
-## 7. Acceptance Criteria
+- documentation readiness as the first governed release gate;
+- exact release-version and release-name matching;
+- approved-status and navigation enforcement;
+- deterministic release validation;
+- verified recovery-package creation;
+- offline restore simulation and exact commit comparison;
+- machine-readable and human-readable release evidence;
+- checksum protection for the complete evidence package;
+- fail-closed orchestration with named failure stages.
 
-The foundation is complete when:
+## 7. Deferred Scope
 
-1. documentation readiness executes before release validation;
-2. incomplete or inconsistent documentation denies release;
-3. release evidence executes only after restore verification;
-4. `release-report.json` records governed stage and artifact evidence;
-5. `release-summary.md` provides a concise human-readable result;
-6. final checksums cover both evidence artifacts;
-7. evidence generation failures deny the release;
-8. focused tests cover approval and fail-closed boundaries;
-9. existing Kernel, CAP-001, J-900, J-901, and strict documentation validations pass.
+The completed foundation does not create tags, publish GitHub Releases, upload evidence externally, sign artifacts, or enforce external approval identities.
 
-## 8. References
+These remain controlled future increments and do not invalidate the J-901 foundation.
 
+## 8. Acceptance Evidence
+
+The foundation was validated through:
+
+1. focused J-900 and J-901 tests;
+2. complete Kernel and CAP-001 regression validation;
+3. strict documentation assembly and build validation;
+4. a disposable committed release record;
+5. a complete governed release execution;
+6. verified `release-report.json` internal consistency;
+7. verified `release-summary.md` generation;
+8. checksum verification covering all recovery and evidence artifacts;
+9. cleanup that returned the source branch to a clean state.
+
+## 9. References
+
+- `10-Milestones/M-003-Release-Governance-Hardening.md`
 - `03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md`
 - `10-Milestones/M-002-Release-and-Recovery-Pipeline.md`
 - `04-Standards/J-403-Canonical-Sources-and-Generated-Artifacts.md`
