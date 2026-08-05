@@ -73,7 +73,21 @@ Every Jason environment must maintain a canonical deployment record containing c
 
 Unknown values must be recorded as `UNVERIFIED` or `NOT IMPLEMENTED`. They must never be replaced by operator guesswork.
 
-## Readiness gate
+## Automated readiness gate
+
+`jason_cap_001.secret_provider_readiness` parses the canonical deployment record before any CAP-001 live provider binding. Table rows containing `UNVERIFIED`, `NOT IMPLEMENTED`, or `Blocking` are returned as named blocking fields.
+
+The gate fails closed when:
+
+- the deployment record is missing;
+- any required deployment row remains blocked;
+- a live command cannot identify an approved deployment record.
+
+The denial identifies the exact deployment-record fields that require remediation and the record path that must be updated. It does not ask the operator to discover those facts interactively.
+
+The CAP-001 `--check-only` path remains available because it performs no secret resolution and no provider network call. The gate is mandatory immediately after explicit `--live-read` acknowledgement and before the Secrets Broker is constructed.
+
+## Readiness requirements
 
 A provider-dependent capability must be denied before live execution unless all of the following are true:
 
@@ -109,7 +123,7 @@ When a required fact is absent, the command must identify the missing deployment
 4. Configure logical-name mappings.
 5. Add health, contract, redaction, and failure tests.
 6. Update the bootstrap runbook with exact installation and recovery commands.
-7. Add an automated documentation-readiness check.
+7. Enforce the automated deployment-readiness gate.
 8. Resume CAP-001 only after the INF-001 readiness gate passes.
 
 ## Definition of Done
