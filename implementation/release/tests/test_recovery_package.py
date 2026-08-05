@@ -89,6 +89,12 @@ def test_builds_verified_recovery_package(tmp_path: Path) -> None:
     assert "Jason-v0.2.0.bundle" in checksums
     assert "release-manifest.json" in checksums
 
+    environment = (
+        result.destination / "environment-v0.2.0.txt"
+    ).read_text(encoding="utf-8")
+    assert ".venv-test: python is not executable" in environment
+    assert ".venv-docs: not present" in environment
+
     for artifact in result.artifacts:
         assert artifact.path.is_file()
         assert artifact.sha256 == file_sha256(artifact.path)
