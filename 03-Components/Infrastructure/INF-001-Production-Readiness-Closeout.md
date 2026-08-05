@@ -17,6 +17,10 @@ The command supports:
 - separate, non-overwriting evidence outputs;
 - logical secret references rather than embedded credentials.
 
+## Morning restart point
+
+Use `07-Operations/INF-001-Morning-Execution-Checklist.md` as the canonical restart checklist. It identifies the repository preparation, protected inputs, approved pilot identifiers, execution stages, validation sequence, and mandatory stop conditions.
+
 ## Required protected inputs
 
 The authenticated phase still requires protected host files established by the OpenBao contract-test workflow:
