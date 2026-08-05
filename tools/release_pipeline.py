@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from tools.documentation_readiness import (
+    DocumentationReadinessError,
+    DocumentationReadinessGate,
+    DocumentationReadinessResult,
+)
 from tools.recovery_package import (
     RecoveryPackageBuilder,
     RecoveryPackageError,
@@ -33,19 +38,23 @@ class ReleasePipelineResult:
     release_name: str
     commit: str
     package_directory: Path
+    documentation_result: DocumentationReadinessResult
     validation_results: tuple[ValidationStepResult, ...]
     package_result: RecoveryPackageResult
     restore_result: RestoreVerificationResult
 
 
 class ReleasePipeline:
-    """Coordinate validation, recovery creation, and restore verification."""
+    """Coordinate documentation, validation, recovery, and restore verification."""
 
     def __init__(
         self,
         repository_root: Path,
         destination_root: Path,
         *,
+        documentation_gate_factory: Callable[
+            [Path], DocumentationReadinessGate
+        ] = DocumentationReadinessGate,
         validator_factory: Callable[[Path], ReleaseValidator] = ReleaseValidator,
         package_builder_factory: Callable[
             [Path, Path], RecoveryPackageBuilder
@@ -56,6 +65,7 @@ class ReleasePipeline:
     ) -> None:
         self._repository_root = repository_root.resolve()
         self._destination_root = destination_root.expanduser().resolve()
+        self._documentation_gate_factory = documentation_gate_factory
         self._validator_factory = validator_factory
         self._package_builder_factory = package_builder_factory
         self._restore_verifier_factory = restore_verifier_factory
@@ -67,6 +77,19 @@ class ReleasePipeline:
         release_name: str,
         ref: str = "HEAD",
     ) -> ReleasePipelineResult:
+        try:
+            documentation_result = self._documentation_gate_factory(
+                self._repository_root
+            ).verify(
+                version,
+                release_name=release_name,
+            )
+        except DocumentationReadinessError as error:
+            raise ReleasePipelineError(
+                "documentation-readiness",
+                str(error),
+            ) from error
+
         try:
             validation_results = self._validator_factory(
                 self._repository_root
@@ -113,6 +136,7 @@ class ReleasePipeline:
             release_name=release_name.strip(),
             commit=package_result.commit,
             package_directory=package_result.destination,
+            documentation_result=documentation_result,
             validation_results=validation_results,
             package_result=package_result,
             restore_result=restore_result,
