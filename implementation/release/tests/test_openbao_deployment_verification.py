@@ -16,15 +16,30 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def test_redacts_sensitive_lines() -> None:
-    text = "safe=value\nroot_token=do-not-show\npassword=hidden"
+def test_redacts_sensitive_assignments_without_false_positive() -> None:
+    text = (
+        "safe=value\n"
+        "root_token=do-not-show\n"
+        "password=hidden\n"
+        "gnome-keyring-secrets\n"
+        "Secret Provider Foundation"
+    )
 
     redacted = MODULE._redact(text)
 
     assert "safe=value" in redacted
     assert "do-not-show" not in redacted
     assert "hidden" not in redacted
+    assert "gnome-keyring-secrets" in redacted
+    assert "Secret Provider Foundation" in redacted
     assert redacted.count("[REDACTED SENSITIVE LINE]") == 2
+
+
+def test_safe_commands_do_not_capture_full_process_arguments() -> None:
+    flattened = [tuple(command) for command in MODULE.SAFE_COMMANDS]
+
+    assert not any(command[:3] == ("ps", "-eo", "pid=,comm=,args=") for command in flattened)
+    assert any(command[:3] == ("docker", "inspect", "openbao") for command in flattened)
 
 
 def test_timeout_returns_bounded_probe(monkeypatch: pytest.MonkeyPatch) -> None:
