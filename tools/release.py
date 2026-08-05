@@ -55,6 +55,7 @@ def main() -> int:
     print("PASS  validation: Release validation approved")
     print("PASS  recovery-package: Recovery package created and verified")
     print("PASS  restore-verification: Restored repository validation approved")
+    print("PASS  release-evidence: JSON report and Markdown summary verified")
     print()
     print("=== JASON RELEASE SUMMARY ===")
     print(f"Version: {result.version}")
@@ -62,6 +63,8 @@ def main() -> int:
     print(f"Documentation: {result.documentation_result.record_path}")
     print(f"Commit: {result.commit}")
     print(f"Recovery: {result.package_directory}")
+    print(f"Evidence report: {result.evidence_result.report_path}")
+    print(f"Release summary: {result.evidence_result.summary_path}")
     print("Release status: APPROVED")
     return 0
 
