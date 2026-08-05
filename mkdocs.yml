@@ -43,6 +43,7 @@ nav:
   - Operations:
       - Bootstrap and Secrets Management: 07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
+      - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:
