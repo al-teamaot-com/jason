@@ -26,6 +26,7 @@ nav:
       - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
+      - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
   - Operations:
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
