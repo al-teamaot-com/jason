@@ -14,6 +14,7 @@ nav:
       - Professional Operating Principles: 01-Foundation/J-003-Professional-Operating-Principles.md
   - Milestones:
       - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
+      - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
   - Kernel:
       - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
       - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
@@ -24,6 +25,8 @@ nav:
       - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
+  - Operations:
+      - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
   - Standards:
       - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
       - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
