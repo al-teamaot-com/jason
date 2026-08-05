@@ -271,6 +271,8 @@ class RecoveryPackageBuilder:
         )
         if not python_path.is_file():
             return f"{environment_name}: not present"
+        if not os.access(python_path, os.X_OK):
+            return f"{environment_name}: python is not executable"
         completed = self._runner(
             (str(python_path), "-m", "pip", "freeze"),
             self._repository_root,
