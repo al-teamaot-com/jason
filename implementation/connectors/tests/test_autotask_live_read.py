@@ -32,7 +32,6 @@ class FakeConnector:
 def request(**overrides: object) -> AutotaskLiveReadRequest:
     values: dict[str, object] = {
         "ticket_number": "T20260806.0001",
-        "company_id": "123",
         "scope_name": "aot-validation",
         "allowed_scope": "aot-validation",
         "principal_id": "operator-al",
@@ -59,7 +58,7 @@ def ticket_payload(**overrides: object) -> Mapping[str, Any]:
     return {"items": [ticket]}
 
 
-def test_uses_canonical_connector_capability_and_logical_contract(
+def test_uses_unique_ticket_lookup_and_derives_company_boundary(
     tmp_path: Path,
 ) -> None:
     connector = FakeConnector(ticket_payload())
@@ -74,11 +73,13 @@ def test_uses_canonical_connector_capability_and_logical_contract(
 
     assert evidence.logical_secret == "autotask.readonly"
     assert evidence.capability == "autotask.ticket.search"
+    assert evidence.discovered_company_id == "123"
+    assert evidence.company_boundary_source == "autotask-ticket"
     assert evidence.protected_values_exposed is False
     assert len(connector.requests) == 1
     connector_request = connector.requests[0]
     assert connector_request.context.mode == "observe"
-    assert connector_request.context.client_id == "123"
+    assert connector_request.context.client_id is None
     search = json.loads(connector_request.arguments["search"])
     assert search == {
         "filter": [
@@ -86,12 +87,7 @@ def test_uses_canonical_connector_capability_and_logical_contract(
                 "op": "eq",
                 "field": "ticketNumber",
                 "value": "T20260806.0001",
-            },
-            {
-                "op": "eq",
-                "field": "companyID",
-                "value": "123",
-            },
+            }
         ]
     }
 
@@ -110,6 +106,8 @@ def test_preserves_redacted_hash_backed_evidence(tmp_path: Path) -> None:
     data = json.loads(stored)
     assert "Sensitive title" not in stored
     assert "Sensitive description" not in stored
+    assert data["discovered_company_id"] == "123"
+    assert data["company_boundary_source"] == "autotask-ticket"
     assert data["title_sha256"]
     assert data["description_sha256"]
     assert data["evidence_sha256"]
@@ -144,22 +142,22 @@ def test_denies_scope_mismatch_before_connector_call(tmp_path: Path) -> None:
     assert connector.requests == []
 
 
-def test_denies_cross_company_result(tmp_path: Path) -> None:
-    service = GovernedAutotaskLiveRead(
-        FakeConnector(ticket_payload(companyID=999))
-    )
-
-    with pytest.raises(PermissionError, match="company boundary"):
-        service.validate(
-            request(),
-            output_path=tmp_path / "evidence.json",
+def test_denies_missing_or_invalid_company_boundary(tmp_path: Path) -> None:
+    for value in (None, ""):
+        service = GovernedAutotaskLiveRead(
+            FakeConnector(ticket_payload(companyID=value))
         )
+        with pytest.raises(AutotaskLiveReadError, match="companyID"):
+            service.validate(
+                request(),
+                output_path=tmp_path / f"company-{value!r}.json",
+            )
 
 
 def test_denies_zero_or_multiple_results(tmp_path: Path) -> None:
     for payload in ({"items": []}, {"items": [{}, {}]}):
         service = GovernedAutotaskLiveRead(FakeConnector(payload))
-        with pytest.raises(AutotaskLiveReadError, match="one ticket"):
+        with pytest.raises(AutotaskLiveReadError, match="exactly one"):
             service.validate(
                 request(),
                 output_path=tmp_path / (str(len(payload["items"])) + ".json"),
