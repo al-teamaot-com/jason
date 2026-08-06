@@ -6,7 +6,10 @@ from pathlib import Path
 import subprocess
 from typing import Sequence
 
-from tools.stateful_recovery_readiness import require_recovery_ready
+try:
+    from tools.stateful_recovery_readiness import require_recovery_ready
+except ModuleNotFoundError:
+    from stateful_recovery_readiness import require_recovery_ready
 
 
 DEFAULT_RECORD = Path("07-Operations/Jason-Secret-Provider-Deployment-Record.md")
