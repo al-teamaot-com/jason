@@ -23,8 +23,6 @@ def make_args(tmp_path: Path, *mode: str):
         [
             "--ticket-number",
             "T20260805.0001",
-            "--company-id",
-            "123",
             "--scope",
             "pilot",
             "--allowed-scope",
@@ -54,6 +52,7 @@ def test_direct_command_loads_without_pythonpath() -> None:
     )
     assert result.returncode == 0
     assert "autotask.readonly" in result.stdout
+    assert "--company-id" not in result.stdout
     assert "--username-reference" not in result.stdout
     assert "--secret-command" not in result.stdout
 
@@ -118,6 +117,8 @@ def test_live_read_uses_canonical_service_and_identity(
     output = MODULE.run(args)
 
     assert captured["connector"] == "canonical"
+    assert captured["request"].ticket_number == "T20260805.0001"
+    assert not hasattr(captured["request"], "company_id")
     assert captured["request"].principal_id == "operator-al"
     assert captured["request"].organization_id == "team-aot"
     assert captured["request"].correlation_id == "cap001-live-1"
