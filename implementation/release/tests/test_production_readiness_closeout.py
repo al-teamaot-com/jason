@@ -14,11 +14,34 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
+def write_ready_recovery_record(path: Path) -> None:
+    path.write_text(
+        """| Field | Value | Status |
+|---|---|---|
+| Component | OpenBao pilot | Verified |
+| Initialization status | Initialized | Verified |
+| Seal or recovery method | Manual Shamir unseal | Verified |
+| Share count | 5 | Verified |
+| Recovery threshold | 3 | Verified |
+| Custody assignments | Five approved custodians | Verified |
+| Protected custody reference | Secure custody register | Verified |
+| Bootstrap credential disposition | Initial root token revoked | Verified |
+| Operational owner | AOT Infrastructure Owner | Verified |
+| Escalation contact | AOT Security Escalation | Verified |
+| Last successful recovery test | 2026-08-06 | Verified |
+| Recovery evidence reference | evidence/recovery.json | Verified |
+""",
+        encoding="utf-8",
+    )
+
+
 def make_args(tmp_path: Path):
     secret_command = tmp_path / "jason-secret"
     secret_command.write_text("#!/bin/sh\n", encoding="utf-8")
     record = tmp_path / "deployment.md"
     record.write_text("# deployment\n", encoding="utf-8")
+    recovery_record = tmp_path / "recovery.md"
+    write_ready_recovery_record(recovery_record)
     return MODULE.build_parser().parse_args(
         [
             "--ticket-number",
@@ -33,6 +56,8 @@ def make_args(tmp_path: Path):
             str(secret_command),
             "--deployment-record",
             str(record),
+            "--recovery-record",
+            str(recovery_record),
             "--contract-evidence",
             str(tmp_path / "contract.json"),
             "--autotask-evidence",
@@ -50,6 +75,7 @@ def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> No
         "secret_resolved": False,
         "openbao_contacted": False,
         "autotask_contacted": False,
+        "recovery_gate_bypassed": False,
     }
 
 
@@ -71,4 +97,18 @@ def test_missing_secret_command_is_denied(tmp_path: Path) -> None:
     args = make_args(tmp_path)
     args.secret_command.unlink()
     with pytest.raises(FileNotFoundError, match="secret command"):
+        MODULE.validate(args)
+
+
+def test_live_execution_is_denied_when_recovery_is_unverified(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    args.check_only = False
+    args.recovery_record.write_text(
+        "| Field | Value | Status |\n"
+        "|---|---|---|\n"
+        "| Component | OpenBao pilot | Verified |\n"
+        "| Custody assignments | UNVERIFIED | Blocking |\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="recovery is not ready"):
         MODULE.validate(args)
