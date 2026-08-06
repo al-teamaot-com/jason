@@ -60,7 +60,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run the accelerated governed INF-001 readiness closeout sequence."
     )
     parser.add_argument("--ticket-number", required=True)
-    parser.add_argument("--company-id", required=True)
     parser.add_argument("--scope", required=True)
     parser.add_argument("--allowed-scope", required=True)
     parser.add_argument("--principal-id", required=True)
@@ -80,7 +79,6 @@ def build_parser() -> argparse.ArgumentParser:
 def validate(args: argparse.Namespace) -> None:
     for name in (
         "ticket_number",
-        "company_id",
         "scope",
         "allowed_scope",
         "principal_id",
@@ -122,6 +120,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "recovery_gate_bypassed": False,
             "bootstrap_gate_bypassed": bool(args.commissioning and bootstrap_present),
             "autotask_secret_contract": "autotask.readonly",
+            "company_boundary_source": "autotask-ticket",
         }
 
     run_command(
@@ -140,8 +139,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         "tools/autotask_live_read.py",
         "--ticket-number",
         args.ticket_number,
-        "--company-id",
-        args.company_id,
         "--scope",
         args.scope,
         "--allowed-scope",
@@ -172,6 +169,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         "bootstrap_gate_bypassed": False,
         "secret_values_exposed": False,
         "autotask_secret_contract": "autotask.readonly",
+        "company_boundary_source": "autotask-ticket",
     }
 
 
