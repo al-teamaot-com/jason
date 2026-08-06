@@ -17,6 +17,7 @@ POLICY_TEXT = '''path "secret/data/jason/contract-test" {
 '''
 CONTRACT_PATH = "secret/data/jason/contract-test"
 CONTRACT_WRITE_OPTIONS = {"cas": 0}
+TOKEN_CREATE_PATH = "auth/token/create-orphan"
 
 
 def ensure_private_file(path: Path) -> None:
@@ -76,7 +77,7 @@ def provision(*, address: str, bootstrap_token_file: Path, token_output: Path, c
     )
     token_response = api_request(
         address,
-        "auth/token/create",
+        TOKEN_CREATE_PATH,
         bootstrap_token,
         method="POST",
         payload={"policies": [POLICY_NAME], "display_name": "jason-contract-test", "renewable": True, "ttl": "24h"},
@@ -115,6 +116,7 @@ def provision(*, address: str, bootstrap_token_file: Path, token_output: Path, c
         "contract_path": CONTRACT_PATH,
         "token_path": str(token_output),
         "token_mode": "0600",
+        "token_parent": "none",
         "health": "approved",
         "contract_test": "approved",
         "secret_value_exposed": False,
