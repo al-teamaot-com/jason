@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
 
 
 MODULE_PATH = Path(__file__).resolve().parents[3] / "tools" / "production_readiness_closeout.py"
+REPOSITORY_ROOT = MODULE_PATH.parents[1]
 SPEC = importlib.util.spec_from_file_location("production_readiness_closeout", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
@@ -67,6 +69,18 @@ def make_args(tmp_path: Path):
             "--check-only",
         ]
     )
+
+
+def test_direct_command_loads_without_pythonpath() -> None:
+    result = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--help"],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "--bootstrap-token-file" in result.stdout
 
 
 def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> None:
