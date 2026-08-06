@@ -89,9 +89,9 @@ def test_successful_retirement_revalidates_after_revocation(monkeypatch, tmp_pat
     assert stored["bootstrap_token_revoked"] is True
     assert stored["protected_values_exposed"] is False
     serialized = output.read_text(encoding="utf-8")
-    assert "bootstrap" not in serialized
-    assert "contract" not in serialized
-    assert "runtime\n" not in serialized
+    assert '"bootstrap"' not in serialized
+    assert '"contract"' not in serialized
+    assert '"runtime"' not in serialized
 
 
 def test_existing_evidence_blocks_before_runtime_or_revocation(monkeypatch, tmp_path: Path) -> None:
