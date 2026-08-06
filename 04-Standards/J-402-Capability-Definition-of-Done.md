@@ -92,6 +92,23 @@ Before pilot or live-provider execution:
 - the dependent capability fails closed when a deployment record is incomplete;
 - any exception is owner-approved, time-bounded, and recorded before execution.
 
+### Stateful infrastructure recovery gate
+
+A stateful dependency may not be promoted beyond initialization, receive production or provider credentials, or support live capability execution until a canonical recovery record passes automated readiness enforcement.
+
+The recovery record must verify, without storing protected values:
+
+- component identity and initialization status;
+- seal, recovery, or restoration mechanism;
+- share count and threshold where applicable;
+- separate custody assignments or approved protected custody references;
+- bootstrap or root credential disposition;
+- named operational ownership and escalation;
+- a successful recovery or restore test;
+- current evidence references and approvals.
+
+Missing, unverified, untested, stale, or contradictory recovery evidence is a hard blocker. Architecture intent, backup job existence, service availability, or successful application tests do not substitute for proven recoverability. No exception may waive the requirement to preserve or verify a viable recovery path for stateful infrastructure.
+
 ## Approval rule
 
-A capability may enter pilot only after all mandatory items are satisfied or a time-bounded, owner-approved exception is recorded. It may not gain execution authority while material identity, isolation, evidence, quality-gate, audit, or operational dependency requirements remain incomplete.
+A capability may enter pilot only after all mandatory items are satisfied or a time-bounded, owner-approved exception is recorded. It may not gain execution authority while material identity, isolation, evidence, quality-gate, audit, operational dependency, or stateful recovery requirements remain incomplete.
