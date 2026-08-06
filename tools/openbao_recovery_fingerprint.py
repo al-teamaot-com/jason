@@ -139,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("APPROVED: Non-secret OpenBao recovery fingerprint evidence collected.")
     print(f"Evidence: {output}")
     print(f"Artifact SHA-256: {evidence['artifact_sha256']}")
-    print(f"Share design: {evidence['share_count']}-of-{evidence['threshold']}")
+    print(f"Share design: {evidence['threshold']}-of-{evidence['share_count']}")
     print(f"OpenBao version: {evidence['version']}")
     print(f"Initialized: {str(evidence['initialized']).lower()}")
     print(f"Sealed: {str(evidence['sealed']).lower()}")
