@@ -46,8 +46,6 @@ def make_args(tmp_path: Path):
         [
             "--ticket-number",
             "T20260805.0001",
-            "--company-id",
-            "123",
             "--scope",
             "pilot",
             "--allowed-scope",
@@ -83,6 +81,7 @@ def test_direct_command_loads_without_pythonpath() -> None:
     )
     assert result.returncode == 0
     assert "--bootstrap-token-file" in result.stdout
+    assert "--company-id" not in result.stdout
     assert "--username-reference" not in result.stdout
     assert "--secret-command" not in result.stdout
 
@@ -116,6 +115,7 @@ def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> No
         "recovery_gate_bypassed": False,
         "bootstrap_gate_bypassed": False,
         "autotask_secret_contract": "autotask.readonly",
+        "company_boundary_source": "autotask-ticket",
     }
 
 
@@ -173,7 +173,7 @@ def test_commissioning_override_cannot_run_live(tmp_path: Path) -> None:
         MODULE.validate(args)
 
 
-def test_live_command_uses_canonical_identity_and_no_legacy_references(
+def test_live_command_uses_ticket_only_canonical_identity(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -192,6 +192,8 @@ def test_live_command_uses_canonical_identity_and_no_legacy_references(
     result = MODULE.execute(args)
     autotask_command = calls[1]
 
+    assert "--ticket-number" in autotask_command
+    assert "--company-id" not in autotask_command
     assert "--principal-id" in autotask_command
     assert "--organization-id" in autotask_command
     assert "--correlation-id" in autotask_command
@@ -200,3 +202,4 @@ def test_live_command_uses_canonical_identity_and_no_legacy_references(
     assert "--integration-code-reference" not in autotask_command
     assert "--secret-command" not in autotask_command
     assert result["autotask_secret_contract"] == "autotask.readonly"
+    assert result["company_boundary_source"] == "autotask-ticket"
