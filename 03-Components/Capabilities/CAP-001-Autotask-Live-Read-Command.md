@@ -1,78 +1,102 @@
-# CAP-001 Autotask Live-Read Command Binding
+# CAP-001 Canonical Autotask Live-Read Command
 
-**Status:** Foundation
+**Status:** Operational pilot
 **Owner:** Jason Architecture Authority
 
 ## Purpose
 
-This component binds the controlled CAP-001 Autotask live-read validator to the production read-only transport and an external Secrets Broker command.
+This component provides the governed operator boundary for one read-only Autotask ticket lookup through the canonical connector framework.
 
-It provides one operator command for configuration validation and, only after explicit acknowledgement, one exact live ticket read.
+The supported command is:
 
-## Command boundary
+```text
+tools/autotask_live_read.py
+```
+
+It uses the single logical secret contract `autotask.readonly`. Capability code and operator input do not contain OpenBao paths, raw credentials, field-level secret aliases, or alternate secret-broker commands.
+
+## Operator boundary
 
 The command requires:
 
-- an exact ticket number;
-- an exact company identifier;
-- a requested validation scope;
-- the separately configured allowed validation scope;
+- one unique Autotask ticket number;
+- the requested scope and separately authorized scope;
+- principal, organization, and correlation identity context;
 - an evidence path outside the repository;
-- three secret references for username, API secret, and integration code;
-- one external secret-command path;
 - either `--check-only` or explicit `--live-read` authorization.
 
-The command accepts secret references only. It does not accept raw credential values.
+The technician does not provide an Autotask company ID. The connector derives the authoritative company boundary from the unique ticket returned by Autotask.
 
-## Secret command contract
-
-For each requested secret, Jason executes:
+## Canonical credential contract
 
 ```text
-<secret-command> <secret-reference>
+autotask.readonly
+  -> secret/data/connectors/autotask/production/read-only
+  -> username, secret, integration_code
 ```
 
-The command is executed directly without a shell. The secret value must be returned on standard output. Standard output and standard error are never included in failure messages.
-
-The production secret command remains an operator-controlled binding to the approved Secrets Broker implementation.
+The connector authenticates to OpenBao using the dedicated protected Autotask read-only AppRole files. Those files remain `root:root` with mode `0600`, so governed live execution requires the appropriate privileged runtime identity. Protected values must never be displayed, logged, or stored in evidence.
 
 ## Configuration check
 
-`--check-only` validates the command path, required identities, scope alignment, and evidence destination.
+`--check-only` validates required business identifiers, identity context, scope alignment, deployment readiness, and the evidence destination.
 
 It does not:
 
-- resolve any secret;
+- read AppRole material;
+- resolve the logical secret;
+- contact OpenBao;
 - perform Autotask zone discovery;
 - contact Autotask;
 - create an evidence artifact.
 
 ## Live-read safeguards
 
-A live request is denied unless `--live-read` is present. The existing live-read validator additionally enforces:
+A live request is denied unless `--live-read` is present. The canonical service additionally enforces:
 
-- exact ticket and company matching;
-- one authorized validation scope;
+- deployment-readiness approval;
+- exact lookup by the supplied unique ticket number;
+- exactly one provider result;
+- returned ticket-number equality;
+- provider-derived company boundary;
+- requested-scope and allowed-scope equality;
+- identity-first principal, organization, and correlation context;
 - evidence output outside the repository;
-- no evidence overwrite;
+- evidence overwrite denial;
 - redacted, hash-backed evidence;
-- no title or description content in the evidence artifact.
+- safe failures that exclude provider response bodies and protected values.
+
+## Evidence
+
+Approved evidence may include non-secret metadata such as:
+
+- ticket number;
+- provider-derived company ID;
+- timestamps;
+- logical secret name;
+- capability name;
+- hashes of title and description;
+- evidence integrity hash;
+- protected-value exposure status.
+
+Evidence must not contain raw title, description, username, API secret, integration code, token, password, AppRole value, or provider response body.
 
 ## Read-only authority
 
-This command composes only the existing read-only ticket transport and provider. It defines no create, update, delete, attachment, note, time-entry, remediation, or workflow-transition operation.
+The command invokes only the registered `autotask.ticket.search` capability. It defines no create, update, delete, attachment, note, time-entry, remediation, or workflow-transition operation.
 
-## First controlled run
+## Verified pilot execution
 
-Before the first live read, the operator must complete the following in order:
+The first governed canonical live read completed successfully on 2026-08-06 using ticket `T20260805.0064`.
 
-1. configure the approved secret-command implementation;
-2. create the three Autotask secret references;
-3. designate a non-client validation ticket and company scope;
-4. select an evidence destination outside the repository;
-5. run `--check-only` and review the result;
-6. obtain explicit authorization for one live read;
-7. run once with `--live-read`;
-8. review and retain the redacted evidence artifact.
+Evidence:
 
-No client-production live read is authorized by this foundation.
+```text
+/home/al/Jason-Evidence/Autotask/autotask-live-read-T20260805.0064-20260806T162842Z.json
+```
+
+The execution used `autotask.readonly`, derived the company boundary from Autotask, generated mode-`0600` redacted evidence, and left OpenBao healthy.
+
+## Retired architecture
+
+The former CAP-001-specific HTTP transport, ticket provider, production transport, command secret broker, field-level secret references, and company-ID operator input are retired. They must not be reintroduced as compatibility paths.
