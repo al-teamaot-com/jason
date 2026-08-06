@@ -38,8 +38,6 @@ def write_ready_recovery_record(path: Path) -> None:
 
 
 def make_args(tmp_path: Path):
-    secret_command = tmp_path / "jason-secret"
-    secret_command.write_text("#!/bin/sh\n", encoding="utf-8")
     record = tmp_path / "deployment.md"
     record.write_text("# deployment\n", encoding="utf-8")
     recovery_record = tmp_path / "recovery.md"
@@ -54,8 +52,12 @@ def make_args(tmp_path: Path):
             "pilot",
             "--allowed-scope",
             "pilot",
-            "--secret-command",
-            str(secret_command),
+            "--principal-id",
+            "operator-al",
+            "--organization-id",
+            "team-aot",
+            "--correlation-id",
+            "cap001-test-1",
             "--deployment-record",
             str(record),
             "--recovery-record",
@@ -81,6 +83,8 @@ def test_direct_command_loads_without_pythonpath() -> None:
     )
     assert result.returncode == 0
     assert "--bootstrap-token-file" in result.stdout
+    assert "--username-reference" not in result.stdout
+    assert "--secret-command" not in result.stdout
 
 
 def test_protected_path_uses_privileged_presence_probe(monkeypatch, tmp_path: Path) -> None:
@@ -111,6 +115,7 @@ def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> No
         "autotask_contacted": False,
         "recovery_gate_bypassed": False,
         "bootstrap_gate_bypassed": False,
+        "autotask_secret_contract": "autotask.readonly",
     }
 
 
@@ -125,13 +130,6 @@ def test_existing_evidence_is_denied(tmp_path: Path) -> None:
     args = make_args(tmp_path)
     args.contract_evidence.write_text("existing\n", encoding="utf-8")
     with pytest.raises(FileExistsError, match="already exists"):
-        MODULE.validate(args)
-
-
-def test_missing_secret_command_is_denied(tmp_path: Path) -> None:
-    args = make_args(tmp_path)
-    args.secret_command.unlink()
-    with pytest.raises(FileNotFoundError, match="secret command"):
         MODULE.validate(args)
 
 
@@ -173,3 +171,32 @@ def test_commissioning_override_cannot_run_live(tmp_path: Path) -> None:
     args.check_only = False
     with pytest.raises(PermissionError, match="only with check-only"):
         MODULE.validate(args)
+
+
+def test_live_command_uses_canonical_identity_and_no_legacy_references(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    args = make_args(tmp_path)
+    args.check_only = False
+    args.live_read = True
+    calls: list[list[str]] = []
+
+    monkeypatch.setattr(MODULE, "require_recovery_ready", lambda path: None)
+    monkeypatch.setattr(
+        MODULE,
+        "run_command",
+        lambda command, label: calls.append(command),
+    )
+
+    result = MODULE.execute(args)
+    autotask_command = calls[1]
+
+    assert "--principal-id" in autotask_command
+    assert "--organization-id" in autotask_command
+    assert "--correlation-id" in autotask_command
+    assert "--username-reference" not in autotask_command
+    assert "--secret-reference" not in autotask_command
+    assert "--integration-code-reference" not in autotask_command
+    assert "--secret-command" not in autotask_command
+    assert result["autotask_secret_contract"] == "autotask.readonly"
