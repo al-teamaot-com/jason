@@ -23,14 +23,14 @@ The current Jason OpenBao pilot is initialized, unsealed, and operational. A suc
 | Recovery threshold | 3 | Verified from protected initialization structure |
 | Protected initialization reference | `/opt/jason/bootstrap/secrets/openbao/init.json` | Verified; `root:root`, mode `0600` |
 | Protected artifact SHA-256 | `877c7ff2688282444a1f232f3e12bec633dad09349513c48431da9aaf7a7d6c6` | Verified fingerprint only |
-| Custody assignments | Protected single-host pilot custody; named custodians not recorded | Governance approval required |
-| Protected custody decision | Existing protected file retained for pilot recovery | Governance approval required |
+| Custody assignments | Protected single-host pilot custody; named custodians not recorded | Blocking |
+| Protected custody reference | Existing protected file retained for pilot recovery; governance approval not recorded | Blocking |
 | Bootstrap credential disposition | Bootstrap token revoked and temporary bootstrap files removed | Verified |
 | Runtime credential disposition | Dedicated orphan token installed at `/etc/jason/openbao.token` | Verified |
 | Operational owner | UNVERIFIED | Blocking |
 | Escalation contact | UNVERIFIED | Blocking |
-| Last successful unseal test | 2026-08-06; three shares accepted and service became unsealed | Verified |
-| Recovery fingerprint evidence | `/home/al/Jason-Evidence/OpenBao/openbao-recovery-fingerprint-20260806T113030Z.json` | Verified |
+| Last successful recovery test | 2026-08-06; three shares accepted and service became unsealed | Verified |
+| Recovery evidence reference | `/home/al/Jason-Evidence/OpenBao/openbao-recovery-fingerprint-20260806T113030Z.json` | Verified |
 | Bootstrap retirement evidence | `/home/al/Jason-Evidence/Secret-Provider/openbao-bootstrap-retirement-20260806T120329Z.json` | Verified |
 | Last successful Raft restore test | UNVERIFIED | Blocking |
 
