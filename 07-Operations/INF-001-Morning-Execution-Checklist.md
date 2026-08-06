@@ -1,118 +1,144 @@
-# INF-001 Morning Execution Checklist
+# INF-001 Operational Verification Checklist
 
 ## Purpose
 
-This checklist provides a single restart point for completing INF-001 production readiness and the first controlled CAP-001 Autotask read after the repository-side closeout foundation has passed validation.
+This checklist provides the supported restart point for verifying the OpenBao foundation and performing a governed CAP-001 Autotask read through the canonical connector.
+
+It replaces the former commissioning-era checklist that required bootstrap credentials, field-level Autotask secret aliases, an external secret command, and manual company-ID input.
 
 ## Repository preparation
 
 1. Connect to the Jason host.
-2. Change to `/tmp/jason-github`.
-3. Check out `feature/inf-001-production-readiness-closeout`.
-4. Pull the branch using fast-forward only.
+2. Change to `$HOME/projects/jason`.
+3. Check out the approved branch or `main`.
+4. Synchronize using fast-forward-only or the approved hard reset to the reviewed remote branch.
 5. Confirm the working tree is clean.
-6. Run the focused closeout tests.
-7. Run the no-network closeout check.
+6. Run focused tests for the change under review.
+7. Run check-only before any live operation.
 
-## Protected input preparation
+## Protected runtime inputs
 
-The following values must be prepared on the Jason host without printing them, copying them into the repository, or placing them in command history:
+The canonical Autotask connector uses the dedicated protected AppRole files:
 
-- OpenBao bootstrap credential in its approved protected file;
-- non-production contract-test value in its approved protected file;
-- Autotask API username;
-- Autotask API secret;
-- Autotask integration code.
+```text
+/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/role-id
+/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/secret-id
+```
 
-All protected files must be owned by the approved operating identity and must not grant group or other access.
+They must remain owned by `root:root` with mode `0600`. Do not display, copy, rename, weaken, or place their values into shell history, repository files, evidence, or logs.
 
-## Approved pilot identifiers
+The approved logical credential contract is:
 
-Record these non-secret values before execution:
+```text
+autotask.readonly
+  -> secret/data/connectors/autotask/production/read-only
+  -> username, secret, integration_code
+```
 
-- approved ticket number;
-- approved company ID;
-- approved scope name;
-- contract-test evidence destination;
-- Autotask evidence destination.
+Do not create field-level aliases or alternate secret-broker commands.
 
-Evidence paths must not already exist.
+## Approved non-secret inputs
+
+Record these before execution:
+
+- unique Autotask ticket number;
+- requested scope name;
+- separately authorized scope name;
+- principal ID;
+- organization ID;
+- correlation ID;
+- evidence destination outside the repository.
+
+The operator does not supply an Autotask company ID. The connector derives it from the unique returned ticket.
 
 ## Execution stages
 
-### Stage 1: OpenBao contract test
+### Stage 1: Verify OpenBao foundation
 
-Run the authenticated OpenBao contract-test workflow. Confirm:
+Confirm:
 
-- the least-privilege policy is created;
-- the non-production contract secret is written;
-- the dedicated token file is created with private permissions;
 - `jason-secret --health` returns `healthy`;
-- the contract test returns `contract-ok`;
-- the evidence report contains no secret value.
+- `jason-secret --contract-test jason.contract-test` returns `contract-ok`;
+- the bootstrap credential remains absent;
+- the runtime token remains protected;
+- a successful governed backup is recorded;
+- a successful isolated restore test is recorded.
 
-Stop immediately if this stage fails. Do not continue to Autotask.
+Stop immediately if this stage fails.
 
-### Stage 2: Deployment record and readiness
+### Stage 2: Verify deployment readiness
 
-Update the canonical deployment record using only verified facts from the evidence. Then run the deployment readiness gate.
+Review `07-Operations/Jason-Secret-Provider-Deployment-Record.md` and run the readiness gate.
 
-The Autotask stage remains denied until the readiness gate reports approved.
+The Autotask stage remains denied unless the record is ready and contains verified or explicitly approved values for backup, restore, operational ownership, escalation, and the canonical `autotask.readonly` mapping.
 
-### Stage 3: Autotask logical mappings
+### Stage 3: CAP-001 check-only
 
-Create the approved logical mappings for:
+Run `tools/autotask_live_read.py --check-only` with the required business, identity, scope, and evidence arguments.
 
-- `autotask.api.username`;
-- `autotask.api.secret`;
-- `autotask.api.integration-code`.
+Confirm:
 
-The mapping file may contain paths and field names only. It must not contain credential values.
-
-### Stage 4: CAP-001 configuration check
-
-Run CAP-001 in check-only mode. Confirm:
-
+- no AppRole material is read;
 - no secret is resolved;
-- no Autotask request is made;
+- OpenBao is not contacted;
+- Autotask is not contacted;
 - no evidence file is written;
-- scope and evidence-path validation pass.
+- scope, identity, readiness, and evidence-path validation pass.
 
-### Stage 5: First controlled live read
+### Stage 4: Governed live read
 
-Run one explicitly acknowledged read-only request against the approved ticket and company. Confirm:
+Run one explicitly acknowledged read-only request with `--live-read` using the privileged runtime identity required to read the protected AppRole files.
 
-- exactly one approved ticket is requested;
-- no write method is available or invoked;
-- the returned company context matches the approved company;
-- evidence is written once and does not contain credentials;
-- failures suppress protected subprocess output.
+Confirm:
+
+- the query uses the unique ticket number only;
+- exactly one matching ticket is accepted;
+- the returned ticket number matches the request;
+- the company boundary is derived from the returned ticket;
+- no write capability is available or invoked;
+- evidence is written once with mode `0600`;
+- evidence contains hashes rather than raw title or description;
+- no credential, token, AppRole value, or provider response body is retained.
+
+### Stage 5: Post-operation verification
+
+Confirm:
+
+- OpenBao remains healthy;
+- the repository remains clean;
+- the evidence artifact exists outside the repository;
+- the evidence reports `protected_values_exposed: false`;
+- the evidence logical secret is `autotask.readonly`;
+- the evidence capability is `autotask.ticket.search`.
 
 ## Final validation
 
-After the controlled live read:
+After a governed live read or architectural change:
 
-1. Run the complete release test suite.
-2. Run the complete CAP-001 test suite.
-3. Run the full Kernel test suite.
-4. Run complete release validation.
-5. Assemble documentation.
-6. Build documentation in strict mode.
-7. Run the whitespace check.
-8. Confirm the branch is clean.
-9. Review the generated evidence.
-10. Mark the pull request ready only after every required stage passes.
+1. Run the connector test suite.
+2. Run the CAP-001 test suite.
+3. Run the release test suite.
+4. Run the Kernel test suite.
+5. Run complete release validation.
+6. Assemble documentation.
+7. Build documentation in strict mode.
+8. Run the whitespace check.
+9. Confirm the branch is clean.
+10. Review retained non-secret evidence.
+11. Mark the pull request ready only after every required stage passes.
 
 ## Stop conditions
 
-Stop and preserve evidence without continuing when any of the following occurs:
+Stop and preserve non-secret diagnostic evidence without continuing when any of the following occurs:
 
 - a protected file has broad permissions;
 - an expected evidence path already exists;
 - OpenBao health or contract validation fails;
 - the deployment readiness gate remains denied;
-- logical mappings are missing;
+- the canonical logical mapping is missing;
 - requested and authorized scopes differ;
-- the ticket and company relationship cannot be confirmed;
-- a secret value appears in output or evidence;
+- the ticket lookup returns zero or multiple results;
+- the returned ticket identity differs from the request;
+- the provider-derived company boundary is absent;
+- a secret or raw ticket-content value appears in output or evidence;
 - any request attempts a write operation.
