@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
 
 
 MODULE_PATH = Path(__file__).resolve().parents[3] / "tools" / "production_readiness_closeout.py"
+REPOSITORY_ROOT = MODULE_PATH.parents[1]
 SPEC = importlib.util.spec_from_file_location("production_readiness_closeout", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
@@ -58,6 +60,8 @@ def make_args(tmp_path: Path):
             str(record),
             "--recovery-record",
             str(recovery_record),
+            "--bootstrap-token-file",
+            str(tmp_path / "openbao-bootstrap.token"),
             "--contract-evidence",
             str(tmp_path / "contract.json"),
             "--autotask-evidence",
@@ -65,6 +69,36 @@ def make_args(tmp_path: Path):
             "--check-only",
         ]
     )
+
+
+def test_direct_command_loads_without_pythonpath() -> None:
+    result = subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--help"],
+        cwd=REPOSITORY_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "--bootstrap-token-file" in result.stdout
+
+
+def test_protected_path_uses_privileged_presence_probe(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "protected.token"
+    calls: list[list[str]] = []
+
+    def denied_exists(self: Path) -> bool:
+        raise PermissionError("protected")
+
+    def sudo_test(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(MODULE.Path, "exists", denied_exists)
+    monkeypatch.setattr(MODULE.subprocess, "run", sudo_test)
+
+    assert MODULE.protected_path_exists(path) is False
+    assert calls == [["sudo", "test", "-e", str(path.resolve())]]
 
 
 def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> None:
@@ -76,6 +110,7 @@ def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> No
         "openbao_contacted": False,
         "autotask_contacted": False,
         "recovery_gate_bypassed": False,
+        "bootstrap_gate_bypassed": False,
     }
 
 
@@ -111,4 +146,30 @@ def test_live_execution_is_denied_when_recovery_is_unverified(tmp_path: Path) ->
         encoding="utf-8",
     )
     with pytest.raises(RuntimeError, match="recovery is not ready"):
+        MODULE.validate(args)
+
+
+def test_bootstrap_credential_blocks_readiness(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    args.bootstrap_token_file.write_text("protected\n", encoding="utf-8")
+    with pytest.raises(PermissionError, match="bootstrap credential exists"):
+        MODULE.validate(args)
+
+
+def test_commissioning_override_is_check_only_and_reported(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    args.bootstrap_token_file.write_text("protected\n", encoding="utf-8")
+    args.commissioning = True
+    result = MODULE.execute(args)
+    assert result["bootstrap_gate_bypassed"] is True
+    assert result["openbao_contacted"] is False
+    assert result["autotask_contacted"] is False
+
+
+def test_commissioning_override_cannot_run_live(tmp_path: Path) -> None:
+    args = make_args(tmp_path)
+    args.bootstrap_token_file.write_text("protected\n", encoding="utf-8")
+    args.commissioning = True
+    args.check_only = False
+    with pytest.raises(PermissionError, match="only with check-only"):
         MODULE.validate(args)
