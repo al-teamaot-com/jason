@@ -27,6 +27,7 @@ nav:
   - Infrastructure:
       - INF-001 Secret Provider Foundation: 03-Components/Infrastructure/INF-001-Secret-Provider-Foundation.md
       - INF-001 OpenBao Deployment Verification: 03-Components/Infrastructure/INF-001-OpenBao-Deployment-Verification.md
+      - INF-001 OpenBao Recovery Evidence Fingerprint: 03-Components/Infrastructure/INF-001-OpenBao-Recovery-Evidence-Fingerprint.md
       - INF-001 Jason Secret Wrapper: 03-Components/Infrastructure/INF-001-Jason-Secret-Wrapper.md
       - INF-001 Jason Secret Host Deployment: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Deployment.md
       - INF-001 Jason Secret Host Installation: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Installation.md
