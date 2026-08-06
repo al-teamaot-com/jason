@@ -63,10 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--company-id", required=True)
     parser.add_argument("--scope", required=True)
     parser.add_argument("--allowed-scope", required=True)
-    parser.add_argument("--username-reference", default="autotask.api.username")
-    parser.add_argument("--secret-reference", default="autotask.api.secret")
-    parser.add_argument("--integration-code-reference", default="autotask.api.integration-code")
-    parser.add_argument("--secret-command", type=Path, default=Path("/usr/local/bin/jason-secret"))
+    parser.add_argument("--principal-id", required=True)
+    parser.add_argument("--organization-id", required=True)
+    parser.add_argument("--correlation-id", required=True)
     parser.add_argument("--deployment-record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--recovery-record", type=Path, default=DEFAULT_RECOVERY_RECORD)
     parser.add_argument("--bootstrap-token-file", type=Path, default=DEFAULT_BOOTSTRAP_TOKEN)
@@ -84,17 +83,15 @@ def validate(args: argparse.Namespace) -> None:
         "company_id",
         "scope",
         "allowed_scope",
-        "username_reference",
-        "secret_reference",
-        "integration_code_reference",
+        "principal_id",
+        "organization_id",
+        "correlation_id",
     ):
         require_text(name.replace("_", "-"), str(getattr(args, name)))
     if args.scope.strip() != args.allowed_scope.strip():
         raise PermissionError("Requested scope does not match the authorized scope.")
     require_new_output(args.contract_evidence)
     require_new_output(args.autotask_evidence)
-    if not args.secret_command.expanduser().resolve().is_file():
-        raise FileNotFoundError("Canonical secret command was not found.")
     if not args.deployment_record.expanduser().resolve().is_file():
         raise FileNotFoundError("Canonical deployment record was not found.")
     if not args.recovery_record.expanduser().resolve().is_file():
@@ -124,6 +121,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "autotask_contacted": False,
             "recovery_gate_bypassed": False,
             "bootstrap_gate_bypassed": bool(args.commissioning and bootstrap_present),
+            "autotask_secret_contract": "autotask.readonly",
         }
 
     run_command(
@@ -148,16 +146,14 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         args.scope,
         "--allowed-scope",
         args.allowed_scope,
+        "--principal-id",
+        args.principal_id,
+        "--organization-id",
+        args.organization_id,
+        "--correlation-id",
+        args.correlation_id,
         "--evidence-output",
         str(args.autotask_evidence),
-        "--username-reference",
-        args.username_reference,
-        "--secret-reference",
-        args.secret_reference,
-        "--integration-code-reference",
-        args.integration_code_reference,
-        "--secret-command",
-        str(args.secret_command),
         "--deployment-record",
         str(args.deployment_record),
     ]
@@ -165,7 +161,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         autotask_command.append("--live-read")
     else:
         autotask_command.append("--check-only")
-    run_command(autotask_command, label="CAP-001 Autotask validation")
+    run_command(autotask_command, label="CAP-001 canonical Autotask validation")
 
     return {
         "status": "approved",
@@ -175,6 +171,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         "recovery_record": str(args.recovery_record.expanduser().resolve()),
         "bootstrap_gate_bypassed": False,
         "secret_values_exposed": False,
+        "autotask_secret_contract": "autotask.readonly",
     }
 
 
