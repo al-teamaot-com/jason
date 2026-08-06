@@ -21,6 +21,10 @@ def test_policy_is_read_only_and_scoped() -> None:
     assert "delete" not in MODULE.POLICY_TEXT
 
 
+def test_contract_write_uses_create_only_cas() -> None:
+    assert MODULE.CONTRACT_WRITE_OPTIONS == {"cas": 0}
+
+
 def test_private_file_rejects_group_or_other_permissions(tmp_path: Path) -> None:
     path = tmp_path / "token"
     path.write_text("placeholder\n", encoding="utf-8")
