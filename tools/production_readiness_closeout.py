@@ -31,6 +31,24 @@ def require_new_output(path: Path) -> Path:
     return resolved
 
 
+def protected_path_exists(path: Path) -> bool:
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.exists()
+    except PermissionError:
+        result = subprocess.run(
+            ["sudo", "test", "-e", str(resolved)],
+            check=False,
+        )
+        if result.returncode == 0:
+            return True
+        if result.returncode == 1:
+            return False
+        raise PermissionError(
+            f"Unable to determine protected path state: {resolved}"
+        )
+
+
 def run_command(command: list[str], *, label: str) -> None:
     result = subprocess.run(command, check=False, text=True, capture_output=True)
     if result.returncode != 0:
@@ -82,7 +100,7 @@ def validate(args: argparse.Namespace) -> None:
     if not args.recovery_record.expanduser().resolve().is_file():
         raise FileNotFoundError("Canonical recovery record was not found.")
 
-    bootstrap_present = args.bootstrap_token_file.expanduser().resolve().exists()
+    bootstrap_present = protected_path_exists(args.bootstrap_token_file)
     if args.commissioning and not args.check_only:
         raise PermissionError("Commissioning mode is allowed only with check-only validation.")
     if bootstrap_present and not args.commissioning:
@@ -96,7 +114,7 @@ def validate(args: argparse.Namespace) -> None:
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
     validate(args)
-    bootstrap_present = args.bootstrap_token_file.expanduser().resolve().exists()
+    bootstrap_present = protected_path_exists(args.bootstrap_token_file)
     if args.check_only:
         return {
             "status": "approved",
