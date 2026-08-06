@@ -6,8 +6,13 @@ from pathlib import Path
 import subprocess
 from typing import Sequence
 
+from tools.stateful_recovery_readiness import require_recovery_ready
+
 
 DEFAULT_RECORD = Path("07-Operations/Jason-Secret-Provider-Deployment-Record.md")
+DEFAULT_RECOVERY_RECORD = Path(
+    "07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md"
+)
 
 
 def require_text(name: str, value: str) -> None:
@@ -41,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--integration-code-reference", default="autotask.api.integration-code")
     parser.add_argument("--secret-command", type=Path, default=Path("/usr/local/bin/jason-secret"))
     parser.add_argument("--deployment-record", type=Path, default=DEFAULT_RECORD)
+    parser.add_argument("--recovery-record", type=Path, default=DEFAULT_RECOVERY_RECORD)
     parser.add_argument("--contract-evidence", type=Path, required=True)
     parser.add_argument("--autotask-evidence", type=Path, required=True)
     parser.add_argument("--check-only", action="store_true")
@@ -67,6 +73,10 @@ def validate(args: argparse.Namespace) -> None:
         raise FileNotFoundError("Canonical secret command was not found.")
     if not args.deployment_record.expanduser().resolve().is_file():
         raise FileNotFoundError("Canonical deployment record was not found.")
+    if not args.recovery_record.expanduser().resolve().is_file():
+        raise FileNotFoundError("Canonical recovery record was not found.")
+    if not args.check_only:
+        require_recovery_ready(args.recovery_record)
 
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
@@ -78,6 +88,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "secret_resolved": False,
             "openbao_contacted": False,
             "autotask_contacted": False,
+            "recovery_gate_bypassed": False,
         }
 
     run_command(
@@ -126,6 +137,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         "mode": "live-read" if args.live_read else "configuration-only",
         "contract_evidence": str(args.contract_evidence.expanduser().resolve()),
         "autotask_evidence": str(args.autotask_evidence.expanduser().resolve()),
+        "recovery_record": str(args.recovery_record.expanduser().resolve()),
         "secret_values_exposed": False,
     }
 
