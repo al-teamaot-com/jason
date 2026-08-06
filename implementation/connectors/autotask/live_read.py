@@ -22,7 +22,6 @@ class AutotaskLiveReadError(RuntimeError):
 @dataclass(frozen=True)
 class AutotaskLiveReadRequest:
     ticket_number: str
-    company_id: str
     scope_name: str
     allowed_scope: str
     principal_id: str
@@ -39,7 +38,8 @@ class AutotaskLiveReadEvidence:
     logical_secret: str
     scope_name: str
     ticket_number: str
-    company_id: str
+    discovered_company_id: str
+    company_boundary_source: str
     retrieved_at: str
     configuration_item_id: str | None
     requester_identity_id: str | None
@@ -79,12 +79,7 @@ class GovernedAutotaskLiveRead:
                         "op": "eq",
                         "field": "ticketNumber",
                         "value": normalized.ticket_number,
-                    },
-                    {
-                        "op": "eq",
-                        "field": "companyID",
-                        "value": normalized.company_id,
-                    },
+                    }
                 ]
             },
             separators=(",", ":"),
@@ -96,7 +91,7 @@ class GovernedAutotaskLiveRead:
                     correlation_id=normalized.correlation_id,
                     principal_id=normalized.principal_id,
                     organization_id=normalized.organization_id,
-                    client_id=normalized.company_id,
+                    client_id=None,
                     capability=self.capability,
                     mode="observe",
                 ),
@@ -107,9 +102,16 @@ class GovernedAutotaskLiveRead:
         ticket = self._extract_exact_ticket(
             result.data,
             ticket_number=normalized.ticket_number,
-            company_id=normalized.company_id,
         )
-        evidence = self._build_evidence(normalized, ticket)
+        discovered_company_id = self._required_string(
+            ticket.get("companyID"),
+            "companyID",
+        )
+        evidence = self._build_evidence(
+            normalized,
+            ticket,
+            discovered_company_id=discovered_company_id,
+        )
         self._write_evidence(destination, evidence)
         return evidence
 
@@ -119,7 +121,6 @@ class GovernedAutotaskLiveRead:
     ) -> AutotaskLiveReadRequest:
         values = {
             "ticket_number": request.ticket_number.strip(),
-            "company_id": request.company_id.strip(),
             "scope_name": request.scope_name.strip(),
             "allowed_scope": request.allowed_scope.strip(),
             "principal_id": request.principal_id.strip(),
@@ -169,7 +170,6 @@ class GovernedAutotaskLiveRead:
         payload: Mapping[str, Any],
         *,
         ticket_number: str,
-        company_id: str,
     ) -> Mapping[str, Any]:
         items = payload.get("items")
         if not isinstance(items, list):
@@ -178,18 +178,15 @@ class GovernedAutotaskLiveRead:
             )
         if len(items) != 1 or not isinstance(items[0], Mapping):
             raise AutotaskLiveReadError(
-                "Exact live read must return one ticket."
+                "Unique ticket lookup must return exactly one ticket."
             )
         ticket = items[0]
         if str(ticket.get("ticketNumber", "")) != ticket_number:
             raise AutotaskLiveReadError(
                 "Validated ticket identity changed."
             )
-        if str(ticket.get("companyID", "")) != company_id:
-            raise PermissionError(
-                "Validated ticket crossed the company boundary."
-            )
         required = {
+            "companyID",
             "title",
             "description",
             "createDate",
@@ -207,15 +204,18 @@ class GovernedAutotaskLiveRead:
         cls,
         request: AutotaskLiveReadRequest,
         ticket: Mapping[str, Any],
+        *,
+        discovered_company_id: str,
     ) -> AutotaskLiveReadEvidence:
         core: dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "provider": "autotask",
             "capability": cls.capability,
             "logical_secret": cls.logical_secret,
             "scope_name": request.scope_name,
             "ticket_number": request.ticket_number,
-            "company_id": request.company_id,
+            "discovered_company_id": discovered_company_id,
+            "company_boundary_source": "autotask-ticket",
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
             "configuration_item_id": cls._optional_string(
                 ticket.get("configurationItemID")
@@ -263,6 +263,14 @@ class GovernedAutotaskLiveRead:
     @staticmethod
     def _hash_text(value: str) -> str:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _required_string(value: object, field: str) -> str:
+        if value is None or not str(value).strip():
+            raise AutotaskLiveReadError(
+                f"Autotask ticket contains an invalid {field}."
+            )
+        return str(value)
 
     @staticmethod
     def _optional_string(value: object) -> str | None:
