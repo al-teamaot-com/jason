@@ -16,6 +16,7 @@ POLICY_TEXT = '''path "secret/data/jason/contract-test" {
 }
 '''
 CONTRACT_PATH = "secret/data/jason/contract-test"
+CONTRACT_WRITE_OPTIONS = {"cas": 0}
 
 
 def ensure_private_file(path: Path) -> None:
@@ -66,7 +67,13 @@ def provision(*, address: str, bootstrap_token_file: Path, token_output: Path, c
         raise FileExistsError("Dedicated token output already exists.")
 
     api_request(address, f"sys/policies/acl/{POLICY_NAME}", bootstrap_token, method="PUT", payload={"policy": POLICY_TEXT})
-    api_request(address, CONTRACT_PATH, bootstrap_token, method="PUT", payload={"data": {"value": contract_value}})
+    api_request(
+        address,
+        CONTRACT_PATH,
+        bootstrap_token,
+        method="PUT",
+        payload={"options": CONTRACT_WRITE_OPTIONS, "data": {"value": contract_value}},
+    )
     token_response = api_request(
         address,
         "auth/token/create",
