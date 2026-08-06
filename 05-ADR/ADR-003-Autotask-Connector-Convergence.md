@@ -21,6 +21,7 @@ CAP-001's stronger controls must be preserved on that path:
 - explicit live-read acknowledgement;
 - exact ticket-number and company-boundary validation;
 - requested-scope and allowed-scope equality;
+- identity-first execution using principal, organization, client, and correlation context;
 - deployment-readiness authorization before production use;
 - one read-only provider request;
 - redacted, hash-backed evidence outside the repository;
@@ -35,7 +36,18 @@ autotask.readonly
   -> username, secret, integration_code
 ```
 
-Capability code must not accept or construct provider paths, raw credentials, or separate field-level logical aliases.
+Capability code must not accept or construct provider paths, raw credentials, separate field-level logical aliases, or an alternate secret-broker command.
+
+## Canonical operator boundary
+
+The supported operator command is `tools/autotask_live_read.py`. It accepts business identity, scope, target, evidence, and explicit authorization parameters only. It does not accept:
+
+- `--username-reference`;
+- `--secret-reference`;
+- `--integration-code-reference`;
+- `--secret-command`.
+
+The production-readiness closeout command invokes this same canonical operator boundary and records `autotask.readonly` as the credential contract.
 
 ## Migration sequence
 
@@ -51,6 +63,7 @@ Capability code must not accept or construct provider paths, raw credentials, or
 - Jason has one Autotask secret contract and one read-only connector boundary.
 - CAP-001 retains its stronger validation and evidence semantics.
 - Provider authentication, zone discovery, capability authorization, and secret resolution are not duplicated.
+- Production readiness and direct operator use share the same execution path.
 - Future Autotask capabilities build on the connector framework rather than creating capability-specific transports.
 
 ## Retirement criteria
