@@ -2,7 +2,7 @@
 
 **Environment:** Jason pilot host  
 **Profile:** Pilot  
-**Status:** BLOCKED — technical runtime, backup, restore, and canonical Autotask binding are verified; human ownership and escalation assignments remain unresolved  
+**Status:** READY — technical runtime, recovery, backup, restore, canonical Autotask binding, operational ownership, and escalation roles are verified or explicitly approved  
 **Owner:** Jason Architecture Authority  
 **Last reconciled:** 2026-08-06
 
@@ -44,8 +44,8 @@ This is the canonical non-secret operational record for the secret provider used
 | Existing Raft snapshots | Multiple mode-`0600` snapshots and SHA-256 sidecars | Verified inventory |
 | Last successful automated backup | 2026-08-06 09:05 EDT; snapshot `/opt/jason/backups/openbao/openbao-raft-Jason-20260806T130505Z.snap`; checksum verified | Verified |
 | Last successful restore test | 2026-08-06; isolated governed restore from the verified snapshot; restored cluster identity and authenticated secret contract matched the live source | Verified |
-| Operational owner | UNVERIFIED | Blocking |
-| Escalation contact | UNVERIFIED | Blocking |
+| Operational owner | AOT Infrastructure Owner | Approved governance role |
+| Escalation contact | AOT Security Escalation | Approved governance role |
 
 ## Logical secret mappings
 
@@ -71,12 +71,11 @@ The evidence contains non-secret status, identity, version, path, permission, fi
 
 ## Readiness decision
 
-The OpenBao runtime foundation, canonical secret wrapper, automated backup workflow, isolated restore workflow, and canonical `autotask.readonly` binding are technically verified. The environment remains **blocked for CAP-001 live Autotask reads** only until the following human governance assignments are explicitly approved and recorded:
+The OpenBao runtime foundation, canonical secret wrapper, automated backup workflow, isolated restore workflow, canonical `autotask.readonly` binding, operational ownership role, and escalation role are approved for the current single-host pilot.
 
-1. Name the operational owner.
-2. Name the escalation contact.
+CAP-001 check-only and governed read-only Autotask live validation are authorized, subject to the canonical connector controls, explicit live-read acknowledgement, identity and scope context, exact-ticket validation, evidence redaction, and all other active governance gates.
 
-CAP-001 check-only validation remains authorized. A production live read is not authorized until those assignments are recorded; technical evidence must not be used to infer or invent human authority.
+This approval does not authorize write capabilities, remote or multi-host OpenBao use without TLS, or use of logical secret mappings that remain marked unverified or blocked.
 
 ## Change rule
 
