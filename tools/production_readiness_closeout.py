@@ -13,6 +13,7 @@ DEFAULT_RECORD = Path("07-Operations/Jason-Secret-Provider-Deployment-Record.md"
 DEFAULT_RECOVERY_RECORD = Path(
     "07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md"
 )
+DEFAULT_BOOTSTRAP_TOKEN = Path("/etc/jason/openbao-bootstrap.token")
 
 
 def require_text(name: str, value: str) -> None:
@@ -47,10 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--secret-command", type=Path, default=Path("/usr/local/bin/jason-secret"))
     parser.add_argument("--deployment-record", type=Path, default=DEFAULT_RECORD)
     parser.add_argument("--recovery-record", type=Path, default=DEFAULT_RECOVERY_RECORD)
+    parser.add_argument("--bootstrap-token-file", type=Path, default=DEFAULT_BOOTSTRAP_TOKEN)
     parser.add_argument("--contract-evidence", type=Path, required=True)
     parser.add_argument("--autotask-evidence", type=Path, required=True)
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--live-read", action="store_true")
+    parser.add_argument("--commissioning", action="store_true")
     return parser
 
 
@@ -75,12 +78,22 @@ def validate(args: argparse.Namespace) -> None:
         raise FileNotFoundError("Canonical deployment record was not found.")
     if not args.recovery_record.expanduser().resolve().is_file():
         raise FileNotFoundError("Canonical recovery record was not found.")
+
+    bootstrap_present = args.bootstrap_token_file.expanduser().resolve().exists()
+    if args.commissioning and not args.check_only:
+        raise PermissionError("Commissioning mode is allowed only with check-only validation.")
+    if bootstrap_present and not args.commissioning:
+        raise PermissionError(
+            "Production readiness is denied while the OpenBao bootstrap credential exists."
+        )
+
     if not args.check_only:
         require_recovery_ready(args.recovery_record)
 
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
     validate(args)
+    bootstrap_present = args.bootstrap_token_file.expanduser().resolve().exists()
     if args.check_only:
         return {
             "status": "approved",
@@ -89,6 +102,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             "openbao_contacted": False,
             "autotask_contacted": False,
             "recovery_gate_bypassed": False,
+            "bootstrap_gate_bypassed": bool(args.commissioning and bootstrap_present),
         }
 
     run_command(
@@ -138,6 +152,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         "contract_evidence": str(args.contract_evidence.expanduser().resolve()),
         "autotask_evidence": str(args.autotask_evidence.expanduser().resolve()),
         "recovery_record": str(args.recovery_record.expanduser().resolve()),
+        "bootstrap_gate_bypassed": False,
         "secret_values_exposed": False,
     }
 
