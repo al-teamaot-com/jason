@@ -1,43 +1,49 @@
 # Jason Secret Provider Deployment Record
 
-**Environment:** Jason pilot host
-**Profile:** Pilot
-**Status:** BLOCKED — deployment partially verified; required operational controls remain incomplete
-**Owner:** Jason Architecture Authority
-**Last verified:** 2026-08-05T13:34:42.257776+00:00
+**Environment:** Jason pilot host  
+**Profile:** Pilot  
+**Status:** BLOCKED — technical runtime is operational; remaining governance and backup controls are unresolved  
+**Owner:** Jason Architecture Authority  
+**Last reconciled:** 2026-08-06
 
 ## Purpose
 
-This is the canonical operational record for the secret provider used by the Jason pilot environment. Capabilities and operator runbooks must reference this record instead of asking an operator to discover infrastructure details during execution.
+This is the canonical non-secret operational record for the secret provider used by the Jason pilot environment. Capabilities and runbooks must rely on this record rather than rediscovering infrastructure details during execution.
 
-`UNVERIFIED` means the repository does not yet contain sufficient approved evidence. It is a blocking state, not an invitation to guess.
+`UNVERIFIED` or `BLOCKING` means the available evidence is insufficient. It is not permission to guess.
 
-## Deployment facts
+## Verified deployment facts
 
 | Field | Verified value | Status |
 |---|---|---|
-| Selected provider | OpenBao | Documented architectural decision |
+| Selected provider | OpenBao | Verified |
 | Runtime type | Docker container | Verified |
 | Service or container name | `openbao` | Verified |
 | Runtime image | `ghcr.io/openbao/openbao:2.6.1` | Verified |
 | Listener or endpoint | `127.0.0.1:8200` mapped to container port `8200/tcp` | Verified |
-| TLS mode | UNVERIFIED | Blocking |
-| Canonical wrapper | `/usr/local/bin/jason-secret` | NOT IMPLEMENTED |
-| OpenBao executable path | Container executable `bao` observed; host executable path not applicable to current runtime | Partially verified |
-| OpenBao configuration path | Host bind `/opt/jason/infrastructure/openbao/config` mounted at `/openbao/config` | Verified |
-| Storage path or backend | Host bind `/opt/jason/infrastructure/openbao/data` mounted at `/openbao/data`; Docker volume mounted at `/openbao/file` | Backend behavior still requires verification |
-| Authentication method | UNVERIFIED | Blocking |
-| Logical-name mapping location | UNVERIFIED | Blocking |
-| Audit device | Host bind `/opt/jason/infrastructure/openbao/audit` mounted at `/openbao/audit` | Audit enablement and status still require verification |
-| Log path | Host bind `/opt/jason/infrastructure/openbao/logs` mounted at `/openbao/logs` | Verified |
-| Seal status and unseal method | UNVERIFIED | Blocking |
-| Backup unit | `/etc/systemd/system/jason-openbao-backup.service`; size `1169` bytes; SHA-256 `45df475a48c215fed26706e411f20b7039cf939fe68297e00129e179ea744a27` | File existence and integrity verified; execution behavior remains unverified |
-| Backup schedule | `/etc/systemd/system/jason-openbao-backup.timer`; size `294` bytes; SHA-256 `d7a63a200a0dba3801b2fc4608c095bf4f91b51d4096b81ae69ca5fedf39d138` | File existence and integrity verified; active schedule remains unverified |
-| Backup destination | UNVERIFIED | Blocking |
-| Last successful backup | UNVERIFIED | Blocking |
+| Pilot TLS mode | HTTP on loopback only | Verified for single-host pilot; remote or multi-host use requires TLS |
+| Canonical wrapper | `/usr/local/bin/jason-secret` | Installed and executable |
+| OpenBao configuration path | `/opt/jason/infrastructure/openbao/config` mounted read-only at `/openbao/config` | Verified |
+| Storage backend | Integrated Raft at `/opt/jason/infrastructure/openbao/data` | Verified |
+| Authentication method | Dedicated OpenBao service token stored at `/etc/jason/openbao.token` | Verified |
+| Runtime token ownership and mode | `root:root`, mode `0600` | Verified |
+| Runtime token parentage | Orphan token; no parent accessor | Verified |
+| Runtime policy | `jason-contract-test` plus `default` | Verified |
+| Logical contract path | `secret/data/jason/contract-test` | Verified |
+| Audit device | File audit output at `/opt/jason/infrastructure/openbao/audit/audit.log` | Verified present and receiving requests |
+| Seal status | Initialized and unsealed | Verified after threshold unseal ceremony |
+| Seal method | Manual Shamir unseal, 3-of-5 | Verified from protected initialization material and successful unseal |
+| Bootstrap credential | Revoked and `/etc/jason/openbao-bootstrap.token` removed | Verified |
+| Contract-test input | `/etc/jason/openbao-contract-test.value` removed after commissioning | Verified |
+| Health-check command | `/usr/local/bin/jason-secret --health` | Verified; returns `healthy` |
+| Secret-resolution contract test | `/usr/local/bin/jason-secret --contract-test jason.contract-test` | Verified; returns `contract-ok` |
+| Production bootstrap gate | Production readiness denies bootstrap credential presence except explicit check-only commissioning mode | Verified |
+| Backup unit | `/etc/systemd/system/jason-openbao-backup.service` | Installed; most recent observed execution failed |
+| Backup schedule | `/etc/systemd/system/jason-openbao-backup.timer`, daily at 02:30 | Installed and active when last inspected |
+| Backup destination | `/opt/jason/backups/openbao` | Verified |
+| Existing Raft snapshots | Multiple mode-`0600` snapshots and SHA-256 sidecars | Verified inventory |
+| Last successful automated backup | UNVERIFIED | Blocking |
 | Last successful restore test | UNVERIFIED | Blocking |
-| Health-check command | NOT IMPLEMENTED | Blocking |
-| Secret-resolution contract test | NOT IMPLEMENTED | Blocking |
 | Operational owner | UNVERIFIED | Blocking |
 | Escalation contact | UNVERIFIED | Blocking |
 
@@ -45,45 +51,35 @@ This is the canonical operational record for the secret provider used by the Jas
 
 | Logical name | Provider reference | Required fields | Status |
 |---|---|---|---|
-| `autotask.readonly` | UNVERIFIED | `username`, `secret`, `integration_code` | Blocking |
-| `it_glue.readonly` | `secret/data/connectors/it-glue/production/read-only` | `api_key` | Path documented; deployment verification required |
+| `jason.contract-test` | `secret/data/jason/contract-test` | contract value | Verified commissioning contract only |
+| `autotask.api.username` | OpenBao mapping not yet recorded here | username | Blocking for CAP-001 live read |
+| `autotask.api.secret` | OpenBao mapping not yet recorded here | API secret | Blocking for CAP-001 live read |
+| `autotask.api.integration-code` | OpenBao mapping not yet recorded here | integration code | Blocking for CAP-001 live read |
+| `it_glue.readonly` | `secret/data/connectors/it-glue/production/read-only` | `api_key` | Path documented; live binding not approved by this record |
 | `datto_rmm.readonly` | UNVERIFIED | Provider-defined read-only fields | Blocking |
 
-## Verified evidence
+## Governed evidence references
 
-The following external evidence was collected by the governed OpenBao deployment verification command:
+- Deployment verification JSON: `/home/al/Jason-Evidence/OpenBao/openbao-verification-20260805T133421Z.json`
+- Deployment verification Markdown: `/home/al/Jason-Evidence/OpenBao/openbao-verification-20260805T133421Z.md`
+- Recovery fingerprint: `/home/al/Jason-Evidence/OpenBao/openbao-recovery-fingerprint-20260806T113030Z.json`
+- Authenticated contract evidence: `/home/al/Jason-Evidence/Secret-Provider/openbao-contract-test-20260806T114905Z.json`
+- Bootstrap retirement evidence: `/home/al/Jason-Evidence/Secret-Provider/openbao-bootstrap-retirement-20260806T120329Z.json`
 
-- JSON: `/home/al/Jason-Evidence/OpenBao/openbao-verification-20260805T133421Z.json`
-- Markdown: `/home/al/Jason-Evidence/OpenBao/openbao-verification-20260805T133421Z.md`
-- Collected at: `2026-08-05T13:34:42.257776+00:00`
-- Host: `Jason`
-
-The evidence confirmed the Docker runtime, container identity, image, loopback listener, configuration/data/audit/log mounts, and backup unit file hashes. It did not authenticate to OpenBao, resolve secrets, inspect secret values, modify services, or prove backup execution or restore capability.
+The evidence contains non-secret status, identity, version, path, permission, fingerprint, and contract results. It must not contain tokens, passwords, unseal shares, recovery keys, API credentials, or secret values.
 
 ## Readiness decision
 
-The Jason pilot environment is **not approved for CAP-001 live Autotask reads** until this record is updated with the remaining verified operational facts and the INF-001 readiness gate passes.
+The OpenBao runtime foundation is operational and the dedicated secret wrapper contract is verified. The environment remains **blocked for CAP-001 live Autotask reads** until all of the following are complete:
 
-The existing CAP-001 fixture, transport, validation, and `--check-only` tests remain valid. Only the live provider binding is blocked.
+1. Record the three approved Autotask logical secret mappings without recording values.
+2. Name the operational owner and escalation contact.
+3. Repair and verify the automated Raft backup service.
+4. Complete and reference a successful restore test.
+5. Reconcile the initialization and recovery record with the verified ceremony and approved custody decision.
 
-## Remaining verification requirements
-
-The next governed changes must provide evidence for:
-
-- TLS mode;
-- exact authentication method;
-- canonical `jason-secret` wrapper installation and contract;
-- logical-name mapping location and Autotask read-only mapping;
-- OpenBao health without exposing secret values;
-- audit device enablement and status;
-- seal status and unseal method;
-- backup destination and active schedule;
-- last successful backup;
-- successful restore test;
-- named operational owner and escalation path.
-
-Evidence may contain paths, unit names, versions, timestamps, hashes, and redacted statuses. It must not contain tokens, passwords, unseal keys, recovery shares, or secret values.
+CAP-001 check-only validation remains authorized. A client-production live read is not authorized by this record.
 
 ## Change rule
 
-Any change to the provider runtime, endpoint, wrapper, authentication method, mapping location, storage backend, backup process, or recovery method must update this record in the same governed change.
+Any change to the provider runtime, endpoint, wrapper, authentication method, logical mappings, storage backend, audit device, backup process, recovery method, token lifecycle, or readiness gates must update this record in the same governed change.
