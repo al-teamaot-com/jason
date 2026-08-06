@@ -6,6 +6,11 @@ from .contracts import (
     OrchestrationResult,
     OrchestrationStatus,
 )
+from .invokers import (
+    CapabilityInvokerAlreadyRegisteredError,
+    CapabilityInvokerNotRegisteredError,
+    CapabilityInvokerRegistry,
+)
 from .service import (
     CapabilityInvoker,
     CentralOrchestrator,
@@ -16,6 +21,9 @@ from .service import (
 __all__ = [
     "ArtifactReference",
     "CapabilityInvoker",
+    "CapabilityInvokerAlreadyRegisteredError",
+    "CapabilityInvokerNotRegisteredError",
+    "CapabilityInvokerRegistry",
     "CentralOrchestrator",
     "ExecutionStage",
     "InvocationResult",
