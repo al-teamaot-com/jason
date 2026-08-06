@@ -38,7 +38,6 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--ticket-number", required=True)
-    parser.add_argument("--company-id", required=True)
     parser.add_argument("--scope", required=True)
     parser.add_argument("--allowed-scope", required=True)
     parser.add_argument("--principal-id", required=True)
@@ -58,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_configuration(args: argparse.Namespace) -> None:
     required = {
         "ticket-number": args.ticket_number,
-        "company-id": args.company_id,
         "scope": args.scope,
         "allowed-scope": args.allowed_scope,
         "principal-id": args.principal_id,
@@ -104,7 +102,6 @@ def run(args: argparse.Namespace) -> Path | None:
     service.validate(
         AutotaskLiveReadRequest(
             ticket_number=args.ticket_number,
-            company_id=args.company_id,
             scope_name=args.scope,
             allowed_scope=args.allowed_scope,
             principal_id=args.principal_id,
