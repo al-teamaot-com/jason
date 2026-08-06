@@ -83,6 +83,24 @@ def test_direct_command_loads_without_pythonpath() -> None:
     assert "--bootstrap-token-file" in result.stdout
 
 
+def test_protected_path_uses_privileged_presence_probe(monkeypatch, tmp_path: Path) -> None:
+    path = tmp_path / "protected.token"
+    calls: list[list[str]] = []
+
+    def denied_exists(self: Path) -> bool:
+        raise PermissionError("protected")
+
+    def sudo_test(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(MODULE.Path, "exists", denied_exists)
+    monkeypatch.setattr(MODULE.subprocess, "run", sudo_test)
+
+    assert MODULE.protected_path_exists(path) is False
+    assert calls == [["sudo", "test", "-e", str(path.resolve())]]
+
+
 def test_check_only_is_no_network_and_no_secret_resolution(tmp_path: Path) -> None:
     result = MODULE.execute(make_args(tmp_path))
     assert result == {
