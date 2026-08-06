@@ -6,6 +6,11 @@ from .contracts import (
     OrchestrationResult,
     OrchestrationStatus,
 )
+from .event_store import (
+    OrchestrationEvent,
+    OrchestrationEventStore,
+    SQLiteOrchestrationEventStore,
+)
 from .invokers import (
     CapabilityInvokerAlreadyRegisteredError,
     CapabilityInvokerNotRegisteredError,
@@ -28,8 +33,11 @@ __all__ = [
     "ExecutionStage",
     "InvocationResult",
     "OrchestrationAuditSink",
+    "OrchestrationEvent",
+    "OrchestrationEventStore",
     "OrchestrationMode",
     "OrchestrationRequest",
     "OrchestrationResult",
     "OrchestrationStatus",
+    "SQLiteOrchestrationEventStore",
 ]
