@@ -1,0 +1,18 @@
+{
+  "updated": "2026-08-07",
+  "milestones": [
+    {"id": "FOUNDATION", "title": "Constitution and governance foundation", "status": "complete", "phase": "Foundation"},
+    {"id": "INF-001", "title": "OpenBao runtime foundation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-002", "title": "Bootstrap credential retirement", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-003", "title": "Governed OpenBao restore validation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "CAP-001", "title": "Canonical Autotask read capability", "status": "complete", "phase": "Capabilities"},
+    {"id": "ORCH-001", "title": "Central Orchestrator foundation", "status": "complete", "phase": "Orchestration"},
+    {"id": "ORCH-002", "title": "Durable orchestration event store", "status": "complete", "phase": "Orchestration"},
+    {"id": "ORCH-003", "title": "Read-only execution reconstruction", "status": "complete", "phase": "Orchestration"},
+    {"id": "ORCH-004", "title": "Interrupted execution assessment", "status": "complete", "phase": "Orchestration"},
+    {"id": "SHOWCASE-001", "title": "Jason Command Center", "status": "in_progress", "phase": "Showcase"},
+    {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "planned", "phase": "Showcase"},
+    {"id": "CAP-002", "title": "Ticket Intelligence v1", "status": "planned", "phase": "Capabilities"},
+    {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
+  ]
+}
