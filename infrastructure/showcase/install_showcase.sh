@@ -39,6 +39,34 @@ cd "$SHOWCASE_DIR"
 docker compose --env-file .env pull
 docker compose --env-file .env up -d
 
+# Prometheus does not automatically reload its main configuration when the
+# repository bind-mounted file changes. Restart Prometheus and Grafana so a
+# repository update cannot leave the Command Center on stale scrape/dashboard
+# configuration.
+docker compose --env-file .env restart prometheus grafana
+
+for attempt in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:9090/-/healthy >/dev/null 2>&1; then
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "Prometheus did not become healthy after configuration reload." >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+for attempt in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+    break
+  fi
+  if [[ "$attempt" -eq 30 ]]; then
+    echo "Grafana did not become healthy after configuration reload." >&2
+    exit 1
+  fi
+  sleep 2
+done
+
 echo "Waiting for Ollama runtime..."
 for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
