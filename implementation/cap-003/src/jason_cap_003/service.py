@@ -36,7 +36,8 @@ class BusinessContextEvidence:
     correlation_id: str
     principal_id: str
     organization_id: str
-    company_name: str
+    requested_company_name: str
+    canonical_company_name: str
     discovered_company_id: str
     focused_ticket_number: str | None
     contacts_count: int
@@ -44,6 +45,9 @@ class BusinessContextEvidence:
     tickets_count: int
     contracts_count: int
     projects_count: int
+    related_record_limit: int
+    local_projection_record_limit: int
+    counts_are_bounded_reads: bool
     local_model: str
     local_processing_only: bool
     provider_side_change: bool
@@ -123,6 +127,10 @@ class AutotaskBusinessContextInvoker:
                 error_code=exc.error_code,
             ) from exc
 
+        canonical_company_name = str(
+            context.company.get("companyName", company_name)
+        ).strip() or company_name
+
         try:
             briefing = self._analyzer.analyze(
                 context,
@@ -138,7 +146,8 @@ class AutotaskBusinessContextInvoker:
             self._write_json(briefing_path, briefing.as_dict())
             evidence = self._build_evidence(
                 request=request,
-                company_name=company_name,
+                requested_company_name=company_name,
+                canonical_company_name=canonical_company_name,
                 focused_ticket_number=focused_ticket_number,
                 context=context,
                 briefing=briefing,
@@ -153,7 +162,7 @@ class AutotaskBusinessContextInvoker:
 
         return InvocationResult(
             output={
-                "company_name": str(context.company.get("companyName", company_name)),
+                "company_name": canonical_company_name,
                 "company_id": context.company_id,
                 "focused_ticket_number": focused_ticket_number,
                 "record_counts": {
@@ -163,6 +172,7 @@ class AutotaskBusinessContextInvoker:
                     "contracts": len(context.contracts),
                     "projects": len(context.projects),
                 },
+                "record_counts_are_bounded_reads": True,
                 "executive_summary": briefing.executive_summary,
                 "operational_observations": list(briefing.operational_observations),
                 "service_risks": list(briefing.service_risks),
@@ -183,21 +193,23 @@ class AutotaskBusinessContextInvoker:
         self,
         *,
         request: OrchestrationRequest,
-        company_name: str,
+        requested_company_name: str,
+        canonical_company_name: str,
         focused_ticket_number: str | None,
         context: Any,
         briefing: BusinessContextBriefing,
         briefing_path: Path,
     ) -> BusinessContextEvidence:
         core: dict[str, Any] = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "evidence_type": "autotask-business-context",
             "capability": self.capability_name,
             "execution_id": request.execution_id,
             "correlation_id": request.correlation_id,
             "principal_id": request.principal_id,
             "organization_id": request.organization_id,
-            "company_name": company_name,
+            "requested_company_name": requested_company_name,
+            "canonical_company_name": canonical_company_name,
             "discovered_company_id": context.company_id,
             "focused_ticket_number": focused_ticket_number,
             "contacts_count": len(context.contacts),
@@ -205,6 +217,9 @@ class AutotaskBusinessContextInvoker:
             "tickets_count": len(context.tickets),
             "contracts_count": len(context.contracts),
             "projects_count": len(context.projects),
+            "related_record_limit": 25,
+            "local_projection_record_limit": 10,
+            "counts_are_bounded_reads": True,
             "local_model": briefing.model,
             "local_processing_only": True,
             "provider_side_change": False,
