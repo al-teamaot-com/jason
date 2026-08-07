@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
 
 from connectors.core.contracts import ConnectorResult
+from connectors.core.openbao_secrets import OpenBaoSecretResolutionError
 from jason_cap_003 import (
     AutotaskBusinessContextError,
     AutotaskBusinessContextReader,
@@ -92,7 +92,7 @@ def test_company_context_composes_narrow_canonical_reads() -> None:
     assert all(request.context.mode == "observe" for request in connector.requests)
 
 
-def test_company_lookup_requires_exactly_one_exact_match() -> None:
+def test_company_lookup_ambiguity_has_safe_code() -> None:
     connector = FakeConnector()
 
     def ambiguous_execute(request):
@@ -111,16 +111,78 @@ def test_company_lookup_requires_exactly_one_exact_match() -> None:
 
     connector.execute = ambiguous_execute  # type: ignore[method-assign]
 
-    with pytest.raises(
-        AutotaskBusinessContextError,
-        match="exactly one exact Autotask company",
-    ):
+    with pytest.raises(AutotaskBusinessContextError) as captured:
         AutotaskBusinessContextReader(connector).read_company_context(
             company_name="Acme Corp",
             correlation_id="corr-2",
             principal_id="operator-1",
             organization_id="aot",
         )
+
+    assert captured.value.error_code == "COMPANY_MATCH_AMBIGUOUS"
+
+
+def test_company_lookup_not_found_has_safe_code() -> None:
+    connector = FakeConnector()
+
+    def empty_execute(request):
+        return ConnectorResult(
+            capability=request.context.capability,
+            provider="autotask",
+            data={"items": []},
+        )
+
+    connector.execute = empty_execute  # type: ignore[method-assign]
+
+    with pytest.raises(AutotaskBusinessContextError) as captured:
+        AutotaskBusinessContextReader(connector).read_company_context(
+            company_name="Acme Corp",
+            correlation_id="corr-empty",
+            principal_id="operator-1",
+            organization_id="aot",
+        )
+
+    assert captured.value.error_code == "COMPANY_MATCH_NOT_FOUND"
+
+
+def test_company_lookup_secret_failure_has_safe_code() -> None:
+    connector = FakeConnector()
+
+    def failed_execute(request):
+        raise OpenBaoSecretResolutionError("protected secret detail")
+
+    connector.execute = failed_execute  # type: ignore[method-assign]
+
+    with pytest.raises(AutotaskBusinessContextError) as captured:
+        AutotaskBusinessContextReader(connector).read_company_context(
+            company_name="Acme Corp",
+            correlation_id="corr-secret",
+            principal_id="operator-1",
+            organization_id="aot",
+        )
+
+    assert captured.value.error_code == "COMPANY_LOOKUP_SECRET_RESOLUTION_FAILED"
+    assert "protected secret detail" not in str(captured.value)
+
+
+def test_company_lookup_provider_failure_has_safe_code() -> None:
+    connector = FakeConnector()
+
+    def failed_execute(request):
+        raise RuntimeError("protected provider detail")
+
+    connector.execute = failed_execute  # type: ignore[method-assign]
+
+    with pytest.raises(AutotaskBusinessContextError) as captured:
+        AutotaskBusinessContextReader(connector).read_company_context(
+            company_name="Acme Corp",
+            correlation_id="corr-provider",
+            principal_id="operator-1",
+            organization_id="aot",
+        )
+
+    assert captured.value.error_code == "COMPANY_LOOKUP_PROVIDER_REQUEST_FAILED"
+    assert "protected provider detail" not in str(captured.value)
 
 
 def test_invalid_provider_items_fail_closed() -> None:
@@ -135,16 +197,15 @@ def test_invalid_provider_items_fail_closed() -> None:
 
     connector.execute = invalid_execute  # type: ignore[method-assign]
 
-    with pytest.raises(
-        AutotaskBusinessContextError,
-        match="invalid items collection",
-    ):
+    with pytest.raises(AutotaskBusinessContextError) as captured:
         AutotaskBusinessContextReader(connector).read_company_context(
             company_name="Acme Corp",
             correlation_id="corr-3",
             principal_id="operator-1",
             organization_id="aot",
         )
+
+    assert captured.value.error_code == "COMPANY_LOOKUP_INVALID_RESPONSE"
 
 
 def test_record_limit_is_bounded() -> None:
