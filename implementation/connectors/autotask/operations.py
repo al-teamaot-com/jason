@@ -80,7 +80,7 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Contacts/query",
         query_argument="search",
     ),
-    "autotask.configuration_item.get": OperationDefinition(
+    "autotask.configuration.get": OperationDefinition(
         method="GET",
         path_template=(
             "/V1.0/ConfigurationItems/"
@@ -88,7 +88,7 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         ),
         path_arguments=("configuration_item_id",),
     ),
-    "autotask.configuration_item.search": OperationDefinition(
+    "autotask.configuration.search": OperationDefinition(
         method="GET",
         path_template="/V1.0/ConfigurationItems/query",
         query_argument="search",
