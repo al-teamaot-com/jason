@@ -1,6 +1,6 @@
 # CAP-003: Autotask Business Context
 
-**Status:** Live validated; convergence in progress  
+**Status:** Complete; live validated and converged  
 **Owner:** Jason Architecture Authority
 
 ## Purpose
@@ -26,7 +26,7 @@ CAP-003 follows these Project Jason principles:
 
 ## Canonical Autotask read capability family
 
-CAP-003 expands the canonical connector with explicit read capabilities for:
+CAP-003 uses explicit read capabilities for:
 
 - `autotask.company.search`;
 - `autotask.contact.search`;
@@ -36,8 +36,6 @@ CAP-003 expands the canonical connector with explicit read capabilities for:
 - `autotask.project.search`.
 
 These capabilities resolve to provider GET operations through the existing `AutotaskConnector` and the existing `autotask.readonly` credential contract.
-
-The lower-level generic entity capability remains connector infrastructure, but higher-level business workflows should request named canonical capabilities when a named capability exists.
 
 ## Business-context assembly
 
@@ -50,9 +48,10 @@ Given a company business name, Jason:
 3. derives the Autotask company identifier from that result;
 4. binds subsequent related reads to that derived client boundary;
 5. gathers bounded related contacts, configurations, tickets, contracts, and projects;
-6. projects provider records into a bounded set of business-relevant fields for local reasoning;
-7. invokes the approved loopback-only local LLM through the governed CAP-003 runtime; and
-8. produces a structured briefing plus controlled evidence artifacts and durable orchestration history.
+6. optionally resolves a focused ticket explicitly by ticket number and verifies it belongs to the resolved company;
+7. projects provider records into a bounded set of business-relevant fields for local reasoning;
+8. invokes the approved loopback-only local LLM through the governed CAP-003 runtime; and
+9. produces a structured briefing plus controlled evidence artifacts and durable orchestration history.
 
 The operator is not required to supply the Autotask company ID.
 
@@ -69,9 +68,9 @@ The local-analysis projection:
 - limits the local model context and response size; and
 - treats all provider content as untrusted data rather than instructions.
 
-This keeps the pilot practical on the CPU-only Jason host while strengthening privacy, determinism, and prompt-injection resistance.
+The runtime explicitly labels record counts as bounded reads. Evidence records both the operator-requested company name and the canonical provider-resolved company name, avoiding ambiguity between input identity and authoritative provider identity.
 
-## Live validation
+## Live business-context validation
 
 On 2026-08-07, CAP-003 completed a governed live execution for Autotask company ID `208` using the business name `James Bales Financial LLC`.
 
@@ -87,7 +86,41 @@ The successful execution:
 - persisted a four-event Central Orchestrator lifecycle ending in `orchestration.capability.completed`; and
 - made no provider-side change.
 
+The counts above are bounded retrieved records, not provider-wide totals.
+
+## Ticket-analysis parity validation
+
+On 2026-08-07, execution `cap003-ticket-parity-live-004` proved that the broader CAP-003 architecture can replace the former CAP-002 ticket-intelligence runtime.
+
+The execution:
+
+- used the same `autotask.business.context` capability rather than a second ticket-specific orchestration path;
+- resolved `James Bales Financial LLC` to company ID `208`;
+- explicitly resolved focused ticket `T20260805.0064` through `autotask.ticket.search`;
+- verified the focused ticket belonged to the resolved company boundary;
+- included the focused ticket even though it was outside the normal bounded company ticket window;
+- invoked local model `qwen3:1.7b` locally;
+- completed in approximately 117 seconds on the CPU-only pilot host;
+- produced protected evidence with `provider_side_change=false` and no raw provider content persisted; and
+- persisted the expected four-event orchestration lifecycle ending in `orchestration.capability.completed`.
+
 Low-confidence model conclusions remain advisory interpretation. Durable provider facts and controlled evidence remain the authoritative basis for operational decisions.
+
+## CAP-002 retirement
+
+CAP-002 Ticket Intelligence was a successful transitional proof. After live CAP-003 ticket-focus parity was proven, the duplicate CAP-002 runtime package, tests, and ticket-specific operator command were removed.
+
+The historical CAP-002 document remains as institutional memory and is marked retired/superseded. Release regression tests deny reintroduction of the retired `support.ticket.analyze` implementation path.
+
+## Continuous validation
+
+The repository validation workflow now includes a dedicated CAP-003 job that:
+
+- compiles CAP-003 and its shared runtime dependencies;
+- runs the CAP-003 test suite; and
+- runs the CAP-003 convergence release gates.
+
+The showcase installer also restarts Prometheus and Grafana after configuration updates and waits for both services to report healthy, preventing the stale scrape/provisioning state observed during CAP-003 validation.
 
 ## Boundary rules
 
@@ -95,39 +128,18 @@ CAP-003 fails closed when:
 
 - the company name is empty;
 - company lookup does not resolve to exactly one exact company;
+- a focused ticket is missing, ambiguous, or belongs to another company;
 - the provider response shape is invalid;
 - a governed secret cannot be resolved;
 - a provider read fails;
-- a related read attempts to leave the discovered company boundary;
 - a requested provider operation is not an approved canonical read capability;
 - the local model is unavailable, times out, or violates the structured-response contract; or
 - evidence would overwrite an existing artifact or be written inside the repository.
 
 Related-record collection and local-model context are bounded to prevent accidental bulk extraction and unnecessary model processing.
 
-## CAP-002 convergence and retirement
+## Closeout
 
-CAP-002 Ticket Intelligence is a validated transitional proof, not a permanent parallel architecture.
+CAP-003 is complete for this increment. It establishes the canonical governed path for company-centered Autotask reasoning and focused ticket analysis without maintaining parallel ticket-specific architecture.
 
-CAP-003 must absorb the reusable CAP-002 behavior before CAP-002 is retired. Retirement requires all of the following:
-
-1. CAP-003 can reproduce the governed ticket-analysis use case with equal or stronger controls.
-2. Ticket analysis uses the broader Autotask business-context capability family and the same Central Orchestrator boundary.
-3. Local LLM processing remains governed and local-only where required.
-4. Existing ticket-analysis regression tests pass through the CAP-003 path.
-5. Operator commands, capability registration, documentation, roadmap references, and dashboard status are migrated.
-6. CAP-002 code, tests, registration, and ticket-specific duplicate orchestration are removed.
-7. Regression tests deny reintroduction of the retired duplicate capability.
-
-CAP-002 is not removed until replacement parity is proven.
-
-## Next increment
-
-The next CAP-003 increment is convergence and hardening:
-
-- add CAP-003 to continuous integration and release validation;
-- prove ticket-analysis parity through the broader CAP-003 architecture;
-- migrate remaining operator, roadmap, and dashboard references;
-- retire CAP-002 only after parity is proven;
-- add regression protection against reintroducing the duplicate ticket-specific capability; and
-- perform final documentation, release, and merge validation.
+Future Autotask intelligence should build on this capability family rather than recreate CAP-002-style provider-specific orchestration.
