@@ -51,12 +51,21 @@ class AutotaskBusinessContextReader:
         correlation_id: str,
         principal_id: str,
         organization_id: str,
+        focus_ticket_number: str | None = None,
     ) -> AutotaskBusinessContext:
         canonical_name = company_name.strip()
         if not canonical_name:
             raise AutotaskBusinessContextError(
                 "company_name must be non-empty.",
                 error_code="COMPANY_NAME_REQUIRED",
+            )
+        canonical_ticket_number = (
+            focus_ticket_number.strip() if focus_ticket_number is not None else None
+        )
+        if focus_ticket_number is not None and not canonical_ticket_number:
+            raise AutotaskBusinessContextError(
+                "focus_ticket_number must be non-empty when supplied.",
+                error_code="TICKET_FOCUS_REQUIRED",
             )
 
         companies = self._query(
@@ -94,6 +103,61 @@ class AutotaskBusinessContextReader:
             )
         client_id = str(company_id)
 
+        tickets = list(
+            self._query(
+                capability="autotask.ticket.search",
+                entity_field="companyID",
+                value=company_id,
+                correlation_id=correlation_id,
+                principal_id=principal_id,
+                organization_id=organization_id,
+                client_id=client_id,
+                failure_prefix="TICKETS_READ",
+            )
+        )
+
+        if canonical_ticket_number is not None:
+            focused_matches = self._query(
+                capability="autotask.ticket.search",
+                entity_field="ticketNumber",
+                value=canonical_ticket_number,
+                correlation_id=correlation_id,
+                principal_id=principal_id,
+                organization_id=organization_id,
+                client_id=client_id,
+                max_records=2,
+                failure_prefix="TICKET_FOCUS_READ",
+            )
+            exact_focused = [
+                item
+                for item in focused_matches
+                if str(item.get("ticketNumber", "")).casefold()
+                == canonical_ticket_number.casefold()
+            ]
+            if not exact_focused:
+                raise AutotaskBusinessContextError(
+                    "Requested ticket focus was not found in Autotask.",
+                    error_code="TICKET_FOCUS_NOT_FOUND",
+                )
+            if len(exact_focused) > 1:
+                raise AutotaskBusinessContextError(
+                    "Requested ticket focus resolved ambiguously.",
+                    error_code="TICKET_FOCUS_AMBIGUOUS",
+                )
+            focused_ticket = exact_focused[0]
+            focused_company_id = focused_ticket.get("companyID")
+            if focused_company_id is None or str(focused_company_id) != client_id:
+                raise AutotaskBusinessContextError(
+                    "Requested ticket focus does not belong to the resolved company.",
+                    error_code="TICKET_FOCUS_COMPANY_MISMATCH",
+                )
+            if not any(
+                str(ticket.get("ticketNumber", "")).casefold()
+                == canonical_ticket_number.casefold()
+                for ticket in tickets
+            ):
+                tickets.insert(0, focused_ticket)
+
         return AutotaskBusinessContext(
             company=company,
             contacts=tuple(
@@ -120,18 +184,7 @@ class AutotaskBusinessContextReader:
                     failure_prefix="CONFIGURATIONS_READ",
                 )
             ),
-            tickets=tuple(
-                self._query(
-                    capability="autotask.ticket.search",
-                    entity_field="companyID",
-                    value=company_id,
-                    correlation_id=correlation_id,
-                    principal_id=principal_id,
-                    organization_id=organization_id,
-                    client_id=client_id,
-                    failure_prefix="TICKETS_READ",
-                )
-            ),
+            tickets=tuple(tickets),
             contracts=tuple(
                 self._query(
                     capability="autotask.contract.search",
