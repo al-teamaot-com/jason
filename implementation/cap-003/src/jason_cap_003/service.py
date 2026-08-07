@@ -125,7 +125,7 @@ class AutotaskBusinessContextInvoker:
         except LocalBusinessContextAnalysisError as exc:
             raise BusinessContextInvocationError(
                 str(exc),
-                error_code="LOCAL_LLM_ANALYSIS_FAILED",
+                error_code=exc.error_code,
             ) from exc
 
         try:
