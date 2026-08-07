@@ -61,7 +61,7 @@ class AutotaskBusinessContextReader:
 
         companies = self._query(
             capability="autotask.company.search",
-            entity_field="companyName",
+            entity_field="CompanyName",
             value=canonical_name,
             correlation_id=correlation_id,
             principal_id=principal_id,
@@ -209,9 +209,15 @@ class AutotaskBusinessContextReader:
                 error_code=f"{failure_prefix}_CONNECTOR_CONFIGURATION_FAILED",
             ) from exc
         except RuntimeError as exc:
+            status_code = getattr(exc, "status_code", None)
+            code_suffix = (
+                f"HTTP_{status_code}"
+                if isinstance(status_code, int)
+                else "PROVIDER_REQUEST_FAILED"
+            )
             raise AutotaskBusinessContextError(
                 "Autotask provider request failed.",
-                error_code=f"{failure_prefix}_PROVIDER_REQUEST_FAILED",
+                error_code=f"{failure_prefix}_{code_suffix}",
             ) from exc
         except Exception as exc:
             raise AutotaskBusinessContextError(
