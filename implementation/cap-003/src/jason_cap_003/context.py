@@ -10,10 +10,6 @@ from connectors.core.contracts import Connector, ConnectorContext, ConnectorRequ
 class AutotaskBusinessContextError(RuntimeError):
     """Safe failure for governed Autotask business-context assembly."""
 
-    def __init__(self, message: str, *, error_code: str = "AUTOTASK_CONTEXT_READ_FAILED") -> None:
-        super().__init__(message)
-        self.error_code = error_code
-
 
 @dataclass(frozen=True, slots=True)
 class AutotaskBusinessContext:
@@ -48,10 +44,7 @@ class AutotaskBusinessContextReader:
     ) -> AutotaskBusinessContext:
         canonical_name = company_name.strip()
         if not canonical_name:
-            raise AutotaskBusinessContextError(
-                "company_name must be non-empty.",
-                error_code="COMPANY_NAME_INVALID",
-            )
+            raise AutotaskBusinessContextError("company_name must be non-empty.")
 
         companies = self._query(
             capability="autotask.company.search",
@@ -62,7 +55,6 @@ class AutotaskBusinessContextReader:
             organization_id=organization_id,
             client_id=None,
             max_records=2,
-            error_code="COMPANY_LOOKUP_FAILED",
         )
         exact = [
             item
@@ -71,15 +63,13 @@ class AutotaskBusinessContextReader:
         ]
         if len(exact) != 1:
             raise AutotaskBusinessContextError(
-                "Company lookup must resolve to exactly one exact Autotask company.",
-                error_code="COMPANY_LOOKUP_NOT_UNIQUE",
+                "Company lookup must resolve to exactly one exact Autotask company."
             )
         company = exact[0]
         company_id = company.get("id")
         if company_id is None:
             raise AutotaskBusinessContextError(
-                "Resolved Autotask company is missing its provider identifier.",
-                error_code="COMPANY_ID_MISSING",
+                "Resolved Autotask company is missing its provider identifier."
             )
         client_id = str(company_id)
 
@@ -94,19 +84,17 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    error_code="CONTACTS_READ_FAILED",
                 )
             ),
             configurations=tuple(
                 self._query(
-                    capability="autotask.configuration_item.search",
+                    capability="autotask.configuration.search",
                     entity_field="companyID",
                     value=company_id,
                     correlation_id=correlation_id,
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    error_code="CONFIGURATIONS_READ_FAILED",
                 )
             ),
             tickets=tuple(
@@ -118,7 +106,6 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    error_code="TICKETS_READ_FAILED",
                 )
             ),
             contracts=tuple(
@@ -130,7 +117,6 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    error_code="CONTRACTS_READ_FAILED",
                 )
             ),
             projects=tuple(
@@ -142,7 +128,6 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    error_code="PROJECTS_READ_FAILED",
                 )
             ),
         )
@@ -158,7 +143,6 @@ class AutotaskBusinessContextReader:
         organization_id: str,
         client_id: str | None,
         max_records: int | None = None,
-        error_code: str,
     ) -> tuple[Mapping[str, Any], ...]:
         search = json.dumps(
             {
@@ -173,29 +157,22 @@ class AutotaskBusinessContextReader:
             },
             separators=(",", ":"),
         )
-        try:
-            result = self._connector.execute(
-                ConnectorRequest(
-                    context=ConnectorContext(
-                        correlation_id=correlation_id,
-                        principal_id=principal_id,
-                        organization_id=organization_id,
-                        client_id=client_id,
-                        capability=capability,
-                        mode="observe",
-                    ),
-                    arguments={"search": search},
-                )
+        result = self._connector.execute(
+            ConnectorRequest(
+                context=ConnectorContext(
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    capability=capability,
+                    mode="observe",
+                ),
+                arguments={"search": search},
             )
-        except Exception as exc:
-            raise AutotaskBusinessContextError(
-                f"Governed Autotask read failed for {capability}.",
-                error_code=error_code,
-            ) from exc
+        )
         items = result.data.get("items")
         if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
             raise AutotaskBusinessContextError(
-                "Autotask query returned an invalid items collection.",
-                error_code=f"{error_code}_INVALID_RESPONSE",
+                "Autotask query returned an invalid items collection."
             )
         return tuple(items)
