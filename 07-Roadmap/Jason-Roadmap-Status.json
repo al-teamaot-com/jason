@@ -12,8 +12,8 @@
     {"id": "ORCH-004", "title": "Interrupted execution assessment", "status": "complete", "phase": "Orchestration"},
     {"id": "SHOWCASE-001", "title": "Jason Command Center", "status": "complete", "phase": "Showcase"},
     {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "complete", "phase": "Showcase"},
-    {"id": "CAP-002", "title": "Ticket Intelligence v1 - transitional proof pending retirement", "status": "complete", "phase": "Capabilities"},
-    {"id": "CAP-003", "title": "Autotask Business Context - live validated; convergence pending", "status": "in_progress", "phase": "Capabilities"},
+    {"id": "CAP-002", "title": "Ticket Intelligence v1 - retired; superseded by CAP-003", "status": "complete", "phase": "Capabilities"},
+    {"id": "CAP-003", "title": "Autotask Business Context - live validated and converged", "status": "complete", "phase": "Capabilities"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
   ]
 }
