@@ -53,8 +53,7 @@ class AutotaskBusinessContextReader:
                 error_code="COMPANY_NAME_REQUIRED",
             )
 
-        companies = self._query_stage(
-            stage="company",
+        companies = self._query(
             capability="autotask.company.search",
             entity_field="companyName",
             value=canonical_name,
@@ -63,6 +62,7 @@ class AutotaskBusinessContextReader:
             organization_id=organization_id,
             client_id=None,
             max_records=2,
+            failure_code="COMPANY_LOOKUP_FAILED",
         )
         exact = [
             item
@@ -72,103 +72,80 @@ class AutotaskBusinessContextReader:
         if len(exact) != 1:
             raise AutotaskBusinessContextError(
                 "Company lookup must resolve to exactly one exact Autotask company.",
-                error_code="COMPANY_LOOKUP_NOT_UNIQUE",
+                error_code="COMPANY_MATCH_NOT_UNIQUE",
             )
         company = exact[0]
         company_id = company.get("id")
         if company_id is None:
             raise AutotaskBusinessContextError(
                 "Resolved Autotask company is missing its provider identifier.",
-                error_code="COMPANY_ID_MISSING",
+                error_code="COMPANY_PROVIDER_ID_MISSING",
             )
         client_id = str(company_id)
 
         return AutotaskBusinessContext(
             company=company,
-            contacts=self._query_stage(
-                stage="contacts",
-                capability="autotask.contact.search",
-                entity_field="companyID",
-                value=company_id,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
+            contacts=tuple(
+                self._query(
+                    capability="autotask.contact.search",
+                    entity_field="companyID",
+                    value=company_id,
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    failure_code="CONTACTS_READ_FAILED",
+                )
             ),
-            configurations=self._query_stage(
-                stage="configurations",
-                capability="autotask.configuration.search",
-                entity_field="companyID",
-                value=company_id,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
+            configurations=tuple(
+                self._query(
+                    capability="autotask.configuration.search",
+                    entity_field="companyID",
+                    value=company_id,
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    failure_code="CONFIGURATIONS_READ_FAILED",
+                )
             ),
-            tickets=self._query_stage(
-                stage="tickets",
-                capability="autotask.ticket.search",
-                entity_field="companyID",
-                value=company_id,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
+            tickets=tuple(
+                self._query(
+                    capability="autotask.ticket.search",
+                    entity_field="companyID",
+                    value=company_id,
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    failure_code="TICKETS_READ_FAILED",
+                )
             ),
-            contracts=self._query_stage(
-                stage="contracts",
-                capability="autotask.contract.search",
-                entity_field="companyID",
-                value=company_id,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
+            contracts=tuple(
+                self._query(
+                    capability="autotask.contract.search",
+                    entity_field="companyID",
+                    value=company_id,
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    failure_code="CONTRACTS_READ_FAILED",
+                )
             ),
-            projects=self._query_stage(
-                stage="projects",
-                capability="autotask.project.search",
-                entity_field="companyID",
-                value=company_id,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
+            projects=tuple(
+                self._query(
+                    capability="autotask.project.search",
+                    entity_field="companyID",
+                    value=company_id,
+                    correlation_id=correlation_id,
+                    principal_id=principal_id,
+                    organization_id=organization_id,
+                    client_id=client_id,
+                    failure_code="PROJECTS_READ_FAILED",
+                )
             ),
         )
-
-    def _query_stage(
-        self,
-        *,
-        stage: str,
-        capability: str,
-        entity_field: str,
-        value: object,
-        correlation_id: str,
-        principal_id: str,
-        organization_id: str,
-        client_id: str | None,
-        max_records: int | None = None,
-    ) -> tuple[Mapping[str, Any], ...]:
-        error_code = f"{stage.upper()}_LOOKUP_FAILED"
-        try:
-            return self._query(
-                capability=capability,
-                entity_field=entity_field,
-                value=value,
-                correlation_id=correlation_id,
-                principal_id=principal_id,
-                organization_id=organization_id,
-                client_id=client_id,
-                max_records=max_records,
-            )
-        except AutotaskBusinessContextError:
-            raise
-        except Exception as exc:
-            raise AutotaskBusinessContextError(
-                f"Autotask {stage} lookup failed.",
-                error_code=error_code,
-            ) from exc
 
     def _query(
         self,
@@ -180,6 +157,7 @@ class AutotaskBusinessContextReader:
         principal_id: str,
         organization_id: str,
         client_id: str | None,
+        failure_code: str,
         max_records: int | None = None,
     ) -> tuple[Mapping[str, Any], ...]:
         search = json.dumps(
@@ -195,23 +173,33 @@ class AutotaskBusinessContextReader:
             },
             separators=(",", ":"),
         )
-        result = self._connector.execute(
-            ConnectorRequest(
-                context=ConnectorContext(
-                    correlation_id=correlation_id,
-                    principal_id=principal_id,
-                    organization_id=organization_id,
-                    client_id=client_id,
-                    capability=capability,
-                    mode="observe",
-                ),
-                arguments={"search": search},
+        try:
+            result = self._connector.execute(
+                ConnectorRequest(
+                    context=ConnectorContext(
+                        correlation_id=correlation_id,
+                        principal_id=principal_id,
+                        organization_id=organization_id,
+                        client_id=client_id,
+                        capability=capability,
+                        mode="observe",
+                    ),
+                    arguments={"search": search},
+                )
             )
-        )
+        except Exception as exc:
+            provider_detail = str(exc).strip()
+            if not provider_detail:
+                provider_detail = exc.__class__.__name__
+            raise AutotaskBusinessContextError(
+                f"Autotask read failed safely: {provider_detail}",
+                error_code=failure_code,
+            ) from exc
+
         items = result.data.get("items")
         if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
             raise AutotaskBusinessContextError(
                 "Autotask query returned an invalid items collection.",
-                error_code="AUTOTASK_ITEMS_INVALID",
+                error_code=failure_code,
             )
         return tuple(items)
