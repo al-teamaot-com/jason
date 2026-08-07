@@ -10,9 +10,9 @@
     {"id": "ORCH-002", "title": "Durable orchestration event store", "status": "complete", "phase": "Orchestration"},
     {"id": "ORCH-003", "title": "Read-only execution reconstruction", "status": "complete", "phase": "Orchestration"},
     {"id": "ORCH-004", "title": "Interrupted execution assessment", "status": "complete", "phase": "Orchestration"},
-    {"id": "SHOWCASE-001", "title": "Jason Command Center", "status": "in_progress", "phase": "Showcase"},
-    {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "planned", "phase": "Showcase"},
-    {"id": "CAP-002", "title": "Ticket Intelligence v1", "status": "planned", "phase": "Capabilities"},
+    {"id": "SHOWCASE-001", "title": "Jason Command Center", "status": "complete", "phase": "Showcase"},
+    {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "complete", "phase": "Showcase"},
+    {"id": "CAP-002", "title": "Ticket Intelligence v1", "status": "in_progress", "phase": "Capabilities"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
   ]
 }
