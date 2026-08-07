@@ -1,0 +1,25 @@
+[Unit]
+Description=Jason Status Metrics Exporter
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason
+Environment=JASON_REPO_ROOT=/home/al/projects/jason
+Environment=JASON_STATUS_HOST=0.0.0.0
+Environment=JASON_STATUS_PORT=9464
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/status_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+
+[Install]
+WantedBy=multi-user.target
