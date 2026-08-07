@@ -14,6 +14,7 @@
     {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "complete", "phase": "Showcase"},
     {"id": "CAP-002", "title": "Ticket Intelligence v1 - retired; superseded by CAP-003", "status": "complete", "phase": "Capabilities"},
     {"id": "CAP-003", "title": "Autotask Business Context - live validated and converged", "status": "complete", "phase": "Capabilities"},
+    {"id": "CAP-004", "title": "Provider-neutral Operational Attention Briefing - foundation in progress", "status": "in_progress", "phase": "Capabilities"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
   ]
 }
