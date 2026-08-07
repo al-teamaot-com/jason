@@ -141,6 +141,7 @@ class CentralOrchestrator:
             )
         except Exception as exc:
             safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
+            safe_error_message = str(exc).strip() or exc.__class__.__name__
             result = OrchestrationResult(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
@@ -158,7 +159,10 @@ class CentralOrchestrator:
                 "orchestration.capability.failed",
                 request,
                 stage=ExecutionStage.FAILED,
-                details={"error_code": result.error_code},
+                details={
+                    "error_code": result.error_code,
+                    "error_message": safe_error_message,
+                },
             )
             return result
 
