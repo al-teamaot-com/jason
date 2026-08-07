@@ -11,12 +11,20 @@ from typing import Any
 from kernel.resolution import CapabilityResolutionResult
 from orchestrator import ArtifactReference, InvocationResult, OrchestrationRequest
 
-from .context import AutotaskBusinessContextReader
-from .local_llm import BusinessContextBriefing, OllamaBusinessContextAnalyzer
+from .context import AutotaskBusinessContextError, AutotaskBusinessContextReader
+from .local_llm import (
+    BusinessContextBriefing,
+    LocalBusinessContextAnalysisError,
+    OllamaBusinessContextAnalyzer,
+)
 
 
 class BusinessContextInvocationError(RuntimeError):
     """Safe failure for CAP-003 business-context execution."""
+
+    def __init__(self, message: str, *, error_code: str = "BUSINESS_CONTEXT_INVOCATION_FAILED") -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,15 +77,22 @@ class AutotaskBusinessContextInvoker:
     ) -> InvocationResult:
         if resolution.capability_name != self.capability_name:
             raise BusinessContextInvocationError(
-                "Resolved capability does not match Autotask business context."
+                "Resolved capability does not match Autotask business context.",
+                error_code="CAPABILITY_MISMATCH",
             )
         company_name = self._required_argument(request, "company_name")
         evidence_directory = Path(
             self._required_argument(request, "evidence_directory")
         ).expanduser().resolve()
         self._require_outside_repository(evidence_directory)
-        evidence_directory.mkdir(parents=True, exist_ok=True)
-        os.chmod(evidence_directory, 0o700)
+        try:
+            evidence_directory.mkdir(parents=True, exist_ok=True)
+            os.chmod(evidence_directory, 0o700)
+        except OSError as exc:
+            raise BusinessContextInvocationError(
+                "Unable to prepare CAP-003 evidence directory.",
+                error_code="EVIDENCE_DIRECTORY_FAILED",
+            ) from exc
 
         briefing_path = evidence_directory / (
             f"autotask-business-briefing-{request.execution_id}.json"
@@ -87,26 +102,47 @@ class AutotaskBusinessContextInvoker:
         )
         for path in (briefing_path, evidence_path):
             if path.exists():
-                raise FileExistsError(
-                    f"CAP-003 artifact already exists; overwrite denied: {path.name}"
+                raise BusinessContextInvocationError(
+                    f"CAP-003 artifact already exists; overwrite denied: {path.name}",
+                    error_code="ARTIFACT_OVERWRITE_DENIED",
                 )
 
-        context = self._reader.read_company_context(
-            company_name=company_name,
-            correlation_id=request.correlation_id,
-            principal_id=request.principal_id,
-            organization_id=request.organization_id,
-        )
-        briefing = self._analyzer.analyze(context)
-        self._write_json(briefing_path, briefing.as_dict())
-        evidence = self._build_evidence(
-            request=request,
-            company_name=company_name,
-            context=context,
-            briefing=briefing,
-            briefing_path=briefing_path,
-        )
-        self._write_json(evidence_path, asdict(evidence))
+        try:
+            context = self._reader.read_company_context(
+                company_name=company_name,
+                correlation_id=request.correlation_id,
+                principal_id=request.principal_id,
+                organization_id=request.organization_id,
+            )
+        except AutotaskBusinessContextError as exc:
+            raise BusinessContextInvocationError(
+                str(exc),
+                error_code=exc.error_code,
+            ) from exc
+
+        try:
+            briefing = self._analyzer.analyze(context)
+        except LocalBusinessContextAnalysisError as exc:
+            raise BusinessContextInvocationError(
+                str(exc),
+                error_code="LOCAL_LLM_ANALYSIS_FAILED",
+            ) from exc
+
+        try:
+            self._write_json(briefing_path, briefing.as_dict())
+            evidence = self._build_evidence(
+                request=request,
+                company_name=company_name,
+                context=context,
+                briefing=briefing,
+                briefing_path=briefing_path,
+            )
+            self._write_json(evidence_path, asdict(evidence))
+        except OSError as exc:
+            raise BusinessContextInvocationError(
+                "Unable to persist CAP-003 evidence artifacts.",
+                error_code="ARTIFACT_WRITE_FAILED",
+            ) from exc
 
         return InvocationResult(
             output={
@@ -178,7 +214,8 @@ class AutotaskBusinessContextInvoker:
         except ValueError:
             return
         raise BusinessContextInvocationError(
-            "Business-context artifacts must be outside the repository."
+            "Business-context artifacts must be outside the repository.",
+            error_code="EVIDENCE_PATH_INSIDE_REPOSITORY",
         )
 
     @staticmethod
@@ -186,7 +223,8 @@ class AutotaskBusinessContextInvoker:
         value = request.arguments.get(name)
         if value is None or not str(value).strip():
             raise BusinessContextInvocationError(
-                f"Required business-context argument is missing: {name}"
+                f"Required business-context argument is missing: {name}",
+                error_code="REQUIRED_ARGUMENT_MISSING",
             )
         return str(value).strip()
 
