@@ -39,7 +39,6 @@ DEFAULT_EVIDENCE_ROOT = Path.home() / "Jason-Evidence" / "Autotask-Business-Cont
 DEFAULT_EVENT_STORE = (
     Path.home() / "Jason-Evidence" / "Orchestrator" / "orchestration.sqlite3"
 )
-CHECK_ONLY_EVENT_STORE = Path(":memory:")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,14 +79,12 @@ def run(args: argparse.Namespace):
     execution_id = (args.execution_id or f"autotask-context-{uuid4()}").strip()
     correlation_id = (args.correlation_id or f"corr-{uuid4()}").strip()
     evidence_root = args.evidence_root.expanduser().resolve()
-    event_store = (
-        CHECK_ONLY_EVENT_STORE
-        if args.check_only
-        else args.event_store.expanduser().resolve()
-    )
+    event_store = args.event_store.expanduser().resolve()
 
     if not args.check_only:
         require_deployment_ready(args.deployment_record)
+    else:
+        event_store = Path(":memory:")
 
     runtime = build_autotask_business_context_runtime(
         autotask_connector=build_autotask_connector(),
@@ -132,16 +129,27 @@ def run(args: argparse.Namespace):
                 allow_pilot_provider=True,
             )
         )
+        events = runtime.event_store.list_by_execution(execution_id)
     finally:
         runtime.close()
-    return result
+    return result, events
+
+
+def _failure_detail(events) -> str:
+    if not events:
+        return "No orchestration events were recorded."
+    last = events[-1]
+    error_code = last.payload.get("error_code")
+    if error_code:
+        return f"Last event: {last.event_type}; error_code={error_code}"
+    return f"Last event: {last.event_type}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        result = run(args)
+        result, events = run(args)
     except Exception as exc:
         parser.exit(1, f"DENIED: {exc}\n")
 
@@ -159,6 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if result.status.value != "succeeded":
+        print(f"Failure detail: {_failure_detail(events)}", file=sys.stderr)
         parser.exit(
             1,
             "DENIED: Governed Autotask business-context execution did not succeed.\n",
