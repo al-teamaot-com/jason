@@ -4,7 +4,13 @@ from dataclasses import dataclass
 import json
 from typing import Any, Mapping
 
-from connectors.core.contracts import Connector, ConnectorContext, ConnectorRequest
+from connectors.core.contracts import (
+    Connector,
+    ConnectorConfigurationError,
+    ConnectorContext,
+    ConnectorRequest,
+)
+from connectors.core.openbao_secrets import OpenBaoSecretResolutionError
 
 
 class AutotaskBusinessContextError(RuntimeError):
@@ -62,17 +68,22 @@ class AutotaskBusinessContextReader:
             organization_id=organization_id,
             client_id=None,
             max_records=2,
-            failure_code="COMPANY_LOOKUP_FAILED",
+            failure_prefix="COMPANY_LOOKUP",
         )
         exact = [
             item
             for item in companies
             if str(item.get("companyName", "")).casefold() == canonical_name.casefold()
         ]
-        if len(exact) != 1:
+        if not exact:
             raise AutotaskBusinessContextError(
-                "Company lookup must resolve to exactly one exact Autotask company.",
-                error_code="COMPANY_MATCH_NOT_UNIQUE",
+                "Company lookup returned no exact Autotask company.",
+                error_code="COMPANY_MATCH_NOT_FOUND",
+            )
+        if len(exact) > 1:
+            raise AutotaskBusinessContextError(
+                "Company lookup returned multiple exact Autotask companies.",
+                error_code="COMPANY_MATCH_AMBIGUOUS",
             )
         company = exact[0]
         company_id = company.get("id")
@@ -94,7 +105,7 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    failure_code="CONTACTS_READ_FAILED",
+                    failure_prefix="CONTACTS_READ",
                 )
             ),
             configurations=tuple(
@@ -106,7 +117,7 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    failure_code="CONFIGURATIONS_READ_FAILED",
+                    failure_prefix="CONFIGURATIONS_READ",
                 )
             ),
             tickets=tuple(
@@ -118,7 +129,7 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    failure_code="TICKETS_READ_FAILED",
+                    failure_prefix="TICKETS_READ",
                 )
             ),
             contracts=tuple(
@@ -130,7 +141,7 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    failure_code="CONTRACTS_READ_FAILED",
+                    failure_prefix="CONTRACTS_READ",
                 )
             ),
             projects=tuple(
@@ -142,7 +153,7 @@ class AutotaskBusinessContextReader:
                     principal_id=principal_id,
                     organization_id=organization_id,
                     client_id=client_id,
-                    failure_code="PROJECTS_READ_FAILED",
+                    failure_prefix="PROJECTS_READ",
                 )
             ),
         )
@@ -157,7 +168,7 @@ class AutotaskBusinessContextReader:
         principal_id: str,
         organization_id: str,
         client_id: str | None,
-        failure_code: str,
+        failure_prefix: str,
         max_records: int | None = None,
     ) -> tuple[Mapping[str, Any], ...]:
         search = json.dumps(
@@ -187,19 +198,31 @@ class AutotaskBusinessContextReader:
                     arguments={"search": search},
                 )
             )
-        except Exception as exc:
-            provider_detail = str(exc).strip()
-            if not provider_detail:
-                provider_detail = exc.__class__.__name__
+        except OpenBaoSecretResolutionError as exc:
             raise AutotaskBusinessContextError(
-                f"Autotask read failed safely: {provider_detail}",
-                error_code=failure_code,
+                "Autotask read could not resolve its governed secret.",
+                error_code=f"{failure_prefix}_SECRET_RESOLUTION_FAILED",
+            ) from exc
+        except ConnectorConfigurationError as exc:
+            raise AutotaskBusinessContextError(
+                "Autotask connector configuration is unavailable.",
+                error_code=f"{failure_prefix}_CONNECTOR_CONFIGURATION_FAILED",
+            ) from exc
+        except RuntimeError as exc:
+            raise AutotaskBusinessContextError(
+                "Autotask provider request failed.",
+                error_code=f"{failure_prefix}_PROVIDER_REQUEST_FAILED",
+            ) from exc
+        except Exception as exc:
+            raise AutotaskBusinessContextError(
+                "Autotask read failed safely.",
+                error_code=f"{failure_prefix}_UNEXPECTED_FAILURE",
             ) from exc
 
         items = result.data.get("items")
         if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
             raise AutotaskBusinessContextError(
                 "Autotask query returned an invalid items collection.",
-                error_code=failure_code,
+                error_code=f"{failure_prefix}_INVALID_RESPONSE",
             )
         return tuple(items)
