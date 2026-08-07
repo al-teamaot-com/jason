@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Any
+from typing import Any, Mapping, Sequence
 from urllib import error, request
 
 from .context import AutotaskBusinessContext
@@ -39,7 +39,81 @@ class BusinessContextBriefing:
 
 
 class OllamaBusinessContextAnalyzer:
-    """Analyze bounded Autotask business context using loopback-only Ollama."""
+    """Analyze a compact, bounded Autotask context using loopback-only Ollama."""
+
+    _MAX_RECORDS_PER_COLLECTION = 10
+    _MAX_TEXT_CHARS = 1200
+
+    _COMPANY_FIELDS = (
+        "id",
+        "companyName",
+        "companyType",
+        "isActive",
+        "phone",
+        "webAddress",
+        "address1",
+        "city",
+        "state",
+        "postalCode",
+        "country",
+        "ownerResourceID",
+    )
+    _CONTACT_FIELDS = (
+        "id",
+        "firstName",
+        "lastName",
+        "title",
+        "emailAddress",
+        "phone",
+        "mobilePhone",
+        "isActive",
+    )
+    _CONFIGURATION_FIELDS = (
+        "id",
+        "referenceTitle",
+        "serialNumber",
+        "productID",
+        "configurationItemType",
+        "installDate",
+        "warrantyExpirationDate",
+        "active",
+    )
+    _TICKET_FIELDS = (
+        "id",
+        "ticketNumber",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "queueID",
+        "issueType",
+        "subIssueType",
+        "createDate",
+        "lastActivityDate",
+        "dueDateTime",
+        "completedDate",
+        "contactID",
+        "configurationItemID",
+        "assignedResourceID",
+    )
+    _CONTRACT_FIELDS = (
+        "id",
+        "contractName",
+        "contractType",
+        "status",
+        "startDate",
+        "endDate",
+        "serviceLevelAgreementID",
+    )
+    _PROJECT_FIELDS = (
+        "id",
+        "projectName",
+        "description",
+        "status",
+        "startDateTime",
+        "endDateTime",
+        "projectLeadResourceID",
+    )
 
     def __init__(
         self,
@@ -61,13 +135,15 @@ class OllamaBusinessContextAnalyzer:
         return self._model
 
     def analyze(self, context: AutotaskBusinessContext) -> BusinessContextBriefing:
+        compact_context = self._compact_context(context)
         payload = {
             "model": self._model,
             "stream": False,
             "think": False,
             "format": "json",
             "options": {
-                "num_ctx": 32768,
+                "num_ctx": 8192,
+                "num_predict": 768,
             },
             "messages": [
                 {
@@ -79,27 +155,22 @@ class OllamaBusinessContextAnalyzer:
                         "Return only JSON with keys executive_summary, operational_observations, "
                         "service_risks, recommended_focus, notable_relationships, confidence. "
                         "All fields except executive_summary and confidence are arrays of concise strings. "
+                        "Use no more than four items in each array. Keep the executive summary under 120 words. "
                         "confidence must be low, medium, or high. Distinguish observations from recommendations."
                     ),
                 },
                 {
                     "role": "user",
                     "content": json.dumps(
-                        {
-                            "company": context.company,
-                            "contacts": context.contacts,
-                            "configurations": context.configurations,
-                            "tickets": context.tickets,
-                            "contracts": context.contracts,
-                            "projects": context.projects,
-                        },
+                        compact_context,
                         ensure_ascii=False,
                         default=str,
+                        separators=(",", ":"),
                     ),
                 },
             ],
         }
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         http_request = request.Request(
             self._endpoint,
             data=body,
@@ -186,6 +257,63 @@ class OllamaBusinessContextAnalyzer:
             ),
             confidence=confidence,
         )
+
+    @classmethod
+    def _compact_context(cls, context: AutotaskBusinessContext) -> dict[str, Any]:
+        return {
+            "company": cls._project_record(context.company, cls._COMPANY_FIELDS),
+            "contacts": cls._project_collection(context.contacts, cls._CONTACT_FIELDS),
+            "configurations": cls._project_collection(
+                context.configurations, cls._CONFIGURATION_FIELDS
+            ),
+            "tickets": cls._project_collection(context.tickets, cls._TICKET_FIELDS),
+            "contracts": cls._project_collection(context.contracts, cls._CONTRACT_FIELDS),
+            "projects": cls._project_collection(context.projects, cls._PROJECT_FIELDS),
+            "record_counts": {
+                "contacts": len(context.contacts),
+                "configurations": len(context.configurations),
+                "tickets": len(context.tickets),
+                "contracts": len(context.contracts),
+                "projects": len(context.projects),
+            },
+        }
+
+    @classmethod
+    def _project_collection(
+        cls,
+        records: Sequence[Mapping[str, Any]],
+        fields: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        return [
+            cls._project_record(record, fields)
+            for record in records[: cls._MAX_RECORDS_PER_COLLECTION]
+        ]
+
+    @classmethod
+    def _project_record(
+        cls,
+        record: Mapping[str, Any],
+        fields: Sequence[str],
+    ) -> dict[str, Any]:
+        projected: dict[str, Any] = {}
+        for field in fields:
+            if field not in record:
+                continue
+            value = record[field]
+            if value is None:
+                continue
+            if isinstance(value, str):
+                value = value.strip()
+                if not value:
+                    continue
+                if len(value) > cls._MAX_TEXT_CHARS:
+                    value = value[: cls._MAX_TEXT_CHARS] + "..."
+            elif not isinstance(value, (bool, int, float)):
+                value = str(value)
+                if len(value) > cls._MAX_TEXT_CHARS:
+                    value = value[: cls._MAX_TEXT_CHARS] + "..."
+            projected[field] = value
+        return projected
 
     @staticmethod
     def _required_text(value: object, field: str) -> str:
