@@ -47,11 +47,11 @@ class ExecutionReconstructor:
     def reconstruct(self, execution_id: str) -> ReconstructedExecution:
         canonical_execution_id = execution_id.strip()
         if not canonical_execution_id:
-            raise ValueError("execution_id must be non-empty.")
+            raise ExecutionReconstructionError("execution_id must be non-empty.")
 
         events = self._event_reader.list_by_execution(canonical_execution_id)
         if not events:
-            raise LookupError(
+            raise ExecutionReconstructionError(
                 f"No orchestration events exist for execution: {canonical_execution_id}"
             )
 
