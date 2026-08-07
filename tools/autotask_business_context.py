@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--company-name", required=True)
+    parser.add_argument(
+        "--ticket-number",
+        help=(
+            "Optional ticket focus. The ticket must belong to the discovered company "
+            "context; CAP-003 remains the single broader business-context capability."
+        ),
+    )
     parser.add_argument("--principal-id", required=True)
     parser.add_argument("--organization-id", required=True)
     parser.add_argument("--execution-id")
@@ -80,6 +87,7 @@ def run(args: argparse.Namespace):
     correlation_id = (args.correlation_id or f"corr-{uuid4()}").strip()
     evidence_root = args.evidence_root.expanduser().resolve()
     event_store = args.event_store.expanduser().resolve()
+    ticket_number = (args.ticket_number or "").strip()
 
     if not args.check_only:
         require_deployment_ready(args.deployment_record)
@@ -92,6 +100,13 @@ def run(args: argparse.Namespace):
         repository_root=REPOSITORY_ROOT,
     )
     try:
+        request_arguments = {
+            "company_name": args.company_name.strip(),
+            "evidence_directory": str(evidence_root),
+        }
+        if ticket_number:
+            request_arguments["ticket_number"] = ticket_number
+
         result = runtime.orchestrator.execute(
             OrchestrationRequest(
                 execution_id=execution_id,
@@ -120,10 +135,7 @@ def run(args: argparse.Namespace):
                     maximum_output_tokens=3072,
                     maximum_attempts=1,
                 ),
-                arguments={
-                    "company_name": args.company_name.strip(),
-                    "evidence_directory": str(evidence_root),
-                },
+                arguments=request_arguments,
                 requester_kind="human",
                 allow_pilot_capability=True,
                 allow_pilot_provider=True,
@@ -180,6 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     output = result.output
     print(f"Company: {output['company_name']}")
     print(f"Discovered Autotask company ID: {output['company_id']}")
+    if output.get("focused_ticket_number"):
+        print(f"Focused ticket: {output['focused_ticket_number']}")
     print(f"Local model: {output['model']}")
     print(f"Confidence: {output['confidence']}")
     print()
