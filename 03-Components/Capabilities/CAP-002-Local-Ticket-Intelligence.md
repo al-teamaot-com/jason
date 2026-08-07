@@ -1,103 +1,59 @@
 # CAP-002: Local Ticket Intelligence
 
-**Status:** Pilot
+**Status:** Retired; superseded by CAP-003  
+**Retired:** 2026-08-07
 
-## Purpose
+## Historical purpose
 
-CAP-002 turns the existing governed Autotask read capability and the local Jason LLM into one useful technician-facing workflow.
+CAP-002 was the first governed proof that Jason could combine the canonical read-only Autotask path, the Central Orchestrator, durable evidence, and the local loopback-only Ollama model into a useful technician-facing workflow.
 
-The operator supplies a unique Autotask ticket number and identity context. The Central Orchestrator resolves the named capability `support.ticket.analyze`, selects the governed local provider, invokes the registered implementation, persists orchestration lifecycle events, and returns a structured technician briefing.
+The operator supplied a unique Autotask ticket number and identity context. The Central Orchestrator resolved the named capability `support.ticket.analyze`, selected the governed local provider, invoked the registered CAP-002 implementation, persisted orchestration lifecycle events, and returned a structured technician briefing.
 
-## Constitutional alignment
+## Retirement decision
 
-CAP-002 preserves the existing architecture instead of creating shortcut paths:
+CAP-002 was intentionally transitional. Maintaining a ticket-specific runtime in parallel with the broader Autotask business-context architecture would create duplicate orchestration, duplicate local-LLM handling, and a second long-term capability model for the same provider data.
 
-- **Central orchestration:** the technician requests one named capability through the Central Orchestrator.
-- **Integrate before innovate:** Autotask access reuses the canonical `autotask.readonly` connector and AppRole contract.
-- **Do not put a band-aid on it; fix it:** the canonical Autotask live-read boundary was extended to return an ephemeral ticket snapshot rather than introducing a second ticket transport.
-- **Least authority:** the workflow is read-only and creates no Autotask-side change.
-- **Local processing:** ticket content is sent only to the loopback Ollama endpoint at `127.0.0.1:11434` during this pilot.
-- **Evidence before assertion:** Autotask read evidence, derived briefing evidence, CAP-002 evidence, and durable orchestration events are retained.
-- **Data minimization:** the standard Autotask evidence remains hash-backed and excludes raw title and description values.
-- **Prompt-injection boundary:** ticket title and description are explicitly treated as untrusted data, never as instructions.
-- **One attempt:** the pilot performs no hidden retries or autonomous recovery.
+On 2026-08-07, CAP-003 proved replacement parity through the canonical `autotask.business.context` capability using optional ticket focus. Live execution `cap003-ticket-parity-live-004`:
 
-## Capability contract
+- resolved `James Bales Financial LLC` to Autotask company ID `208`;
+- explicitly resolved focused ticket `T20260805.0064` through the canonical `autotask.ticket.search` path;
+- verified the ticket belonged to the resolved company boundary;
+- analyzed the focused ticket together with bounded company context using local model `qwen3:1.7b`;
+- completed through the Central Orchestrator with the expected four-event lifecycle ending in `orchestration.capability.completed`;
+- produced protected briefing and evidence artifacts;
+- made no provider-side change; and
+- completed in approximately 117 seconds on the CPU-only pilot host.
 
-Canonical capability:
+After that parity proof, the CAP-002 runtime package, tests, and `tools/ticket_intelligence.py` operator command were retired. Regression tests now deny reintroduction of the retired `support.ticket.analyze` runtime.
 
-```text
-support.ticket.analyze
-```
+## Superseding capability
 
-Version:
+Current governed path:
 
 ```text
-1.0
+autotask.business.context
 ```
 
-Pilot execution mode:
+Operator command:
 
 ```text
-local_ai
+tools/autotask_business_context.py
 ```
 
-Provider:
+Ticket-focused use remains available through the optional `--ticket-number` argument while retaining the broader company/business-context architecture.
 
-```text
-jason.local-ticket-intelligence
-```
+## Preserved architectural lessons
 
-Local model:
+CAP-002 established several controls that remain part of CAP-003:
 
-```text
-qwen3:1.7b
-```
+- central orchestration rather than direct capability-to-capability invocation;
+- canonical Autotask read access and governed secret resolution;
+- read-only provider behavior;
+- loopback-only local model processing for the pilot;
+- provider content treated as untrusted data rather than instructions;
+- protected evidence outside the repository;
+- durable correlated orchestration events;
+- one-attempt execution without hidden autonomous recovery; and
+- model output treated as advisory interpretation rather than authoritative provider fact.
 
-## Execution flow
-
-1. The operator submits a ticket number, principal ID, and organization ID.
-2. The Central Orchestrator resolves `support.ticket.analyze` through the Kernel capability registry, provider registry, and execution policy engine.
-3. The registered CAP-002 invoker calls the canonical governed Autotask read service.
-4. Autotask returns exactly one ticket and the company boundary is derived from that authoritative ticket record.
-5. The ticket title and description remain in memory for the analysis step.
-6. The local Ollama model receives the ticket as untrusted data and produces structured JSON.
-7. Jason writes a technician briefing artifact and CAP-002 evidence outside the repository.
-8. The Central Orchestrator records the correlated execution lifecycle in the durable event store.
-9. The operator receives the summary, likely causes, recommended diagnostic steps, escalation flags, confidence, and artifact references.
-
-## Persisted artifacts
-
-The workflow creates three JSON artifacts under the configured evidence directory:
-
-- canonical Autotask read evidence;
-- the derived technician briefing;
-- CAP-002 execution evidence linking the Autotask evidence, briefing checksum, local model, identity context, and execution ID.
-
-The Autotask evidence contains hashes of the ticket title and description rather than the raw source text.
-
-The technician briefing is derived work product and may contain a concise summary of ticket details. It is protected with mode `600` and is not stored in the repository.
-
-## Check-only mode
-
-Check-only mode runs capability resolution and policy evaluation through the Central Orchestrator but performs no Autotask request and no Ollama request.
-
-Durable orchestration lifecycle events may still be written because check-only itself is an auditable governance action.
-
-## Explicit exclusions
-
-CAP-002 does not:
-
-- modify an Autotask ticket;
-- post notes or status changes;
-- run Datto RMM commands;
-- contact hosted AI providers;
-- permit direct agent-to-agent communication;
-- automatically remediate the issue;
-- retry, resume, replay, or recover an execution;
-- treat model output as verified fact;
-- bypass technician judgment or existing approval requirements.
-
-## Pilot success criteria
-
-The pilot is successful when one authorized ticket can be read through the canonical connector, analyzed by the local model through the Central Orchestrator, returned as a useful structured technician briefing, and reconstructed later from durable evidence without exposing credentials or writing back to Autotask.
+This document remains as institutional memory. It does not describe an active runtime capability.
