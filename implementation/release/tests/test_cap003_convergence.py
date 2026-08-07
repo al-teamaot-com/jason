@@ -35,8 +35,31 @@ def test_cap003_ticket_focus_is_the_convergence_path() -> None:
     assert 'error_code="TICKET_FOCUS_COMPANY_MISMATCH"' in context
 
 
-def test_cap002_is_not_retired_before_parity_closeout() -> None:
-    assert (REPO_ROOT / "implementation" / "cap-002").is_dir()
+def test_cap002_duplicate_runtime_is_retired() -> None:
+    assert not (REPO_ROOT / "implementation" / "cap-002").exists()
+    assert not (REPO_ROOT / "tools" / "ticket_intelligence.py").exists()
+
+
+def test_retired_ticket_capability_cannot_be_reintroduced() -> None:
+    implementation = REPO_ROOT / "implementation"
+    for path in implementation.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "support.ticket.analyze" not in text
+        assert "jason_cap_002" not in text
+
+
+def test_cap003_evidence_distinguishes_requested_and_canonical_identity() -> None:
+    service = (
+        REPO_ROOT
+        / "implementation"
+        / "cap-003"
+        / "src"
+        / "jason_cap_003"
+        / "service.py"
+    ).read_text(encoding="utf-8")
+    assert "requested_company_name" in service
+    assert "canonical_company_name" in service
+    assert '"counts_are_bounded_reads": True' in service
 
 
 def test_showcase_installer_reloads_observability_configuration() -> None:
