@@ -66,6 +66,9 @@ class OllamaBusinessContextAnalyzer:
             "stream": False,
             "think": False,
             "format": "json",
+            "options": {
+                "num_ctx": 32768,
+            },
             "messages": [
                 {
                     "role": "system",
@@ -106,7 +109,22 @@ class OllamaBusinessContextAnalyzer:
         try:
             with request.urlopen(http_request, timeout=self._timeout_seconds) as response:
                 response_body = response.read().decode("utf-8")
-        except (OSError, error.URLError, TimeoutError) as exc:
+        except error.HTTPError as exc:
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM HTTP request failed.",
+                error_code=f"LOCAL_LLM_HTTP_{exc.code}",
+            ) from exc
+        except (error.URLError, ConnectionError) as exc:
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM is unavailable.",
+                error_code="LOCAL_LLM_UNAVAILABLE",
+            ) from exc
+        except TimeoutError as exc:
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM request timed out.",
+                error_code="LOCAL_LLM_TIMEOUT",
+            ) from exc
+        except OSError as exc:
             raise LocalBusinessContextAnalysisError(
                 "Local LLM request failed.",
                 error_code="LOCAL_LLM_REQUEST_FAILED",
@@ -116,36 +134,33 @@ class OllamaBusinessContextAnalyzer:
             envelope = json.loads(response_body)
         except json.JSONDecodeError as exc:
             raise LocalBusinessContextAnalysisError(
-                "Local LLM returned an invalid API envelope.",
-                error_code="LOCAL_LLM_INVALID_ENVELOPE",
+                "Local LLM returned invalid JSON.",
+                error_code="LOCAL_LLM_INVALID_ENVELOPE_JSON",
             ) from exc
 
-        try:
-            raw_content = envelope["message"]["content"]
-        except (KeyError, TypeError) as exc:
+        message = envelope.get("message")
+        if not isinstance(message, dict):
             raise LocalBusinessContextAnalysisError(
-                "Local LLM response is missing message content.",
-                error_code="LOCAL_LLM_MESSAGE_CONTENT_MISSING",
-            ) from exc
-
-        if not isinstance(raw_content, str):
-            raise LocalBusinessContextAnalysisError(
-                "Local LLM message content is not text.",
-                error_code="LOCAL_LLM_MESSAGE_CONTENT_INVALID",
+                "Local LLM response is missing its message envelope.",
+                error_code="LOCAL_LLM_MESSAGE_MISSING",
             )
-
+        raw_content = message.get("content")
+        if not isinstance(raw_content, str) or not raw_content.strip():
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM response content is empty.",
+                error_code="LOCAL_LLM_CONTENT_EMPTY",
+            )
         try:
             content = json.loads(raw_content)
         except json.JSONDecodeError as exc:
             raise LocalBusinessContextAnalysisError(
                 "Local LLM returned invalid structured JSON.",
-                error_code="LOCAL_LLM_INVALID_STRUCTURED_JSON",
+                error_code="LOCAL_LLM_INVALID_CONTENT_JSON",
             ) from exc
-
         if not isinstance(content, dict):
             raise LocalBusinessContextAnalysisError(
                 "Local LLM structured response must be an object.",
-                error_code="LOCAL_LLM_STRUCTURED_RESPONSE_INVALID",
+                error_code="LOCAL_LLM_CONTENT_NOT_OBJECT",
             )
 
         confidence = self._required_text(content.get("confidence"), "confidence").lower()
