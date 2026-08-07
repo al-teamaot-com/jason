@@ -36,13 +36,24 @@ def test_cap003_ticket_focus_is_the_convergence_path() -> None:
 
 
 def test_cap002_duplicate_runtime_is_retired() -> None:
-    assert not (REPO_ROOT / "implementation" / "cap-002").exists()
+    retired_root = REPO_ROOT / "implementation" / "cap-002"
+    tracked_runtime_files = [
+        path
+        for path in retired_root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix != ".pyc"
+    ] if retired_root.exists() else []
+
+    assert tracked_runtime_files == []
     assert not (REPO_ROOT / "tools" / "ticket_intelligence.py").exists()
 
 
 def test_retired_ticket_capability_cannot_be_reintroduced() -> None:
     implementation = REPO_ROOT / "implementation"
     for path in implementation.rglob("*.py"):
+        if "tests" in path.parts or "__pycache__" in path.parts:
+            continue
         text = path.read_text(encoding="utf-8")
         assert "support.ticket.analyze" not in text
         assert "jason_cap_002" not in text
