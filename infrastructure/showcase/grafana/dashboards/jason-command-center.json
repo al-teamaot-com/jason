@@ -110,10 +110,10 @@
     {
       "type": "stat",
       "title": "CAP-003 Business Context",
-      "description": "Live business-context execution has been validated. CAP-003 remains in progress until CAP-002 ticket-analysis parity and retirement are complete.",
+      "description": "Autotask Business Context is live validated, ticket-analysis parity is proven, and the duplicate CAP-002 runtime is retired.",
       "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
-      "targets": [{"expr": "jason_roadmap_item_info{milestone=\"CAP-003\",status=\"in_progress\"}", "refId": "A"}],
-      "fieldConfig": {"defaults": {"mappings": [{"options": {"1": {"text": "LIVE VALIDATED / CONVERGENCE PENDING"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "orange", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "targets": [{"expr": "jason_roadmap_item_info{milestone=\"CAP-003\",status=\"complete\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"1": {"text": "COMPLETE / CONVERGED"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
       "gridPos": {"h": 4, "w": 10, "x": 14, "y": 12},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
@@ -140,5 +140,5 @@
   "timezone": "browser",
   "title": "Jason Command Center",
   "uid": "jason-command-center",
-  "version": 2
+  "version": 3
 }
