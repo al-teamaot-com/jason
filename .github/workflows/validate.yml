@@ -31,6 +31,22 @@ jobs:
       - name: Test
         run: pytest
 
+  cap-003:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation/cap-003/src:implementation/cap-001/src:implementation/cli/src:implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile CAP-003 and shared runtime
+        run: python -m compileall -q implementation/cap-003/src implementation/cap-003/tests implementation/orchestrator implementation/connectors implementation/kernel tools/autotask_business_context.py
+      - name: Test CAP-003
+        run: python -m pytest implementation/cap-003/tests -q
+      - name: Test convergence release gates
+        run: python -m pytest implementation/release/tests/test_cap003_convergence.py -q
+
   documentation:
     runs-on: ubuntu-latest
     steps:
