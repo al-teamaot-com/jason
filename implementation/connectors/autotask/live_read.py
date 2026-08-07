@@ -31,6 +31,25 @@ class AutotaskLiveReadRequest:
 
 
 @dataclass(frozen=True)
+class AutotaskTicketSnapshot:
+    """Ephemeral ticket content returned through the canonical read boundary.
+
+    Raw title and description are intentionally not written to the standard
+    live-read evidence record. Callers must apply their own governed data-
+    handling rules before persisting derived artifacts.
+    """
+
+    ticket_number: str
+    company_id: str
+    title: str
+    description: str
+    created_at: str
+    updated_at: str | None
+    configuration_item_id: str | None
+    requester_identity_id: str | None
+
+
+@dataclass(frozen=True)
 class AutotaskLiveReadEvidence:
     schema_version: str
     provider: str
@@ -61,13 +80,14 @@ class GovernedAutotaskLiveRead:
     def __init__(self, connector: Connector) -> None:
         self._connector = connector
 
-    def validate(
+    def read_ticket(
         self,
         request: AutotaskLiveReadRequest,
         *,
         output_path: Path,
         repository_root: Path | None = None,
-    ) -> AutotaskLiveReadEvidence:
+    ) -> tuple[AutotaskTicketSnapshot, AutotaskLiveReadEvidence]:
+        """Read one exact ticket and persist the existing redacted evidence."""
         normalized = self._validate_request(request)
         destination = output_path.expanduser().resolve()
         self._validate_destination(destination, repository_root)
@@ -107,12 +127,39 @@ class GovernedAutotaskLiveRead:
             ticket.get("companyID"),
             "companyID",
         )
+        snapshot = AutotaskTicketSnapshot(
+            ticket_number=normalized.ticket_number,
+            company_id=discovered_company_id,
+            title=str(ticket["title"]),
+            description=str(ticket["description"]),
+            created_at=str(ticket["createDate"]),
+            updated_at=self._optional_string(ticket.get("lastActivityDate")),
+            configuration_item_id=self._optional_string(
+                ticket.get("configurationItemID")
+            ),
+            requester_identity_id=self._optional_string(ticket.get("contactID")),
+        )
         evidence = self._build_evidence(
             normalized,
             ticket,
             discovered_company_id=discovered_company_id,
         )
         self._write_evidence(destination, evidence)
+        return snapshot, evidence
+
+    def validate(
+        self,
+        request: AutotaskLiveReadRequest,
+        *,
+        output_path: Path,
+        repository_root: Path | None = None,
+    ) -> AutotaskLiveReadEvidence:
+        """Compatibility boundary for CAP-001 callers that need evidence only."""
+        _, evidence = self.read_ticket(
+            request,
+            output_path=output_path,
+            repository_root=repository_root,
+        )
         return evidence
 
     @staticmethod
