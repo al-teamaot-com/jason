@@ -18,11 +18,21 @@ def test_cap003_ticket_focus_is_the_convergence_path() -> None:
         / "jason_cap_003"
         / "service.py"
     ).read_text(encoding="utf-8")
+    context = (
+        REPO_ROOT
+        / "implementation"
+        / "cap-003"
+        / "src"
+        / "jason_cap_003"
+        / "context.py"
+    ).read_text(encoding="utf-8")
 
     assert '"--ticket-number"' in tool
     assert 'capability_name = "autotask.business.context"' in service
-    assert 'error_code="TICKET_FOCUS_NOT_FOUND"' in service
     assert "focused_ticket_number" in service
+    assert 'entity_field="ticketNumber"' in context
+    assert 'error_code="TICKET_FOCUS_NOT_FOUND"' in context
+    assert 'error_code="TICKET_FOCUS_COMPANY_MISMATCH"' in context
 
 
 def test_cap002_is_not_retired_before_parity_closeout() -> None:
