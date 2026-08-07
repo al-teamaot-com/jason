@@ -111,7 +111,7 @@ def build_autotask_business_context_runtime(
                 {
                     "autotask.company.search",
                     "autotask.contact.search",
-                    "autotask.configuration_item.search",
+                    "autotask.configuration.search",
                     "autotask.ticket.search",
                     "autotask.contract.search",
                     "autotask.project.search",
