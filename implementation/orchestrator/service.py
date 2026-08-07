@@ -139,7 +139,8 @@ class CentralOrchestrator:
                 request=request,
                 resolution=resolution,
             )
-        except Exception:
+        except Exception as exc:
+            safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
             result = OrchestrationResult(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
@@ -151,7 +152,7 @@ class CentralOrchestrator:
                 artifact_references=request.artifact_references,
                 attempts=1,
                 provider_id=resolution.selected_provider_id,
-                error_code="CAPABILITY_INVOCATION_FAILED",
+                error_code=str(safe_error_code),
             )
             self._record(
                 "orchestration.capability.failed",
