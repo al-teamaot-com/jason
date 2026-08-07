@@ -36,7 +36,7 @@ class FakeConnector:
         value = search["filter"][0]["value"]
 
         if capability == "autotask.company.search":
-            assert field == "companyName"
+            assert field == "CompanyName"
             assert value == "Acme Corp"
             items = [{"id": 208, "companyName": "Acme Corp", "isActive": True}]
         elif capability == "autotask.contact.search":
