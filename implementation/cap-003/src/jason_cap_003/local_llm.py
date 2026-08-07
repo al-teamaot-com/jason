@@ -11,6 +11,10 @@ from .context import AutotaskBusinessContext
 class LocalBusinessContextAnalysisError(RuntimeError):
     """Safe failure for local business-context analysis."""
 
+    def __init__(self, message: str, *, error_code: str = "LOCAL_LLM_ANALYSIS_FAILED") -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
 
 @dataclass(frozen=True, slots=True)
 class BusinessContextBriefing:
@@ -103,20 +107,52 @@ class OllamaBusinessContextAnalyzer:
             with request.urlopen(http_request, timeout=self._timeout_seconds) as response:
                 response_body = response.read().decode("utf-8")
         except (OSError, error.URLError, TimeoutError) as exc:
-            raise LocalBusinessContextAnalysisError("Local LLM request failed.") from exc
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM request failed.",
+                error_code="LOCAL_LLM_REQUEST_FAILED",
+            ) from exc
 
         try:
             envelope = json.loads(response_body)
-            content = json.loads(envelope["message"]["content"])
-        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        except json.JSONDecodeError as exc:
             raise LocalBusinessContextAnalysisError(
-                "Local LLM returned an invalid structured response."
+                "Local LLM returned an invalid API envelope.",
+                error_code="LOCAL_LLM_INVALID_ENVELOPE",
             ) from exc
+
+        try:
+            raw_content = envelope["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM response is missing message content.",
+                error_code="LOCAL_LLM_MESSAGE_CONTENT_MISSING",
+            ) from exc
+
+        if not isinstance(raw_content, str):
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM message content is not text.",
+                error_code="LOCAL_LLM_MESSAGE_CONTENT_INVALID",
+            )
+
+        try:
+            content = json.loads(raw_content)
+        except json.JSONDecodeError as exc:
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM returned invalid structured JSON.",
+                error_code="LOCAL_LLM_INVALID_STRUCTURED_JSON",
+            ) from exc
+
+        if not isinstance(content, dict):
+            raise LocalBusinessContextAnalysisError(
+                "Local LLM structured response must be an object.",
+                error_code="LOCAL_LLM_STRUCTURED_RESPONSE_INVALID",
+            )
 
         confidence = self._required_text(content.get("confidence"), "confidence").lower()
         if confidence not in {"low", "medium", "high"}:
             raise LocalBusinessContextAnalysisError(
-                "Local LLM returned an unsupported confidence value."
+                "Local LLM returned an unsupported confidence value.",
+                error_code="LOCAL_LLM_CONFIDENCE_INVALID",
             )
         return BusinessContextBriefing(
             model=self._model,
@@ -140,7 +176,8 @@ class OllamaBusinessContextAnalyzer:
     def _required_text(value: object, field: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise LocalBusinessContextAnalysisError(
-                f"Local LLM response is missing {field}."
+                f"Local LLM response is missing {field}.",
+                error_code=f"LOCAL_LLM_FIELD_{field.upper()}_INVALID",
             )
         return value.strip()
 
@@ -148,6 +185,7 @@ class OllamaBusinessContextAnalyzer:
     def _string_list(cls, value: object, field: str) -> tuple[str, ...]:
         if not isinstance(value, list):
             raise LocalBusinessContextAnalysisError(
-                f"Local LLM response field {field} must be an array."
+                f"Local LLM response field {field} must be an array.",
+                error_code=f"LOCAL_LLM_FIELD_{field.upper()}_INVALID",
             )
         return tuple(cls._required_text(item, field) for item in value)
