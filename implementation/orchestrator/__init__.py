@@ -1,3 +1,9 @@
+from .assessment import (
+    ExecutionAssessment,
+    ExecutionAssessmentReason,
+    ExecutionAssessmentStatus,
+    InterruptedExecutionAssessor,
+)
 from .contracts import (
     ArtifactReference,
     ExecutionStage,
@@ -37,10 +43,14 @@ __all__ = [
     "CapabilityInvokerNotRegisteredError",
     "CapabilityInvokerRegistry",
     "CentralOrchestrator",
+    "ExecutionAssessment",
+    "ExecutionAssessmentReason",
+    "ExecutionAssessmentStatus",
     "ExecutionReconstructionError",
     "ExecutionReconstructor",
     "ExecutionStage",
     "ExecutionTimelineEntry",
+    "InterruptedExecutionAssessor",
     "InvocationResult",
     "OrchestrationAuditSink",
     "OrchestrationEvent",
