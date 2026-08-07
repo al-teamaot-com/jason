@@ -19,6 +19,14 @@ DEFAULT_AUTOTASK_CREDENTIAL_DIR = Path(
 )
 
 
+class ProviderHttpError(RuntimeError):
+    """Sanitized provider HTTP failure with a non-secret status code."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"Provider request failed with HTTP {status_code}.")
+        self.status_code = status_code
+
+
 class UrllibHttpTransport:
     def request(
         self,
@@ -56,9 +64,7 @@ class UrllibHttpTransport:
             ) as response:
                 response_body = response.read()
         except urllib.error.HTTPError as error:
-            raise RuntimeError(
-                f"Provider request failed with HTTP {error.code}."
-            ) from error
+            raise ProviderHttpError(error.code) from error
         except (urllib.error.URLError, TimeoutError) as error:
             raise RuntimeError(
                 "Provider request failed."
