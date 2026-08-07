@@ -134,8 +134,23 @@ class OllamaBusinessContextAnalyzer:
     def model(self) -> str:
         return self._model
 
-    def analyze(self, context: AutotaskBusinessContext) -> BusinessContextBriefing:
-        compact_context = self._compact_context(context)
+    def analyze(
+        self,
+        context: AutotaskBusinessContext,
+        *,
+        focus_ticket_number: str | None = None,
+    ) -> BusinessContextBriefing:
+        compact_context = self._compact_context(
+            context,
+            focus_ticket_number=focus_ticket_number,
+        )
+        focus_instruction = ""
+        if focus_ticket_number:
+            focus_instruction = (
+                f" The requested analysis focus is ticket {focus_ticket_number}. "
+                "Prioritize supported observations, risks, and recommended diagnostic focus for that "
+                "ticket while using the surrounding company context only as supporting evidence."
+            )
         payload = {
             "model": self._model,
             "stream": False,
@@ -157,6 +172,7 @@ class OllamaBusinessContextAnalyzer:
                         "All fields except executive_summary and confidence are arrays of concise strings. "
                         "Use no more than four items in each array. Keep the executive summary under 120 words. "
                         "confidence must be low, medium, or high. Distinguish observations from recommendations."
+                        + focus_instruction
                     ),
                 },
                 {
@@ -259,14 +275,31 @@ class OllamaBusinessContextAnalyzer:
         )
 
     @classmethod
-    def _compact_context(cls, context: AutotaskBusinessContext) -> dict[str, Any]:
-        return {
+    def _compact_context(
+        cls,
+        context: AutotaskBusinessContext,
+        *,
+        focus_ticket_number: str | None = None,
+    ) -> dict[str, Any]:
+        tickets: Sequence[Mapping[str, Any]] = context.tickets
+        canonical_focus = (focus_ticket_number or "").strip()
+        if canonical_focus:
+            focused = [
+                ticket
+                for ticket in context.tickets
+                if str(ticket.get("ticketNumber", "")).strip().casefold()
+                == canonical_focus.casefold()
+            ]
+            remaining = [ticket for ticket in context.tickets if ticket not in focused]
+            tickets = tuple(focused + remaining)
+
+        projected = {
             "company": cls._project_record(context.company, cls._COMPANY_FIELDS),
             "contacts": cls._project_collection(context.contacts, cls._CONTACT_FIELDS),
             "configurations": cls._project_collection(
                 context.configurations, cls._CONFIGURATION_FIELDS
             ),
-            "tickets": cls._project_collection(context.tickets, cls._TICKET_FIELDS),
+            "tickets": cls._project_collection(tickets, cls._TICKET_FIELDS),
             "contracts": cls._project_collection(context.contracts, cls._CONTRACT_FIELDS),
             "projects": cls._project_collection(context.projects, cls._PROJECT_FIELDS),
             "record_counts": {
@@ -277,6 +310,12 @@ class OllamaBusinessContextAnalyzer:
                 "projects": len(context.projects),
             },
         }
+        if canonical_focus:
+            projected["analysis_focus"] = {
+                "type": "ticket",
+                "ticket_number": canonical_focus,
+            }
+        return projected
 
     @classmethod
     def _project_collection(
