@@ -16,6 +16,13 @@ from .invokers import (
     CapabilityInvokerNotRegisteredError,
     CapabilityInvokerRegistry,
 )
+from .reconstruction import (
+    ExecutionReconstructionError,
+    ExecutionReconstructor,
+    ExecutionTimelineEntry,
+    OrchestrationEventReader,
+    ReconstructedExecution,
+)
 from .service import (
     CapabilityInvoker,
     CentralOrchestrator,
@@ -30,14 +37,19 @@ __all__ = [
     "CapabilityInvokerNotRegisteredError",
     "CapabilityInvokerRegistry",
     "CentralOrchestrator",
+    "ExecutionReconstructionError",
+    "ExecutionReconstructor",
     "ExecutionStage",
+    "ExecutionTimelineEntry",
     "InvocationResult",
     "OrchestrationAuditSink",
     "OrchestrationEvent",
+    "OrchestrationEventReader",
     "OrchestrationEventStore",
     "OrchestrationMode",
     "OrchestrationRequest",
     "OrchestrationResult",
     "OrchestrationStatus",
+    "ReconstructedExecution",
     "SQLiteOrchestrationEventStore",
 ]
