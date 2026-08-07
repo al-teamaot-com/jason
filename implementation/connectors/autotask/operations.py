@@ -65,10 +65,20 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Companies/{company_id}",
         path_arguments=("company_id",),
     ),
+    "autotask.company.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Companies/query",
+        query_argument="search",
+    ),
     "autotask.contact.get": OperationDefinition(
         method="GET",
         path_template="/V1.0/Contacts/{contact_id}",
         path_arguments=("contact_id",),
+    ),
+    "autotask.contact.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Contacts/query",
+        query_argument="search",
     ),
     "autotask.configuration_item.get": OperationDefinition(
         method="GET",
@@ -77,6 +87,21 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
             "{configuration_item_id}"
         ),
         path_arguments=("configuration_item_id",),
+    ),
+    "autotask.configuration_item.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/ConfigurationItems/query",
+        query_argument="search",
+    ),
+    "autotask.contract.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Contracts/query",
+        query_argument="search",
+    ),
+    "autotask.project.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Projects/query",
+        query_argument="search",
     ),
 }
 
