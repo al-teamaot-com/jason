@@ -115,21 +115,13 @@ class AutotaskBusinessContextInvoker:
                 correlation_id=request.correlation_id,
                 principal_id=request.principal_id,
                 organization_id=request.organization_id,
+                focus_ticket_number=focused_ticket_number,
             )
         except AutotaskBusinessContextError as exc:
             raise BusinessContextInvocationError(
                 str(exc),
                 error_code=exc.error_code,
             ) from exc
-
-        if focused_ticket_number and not self._ticket_exists(
-            context.tickets,
-            focused_ticket_number,
-        ):
-            raise BusinessContextInvocationError(
-                "Requested ticket focus was not present in the discovered company context.",
-                error_code="TICKET_FOCUS_NOT_FOUND",
-            )
 
         try:
             briefing = self._analyzer.analyze(
@@ -253,14 +245,6 @@ class AutotaskBusinessContextInvoker:
             return None
         canonical = str(value).strip()
         return canonical or None
-
-    @staticmethod
-    def _ticket_exists(tickets: Any, ticket_number: str) -> bool:
-        canonical = ticket_number.strip().casefold()
-        return any(
-            str(ticket.get("ticketNumber", "")).strip().casefold() == canonical
-            for ticket in tickets
-        )
 
     @classmethod
     def _artifact(cls, path: Path) -> ArtifactReference:
