@@ -29,8 +29,8 @@ class AutotaskConnector(ConnectorBase):
             "autotask.company.search",
             "autotask.contact.get",
             "autotask.contact.search",
-            "autotask.configuration_item.get",
-            "autotask.configuration_item.search",
+            "autotask.configuration.get",
+            "autotask.configuration.search",
             "autotask.contract.search",
             "autotask.project.search",
         }
