@@ -87,8 +87,13 @@ def test_registry_matches_connector_capabilities() -> None:
         "autotask.ticket.search",
         "autotask.ticket.notes.list",
         "autotask.company.get",
+        "autotask.company.search",
         "autotask.contact.get",
+        "autotask.contact.search",
         "autotask.configuration_item.get",
+        "autotask.configuration_item.search",
+        "autotask.contract.search",
+        "autotask.project.search",
     }
 
 
