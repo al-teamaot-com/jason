@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Jason Command Center
+    orgId: 1
+    folder: Jason
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
