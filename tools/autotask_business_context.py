@@ -140,9 +140,13 @@ def _failure_detail(events) -> str:
         return "No orchestration events were recorded."
     last = events[-1]
     error_code = last.payload.get("error_code")
+    error_message = last.payload.get("error_message")
+    parts = [f"Last event: {last.event_type}"]
     if error_code:
-        return f"Last event: {last.event_type}; error_code={error_code}"
-    return f"Last event: {last.event_type}"
+        parts.append(f"error_code={error_code}")
+    if error_message:
+        parts.append(f"error_message={error_message}")
+    return "; ".join(parts)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
