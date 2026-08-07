@@ -118,6 +118,16 @@
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
     {
+      "type": "stat",
+      "title": "CAP-004 Operational Briefing",
+      "description": "Provider-neutral attention briefing foundation. Autotask is the first contributor; IT Glue and Datto RMM will use the same signal contract.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_roadmap_item_info{milestone=\"CAP-004\",status=\"in_progress\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"1": {"text": "FOUNDATION IN PROGRESS"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 10, "x": 14, "y": 16},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
+    },
+    {
       "type": "timeseries",
       "title": "Jason Host CPU / Memory",
       "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
@@ -126,7 +136,7 @@
         {"expr": "(1 - (node_memory_MemAvailable_bytes{job=\"jason-host\"} / node_memory_MemTotal_bytes{job=\"jason-host\"})) * 100", "legendFormat": "Memory", "refId": "B"}
       ],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
-      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 16},
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 20},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}}
     }
   ],
@@ -140,5 +150,5 @@
   "timezone": "browser",
   "title": "Jason Command Center",
   "uid": "jason-command-center",
-  "version": 3
+  "version": 4
 }
