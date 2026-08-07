@@ -6,6 +6,8 @@ import os
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -13,6 +15,7 @@ REPO_ROOT = Path(os.environ.get("JASON_REPO_ROOT", Path(__file__).resolve().pare
 ROADMAP_PATH = REPO_ROOT / "07-Roadmap" / "Jason-Roadmap-Status.json"
 HOST = os.environ.get("JASON_STATUS_HOST", "0.0.0.0")
 PORT = int(os.environ.get("JASON_STATUS_PORT", "9464"))
+LOCAL_LLM_MODEL = os.environ.get("JASON_LOCAL_LLM_MODEL", "qwen3:1.7b")
 
 
 def _metric_escape(value: str) -> str:
@@ -39,6 +42,20 @@ def _docker_running(container_name: str) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     return completed.returncode == 0 and completed.stdout.strip().lower() == "true"
+
+
+def _ollama_model_ready(model_name: str) -> bool:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError, urllib.error.URLError):
+        return False
+
+    for model in payload.get("models", []):
+        candidate = str(model.get("name", ""))
+        if candidate == model_name or candidate.startswith(f"{model_name}:"):
+            return True
+    return False
 
 
 def _roadmap() -> dict:
@@ -83,10 +100,11 @@ def render_metrics() -> str:
         label_text = ",".join(f'{key}="{_metric_escape(value)}"' for key, value in labels.items())
         lines.append(f"jason_roadmap_item_info{{{label_text}}} 1")
 
+    local_llm_ready = _ollama_model_ready(LOCAL_LLM_MODEL)
     component_health = {
         "openbao": 1 if _docker_running("openbao") and _tcp_open("127.0.0.1", 8200) else 0,
         "openclaw_gateway": 1 if _docker_running("openclaw-openclaw-gateway-1") and _tcp_open("127.0.0.1", 3978) else 0,
-        "local_llm": 1 if _tcp_open("127.0.0.1", 11434) else 0,
+        "local_llm": 1 if local_llm_ready else 0,
         "autotask_readonly": 1 if (REPO_ROOT / "implementation" / "connectors" / "autotask").exists() else 0,
     }
     lines.extend([
@@ -97,9 +115,12 @@ def render_metrics() -> str:
         lines.append(f'jason_component_health{{component="{component}"}} {health}')
 
     lines.extend([
+        "# HELP jason_local_llm_model_info Local LLM model readiness metadata.",
+        "# TYPE jason_local_llm_model_info gauge",
+        f'jason_local_llm_model_info{{model="{_metric_escape(LOCAL_LLM_MODEL)}",runtime="ollama"}} {1 if local_llm_ready else 0}',
         "# HELP jason_status_exporter_build_info Jason status exporter metadata.",
         "# TYPE jason_status_exporter_build_info gauge",
-        'jason_status_exporter_build_info{version="1"} 1',
+        'jason_status_exporter_build_info{version="2"} 1',
     ])
     return "\n".join(lines) + "\n"
 
