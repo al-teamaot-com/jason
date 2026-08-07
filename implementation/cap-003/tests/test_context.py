@@ -18,7 +18,7 @@ class FakeConnector:
         {
             "autotask.company.search",
             "autotask.contact.search",
-            "autotask.configuration_item.search",
+            "autotask.configuration.search",
             "autotask.ticket.search",
             "autotask.contract.search",
             "autotask.project.search",
@@ -41,7 +41,7 @@ class FakeConnector:
             items = [{"id": 208, "companyName": "Acme Corp", "isActive": True}]
         elif capability == "autotask.contact.search":
             items = [{"id": 11, "companyID": 208, "firstName": "Alex"}]
-        elif capability == "autotask.configuration_item.search":
+        elif capability == "autotask.configuration.search":
             items = [{"id": 22, "companyID": 208, "referenceTitle": "PC-22"}]
         elif capability == "autotask.ticket.search":
             items = [{"id": 33, "companyID": 208, "ticketNumber": "T1"}]
@@ -79,7 +79,7 @@ def test_company_context_composes_narrow_canonical_reads() -> None:
     assert [request.context.capability for request in connector.requests] == [
         "autotask.company.search",
         "autotask.contact.search",
-        "autotask.configuration_item.search",
+        "autotask.configuration.search",
         "autotask.ticket.search",
         "autotask.contract.search",
         "autotask.project.search",
