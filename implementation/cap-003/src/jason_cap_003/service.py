@@ -38,6 +38,7 @@ class BusinessContextEvidence:
     organization_id: str
     company_name: str
     discovered_company_id: str
+    focused_ticket_number: str | None
     contacts_count: int
     configurations_count: int
     tickets_count: int
@@ -81,6 +82,7 @@ class AutotaskBusinessContextInvoker:
                 error_code="CAPABILITY_MISMATCH",
             )
         company_name = self._required_argument(request, "company_name")
+        focused_ticket_number = self._optional_argument(request, "ticket_number")
         evidence_directory = Path(
             self._required_argument(request, "evidence_directory")
         ).expanduser().resolve()
@@ -120,8 +122,20 @@ class AutotaskBusinessContextInvoker:
                 error_code=exc.error_code,
             ) from exc
 
+        if focused_ticket_number and not self._ticket_exists(
+            context.tickets,
+            focused_ticket_number,
+        ):
+            raise BusinessContextInvocationError(
+                "Requested ticket focus was not present in the discovered company context.",
+                error_code="TICKET_FOCUS_NOT_FOUND",
+            )
+
         try:
-            briefing = self._analyzer.analyze(context)
+            briefing = self._analyzer.analyze(
+                context,
+                focus_ticket_number=focused_ticket_number,
+            )
         except LocalBusinessContextAnalysisError as exc:
             raise BusinessContextInvocationError(
                 str(exc),
@@ -133,6 +147,7 @@ class AutotaskBusinessContextInvoker:
             evidence = self._build_evidence(
                 request=request,
                 company_name=company_name,
+                focused_ticket_number=focused_ticket_number,
                 context=context,
                 briefing=briefing,
                 briefing_path=briefing_path,
@@ -148,6 +163,7 @@ class AutotaskBusinessContextInvoker:
             output={
                 "company_name": str(context.company.get("companyName", company_name)),
                 "company_id": context.company_id,
+                "focused_ticket_number": focused_ticket_number,
                 "record_counts": {
                     "contacts": len(context.contacts),
                     "configurations": len(context.configurations),
@@ -176,6 +192,7 @@ class AutotaskBusinessContextInvoker:
         *,
         request: OrchestrationRequest,
         company_name: str,
+        focused_ticket_number: str | None,
         context: Any,
         briefing: BusinessContextBriefing,
         briefing_path: Path,
@@ -190,6 +207,7 @@ class AutotaskBusinessContextInvoker:
             "organization_id": request.organization_id,
             "company_name": company_name,
             "discovered_company_id": context.company_id,
+            "focused_ticket_number": focused_ticket_number,
             "contacts_count": len(context.contacts),
             "configurations_count": len(context.configurations),
             "tickets_count": len(context.tickets),
@@ -227,6 +245,22 @@ class AutotaskBusinessContextInvoker:
                 error_code="REQUIRED_ARGUMENT_MISSING",
             )
         return str(value).strip()
+
+    @staticmethod
+    def _optional_argument(request: OrchestrationRequest, name: str) -> str | None:
+        value = request.arguments.get(name)
+        if value is None:
+            return None
+        canonical = str(value).strip()
+        return canonical or None
+
+    @staticmethod
+    def _ticket_exists(tickets: Any, ticket_number: str) -> bool:
+        canonical = ticket_number.strip().casefold()
+        return any(
+            str(ticket.get("ticketNumber", "")).strip().casefold() == canonical
+            for ticket in tickets
+        )
 
     @classmethod
     def _artifact(cls, path: Path) -> ArtifactReference:
