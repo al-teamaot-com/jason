@@ -39,6 +39,7 @@ DEFAULT_EVIDENCE_ROOT = Path.home() / "Jason-Evidence" / "Autotask-Business-Cont
 DEFAULT_EVENT_STORE = (
     Path.home() / "Jason-Evidence" / "Orchestrator" / "orchestration.sqlite3"
 )
+CHECK_ONLY_EVENT_STORE = Path(":memory:")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,7 +80,11 @@ def run(args: argparse.Namespace):
     execution_id = (args.execution_id or f"autotask-context-{uuid4()}").strip()
     correlation_id = (args.correlation_id or f"corr-{uuid4()}").strip()
     evidence_root = args.evidence_root.expanduser().resolve()
-    event_store = args.event_store.expanduser().resolve()
+    event_store = (
+        CHECK_ONLY_EVENT_STORE
+        if args.check_only
+        else args.event_store.expanduser().resolve()
+    )
 
     if not args.check_only:
         require_deployment_ready(args.deployment_record)
