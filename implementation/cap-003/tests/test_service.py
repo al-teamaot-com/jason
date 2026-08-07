@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import json
 from pathlib import Path
 
 from jason_cap_003.context import AutotaskBusinessContext
@@ -24,7 +25,7 @@ class FakeReader:
                 {"id": 999, "companyID": 208, "ticketNumber": "T999", "title": "Focused"},
             )
         return AutotaskBusinessContext(
-            company={"id": 208, "companyName": "Atlantic Office Technologies"},
+            company={"id": 208, "companyName": "Atlantic Office Technologies LLC"},
             contacts=({"id": 1, "companyID": 208},),
             configurations=({"id": 2, "companyID": 208},),
             tickets=tuple(tickets),
@@ -110,6 +111,7 @@ def test_invoker_persists_derived_briefing_and_redacted_evidence(tmp_path) -> No
     )
 
     assert analyzer.focus_ticket_number is None
+    assert result.output["company_name"] == "Atlantic Office Technologies LLC"
     assert result.output["company_id"] == "208"
     assert result.output["focused_ticket_number"] is None
     assert result.output["record_counts"] == {
@@ -119,15 +121,22 @@ def test_invoker_persists_derived_briefing_and_redacted_evidence(tmp_path) -> No
         "contracts": 0,
         "projects": 0,
     }
+    assert result.output["record_counts_are_bounded_reads"] is True
     assert result.output["provider_side_change"] is False
     assert len(result.artifact_references) == 2
 
     evidence_path = tmp_path / "evidence" / "autotask-business-context-exec-cap003-service.json"
-    text = evidence_path.read_text(encoding="utf-8")
-    assert '"raw_provider_content_persisted": false' in text
-    assert '"discovered_company_id": "208"' in text
-    assert '"focused_ticket_number": null' in text
-    assert "ticketNumber" not in text
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "1.1"
+    assert payload["requested_company_name"] == "Atlantic Office Technologies"
+    assert payload["canonical_company_name"] == "Atlantic Office Technologies LLC"
+    assert payload["discovered_company_id"] == "208"
+    assert payload["focused_ticket_number"] is None
+    assert payload["counts_are_bounded_reads"] is True
+    assert payload["related_record_limit"] == 25
+    assert payload["local_projection_record_limit"] == 10
+    assert payload["raw_provider_content_persisted"] is False
+    assert "ticketNumber" not in evidence_path.read_text(encoding="utf-8")
 
 
 def test_invoker_routes_ticket_focus_through_same_business_context_capability(tmp_path) -> None:
