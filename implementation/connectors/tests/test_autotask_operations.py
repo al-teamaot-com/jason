@@ -46,7 +46,7 @@ from connectors.autotask.operations import (
             None,
         ),
         (
-            "autotask.configuration_item.get",
+            "autotask.configuration.get",
             {"configuration_item_id": 88},
             "GET",
             "/V1.0/ConfigurationItems/88",
@@ -87,8 +87,13 @@ def test_registry_matches_connector_capabilities() -> None:
         "autotask.ticket.search",
         "autotask.ticket.notes.list",
         "autotask.company.get",
+        "autotask.company.search",
         "autotask.contact.get",
-        "autotask.configuration_item.get",
+        "autotask.contact.search",
+        "autotask.configuration.get",
+        "autotask.configuration.search",
+        "autotask.contract.search",
+        "autotask.project.search",
     }
 
 

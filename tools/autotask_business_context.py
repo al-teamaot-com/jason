@@ -11,22 +11,22 @@ from uuid import uuid4
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 IMPLEMENTATION_ROOT = REPOSITORY_ROOT / "implementation"
 CLI_SOURCE = IMPLEMENTATION_ROOT / "cli" / "src"
-CAP002_SOURCE = IMPLEMENTATION_ROOT / "cap-002" / "src"
+CAP003_SOURCE = IMPLEMENTATION_ROOT / "cap-003" / "src"
 CAP001_SOURCE = IMPLEMENTATION_ROOT / "cap-001" / "src"
 
 for source in (
     IMPLEMENTATION_ROOT,
     CLI_SOURCE,
-    CAP002_SOURCE,
+    CAP003_SOURCE,
     CAP001_SOURCE,
 ):
     if str(source) not in sys.path:
         sys.path.insert(0, str(source))
 
 from jason_cap_001.secret_provider_readiness import require_deployment_ready
-from jason_cap_002.runtime import (
+from jason_cap_003.runtime import (
     CAPABILITY_NAME,
-    build_ticket_intelligence_runtime,
+    build_autotask_business_context_runtime,
 )
 from jason_cli.runtime import build_autotask_connector
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
@@ -35,25 +35,29 @@ from orchestrator import OrchestrationMode, OrchestrationRequest
 DEFAULT_DEPLOYMENT_RECORD = Path(
     "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
 )
-DEFAULT_EVIDENCE_ROOT = Path.home() / "Jason-Evidence" / "Ticket-Intelligence"
+DEFAULT_EVIDENCE_ROOT = Path.home() / "Jason-Evidence" / "Autotask-Business-Context"
 DEFAULT_EVENT_STORE = (
     Path.home() / "Jason-Evidence" / "Orchestrator" / "orchestration.sqlite3"
 )
-DEFAULT_SCOPE = "aot-internal-ticket-analysis"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Analyze one Autotask ticket through the governed central "
-            "orchestrator using the local Jason LLM."
+            "Build governed Autotask business context for one company and produce "
+            "a local Jason operational briefing."
         )
     )
-    parser.add_argument("--ticket-number", required=True)
+    parser.add_argument("--company-name", required=True)
+    parser.add_argument(
+        "--ticket-number",
+        help=(
+            "Optional ticket focus. The ticket must belong to the discovered company "
+            "context; CAP-003 remains the single broader business-context capability."
+        ),
+    )
     parser.add_argument("--principal-id", required=True)
     parser.add_argument("--organization-id", required=True)
-    parser.add_argument("--scope", default=DEFAULT_SCOPE)
-    parser.add_argument("--allowed-scope", default=DEFAULT_SCOPE)
     parser.add_argument("--execution-id")
     parser.add_argument("--correlation-id")
     parser.add_argument("--evidence-root", type=Path, default=DEFAULT_EVIDENCE_ROOT)
@@ -69,36 +73,40 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace):
     values = {
-        "ticket-number": args.ticket_number,
+        "company-name": args.company_name,
         "principal-id": args.principal_id,
         "organization-id": args.organization_id,
-        "scope": args.scope,
-        "allowed-scope": args.allowed_scope,
     }
     missing = sorted(
         name for name, value in values.items() if not str(value).strip()
     )
     if missing:
         raise ValueError("Required values are blank: " + ", ".join(missing))
-    if args.scope.strip() != args.allowed_scope.strip():
-        raise PermissionError(
-            "Requested scope does not match the authorized scope."
-        )
 
-    execution_id = (args.execution_id or f"ticket-intel-{uuid4()}").strip()
+    execution_id = (args.execution_id or f"autotask-context-{uuid4()}").strip()
     correlation_id = (args.correlation_id or f"corr-{uuid4()}").strip()
     evidence_root = args.evidence_root.expanduser().resolve()
     event_store = args.event_store.expanduser().resolve()
+    ticket_number = (args.ticket_number or "").strip()
 
     if not args.check_only:
         require_deployment_ready(args.deployment_record)
+    else:
+        event_store = Path(":memory:")
 
-    runtime = build_ticket_intelligence_runtime(
+    runtime = build_autotask_business_context_runtime(
         autotask_connector=build_autotask_connector(),
         event_store_path=event_store,
         repository_root=REPOSITORY_ROOT,
     )
     try:
+        request_arguments = {
+            "company_name": args.company_name.strip(),
+            "evidence_directory": str(evidence_root),
+        }
+        if ticket_number:
+            request_arguments["ticket_number"] = ticket_number
+
         result = runtime.orchestrator.execute(
             OrchestrationRequest(
                 execution_id=execution_id,
@@ -123,31 +131,41 @@ def run(args: argparse.Namespace):
                 ),
                 budget=ExecutionBudget(
                     maximum_estimated_cost=Decimal("0"),
-                    maximum_input_tokens=8192,
-                    maximum_output_tokens=2048,
+                    maximum_input_tokens=16384,
+                    maximum_output_tokens=3072,
                     maximum_attempts=1,
                 ),
-                arguments={
-                    "ticket_number": args.ticket_number.strip(),
-                    "scope": args.scope.strip(),
-                    "allowed_scope": args.allowed_scope.strip(),
-                    "evidence_directory": str(evidence_root),
-                },
+                arguments=request_arguments,
                 requester_kind="human",
                 allow_pilot_capability=True,
                 allow_pilot_provider=True,
             )
         )
+        events = runtime.event_store.list_by_execution(execution_id)
     finally:
         runtime.close()
-    return result
+    return result, events
+
+
+def _failure_detail(events) -> str:
+    if not events:
+        return "No orchestration events were recorded."
+    last = events[-1]
+    error_code = last.payload.get("error_code")
+    error_message = last.payload.get("error_message")
+    parts = [f"Last event: {last.event_type}"]
+    if error_code:
+        parts.append(f"error_code={error_code}")
+    if error_message:
+        parts.append(f"error_message={error_message}")
+    return "; ".join(parts)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        result = run(args)
+        result, events = run(args)
     except Exception as exc:
         parser.exit(1, f"DENIED: {exc}\n")
 
@@ -155,40 +173,52 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Execution ID: {result.execution_id}")
     print(f"Correlation ID: {result.correlation_id}")
     print(f"Capability: {result.capability_name}")
+
     if args.check_only:
         print("Capability invoked: false")
         print(
-            "APPROVED: Ticket-intelligence request resolved through governance; "
+            "APPROVED: Autotask business-context request resolved through governance; "
             "no Autotask or local-LLM request was made."
         )
         return 0
 
     if result.status.value != "succeeded":
+        print(f"Failure detail: {_failure_detail(events)}", file=sys.stderr)
         parser.exit(
             1,
-            "DENIED: Governed ticket-intelligence execution did not succeed.\n",
+            "DENIED: Governed Autotask business-context execution did not succeed.\n",
         )
 
     output = result.output
-    print(f"Ticket: {output['ticket_number']}")
-    print(f"Company boundary: {output['company_id']}")
+    print(f"Company: {output['company_name']}")
+    print(f"Discovered Autotask company ID: {output['company_id']}")
+    if output.get("focused_ticket_number"):
+        print(f"Focused ticket: {output['focused_ticket_number']}")
     print(f"Local model: {output['model']}")
     print(f"Confidence: {output['confidence']}")
     print()
-    print("Summary:")
-    print(output["summary"])
+    print("Record counts:")
+    for name, count in output["record_counts"].items():
+        print(f"- {name}: {count}")
     print()
-    print("Likely causes:")
-    for item in output["likely_causes"]:
+    print("Executive summary:")
+    print(output["executive_summary"])
+    print()
+    print("Operational observations:")
+    for item in output["operational_observations"]:
         print(f"- {item}")
     print()
-    print("Recommended diagnostic steps:")
-    for item in output["recommended_steps"]:
+    print("Service risks:")
+    for item in output["service_risks"]:
         print(f"- {item}")
-    if output["escalation_flags"]:
+    print()
+    print("Recommended focus:")
+    for item in output["recommended_focus"]:
+        print(f"- {item}")
+    if output["notable_relationships"]:
         print()
-        print("Escalation flags:")
-        for item in output["escalation_flags"]:
+        print("Notable relationships:")
+        for item in output["notable_relationships"]:
             print(f"- {item}")
     print()
     print("Provider-side change: false")
