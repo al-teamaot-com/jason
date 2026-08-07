@@ -84,14 +84,20 @@ def test_reconstructs_ordered_observed_execution() -> None:
 def test_missing_execution_fails_closed() -> None:
     store = SQLiteOrchestrationEventStore()
 
-    with pytest.raises(LookupError, match="No orchestration events exist"):
+    with pytest.raises(
+        ExecutionReconstructionError,
+        match="No orchestration events exist",
+    ):
         ExecutionReconstructor(store).reconstruct("missing")
 
 
 def test_empty_execution_id_is_denied() -> None:
     store = SQLiteOrchestrationEventStore()
 
-    with pytest.raises(ValueError, match="execution_id must be non-empty"):
+    with pytest.raises(
+        ExecutionReconstructionError,
+        match="execution_id must be non-empty",
+    ):
         ExecutionReconstructor(store).reconstruct("   ")
 
 
