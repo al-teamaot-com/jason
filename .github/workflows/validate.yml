@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install test dependency
+        run: python -m pip install --upgrade pip pytest
       - name: Compile CAP-003 and shared runtime
         run: python -m compileall -q implementation/cap-003/src implementation/cap-003/tests implementation/orchestrator implementation/connectors implementation/kernel tools/autotask_business_context.py
       - name: Test CAP-003
