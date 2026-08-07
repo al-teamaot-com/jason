@@ -1,6 +1,6 @@
 # CAP-004 Provider-Neutral Operational Attention Briefing
 
-**Status:** Foundation in progress
+**Status:** Autotask signal producer implemented; host validation pending
 
 ## Purpose
 
@@ -9,6 +9,8 @@ CAP-004 gives Jason a provider-neutral way to answer a higher-level operational 
 > What deserves human attention right now?
 
 The capability is intentionally broader than a ticket queue, device alert list, or documentation exception report. It accepts normalized operational signals from governed provider integrations and produces a bounded, deterministic attention briefing.
+
+This capability directly supports Jason's mission to help AOT serve clients more consistently and scalably. Security and compliance conditions may contribute signals, but they are not the sole identity of the briefing.
 
 ## Architectural role
 
@@ -53,6 +55,20 @@ This keeps prioritization inspectable and prevents free-form model output from s
 
 The result is bounded to an operator-selected number of attention items, defaulting to ten.
 
+## First Autotask signal producer
+
+The first provider adapter consumes the existing bounded `AutotaskBusinessContext` produced through CAP-003. It does not introduce a second Autotask transport or bypass the CAP-003 company boundary.
+
+The initial deterministic rules emit client-level signals for:
+
+- incomplete tickets whose due date is in the past — `high`;
+- incomplete tickets with no recorded activity for the configured stale interval — `medium`; and
+- active configurations whose warranty expiration date is in the past — `medium`.
+
+Completed tickets and inactive configurations are not signaled by these rules. Provider enum values such as Autotask priority and status are intentionally not reinterpreted until Jason has an authoritative metadata mapping for those provider values.
+
+Each signal references its source object by durable provider reference such as `autotask:ticket:<id>` or `autotask:configuration:<id>` rather than copying evidence into the provider-neutral briefing.
+
 ## Governance boundaries
 
 CAP-004 foundation rules:
@@ -63,6 +79,7 @@ CAP-004 foundation rules:
 - evidence is referenced rather than copied into the briefing;
 - signals from multiple providers may be correlated only through orchestrator-approved identity relationships;
 - ranking is deterministic and explainable;
+- time-dependent rules receive an explicit timezone-aware `as_of` value so validation is reproducible; and
 - agents do not communicate directly with one another; provider context enters through central orchestration and capability routing.
 
 ## Why this enables IT Glue and Datto RMM
@@ -80,8 +97,11 @@ The initial foundation is complete when:
 - cross-organization input fails closed;
 - multiple providers can contribute to one attention item;
 - tests prove severity ranking and cross-provider corroboration;
+- the Autotask signal producer is validated against CAP-003 context; and
 - the roadmap and Command Center expose CAP-004 state.
 
 ## Next increment
 
-Build the first Autotask signal producer using CAP-003 and live-read data, then validate a real operational briefing on the Jason host. After that, add IT Glue as the second provider against the same contract rather than creating a new briefing architecture.
+Validate the Autotask signal producer on the Jason host, then add a governed company-discovery/batch path that can assemble bounded CAP-003 context across approved Autotask clients and produce the first real cross-client operational briefing.
+
+After that live Autotask briefing is proven, add IT Glue as the second provider against the same `OperationalSignal` contract rather than creating a new briefing architecture.
