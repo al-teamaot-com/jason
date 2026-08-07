@@ -3,11 +3,9 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-import pytest
-
 from jason_cap_003.context import AutotaskBusinessContext
 from jason_cap_003.local_llm import BusinessContextBriefing
-from jason_cap_003.service import AutotaskBusinessContextInvoker, BusinessContextInvocationError
+from jason_cap_003.service import AutotaskBusinessContextInvoker
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from orchestrator import OrchestrationMode, OrchestrationRequest
 
@@ -15,14 +13,21 @@ from orchestrator import OrchestrationMode, OrchestrationRequest
 class FakeReader:
     def read_company_context(self, **kwargs):
         assert kwargs["company_name"] == "Atlantic Office Technologies"
+        focus_ticket_number = kwargs.get("focus_ticket_number")
+        tickets = [
+            {"id": 3, "companyID": 208, "ticketNumber": "T1", "title": "First"},
+            {"id": 4, "companyID": 208, "ticketNumber": "T2", "title": "Second"},
+        ]
+        if focus_ticket_number == "T999":
+            tickets.insert(
+                0,
+                {"id": 999, "companyID": 208, "ticketNumber": "T999", "title": "Focused"},
+            )
         return AutotaskBusinessContext(
             company={"id": 208, "companyName": "Atlantic Office Technologies"},
             contacts=({"id": 1, "companyID": 208},),
             configurations=({"id": 2, "companyID": 208},),
-            tickets=(
-                {"id": 3, "companyID": 208, "ticketNumber": "T1", "title": "First"},
-                {"id": 4, "companyID": 208, "ticketNumber": "T2", "title": "Second"},
-            ),
+            tickets=tuple(tickets),
             contracts=(),
             projects=(),
         )
@@ -149,17 +154,19 @@ def test_invoker_routes_ticket_focus_through_same_business_context_capability(tm
     assert '"raw_provider_content_persisted": false' in text
 
 
-def test_invoker_fails_closed_when_ticket_focus_is_outside_company_context(tmp_path) -> None:
+def test_invoker_accepts_focused_ticket_resolved_outside_bounded_company_list(tmp_path) -> None:
+    analyzer = FakeAnalyzer()
     invoker = AutotaskBusinessContextInvoker(
         reader=FakeReader(),
-        analyzer=FakeAnalyzer(),
+        analyzer=analyzer,
         repository_root=tmp_path / "repository",
     )
 
-    with pytest.raises(BusinessContextInvocationError) as exc_info:
-        invoker.invoke(
-            request=_request(tmp_path, ticket_number="T999"),
-            resolution=_resolution(),
-        )
+    result = invoker.invoke(
+        request=_request(tmp_path, ticket_number="T999"),
+        resolution=_resolution(),
+    )
 
-    assert exc_info.value.error_code == "TICKET_FOCUS_NOT_FOUND"
+    assert analyzer.focus_ticket_number == "T999"
+    assert result.output["focused_ticket_number"] == "T999"
+    assert result.output["record_counts"]["tickets"] == 3
