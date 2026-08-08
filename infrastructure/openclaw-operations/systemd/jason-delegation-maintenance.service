@@ -1,0 +1,18 @@
+[Unit]
+Description=Jason JKD-001 Delegation Lifecycle Maintenance
+After=local-fs.target
+ConditionPathExists=/var/lib/jason/authority/authority.sqlite3
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason
+ExecStart=/usr/bin/python3 /home/al/projects/jason/tools/delegation_maintenance.py --database /var/lib/jason/authority/authority.sqlite3 deactivate-expired --recorded-by svc-jason-maintenance --correlation-id systemd-delegation-maintenance
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadWritePaths=/var/lib/jason/authority
+UMask=0077
