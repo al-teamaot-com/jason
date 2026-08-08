@@ -8,6 +8,17 @@ from .contracts import (
     IdentityRecord,
     PermissionMode,
 )
+from .context_validation import (
+    ContextValidationRequest,
+    ContextValidationResult,
+    ExecutionContextValidator,
+)
+from .durable import (
+    SQLiteApprovalRepository,
+    SQLiteAuthorityGrantRepository,
+    SQLiteIdentityAuthorityStore,
+    SQLiteIdentityRepository,
+)
 from .repositories import (
     InMemoryApprovalRepository,
     InMemoryAuthorityGrantRepository,
@@ -21,11 +32,18 @@ __all__ = [
     "AuthorityGrant",
     "AuthorityOutcome",
     "AuthorityRequest",
+    "ContextValidationRequest",
+    "ContextValidationResult",
     "ExecutionContext",
+    "ExecutionContextValidator",
     "IdentityAuthorityService",
     "IdentityRecord",
     "InMemoryApprovalRepository",
     "InMemoryAuthorityGrantRepository",
     "InMemoryIdentityRepository",
     "PermissionMode",
+    "SQLiteApprovalRepository",
+    "SQLiteAuthorityGrantRepository",
+    "SQLiteIdentityAuthorityStore",
+    "SQLiteIdentityRepository",
 ]

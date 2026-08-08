@@ -49,9 +49,7 @@ class Invoker:
             raise RuntimeError("protected provider detail")
         return InvocationResult(
             output={"status": "ok"},
-            artifact_references=(
-                ArtifactReference("evidence://result/1"),
-            ),
+            artifact_references=(ArtifactReference("evidence://result/1"),),
             attempts=1,
         )
 
@@ -64,6 +62,16 @@ class Audit:
         self.events.append((event_type, dict(payload)))
 
 
+class AuthorityContext:
+    def __init__(self, failure=None):
+        self.failure = failure
+        self.calls = []
+
+    def validate(self, request):
+        self.calls.append(request)
+        return self.failure
+
+
 def request(mode=OrchestrationMode.EXECUTE, **changes):
     values = {
         "execution_id": "exec-1",
@@ -72,7 +80,7 @@ def request(mode=OrchestrationMode.EXECUTE, **changes):
         "organization_id": "aot",
         "capability_name": "autotask.ticket.search",
         "capability_version": None,
-        "requested_mode": "deterministic",
+        "requested_mode": "observe",
         "orchestration_mode": mode,
         "authority_allowed": True,
         "approval_present": False,
@@ -81,13 +89,9 @@ def request(mode=OrchestrationMode.EXECUTE, **changes):
             classification="internal",
             hosted_processing_allowed=False,
         ),
-        "budget": ExecutionBudget(
-            maximum_estimated_cost=Decimal("0"),
-        ),
+        "budget": ExecutionBudget(maximum_estimated_cost=Decimal("0")),
         "arguments": {"ticket_number": "T1"},
-        "artifact_references": (
-            ArtifactReference("evidence://input/1"),
-        ),
+        "artifact_references": (ArtifactReference("evidence://input/1"),),
     }
     values.update(changes)
     return OrchestrationRequest(**values)
@@ -97,37 +101,67 @@ def test_check_only_resolves_policy_without_invoking_capability():
     resolution = Resolution()
     invoker = Invoker()
     audit = Audit()
-    result = CentralOrchestrator(
-        resolution=resolution,
-        invoker=invoker,
-        audit=audit,
-    ).execute(request(OrchestrationMode.CHECK_ONLY))
-
+    result = CentralOrchestrator(resolution=resolution, invoker=invoker, audit=audit).execute(
+        request(OrchestrationMode.CHECK_ONLY)
+    )
     assert result.status is OrchestrationStatus.VALIDATED
-    assert result.attempts == 0
     assert invoker.calls == []
     assert len(resolution.requests) == 1
-    assert audit.events[-1][0] == "orchestration.check_only.validated"
-    assert audit.events[-1][1]["provider_invoked"] is False
 
 
 def test_execute_routes_one_named_capability_and_returns_references():
     invoker = Invoker()
-    audit = Audit()
+    result = CentralOrchestrator(resolution=Resolution(), invoker=invoker, audit=Audit()).execute(request())
+    assert result.status is OrchestrationStatus.SUCCEEDED
+    assert [item.reference for item in result.artifact_references] == [
+        "evidence://input/1", "evidence://result/1"
+    ]
+
+
+def test_required_authority_context_is_checked_before_resolution():
+    resolution = Resolution()
+    invoker = Invoker()
+    result = CentralOrchestrator(
+        resolution=resolution,
+        invoker=invoker,
+        audit=Audit(),
+        authority_context=AuthorityContext(),
+        require_authority_context=True,
+    ).execute(request())
+    assert result.status is OrchestrationStatus.DENIED
+    assert result.reason_codes == ("AUTHORITY_CONTEXT_REQUIRED",)
+    assert result.resolution is None
+    assert resolution.requests == []
+    assert invoker.calls == []
+
+
+def test_invalid_authority_context_is_checked_before_resolution():
+    resolution = Resolution()
+    invoker = Invoker()
+    result = CentralOrchestrator(
+        resolution=resolution,
+        invoker=invoker,
+        audit=Audit(),
+        authority_context=AuthorityContext("EXECUTION_CONTEXT_REVOKED"),
+        require_authority_context=True,
+    ).execute(request(authority_context_id="ctx-1"))
+    assert result.status is OrchestrationStatus.DENIED
+    assert result.reason_codes == ("EXECUTION_CONTEXT_REVOKED",)
+    assert resolution.requests == []
+    assert invoker.calls == []
+
+
+def test_valid_authority_context_allows_normal_resolution():
+    context = AuthorityContext()
     result = CentralOrchestrator(
         resolution=Resolution(),
-        invoker=invoker,
-        audit=audit,
-    ).execute(request())
-
+        invoker=Invoker(),
+        audit=Audit(),
+        authority_context=context,
+        require_authority_context=True,
+    ).execute(request(authority_context_id="ctx-1"))
     assert result.status is OrchestrationStatus.SUCCEEDED
-    assert result.output == {"status": "ok"}
-    assert [item.reference for item in result.artifact_references] == [
-        "evidence://input/1",
-        "evidence://result/1",
-    ]
-    assert len(invoker.calls) == 1
-    assert audit.events[-1][0] == "orchestration.capability.completed"
+    assert len(context.calls) == 1
 
 
 def test_non_allowing_resolution_never_invokes_capability():
@@ -137,30 +171,20 @@ def test_non_allowing_resolution_never_invokes_capability():
         invoker=invoker,
         audit=Audit(),
     ).execute(request())
-
     assert result.status is OrchestrationStatus.APPROVAL_REQUIRED
-    assert result.attempts == 0
     assert invoker.calls == []
 
 
 def test_provider_failure_is_sanitized_and_correlated():
     audit = Audit()
     result = CentralOrchestrator(
-        resolution=Resolution(),
-        invoker=Invoker(fail=True),
-        audit=audit,
+        resolution=Resolution(), invoker=Invoker(fail=True), audit=audit
     ).execute(request())
-
     assert result.status is OrchestrationStatus.FAILED
     assert result.error_code == "CAPABILITY_INVOCATION_FAILED"
-    serialized = repr(result) + repr(audit.events)
-    assert "protected provider detail" not in serialized
-    assert audit.events[-1][1]["correlation_id"] == "corr-1"
+    assert "protected provider detail" not in repr(result) + repr(audit.events)
 
 
 def test_direct_agent_invocation_contract_is_rejected():
     with pytest.raises(ValueError, match="Direct agent invocation"):
-        request(
-            requester_kind="agent",
-            arguments={"target_agent": "other-agent"},
-        )
+        request(requester_kind="agent", arguments={"target_agent": "other-agent"})

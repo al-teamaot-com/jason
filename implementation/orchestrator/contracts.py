@@ -70,6 +70,7 @@ class OrchestrationRequest:
     requester_kind: str = "human"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
+    authority_context_id: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -82,24 +83,16 @@ class OrchestrationRequest:
             "risk": self.risk,
             "requester_kind": self.requester_kind,
         }
-        missing = sorted(
-            name for name, value in required.items() if not value.strip()
-        )
+        missing = sorted(name for name, value in required.items() if not value.strip())
         if missing:
-            raise ValueError(
-                "Required orchestration fields are empty: "
-                + ", ".join(missing)
-            )
+            raise ValueError("Required orchestration fields are empty: " + ", ".join(missing))
         if self.capability_version is not None and not self.capability_version.strip():
             raise ValueError("capability_version must be non-empty when provided.")
+        if self.authority_context_id is not None and not self.authority_context_id.strip():
+            raise ValueError("authority_context_id must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
-        forbidden = {
-            "target_agent",
-            "agent_endpoint",
-            "invoke_agent",
-            "recipient_agent",
-        }
+        forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:
             raise ValueError(
@@ -116,7 +109,7 @@ class OrchestrationResult:
     status: OrchestrationStatus
     stage: ExecutionStage
     reason_codes: tuple[str, ...]
-    resolution: CapabilityResolutionResult
+    resolution: CapabilityResolutionResult | None
     output: Mapping[str, Any] = field(default_factory=dict)
     artifact_references: tuple[ArtifactReference, ...] = ()
     attempts: int = 0

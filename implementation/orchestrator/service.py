@@ -24,6 +24,10 @@ class OrchestrationAuditSink(Protocol):
     def append(self, event_type: str, payload: Mapping[str, Any]) -> None: ...
 
 
+class AuthorityContextEnforcer(Protocol):
+    def validate(self, request: OrchestrationRequest) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class InvocationResult:
     output: Mapping[str, Any] = field(default_factory=dict)
@@ -49,17 +53,41 @@ class CentralOrchestrator:
         resolution: GovernedCapabilityResolutionEngine,
         invoker: CapabilityInvoker,
         audit: OrchestrationAuditSink,
+        authority_context: AuthorityContextEnforcer | None = None,
+        require_authority_context: bool = False,
     ) -> None:
         self._resolution = resolution
         self._invoker = invoker
         self._audit = audit
+        self._authority_context = authority_context
+        self._require_authority_context = require_authority_context
+        if require_authority_context and authority_context is None:
+            raise ValueError("authority_context enforcer is required when enforcement is enabled")
 
     def execute(self, request: OrchestrationRequest) -> OrchestrationResult:
-        self._record(
-            "orchestration.request.received",
-            request,
-            stage=ExecutionStage.RECEIVED,
-        )
+        self._record("orchestration.request.received", request, stage=ExecutionStage.RECEIVED)
+
+        authority_failure = self._authority_failure(request)
+        if authority_failure is not None:
+            result = OrchestrationResult(
+                execution_id=request.execution_id,
+                correlation_id=request.correlation_id,
+                capability_name=request.capability_name,
+                status=OrchestrationStatus.DENIED,
+                stage=ExecutionStage.DENIED,
+                reason_codes=(authority_failure,),
+                resolution=None,
+                artifact_references=request.artifact_references,
+                attempts=0,
+                error_code="AUTHORITY_CONTEXT_INVALID",
+            )
+            self._record(
+                "orchestration.authority_context.denied",
+                request,
+                stage=ExecutionStage.DENIED,
+                details={"reason_code": authority_failure},
+            )
+            return result
 
         resolution = self._resolution.resolve(
             CapabilityResolutionRequest(
@@ -99,10 +127,7 @@ class CentralOrchestrator:
                 "orchestration.request.terminated",
                 request,
                 stage=terminal.stage,
-                details={
-                    "status": terminal.status.value,
-                    "reason_codes": terminal.reason_codes,
-                },
+                details={"status": terminal.status.value, "reason_codes": terminal.reason_codes},
             )
             return terminal
 
@@ -135,10 +160,7 @@ class CentralOrchestrator:
         )
 
         try:
-            invocation = self._invoker.invoke(
-                request=request,
-                resolution=resolution,
-            )
+            invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
             safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
             result = OrchestrationResult(
@@ -171,10 +193,7 @@ class CentralOrchestrator:
             reason_codes=("capability_completed",),
             resolution=resolution,
             output=dict(invocation.output),
-            artifact_references=(
-                request.artifact_references
-                + invocation.artifact_references
-            ),
+            artifact_references=request.artifact_references + invocation.artifact_references,
             attempts=invocation.attempts,
             provider_id=resolution.selected_provider_id,
         )
@@ -189,28 +208,24 @@ class CentralOrchestrator:
         )
         return result
 
+    def _authority_failure(self, request: OrchestrationRequest) -> str | None:
+        if not self._require_authority_context:
+            return None
+        if request.authority_context_id is None:
+            return "AUTHORITY_CONTEXT_REQUIRED"
+        assert self._authority_context is not None
+        return self._authority_context.validate(request)
+
     @staticmethod
     def _terminal_result(
         request: OrchestrationRequest,
         resolution: CapabilityResolutionResult,
     ) -> OrchestrationResult | None:
         mapping = {
-            ResolutionOutcome.APPROVAL_REQUIRED: (
-                OrchestrationStatus.APPROVAL_REQUIRED,
-                ExecutionStage.DENIED,
-            ),
-            ResolutionOutcome.HUMAN_REQUIRED: (
-                OrchestrationStatus.HUMAN_REQUIRED,
-                ExecutionStage.DENIED,
-            ),
-            ResolutionOutcome.DENIED: (
-                OrchestrationStatus.DENIED,
-                ExecutionStage.DENIED,
-            ),
-            ResolutionOutcome.UNRESOLVED: (
-                OrchestrationStatus.DENIED,
-                ExecutionStage.DENIED,
-            ),
+            ResolutionOutcome.APPROVAL_REQUIRED: (OrchestrationStatus.APPROVAL_REQUIRED, ExecutionStage.DENIED),
+            ResolutionOutcome.HUMAN_REQUIRED: (OrchestrationStatus.HUMAN_REQUIRED, ExecutionStage.DENIED),
+            ResolutionOutcome.DENIED: (OrchestrationStatus.DENIED, ExecutionStage.DENIED),
+            ResolutionOutcome.UNRESOLVED: (OrchestrationStatus.DENIED, ExecutionStage.DENIED),
         }
         translated = mapping.get(resolution.outcome)
         if translated is None:
@@ -245,6 +260,7 @@ class CentralOrchestrator:
             "capability_name": request.capability_name,
             "stage": stage.value,
             "requester_kind": request.requester_kind,
+            "authority_context_id": request.authority_context_id,
         }
         payload.update(details or {})
         self._audit.append(event_type, payload)
