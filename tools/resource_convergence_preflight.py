@@ -41,11 +41,14 @@ def build_summary() -> dict[str, object]:
             },
             "datto_rmm": {
                 "logical_name": DattoRmmConnector.logical_secret,
-                "required_fields": ["base_url", "access_token"],
+                "required_fields": ["api_url", "api_key", "api_secret"],
+                "runtime_material": ["access_token"],
+                "persist_access_token": False,
             },
         },
         "next_live_validation": [
             "bind new read-only credentials through the Jason secret broker",
+            "acquire the Datto bearer token at runtime without persisting it",
             "perform one bounded IT Glue configuration GET",
             "perform one bounded Datto RMM device search",
             "inspect only sanitized response shape and identity fields",
