@@ -49,6 +49,43 @@ jobs:
       - name: Test convergence release gates
         run: python -m pytest implementation/release/tests/test_cap003_convergence.py -q
 
+  resource-convergence:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile connector convergence
+        run: python -m compileall -q implementation/connectors tools/resource_convergence_preflight.py
+      - name: Test resource convergence contracts
+        run: |
+          python -m pytest \
+            implementation/connectors/tests/test_resource_gateway.py \
+            implementation/connectors/tests/test_provider_resource_adapters.py \
+            implementation/connectors/tests/test_relationships.py \
+            implementation/connectors/tests/test_artifact_evidence.py \
+            implementation/connectors/tests/test_resource_convergence.py \
+            -q
+      - name: Verify credential-safe preflight
+        run: |
+          python tools/resource_convergence_preflight.py > /tmp/resource-convergence-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('/tmp/resource-convergence-preflight.json').read_text())
+          assert report['status'] == 'credential_boundary_reached'
+          assert report['network_contacted'] is False
+          assert report['secret_resolved'] is False
+          assert report['required_logical_secrets']['it_glue']['logical_name'] == 'it_glue.readonly'
+          assert report['required_logical_secrets']['datto_rmm']['logical_name'] == 'datto_rmm.readonly'
+          PY
+
   documentation:
     runs-on: ubuntu-latest
     steps:
