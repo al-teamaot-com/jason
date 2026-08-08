@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -95,10 +95,7 @@ class SQLiteIdentityAuthorityStore:
         row = self.connection.execute(
             "SELECT payload FROM identities WHERE identity_id=?", (identity_id,)
         ).fetchone()
-        if row is None:
-            return None
-        p = json.loads(row["payload"])
-        return IdentityRecord(**p)
+        return None if row is None else IdentityRecord(**json.loads(row["payload"]))
 
     def put_grant(self, record: AuthorityGrant) -> None:
         with self.connection:
@@ -200,3 +197,30 @@ class SQLiteIdentityAuthorityStore:
                     capability, outcome, json.dumps(reason_codes),
                 ),
             )
+
+
+@dataclass(frozen=True)
+class SQLiteIdentityRepository:
+    store: SQLiteIdentityAuthorityStore
+    def get(self, identity_id: str) -> IdentityRecord | None:
+        return self.store.get_identity(identity_id)
+    def put(self, record: IdentityRecord) -> None:
+        self.store.put_identity(record)
+
+
+@dataclass(frozen=True)
+class SQLiteAuthorityGrantRepository:
+    store: SQLiteIdentityAuthorityStore
+    def list_for_subject(self, subject_id: str) -> tuple[AuthorityGrant, ...]:
+        return self.store.list_grants_for_subject(subject_id)
+    def put(self, record: AuthorityGrant) -> None:
+        self.store.put_grant(record)
+
+
+@dataclass(frozen=True)
+class SQLiteApprovalRepository:
+    store: SQLiteIdentityAuthorityStore
+    def get(self, approval_id: str) -> ApprovalRecord | None:
+        return self.store.get_approval(approval_id)
+    def put(self, record: ApprovalRecord) -> None:
+        self.store.put_approval(record)
