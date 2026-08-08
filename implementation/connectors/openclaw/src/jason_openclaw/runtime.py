@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -170,6 +171,7 @@ class SQLiteReplayStore:
                 )
                 """
             )
+        os.chmod(self._path, 0o600)
 
     def claim(self, request_id: str) -> bool:
         key = request_id.strip()
