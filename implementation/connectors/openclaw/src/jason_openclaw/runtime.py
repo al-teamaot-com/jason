@@ -68,7 +68,7 @@ class OpenClawOrchestratorDispatcher:
                 requested_mode=request.requested_mode,
                 orchestration_mode=OrchestrationMode.EXECUTE,
                 authority_allowed=True,
-                approval_present=(request.requested_mode == "execute"),
+                approval_present=False,
                 risk="low",
                 data_handling=DataHandlingPolicy(
                     classification="internal",
@@ -102,7 +102,7 @@ class OpenClawOrchestratorDispatcher:
 
 
 class SQLiteReplayStore:
-    """Durable request-id/nonce replay protection for one OpenClaw ingress."""
+    """Durable request-id replay protection for one OpenClaw ingress."""
 
     def __init__(self, path: str | Path) -> None:
         self._path = str(path)
