@@ -14,8 +14,12 @@ on:
       - "implementation/connectors/openclaw/src/jason_openclaw/runtime.py"
       - "implementation/connectors/openclaw/tests/test_runtime.py"
       - "tools/identity_authority_admin.py"
+      - "tools/delegation_maintenance.py"
+      - "tools/openclaw_authority_operational_health.py"
+      - "tools/register_openclaw_public_key.py"
       - "tools/prepare_authority_openclaw_host.sh"
       - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
+      - "07-Operations/OpenClaw-JKD001-Operational-Hardening.md"
       - ".github/workflows/identity-authority.yml"
   pull_request:
     paths:
@@ -30,8 +34,12 @@ on:
       - "implementation/connectors/openclaw/src/jason_openclaw/runtime.py"
       - "implementation/connectors/openclaw/tests/test_runtime.py"
       - "tools/identity_authority_admin.py"
+      - "tools/delegation_maintenance.py"
+      - "tools/openclaw_authority_operational_health.py"
+      - "tools/register_openclaw_public_key.py"
       - "tools/prepare_authority_openclaw_host.sh"
       - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
+      - "07-Operations/OpenClaw-JKD001-Operational-Hardening.md"
       - ".github/workflows/identity-authority.yml"
 
 permissions:
@@ -48,9 +56,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install tests
-        run: python -m pip install --upgrade pip pytest
-      - name: Compile authority, orchestrator, OpenClaw, and admin tooling
-        run: python -m compileall -q implementation/kernel/identity_authority implementation/orchestrator implementation/connectors/openclaw/src tools/identity_authority_admin.py
+        run: python -m pip install --upgrade pip pytest "cryptography>=45,<47"
+      - name: Compile authority, orchestrator, OpenClaw, and operational tooling
+        run: python -m compileall -q implementation/kernel/identity_authority implementation/orchestrator implementation/connectors/openclaw/src tools/identity_authority_admin.py tools/delegation_maintenance.py tools/openclaw_authority_operational_health.py tools/register_openclaw_public_key.py
       - name: Validate host preparation shell
         run: bash -n tools/prepare_authority_openclaw_host.sh
       - name: Validate admin health command
@@ -61,3 +69,5 @@ jobs:
         run: python -m pytest implementation/orchestrator/tests/test_service.py -q
       - name: Test OpenClaw authority-context handoff
         run: python -m pytest implementation/connectors/openclaw/tests/test_runtime.py -q
+      - name: Smoke test delegation maintenance
+        run: python tools/delegation_maintenance.py --database /tmp/jason-authority-test.sqlite3 list
