@@ -4,6 +4,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
 
+from kernel.identity_authority import (
+    DelegationValidationRequest,
+    DelegationValidator,
+    PermissionMode,
+)
+
 from .connector import OpenClawConnector
 
 
@@ -22,6 +28,7 @@ class GovernedOpenClawIngress:
     audit: IngressAuditSink
     machine_principal_bindings: Mapping[str, str] = field(default_factory=dict)
     require_machine_principal_binding: bool = True
+    delegation_validator: DelegationValidator | None = None
     max_clock_skew_seconds: int = 60
 
     def handle(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -49,44 +56,16 @@ class GovernedOpenClawIngress:
 
         freshness_error = self._validate_freshness(envelope)
         if freshness_error is not None:
-            self.audit.append(
-                "openclaw.transport_denied",
-                {
-                    "request_id": request_id,
-                    "correlation_id": correlation_id,
-                    "machine_identity": machine_identity,
-                    "reason": freshness_error,
-                },
-            )
-            return {
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "status": "rejected",
-                "error_code": freshness_error,
-                "message": "OpenClaw request freshness validation failed.",
-            }
+            return self._deny(request_id, correlation_id, machine_identity, freshness_error,
+                              "OpenClaw request freshness validation failed.")
 
-        binding_error = self._validate_machine_principal_binding(
+        binding_error, delegation_id = self._validate_machine_principal_binding(
             machine_identity,
             envelope,
         )
         if binding_error is not None:
-            self.audit.append(
-                "openclaw.transport_denied",
-                {
-                    "request_id": request_id,
-                    "correlation_id": correlation_id,
-                    "machine_identity": machine_identity,
-                    "reason": binding_error,
-                },
-            )
-            return {
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "status": "rejected",
-                "error_code": binding_error,
-                "message": "OpenClaw machine identity is not authorized to assert this principal.",
-            }
+            return self._deny(request_id, correlation_id, machine_identity, binding_error,
+                              "OpenClaw machine identity is not authorized to assert this principal.")
 
         self.audit.append(
             "openclaw.transport_authenticated",
@@ -94,27 +73,82 @@ class GovernedOpenClawIngress:
                 "request_id": request_id,
                 "correlation_id": correlation_id,
                 "machine_identity": machine_identity,
+                "delegation_id": delegation_id,
             },
         )
         return self.connector.handle(envelope)
+
+    def _deny(
+        self,
+        request_id: str,
+        correlation_id: str,
+        machine_identity: str,
+        reason: str,
+        message: str,
+    ) -> dict[str, Any]:
+        self.audit.append(
+            "openclaw.transport_denied",
+            {
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "machine_identity": machine_identity,
+                "reason": reason,
+            },
+        )
+        return {
+            "request_id": request_id,
+            "correlation_id": correlation_id,
+            "status": "rejected",
+            "error_code": reason,
+            "message": message,
+        }
 
     def _validate_machine_principal_binding(
         self,
         machine_identity: str,
         envelope: Mapping[str, Any],
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         if not self.require_machine_principal_binding:
-            return None
+            return None, None
         bound_principal = self.machine_principal_bindings.get(machine_identity)
         if bound_principal is None:
-            return "machine_principal_binding_missing"
+            return "machine_principal_binding_missing", None
         principal = envelope.get("principal")
         if not isinstance(principal, Mapping):
-            return "machine_principal_binding_invalid"
+            return "machine_principal_binding_invalid", None
         asserted_principal = str(principal.get("principal_id", "")).strip()
-        if asserted_principal != bound_principal:
-            return "machine_principal_binding_mismatch"
-        return None
+        if asserted_principal == bound_principal:
+            return None, None
+
+        delegation_id = str(envelope.get("delegation_id", "")).strip()
+        if not delegation_id:
+            return "delegation_required", None
+        if self.delegation_validator is None:
+            return "delegation_validation_unavailable", delegation_id
+
+        try:
+            requested_mode = PermissionMode(str(envelope.get("requested_mode", "observe")))
+        except ValueError:
+            return "delegation_mode_invalid", delegation_id
+
+        result = self.delegation_validator.validate(
+            DelegationValidationRequest(
+                delegation_id=delegation_id,
+                delegator_id=asserted_principal,
+                delegate_id=bound_principal,
+                organization_id=str(principal.get("organization_id", "")),
+                client_id=(
+                    str(principal["client_id"])
+                    if principal.get("client_id") is not None
+                    else None
+                ),
+                capability=str(envelope.get("capability", "")),
+                requested_mode=requested_mode,
+            )
+        )
+        if not result.valid:
+            return result.reason_code.lower(), delegation_id
+        return None, delegation_id
 
     def _validate_freshness(self, envelope: Mapping[str, Any]) -> str | None:
         issued_at_raw = envelope.get("issued_at")

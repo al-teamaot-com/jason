@@ -5,6 +5,8 @@ on:
     paths:
       - "implementation/kernel/identity_authority/**"
       - "implementation/kernel/tests/test_identity_authority.py"
+      - "implementation/kernel/tests/test_delegation.py"
+      - "implementation/kernel/tests/test_delegation_durable.py"
       - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/authority.py"
@@ -19,6 +21,8 @@ on:
     paths:
       - "implementation/kernel/identity_authority/**"
       - "implementation/kernel/tests/test_identity_authority.py"
+      - "implementation/kernel/tests/test_delegation.py"
+      - "implementation/kernel/tests/test_delegation_durable.py"
       - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/authority.py"
@@ -51,8 +55,8 @@ jobs:
         run: bash -n tools/prepare_authority_openclaw_host.sh
       - name: Validate admin health command
         run: python tools/identity_authority_admin.py --database /tmp/jason-authority-test.sqlite3 health
-      - name: Test durable identity and authority service
-        run: python -m pytest implementation/kernel/tests/test_identity_authority.py -q
+      - name: Test durable identity, authority, and delegation service
+        run: python -m pytest implementation/kernel/tests/test_identity_authority.py implementation/kernel/tests/test_delegation.py implementation/kernel/tests/test_delegation_durable.py -q
       - name: Test orchestrator authority-context enforcement
         run: python -m pytest implementation/orchestrator/tests/test_service.py -q
       - name: Test OpenClaw authority-context handoff

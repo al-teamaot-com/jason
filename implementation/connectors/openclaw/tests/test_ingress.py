@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from jason_openclaw.connector import OpenClawConnector
@@ -57,9 +58,26 @@ class Authenticator:
         return "machine-openclaw-prod"
 
 
-def envelope(principal_id="svc-openclaw-gateway"):
+@dataclass(frozen=True)
+class DelegationResult:
+    valid: bool
+    reason_code: str
+
+
+class DelegationValidator:
+    def __init__(self, *, valid=True, reason="DELEGATION_VALID"):
+        self.valid = valid
+        self.reason = reason
+        self.requests = []
+
+    def validate(self, request):
+        self.requests.append(request)
+        return DelegationResult(self.valid, self.reason)
+
+
+def envelope(principal_id="svc-openclaw-gateway", delegation_id=None):
     now = datetime.now(timezone.utc)
-    return {
+    value = {
         "request_id": "req-1",
         "correlation_id": "corr-1",
         "capability": "autotask.ticket.get",
@@ -76,9 +94,12 @@ def envelope(principal_id="svc-openclaw-gateway"):
             "client_id": "client-1",
         },
     }
+    if delegation_id is not None:
+        value["delegation_id"] = delegation_id
+    return value
 
 
-def build(*, auth=True, policy="allowed", bindings=None):
+def build(*, auth=True, policy="allowed", bindings=None, delegation=None):
     dispatcher = Dispatcher()
     audit = Audit()
     connector = OpenClawConnector(
@@ -97,6 +118,7 @@ def build(*, auth=True, policy="allowed", bindings=None):
             if bindings is not None
             else {"machine-openclaw-prod": "svc-openclaw-gateway"}
         ),
+        delegation_validator=delegation,
     )
     return ingress, dispatcher, audit
 
@@ -127,12 +149,31 @@ def test_expired_request_never_reaches_dispatch():
     assert dispatcher.calls == []
 
 
-def test_machine_identity_cannot_assert_different_principal():
+def test_machine_identity_cannot_assert_human_without_delegation():
     ingress, dispatcher, audit = build()
     result = ingress.handle(envelope("person-al"))
-    assert result["error_code"] == "machine_principal_binding_mismatch"
+    assert result["error_code"] == "delegation_required"
     assert dispatcher.calls == []
-    assert audit.events[-1][1]["reason"] == "machine_principal_binding_mismatch"
+    assert audit.events[-1][1]["reason"] == "delegation_required"
+
+
+def test_valid_delegation_allows_human_principal():
+    delegation = DelegationValidator()
+    ingress, dispatcher, audit = build(delegation=delegation)
+    result = ingress.handle(envelope("person-al", "dlg-1"))
+    assert result["status"] == "completed"
+    assert len(dispatcher.calls) == 1
+    assert delegation.requests[0].delegator_id == "person-al"
+    assert delegation.requests[0].delegate_id == "svc-openclaw-gateway"
+    assert audit.events[0][1]["delegation_id"] == "dlg-1"
+
+
+def test_invalid_delegation_fails_closed():
+    delegation = DelegationValidator(valid=False, reason="DELEGATION_SCOPE_MISMATCH")
+    ingress, dispatcher, _ = build(delegation=delegation)
+    result = ingress.handle(envelope("person-al", "dlg-bad"))
+    assert result["error_code"] == "delegation_scope_mismatch"
+    assert dispatcher.calls == []
 
 
 def test_unbound_machine_identity_fails_closed():
