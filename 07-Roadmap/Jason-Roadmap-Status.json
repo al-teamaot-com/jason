@@ -1,10 +1,14 @@
 {
-  "updated": "2026-08-07",
+  "updated": "2026-08-08",
   "milestones": [
     {"id": "FOUNDATION", "title": "Constitution and governance foundation", "status": "complete", "phase": "Foundation"},
     {"id": "INF-001", "title": "OpenBao runtime foundation", "status": "complete", "phase": "Infrastructure"},
     {"id": "INF-002", "title": "Bootstrap credential retirement", "status": "complete", "phase": "Infrastructure"},
     {"id": "INF-003", "title": "Governed OpenBao restore validation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-010", "title": "Microsoft Cloud platform foundation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-011", "title": "Kaseya resource platform foundation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-012", "title": "Cross-provider relationship foundation", "status": "complete", "phase": "Infrastructure"},
+    {"id": "INF-013", "title": "Artifact and evidence storage foundation", "status": "complete", "phase": "Infrastructure"},
     {"id": "CAP-001", "title": "Canonical Autotask read capability", "status": "complete", "phase": "Capabilities"},
     {"id": "ORCH-001", "title": "Central Orchestrator foundation", "status": "complete", "phase": "Orchestration"},
     {"id": "ORCH-002", "title": "Durable orchestration event store", "status": "complete", "phase": "Orchestration"},
@@ -14,6 +18,11 @@
     {"id": "SHOWCASE-002", "title": "Local LLM pilot", "status": "complete", "phase": "Showcase"},
     {"id": "CAP-002", "title": "Ticket Intelligence v1 - retired; superseded by CAP-003", "status": "complete", "phase": "Capabilities"},
     {"id": "CAP-003", "title": "Autotask Business Context - live validated and converged", "status": "complete", "phase": "Capabilities"},
+    {"id": "J-116", "title": "State Model", "status": "complete", "phase": "Canonical Models"},
+    {"id": "J-117", "title": "Object Model", "status": "complete", "phase": "Canonical Models"},
+    {"id": "J-118", "title": "Relationship Model", "status": "complete", "phase": "Canonical Models"},
+    {"id": "J-120", "title": "Organizational Model", "status": "complete", "phase": "Canonical Models"},
+    {"id": "J-119", "title": "Event Model", "status": "in_progress", "phase": "Canonical Models"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
   ]
 }
