@@ -13,7 +13,24 @@
 2. **J-117 Object Model — approved foundation model**
 3. **J-116 State Model — approved foundation model**
 4. **J-118 Relationship Model — approved foundation model**
-5. J-119 Event Model — next
+5. **J-119 Event Model — active draft foundation model**
+
+## Integrated Provider / Infrastructure Foundations
+
+The following provider-neutral foundations are integrated and available to support later canonical-model and capability work:
+
+- **INF-010 Microsoft Cloud Platform Foundation — integrated**
+- **INF-011 Kaseya Resource Platform Foundation — integrated**
+- **INF-012 Cross-Provider Relationship Foundation — integrated**
+- **INF-013 Artifact/Evidence Storage Foundation — integrated**
+
+Their production bindings and provider-specific expansion remain separate governed follow-on work. Integration of a foundation does not itself authorize live provider access, mutation, cross-tenant activity, or autonomous execution.
+
+## Current Primary Workstream
+
+**J-119 Event Model** is the current canonical-model priority.
+
+J-119 must define a provider-neutral representation of material occurrences while preserving the distinction between canonical events, provider/source observations, evidence artifacts, orchestration audit events, state, relationships, and execution authority.
 
 ## Phase Principle
 
