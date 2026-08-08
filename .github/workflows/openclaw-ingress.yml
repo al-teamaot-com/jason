@@ -6,6 +6,7 @@ on:
       - "implementation/connectors/openclaw/**"
       - "implementation/orchestrator/gates.py"
       - "implementation/orchestrator/tests/test_gates.py"
+      - "tools/register_openclaw_public_key.py"
       - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - "implementation/connectors/openclaw/**"
       - "implementation/orchestrator/gates.py"
       - "implementation/orchestrator/tests/test_gates.py"
+      - "tools/register_openclaw_public_key.py"
       - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
 
@@ -31,9 +33,9 @@ jobs:
           python-version: "3.12"
       - name: Install tests and transport crypto
         run: python -m pip install --upgrade pip pytest "cryptography>=45,<47"
-      - name: Compile ingress, runtime bindings, and gates
-        run: python -m compileall -q implementation/connectors/openclaw/src implementation/orchestrator/gates.py
-      - name: Test OpenClaw connector, ingress, runtime, audit, and signed transport
+      - name: Compile ingress, runtime bindings, gates, and key tooling
+        run: python -m compileall -q implementation/connectors/openclaw/src implementation/orchestrator/gates.py tools/register_openclaw_public_key.py
+      - name: Test OpenClaw connector, ingress, runtime, audit, signed transport, and key registry
         run: python -m pytest implementation/connectors/openclaw/tests -q
       - name: Test governance gate chain
         run: python -m pytest implementation/orchestrator/tests/test_gates.py -q
