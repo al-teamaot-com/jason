@@ -13,7 +13,7 @@ The bounded question is:
 The convergence layer now:
 
 1. authorizes IT Glue and Datto RMM reads through the INF-011 resource registry;
-2. translates generic resource requests into the existing connector capabilities;
+2. translates generic resource requests into existing connector capabilities;
 3. preserves one organization, principal, client, and correlation context across independent provider reads;
 4. denies cross-organization correlation;
 5. creates INF-012 relationship evidence only when explicitly selected attributes agree;
@@ -25,28 +25,50 @@ The convergence layer now:
 
 ## Credential boundary
 
-The repository is intentionally ready to stop before live provider access.
-
 ### IT Glue
 
-Existing connector contract:
-
 - logical secret: `it_glue.readonly`
-- required credential field: `api_key`
+- durable field: `api_key`
 - API base: `https://api.itglue.com`
 - first bounded operation: one configuration GET through `it_glue.entity.get`
 
-The API key must be read-only for the intended discovery scope and must be stored through the Jason secret-provider path rather than committed, pasted into code, or supplied through normal logs/evidence.
+The key must be dedicated to Jason and constrained to the least privilege available for this read-only discovery slice. Password access is not required. The value belongs only in the approved Jason/OpenBao secret boundary.
 
 ### Datto RMM
 
-Existing connector contract:
-
 - logical secret: `datto_rmm.readonly`
-- required credential fields: `base_url`, `access_token`
+- durable fields: `api_url`, `api_key`, `api_secret`
+- runtime-only material: `access_token`
 - first bounded operation: one device search through `datto_rmm.device.search`
 
-The current connector consumes a provider base URL and bearer access token. If the production Datto RMM credential source is an API key/secret or OAuth client rather than a durable bearer token, credential acquisition must be bound behind the secret/transport boundary before live validation. Do not commit or log token material.
+Jason must not persist a Datto bearer token as the durable secret. The connector exchanges the durable API credentials for a bearer token at runtime and uses that token only for the bounded provider request. Token material must not enter Git, chat, normal logs, repository evidence, or the durable OpenBao secret record.
+
+Use the most restrictive Datto API security/component level available for the dedicated Jason API identity. If read-only scope cannot be established with confidence, stop before live validation.
+
+## OpenBao provisioning readiness
+
+Before credentials exist, it is safe to prepare logical paths and policy bindings, but do not create placeholder secret values that could be mistaken for production credentials.
+
+Expected durable secret shapes:
+
+```text
+it_glue.readonly
+  api_key
+
+datto_rmm.readonly
+  api_url
+  api_key
+  api_secret
+```
+
+Provisioning tooling must:
+
+- accept values without terminal echo;
+- avoid placing values on command lines or in shell history;
+- write directly through the approved OpenBao path;
+- clear transient variables after the write;
+- report only field presence and PASS/FAIL state;
+- never print secret values during verification.
 
 ## Preflight
 
@@ -61,7 +83,9 @@ Expected properties:
 - `status` = `credential_boundary_reached`
 - `network_contacted` = `false`
 - `secret_resolved` = `false`
-- both logical-secret contracts are listed
+- IT Glue requires `api_key`
+- Datto requires durable `api_url`, `api_key`, and `api_secret`
+- Datto `access_token` is identified as runtime-only and non-persistent
 - the two bounded provider reads are listed
 
 ## First live validation after credentials exist
@@ -70,27 +94,32 @@ Use one controlled client/organization and one known configuration/device pair.
 
 1. resolve `it_glue.readonly` through the approved Jason secret provider;
 2. execute one exact IT Glue configuration GET;
-3. resolve `datto_rmm.readonly` through the approved Jason secret provider;
-4. execute one bounded Datto RMM device search;
-5. capture only sanitized response-shape metadata and candidate identity fields;
-6. finalize normalization for stable identity attributes such as provider IDs, device/configuration names, serial numbers, and other verified identifiers actually returned by the APIs;
-7. evaluate candidate relationship evidence through the convergence service;
-8. keep the relationship at inferred/corroborated status unless the evidence threshold for verification is satisfied;
-9. record the occurrence through J-119 only if it is a material provider-neutral business event;
-10. keep raw provider payloads outside normal chat, Git, logs, and repository evidence.
+3. resolve durable `datto_rmm.readonly` through the approved Jason secret provider;
+4. acquire a Datto bearer token at runtime behind the connector boundary;
+5. execute one bounded Datto RMM device search;
+6. capture only sanitized response-shape metadata and candidate identity fields;
+7. finalize normalization for stable identity attributes actually returned by the APIs;
+8. evaluate candidate relationship evidence through the convergence service;
+9. keep the relationship inferred/corroborated unless the verification threshold is satisfied;
+10. record a J-119 event only for a material provider-neutral occurrence;
+11. keep raw provider payloads outside normal chat, Git, logs, and repository evidence.
 
 ## Stop conditions
 
 Stop before or during live validation if:
 
 - either logical secret cannot be resolved through the approved secret provider;
-- provider credentials have broader write authority than required and cannot be constrained;
+- provider credentials have broader authority than required and cannot be constrained;
 - organization/client scope cannot be established exactly;
 - the IT Glue configuration belongs to a different organization than the active context;
 - the Datto RMM device search cannot be bounded to the intended client/device context;
-- response shape differs from the expected provider contract and would require guessing;
+- token acquisition or response shape differs from the verified provider contract and would require guessing;
 - raw secrets or protected payloads would be printed or committed;
 - a mutation or provider-to-provider call would be required.
+
+## Credential lifecycle
+
+Dedicated Jason provider credentials must have an owner, creation date, review interval, and revocation/rotation procedure. Rotation must replace the durable OpenBao values without requiring workflow changes. Revocation must fail closed and must not cause Jason to fall back to personal, shared, cached, or embedded credentials.
 
 ## Additional providers
 
