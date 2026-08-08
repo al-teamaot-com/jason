@@ -21,8 +21,8 @@
     {"id": "J-116", "title": "State Model", "status": "complete", "phase": "Canonical Models"},
     {"id": "J-117", "title": "Object Model", "status": "complete", "phase": "Canonical Models"},
     {"id": "J-118", "title": "Relationship Model", "status": "complete", "phase": "Canonical Models"},
+    {"id": "J-119", "title": "Event Model", "status": "complete", "phase": "Canonical Models"},
     {"id": "J-120", "title": "Organizational Model", "status": "complete", "phase": "Canonical Models"},
-    {"id": "J-119", "title": "Event Model", "status": "in_progress", "phase": "Canonical Models"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"}
   ]
 }
