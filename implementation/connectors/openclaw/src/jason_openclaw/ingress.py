@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
 
@@ -20,6 +20,8 @@ class GovernedOpenClawIngress:
     connector: OpenClawConnector
     authenticator: TransportAuthenticator
     audit: IngressAuditSink
+    machine_principal_bindings: Mapping[str, str] = field(default_factory=dict)
+    require_machine_principal_binding: bool = True
     max_clock_skew_seconds: int = 60
 
     def handle(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -64,6 +66,28 @@ class GovernedOpenClawIngress:
                 "message": "OpenClaw request freshness validation failed.",
             }
 
+        binding_error = self._validate_machine_principal_binding(
+            machine_identity,
+            envelope,
+        )
+        if binding_error is not None:
+            self.audit.append(
+                "openclaw.transport_denied",
+                {
+                    "request_id": request_id,
+                    "correlation_id": correlation_id,
+                    "machine_identity": machine_identity,
+                    "reason": binding_error,
+                },
+            )
+            return {
+                "request_id": request_id,
+                "correlation_id": correlation_id,
+                "status": "rejected",
+                "error_code": binding_error,
+                "message": "OpenClaw machine identity is not authorized to assert this principal.",
+            }
+
         self.audit.append(
             "openclaw.transport_authenticated",
             {
@@ -73,6 +97,24 @@ class GovernedOpenClawIngress:
             },
         )
         return self.connector.handle(envelope)
+
+    def _validate_machine_principal_binding(
+        self,
+        machine_identity: str,
+        envelope: Mapping[str, Any],
+    ) -> str | None:
+        if not self.require_machine_principal_binding:
+            return None
+        bound_principal = self.machine_principal_bindings.get(machine_identity)
+        if bound_principal is None:
+            return "machine_principal_binding_missing"
+        principal = envelope.get("principal")
+        if not isinstance(principal, Mapping):
+            return "machine_principal_binding_invalid"
+        asserted_principal = str(principal.get("principal_id", "")).strip()
+        if asserted_principal != bound_principal:
+            return "machine_principal_binding_mismatch"
+        return None
 
     def _validate_freshness(self, envelope: Mapping[str, Any]) -> str | None:
         issued_at_raw = envelope.get("issued_at")
