@@ -29,11 +29,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install tests
-        run: python -m pip install --upgrade pip pytest
+      - name: Install tests and transport crypto
+        run: python -m pip install --upgrade pip pytest "cryptography>=45,<47"
       - name: Compile ingress, runtime bindings, and gates
         run: python -m compileall -q implementation/connectors/openclaw/src implementation/orchestrator/gates.py
-      - name: Test OpenClaw connector, ingress, and runtime bindings
+      - name: Test OpenClaw connector, ingress, runtime, audit, and signed transport
         run: python -m pytest implementation/connectors/openclaw/tests -q
       - name: Test governance gate chain
         run: python -m pytest implementation/orchestrator/tests/test_gates.py -q
