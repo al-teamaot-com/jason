@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from threading import Lock
@@ -9,41 +9,53 @@ from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
+from kernel.identity_authority import (
+    AuthorityOutcome,
+    AuthorityRequest,
+    IdentityAuthorityService,
+    PermissionMode,
+)
 from orchestrator import CentralOrchestrator, OrchestrationMode, OrchestrationRequest
 from orchestrator.gates import GateContext, GateOutcome, GovernanceGateChain
 
 from .models import CapabilityRequest
 
 
-class IdentityAuthorityService(Protocol):
-    def evaluate(
-        self,
-        *,
-        principal_id: str,
-        organization_id: str,
-        client_id: str | None,
-        capability: str,
-        requested_mode: str,
-        authentication_assurance: str,
-    ) -> str: ...
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass
 class JasonAuthorityEvaluator:
     service: IdentityAuthorityService
+    _contexts: dict[str, str] = field(default_factory=dict)
 
     def evaluate(self, request: CapabilityRequest) -> str:
-        decision = self.service.evaluate(
-            principal_id=request.principal.principal_id,
-            organization_id=request.principal.organization_id,
-            client_id=request.principal.client_id,
-            capability=request.capability,
-            requested_mode=request.requested_mode,
-            authentication_assurance=request.principal.authentication_assurance,
-        )
-        if decision not in {"allowed", "denied", "approval_required"}:
+        try:
+            requested_mode = PermissionMode(request.requested_mode)
+        except ValueError:
             return "denied"
-        return decision
+        decision = self.service.evaluate(
+            AuthorityRequest(
+                request_id=request.request_id,
+                correlation_id=request.correlation_id,
+                principal_id=request.principal.principal_id,
+                organization_id=request.principal.organization_id,
+                client_id=request.principal.client_id,
+                capability=request.capability,
+                requested_mode=requested_mode,
+                authentication_assurance=request.principal.authentication_assurance,
+            )
+        )
+        if decision.execution_context is not None:
+            self._contexts[request.request_id] = decision.execution_context.context_id
+        mapping = {
+            AuthorityOutcome.ALLOWED: "allowed",
+            AuthorityOutcome.ALLOWED_LIMITED: "denied",
+            AuthorityOutcome.APPROVAL_REQUIRED: "approval_required",
+            AuthorityOutcome.DENIED: "denied",
+            AuthorityOutcome.INDETERMINATE: "denied",
+        }
+        return mapping[decision.outcome]
+
+    def context_id_for(self, request_id: str) -> str | None:
+        return self._contexts.pop(request_id, None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,16 +82,24 @@ class GateChainPolicyEvaluator:
         return mapping[result.outcome]
 
 
+class AuthorityContextProvider(Protocol):
+    def context_id_for(self, request_id: str) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class OpenClawOrchestratorDispatcher:
     orchestrator: CentralOrchestrator
     capability_versions: Mapping[str, str]
+    authority_contexts: AuthorityContextProvider
     policy_ids: tuple[str, ...] = ("openclaw-ingress",)
 
     def dispatch(self, request: CapabilityRequest) -> Mapping[str, Any]:
         version = self.capability_versions.get(request.capability)
         if version is None:
             raise KeyError(request.capability)
+        authority_context_id = self.authority_contexts.context_id_for(request.request_id)
+        if authority_context_id is None:
+            raise RuntimeError("governed authority context was not issued")
 
         result = self.orchestrator.execute(
             OrchestrationRequest(
@@ -107,6 +127,7 @@ class OpenClawOrchestratorDispatcher:
                 arguments=dict(request.arguments),
                 policy_ids=self.policy_ids,
                 requester_kind="service",
+                authority_context_id=authority_context_id,
             )
         )
         return {
