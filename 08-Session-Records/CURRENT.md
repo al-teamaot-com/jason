@@ -21,6 +21,7 @@ The 2026-08-08 architecture/runtime sequence now includes:
 12. PR #84 — replay DB permission hardening and JKD-001 delegation foundation — merged
 13. PR #85 — durable governed OpenClaw human delegation — merged
 14. PR #86 — delegated-human host proof tooling — merged
+15. PR #87 — OpenClaw + JKD-001 operational hardening — merged
 
 PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider credential boundary. Do not invent provider payload schemas or placeholder secrets while those credentials are unavailable.
 
@@ -48,20 +49,18 @@ Host proof evidence is recorded in `08-Session-Records/OpenClaw-Delegated-Human-
 
 ### OpenClaw + JKD-001 Operational Hardening
 
-The next safe work requires no provider API credentials.
+Operational hardening is merged. Remaining host validation should confirm:
 
-Priorities:
-
-1. delegation lifecycle housekeeping that expires/deactivates stale records without deleting audit history;
-2. trusted OpenClaw machine-key rotation and revocation procedure with overlapping-key cutover support;
-3. production ingress/state health checks for authority DB, replay DB, security audit, orchestration audit, trusted-key registry, Docker/OpenClaw runtime, and key readability boundaries;
-4. backup and restore validation for JKD-001/OpenClaw SQLite state with owner-only permissions preserved;
-5. service packaging/runbook improvements so production composition is repeatable and observable;
-6. documentation and CatchMeUp integration for the above controls.
+1. delegation lifecycle housekeeping works against deployed state without deleting audit history;
+2. trusted OpenClaw key metadata can be safely listed and later rotated/revoked with overlap-first cutover;
+3. production ingress/state health checks pass for authority DB, replay DB, security audit, orchestration audit, trusted-key registry, Docker/OpenClaw runtime, and key readability boundaries;
+4. backup and restore validation passes for JKD-001/OpenClaw SQLite state with owner-only permissions preserved;
+5. service packaging/runbook improvements are repeatable and observable;
+6. CatchMeUp reports the above controls.
 
 Do not enable real human delegation to provider-backed capabilities until the operational controls above are complete and the relevant capability/provider authorization model has been explicitly reviewed.
 
-## Parallel Blocked Workstream
+## Parallel / Future Provider Workstreams
 
 ### IT Glue + Datto RMM Resource Convergence — PR #77
 
@@ -75,15 +74,33 @@ Needed later:
 
 Before live Datto use, re-verify the exact current OAuth token endpoint/request contract against official Datto documentation. Then run exactly one bounded IT Glue configuration GET and one bounded Datto device search, sanitize response-shape inspection, and finalize normalization/INF-012 matching.
 
+### AWS Connection — TODO
+
+Add AWS as a governed provider family rather than as direct ad hoc SDK access.
+
+Initial design/implementation should include:
+
+- provider-neutral AWS resource family registration and named capabilities;
+- identity-first authorization and organization/account/region scoping;
+- least-privilege, preferably read-only initial credentials/roles;
+- OpenBao-backed durable credential or role-assumption configuration with no long-lived access key exposure in Git/chat/logs;
+- STS/session credentials treated as runtime-only material;
+- Central Orchestrator-only invocation, with no direct OpenClaw/agent -> AWS path;
+- audit/evidence events for AWS reads and any later mutations;
+- controlled synthetic/test-account validation before any production account access;
+- explicit review of Organizations, IAM, CloudTrail, Config, Security Hub, GuardDuty, EC2, S3, RDS, Backup, and Systems Manager capabilities before expanding scope.
+
+Use "integrate before innovate": prefer AWS-native identity, audit, inventory, configuration, and security services over custom replacements.
+
 ## Immediate Next Actions
 
-1. complete and validate the OpenClaw/JKD-001 operational-hardening branch;
-2. add delegation expiry/deactivation tooling and tests;
-3. add trusted-key rotation/revocation tooling and runbook;
-4. add host health/preflight checks for all production ingress and authority state;
-5. add owner-permission-preserving SQLite backup/restore proof tooling;
-6. update CatchMeUp to report machine trust, authority/delegation store health, security-state modes, and operational-hardening status;
-7. run the resulting non-provider host proof and record evidence.
+1. complete the deployed OpenClaw/JKD-001 operational-hardening host proof;
+2. fix and validate the OpenClaw trusted-key lifecycle CLI if host validation exposes regressions;
+3. add production service packaging/health monitoring;
+4. perform an overlap-first OpenClaw signing-key rotation proof without losing service continuity;
+5. update CatchMeUp to report machine trust, authority/delegation store health, security-state modes, and operational-hardening status;
+6. record AWS connection as a future governed provider workstream and design it after the current OpenClaw/JKD-001 production boundary is stable;
+7. return to PR #77 when approved IT Glue/Datto credentials exist.
 
 ## Outstanding Historical Recovery Note
 
