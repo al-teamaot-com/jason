@@ -16,10 +16,12 @@ if str(IMPLEMENTATION) not in sys.path:
 from kernel.identity_authority import (  # noqa: E402
     ApprovalRecord,
     AuthorityGrant,
+    DelegationRecord,
     IdentityRecord,
     PermissionMode,
     SQLiteApprovalRepository,
     SQLiteAuthorityGrantRepository,
+    SQLiteDelegationRepository,
     SQLiteIdentityAuthorityStore,
     SQLiteIdentityRepository,
 )
@@ -55,6 +57,7 @@ def cmd_health(args) -> int:
             identities=store.connection.execute("SELECT COUNT(*) FROM identities").fetchone()[0],
             grants=store.connection.execute("SELECT COUNT(*) FROM authority_grants").fetchone()[0],
             approvals=store.connection.execute("SELECT COUNT(*) FROM approvals").fetchone()[0],
+            delegations=store.connection.execute("SELECT COUNT(*) FROM delegations").fetchone()[0],
             contexts=store.connection.execute("SELECT COUNT(*) FROM execution_contexts").fetchone()[0],
         )
         return 0
@@ -115,6 +118,68 @@ def cmd_approval_put(args) -> int:
             )
         )
         emit("pass", action="approval_put", approval_id=args.approval_id)
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_delegation_put(args) -> int:
+    effective_from = parse_time(args.effective_from)
+    effective_until = parse_time(args.effective_until)
+    if effective_from is None or effective_until is None:
+        raise ValueError("delegation effective-from and effective-until are required")
+    store = store_for(args.database)
+    try:
+        SQLiteDelegationRepository(store).put(
+            DelegationRecord(
+                delegation_id=args.delegation_id,
+                delegator_id=args.delegator_id,
+                delegate_id=args.delegate_id,
+                organization_id=args.organization_id,
+                client_id=args.client_id,
+                capability=args.capability,
+                maximum_mode=PermissionMode(args.maximum_mode),
+                effective_from=effective_from,
+                effective_until=effective_until,
+                status=args.record_status,
+            )
+        )
+        store.append_authority_audit(
+            event_type="authority.delegation.recorded",
+            correlation_id=args.correlation_id,
+            principal_id=args.recorded_by,
+            organization_id=args.organization_id,
+            capability=args.capability,
+            outcome="recorded",
+            reason_codes=(args.delegation_id,),
+        )
+        emit("pass", action="delegation_put", delegation_id=args.delegation_id)
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_delegation_revoke(args) -> int:
+    store = store_for(args.database)
+    try:
+        changed = SQLiteDelegationRepository(store).revoke(
+            args.delegation_id,
+            revoked_at=datetime.now(timezone.utc),
+            reason=args.reason,
+        )
+        if not changed:
+            emit("fail", action="delegation_revoke", reason="delegation_not_found_or_already_revoked")
+            return 2
+        store.append_authority_audit(
+            event_type="authority.delegation.revoked",
+            correlation_id=args.correlation_id,
+            principal_id=args.revoked_by,
+            organization_id=args.organization_id,
+            capability=args.capability,
+            outcome="revoked",
+            reason_codes=(args.reason,),
+        )
+        emit("pass", action="delegation_revoke", delegation_id=args.delegation_id)
         return 0
     finally:
         store.close()
@@ -186,6 +251,30 @@ def parser() -> argparse.ArgumentParser:
     approval.add_argument("--decided-at")
     approval.add_argument("--expires-at")
     approval.set_defaults(func=cmd_approval_put)
+
+    delegation = sub.add_parser("delegation-put")
+    delegation.add_argument("--delegation-id", required=True)
+    delegation.add_argument("--delegator-id", required=True)
+    delegation.add_argument("--delegate-id", required=True)
+    delegation.add_argument("--organization-id", required=True)
+    delegation.add_argument("--client-id")
+    delegation.add_argument("--capability", required=True)
+    delegation.add_argument("--maximum-mode", choices=[m.value for m in PermissionMode], required=True)
+    delegation.add_argument("--effective-from", required=True)
+    delegation.add_argument("--effective-until", required=True)
+    delegation.add_argument("--record-status", default="active")
+    delegation.add_argument("--correlation-id", required=True)
+    delegation.add_argument("--recorded-by", required=True)
+    delegation.set_defaults(func=cmd_delegation_put)
+
+    delegation_revoke = sub.add_parser("delegation-revoke")
+    delegation_revoke.add_argument("--delegation-id", required=True)
+    delegation_revoke.add_argument("--reason", required=True)
+    delegation_revoke.add_argument("--correlation-id", required=True)
+    delegation_revoke.add_argument("--revoked-by", required=True)
+    delegation_revoke.add_argument("--organization-id", required=True)
+    delegation_revoke.add_argument("--capability", required=True)
+    delegation_revoke.set_defaults(func=cmd_delegation_revoke)
 
     revoke = sub.add_parser("context-revoke")
     revoke.add_argument("--context-id", required=True)
