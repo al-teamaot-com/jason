@@ -36,6 +36,7 @@ nav:
       - INF-002 OpenBao Bootstrap Credential Retirement: 03-Components/Infrastructure/INF-002-OpenBao-Bootstrap-Credential-Retirement.md
       - INF-002 Production Readiness Bootstrap Gate: 03-Components/Infrastructure/INF-002-Production-Readiness-Bootstrap-Gate.md
       - INF-003 Governed OpenBao Raft Restore Test: 03-Components/Infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
+      - INF-010 Microsoft Cloud Platform Foundation: 03-Components/Infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
@@ -49,6 +50,7 @@ nav:
       - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: 07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
       - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
+      - INF-010 Microsoft Cloud Deployment Checklist: 07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:

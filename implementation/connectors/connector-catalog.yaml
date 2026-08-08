@@ -66,15 +66,35 @@ connectors:
     status: partial
     priority: 6
   microsoft_graph:
-    status: foundation_built
+    status: platform_foundation_built
     priority: 7
-    mode: directory_read_onboarding
+    mode: governed_read_first
+    service_families:
+      - graph
+      - entra
+      - exchange_online
+      - sharepoint_online
+      - onedrive
+      - teams
+      - intune
+      - defender
+      - purview
+      - service_health
+      - licensing
+    permission_profiles:
+      - directory-read
+      - identity-investigation-read
+      - mail-investigation-read
+      - device-compliance-read
+      - security-investigation-read
+      - collaboration-permissions-read
     next:
       - openbao_certificate_credential_source
       - multitenant_app_registration
-      - directory_read_permission_profile
       - persistent_client_boundary_registry
+      - live_token_validation
       - first_graph_read_capability
+      - controlled_test_tenant_onboarding
       - production_validation
   teams_approvals:
     status: planned
