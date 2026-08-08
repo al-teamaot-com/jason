@@ -70,6 +70,7 @@ jobs:
             implementation/connectors/tests/test_relationships.py \
             implementation/connectors/tests/test_artifact_evidence.py \
             implementation/connectors/tests/test_resource_convergence.py \
+            implementation/connectors/tests/test_datto_rmm_auth.py \
             -q
       - name: Verify credential-safe preflight
         run: |
@@ -83,7 +84,11 @@ jobs:
           assert report['network_contacted'] is False
           assert report['secret_resolved'] is False
           assert report['required_logical_secrets']['it_glue']['logical_name'] == 'it_glue.readonly'
-          assert report['required_logical_secrets']['datto_rmm']['logical_name'] == 'datto_rmm.readonly'
+          datto = report['required_logical_secrets']['datto_rmm']
+          assert datto['logical_name'] == 'datto_rmm.readonly'
+          assert datto['required_fields'] == ['api_url', 'api_key', 'api_secret']
+          assert datto['runtime_material'] == ['access_token']
+          assert datto['persist_access_token'] is False
           PY
 
   documentation:
