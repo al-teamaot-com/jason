@@ -38,6 +38,7 @@ nav:
       - INF-003 Governed OpenBao Raft Restore Test: 03-Components/Infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
       - INF-010 Microsoft Cloud Platform Foundation: 03-Components/Infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
       - INF-011 Kaseya Resource Platform Foundation: 03-Components/Infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
+      - INF-012 Cross-Provider Relationship Foundation: 03-Components/Infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
