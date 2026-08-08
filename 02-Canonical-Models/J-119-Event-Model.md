@@ -1,426 +1,370 @@
 # J-119 — Event Model
 
-**Status:** Draft Foundation Model  
+**Status:** Approved Foundation Model  
 **Artifact Type:** Canonical Model  
 **Owner:** Jason Architecture Authority  
-**Applies To:** Every governed observation, occurrence, state change, action, decision, communication, alert, request, workflow, provider signal, and audit-producing capability in Jason
+**Applies To:** Every governed occurrence, observation, action, communication, state change, relationship change, provider signal, and audit-producing capability in Jason
 
 ## 1. Purpose
 
 The Event Model defines how Jason represents that something happened.
 
-An event is not merely a log line, webhook, ticket update, alert, audit record, orchestration message, or provider notification. Those are sources that may report, describe, or provide evidence for an event. Jason needs a provider-neutral event model so it can reason consistently across Autotask, Datto RMM, IT Glue, Microsoft, security platforms, human activity, orchestration, and future capabilities without allowing any provider's schema to become the business model.
+A canonical Jason event is a provider-neutral occurrence record. A webhook, audit entry, log line, ticket update, alert, orchestration record, or provider message may provide evidence that an event occurred, but none of those source records automatically becomes the canonical business event.
 
 Jason must be able to answer:
 
 1. What happened?
-2. When did it happen?
+2. When did it happen, and how certain is that time?
 3. When and how did Jason learn about it?
-4. Who or what acted, observed, requested, decided, or was affected?
-5. Which organization, tenant, object, relationship, state, or capability does it concern?
-6. What evidence supports the event statement?
-7. Is the event reported, inferred, corroborated, verified, disputed, corrected, or superseded?
-8. What other events caused, preceded, followed, correlated with, or resulted from it?
-9. Does the event describe authority, or merely record that an authority-related action was claimed or observed?
-10. Can the event be trusted strongly enough to support a decision while preserving tenant, policy, and evidence boundaries?
+4. Who or what acted, observed, or was affected?
+5. Which organization, tenant, object, state, relationship, or capability does it concern?
+6. What evidence supports the occurrence?
+7. How strongly is the occurrence verified?
+8. Which governed relationships connect it to other events or objects?
+9. Was an authority-related action merely observed, or was valid authority independently established?
+10. Can the event be relied upon for reasoning without violating tenant, policy, evidence, or execution boundaries?
 
 ## 2. Scope
 
 This model defines:
 
-- the distinction between a canonical Jason event and source evidence about an event;
-- the minimum common event record;
+- the distinction between source observations/evidence and canonical events;
+- the common canonical event record;
 - event identity, organization context, participants, subjects, timing, provenance, classification, verification, and evidence;
-- occurrence time, observation time, ingestion time, and recording time;
-- correlation, causation, sequence, and consequence semantics;
+- occurrence, observation, ingestion, and recording time;
+- event classes for occurrence meaning;
 - state-change and relationship-change event semantics;
-- event immutability and correction rules;
-- cross-provider event normalization;
-- event relationships to J-116 State, J-117 Object, J-118 Relationship, and J-120 Organizational models;
-- compatibility with orchestration audit events and INF-013 artifact/evidence references;
-- requirements for introducing new event classes and types.
+- event immutability, correction, and supersession;
+- event-to-event linkage through J-118 relationships;
+- cross-provider normalization;
+- compatibility with J-116 State, J-117 Object, J-118 Relationship, J-120 Organizational models, ORCH-002 audit history, and INF-013 artifact/evidence references.
 
-This model does not prescribe an event bus, queue, database, stream processor, SIEM, webhook framework, or storage provider. Implementations may use different technologies when they preserve the canonical meaning and governance defined here.
+This model does not prescribe an event bus, queue, database, SIEM, stream processor, webhook framework, or storage provider.
 
 ## 3. Foundational Principles
 
-### 3.1 Model the occurrence, not the provider message
+### 3.1 Model the occurrence, not the source message
 
-A provider message is evidence that something may have happened. It is not automatically the canonical event.
+Provider-native messages remain source observations or evidence. Canonical promotion requires governed interpretation with preserved provenance.
 
-Examples:
+### 3.2 Events do not replace canonical objects
 
-- a Datto RMM alert may report that a device crossed a threshold;
-- a Microsoft audit record may report that an identity changed a setting;
-- an Autotask ticket update may report that work status changed;
-- an orchestration lifecycle record may report that Jason invoked a capability.
+J-117 remains authoritative for canonical objects such as Request, Decision, Approval, Evidence, Work Item, Incident, Change, Alert, Policy, and Capability.
 
-Each source retains its own evidence identity and provenance. Jason may normalize one or more source records into a canonical event only through a governed interpretation boundary.
+J-119 records occurrences involving those objects. It does not create parallel Request, Decision, Approval, or Evidence object definitions.
 
-### 3.2 Events are immutable occurrence records
+### 3.3 Events are immutable in material meaning
 
-Once recorded, the material assertion of an event must not be silently rewritten. New evidence may change confidence or interpretation, but corrections and supersession must remain visible and attributable.
+A recorded event is not silently rewritten. Corrections, supersession, changed interpretation, and changed verification posture remain attributable and auditable.
 
-If a previously recorded event is materially wrong, Jason records the correction through a new governed record and explicit relationship rather than erasing historical evidence.
+### 3.4 Event time has multiple meanings
 
-### 3.3 Event time has multiple meanings
+Occurrence time, observation time, ingestion time, and recording time are distinct concepts. Exact time must not be fabricated when the source only supports a range or approximate timestamp.
 
-Jason must not collapse all timestamps into one field. At minimum it must distinguish when the occurrence happened from when it was observed or received.
+### 3.5 Observation is not proof
 
-### 3.4 Observation is not proof
+A source observation may remain reported, inferred, disputed, stale, or otherwise insufficient to establish a verified canonical event.
 
-A webhook, alert, log, user statement, API response, or model inference is a source observation. Jason must preserve the difference between reported evidence and a verified canonical fact.
+### 3.6 Events do not create authority
 
-### 3.5 Events do not create authority by themselves
+An event stating that an approval, administrative action, or change occurred does not independently prove that the actor possessed valid authority. Authority still resolves through identity, J-118 relationships, policy, scope, approval objects, and effective time.
 
-An event stating that an approval occurred does not independently prove that the approving actor possessed valid authority. Authority must still resolve through J-118 relationships, identity, policy, scope, and effective time.
+### 3.7 Tenant boundaries remain authoritative
 
-Likewise, observing that an administrator performed an action does not prove that the action was authorized.
+Shared infrastructure, correlated identifiers, provider links, or telemetry must never merge tenant context or grant cross-tenant access.
 
-### 3.6 Tenant and organization boundaries remain authoritative
+### 3.8 Evidence remains by reference
 
-Shared infrastructure, correlated identifiers, provider links, or cross-tenant telemetry must never cause events to merge organizational context or grant access across boundaries.
+Large payloads, attachments, exports, transcripts, screenshots, reports, and raw provider bodies belong behind the INF-013 artifact/evidence boundary and are referenced from the event.
 
-### 3.7 Evidence remains by reference
+### 3.9 Relationships remain governed by J-118
 
-Large payloads, attachments, transcripts, provider exports, reports, screenshots, and raw event bodies should be stored through the INF-013 artifact/evidence boundary and referenced from the event record rather than copied into every event representation.
+Causation, correction, supersession, duplication, sequencing, containment, and consequence are relationships between events or other objects. J-118 remains authoritative for their governed meaning.
 
-### 3.8 Use a small canonical vocabulary
+J-119 may carry correlation keys and relationship references, but it must not create a competing relationship model.
 
-Jason should maintain a bounded set of canonical event classes and allow governed subtypes. Provider-specific event names map into that vocabulary rather than multiplying the canonical model.
+## 4. Common Canonical Event Record
 
-## 4. Canonical Event Record
+Every material canonical event must support the following.
 
-Every material governed event must support the following concepts.
-
-### 4.1 Identity and boundary
+### 4.1 Required fields
 
 - canonical event identifier;
 - schema/model version;
 - organization identifier;
-- tenant or environment context where applicable;
+- tenant or governed shared-context identifier;
 - canonical event class;
-- canonical event type or governed subtype;
-- human-readable event meaning.
+- human-readable event meaning;
+- `recorded_at`;
+- source/provenance reference;
+- recording capability or authority;
+- verification state;
+- classification/handling context.
 
-### 4.2 Participants and subjects
+### 4.2 Conditionally required fields
 
-- actor or initiating principal where known;
-- observing principal or capability where relevant;
-- affected or subject object identifiers;
-- related organization, person, identity, asset, service, work item, agreement, policy, capability, or other canonical objects;
-- related canonical relationship identifiers where the event concerns a relationship.
+When available or materially relevant, the event must also support:
 
-Unknown actors or subjects must remain explicitly unknown rather than fabricated from naming similarity or provider ownership.
-
-### 4.3 Timing
-
-- `occurred_at` — best supported time the business occurrence happened;
-- `observed_at` — time a source or observer detected or reported it;
-- `ingested_at` — time Jason accepted the source observation into a governed boundary;
-- `recorded_at` — time the canonical event record was created;
-- source timezone or timestamp precision where relevant;
-- uncertainty or bounded time range when exact occurrence time is not known.
-
-These timestamps may be identical, but implementations must not assume they are.
-
-### 4.4 Provenance and evidence
-
-- source provider or source system where applicable;
-- source resource/reference identifier;
-- source event/message identifier where available;
+- canonical event subtype;
+- actor or initiating principal;
+- observing principal or capability;
+- affected/subject object references;
+- related canonical object references;
+- related canonical relationship references;
+- `occurred_at`;
+- `observed_at`;
+- `ingested_at`;
+- time precision, uncertainty, or bounded occurrence interval;
+- source provider/system;
+- source resource/event/message identifier;
 - source capability and operation;
 - source correlation identifier;
 - evidence/artifact references;
-- transformation or normalization version;
-- recording capability or authority;
-- confidence and verification state;
-- classification and handling restrictions.
+- normalization/transformation version;
+- before-state and after-state references;
+- policy, agreement, approval, or authority context;
+- J-118 event-to-event relationship references.
 
-### 4.5 Context and meaning
-
-- current interpretation or event statement;
-- relevant before-state and after-state references where applicable;
-- relevant relationship references;
-- related request, decision, approval, work item, incident, change, alert, communication, or workflow references;
-- policy or agreement context when material;
-- scope and limitations on the interpretation.
-
-### 4.6 Correlation and consequence
-
-- correlation identifiers;
-- parent or containing event where applicable;
-- causal predecessor where verified or explicitly claimed;
-- resulting/consequence event references;
-- sequence membership where order is material;
-- superseding or corrective event references.
-
-Correlation must not be represented as causation without evidence.
+Unknown values remain unknown. Implementations must not manufacture actors, objects, timestamps, authority, or causal links.
 
 ## 5. Canonical Event Classes
 
-The canonical event vocabulary should remain small. Initial classes are:
+The canonical vocabulary is intentionally small.
 
 ### 5.1 Observation
 
-Records that an object, condition, signal, fact, or claim was observed or reported.
+Records that a condition, signal, fact, or claim was observed or reported.
 
-Examples include monitoring detections, provider alerts, discovered resources, user reports, and health observations.
+Examples include monitoring detections, provider alerts, discovered resources, user reports, health observations, and model findings.
 
-An Observation does not itself prove the observed condition is true.
+Observation does not itself establish truth.
 
-### 5.2 Request
+### 5.2 Action
 
-Records that a person, identity, organization, system, or governed capability expressed a request for work, information, approval, or change.
+Records that an actor, capability, provider, or governed process attempted or performed an action.
 
-A Request event does not itself authorize execution.
+Action subtypes may preserve attempted, started, completed, failed, denied, cancelled, rolled back, or verified meanings when operationally material.
 
-### 5.3 Action
+An action involving a J-117 Request, Decision, Approval, Evidence, Change, Work Item, or other object references that object rather than redefining it.
 
-Records that an actor, provider, capability, or governed process performed or attempted an action.
+### 5.3 State Change
 
-Action subtypes must preserve attempted, started, completed, failed, denied, cancelled, and rolled-back meanings when they matter.
+Records a material transition in J-116 state for a governed object.
 
-### 5.4 State Change
+Lifecycle progression is represented through State Change rather than a separate top-level Lifecycle event class. J-116 remains authoritative for lifecycle, health, verification, attention, operational-condition, and execution-state meaning.
 
-Records a material change between J-116 state representations for a governed object.
+### 5.4 Relationship Change
 
-A State Change event should reference the affected object and the before/after state facts rather than inventing a parallel status model.
+Records a material occurrence involving a J-118 relationship, such as proposal, discovery, corroboration, verification, activation, dispute, suspension, revocation, expiration, correction, or supersession.
 
-### 5.5 Relationship Change
+The relationship record remains authoritative for relationship meaning and current governed state.
 
-Records creation, verification, activation, suspension, expiration, revocation, dispute, correction, or supersession of a J-118 relationship.
+### 5.5 Communication
 
-The event records that the relationship changed; the relationship record remains the canonical relationship authority.
+Records a material communication occurrence such as a message, notification, acknowledgement, escalation, client-facing update, or response.
 
-### 5.6 Decision
-
-Records that a governed decision was made, including approval, denial, escalation, exception, classification, or disposition.
-
-A Decision event must identify the decision record or authority chain when the decision can affect execution rights, obligations, risk, or client impact.
-
-### 5.7 Communication
-
-Records a material communication occurrence such as a message, notification, acknowledgement, escalation, or client-facing update.
-
-Message bodies and large transcripts should normally remain artifact/evidence references rather than duplicated event payloads.
-
-### 5.8 Evidence
-
-Records the creation, collection, verification, preservation, challenge, or retirement of evidence.
-
-Evidence events do not replace the evidence artifact or evidence relationship itself.
-
-### 5.9 Lifecycle
-
-Records lifecycle progression for governed workflows, capabilities, jobs, cases, incidents, changes, or orchestration executions when that lifecycle is materially useful outside the source system.
-
-Provider-specific workflow states must map to canonical lifecycle meaning rather than becoming new event classes.
+Communication content may reference J-117 Request, Decision, Approval, Knowledge, Evidence, Work Item, or other objects. Large message bodies and transcripts remain artifact/evidence references.
 
 ## 6. Source Observation Versus Canonical Event
 
-Jason must preserve two layers:
+Jason preserves two layers:
 
-1. **Source observation/evidence** — what a provider, person, device, system, model, connector, or capability reported.
-2. **Canonical event** — Jason's governed, provider-neutral interpretation that a material occurrence happened.
+1. **Source observation/evidence** — what a provider, person, device, connector, model, or capability reported.
+2. **Canonical event** — Jason's governed interpretation that a material business occurrence happened.
 
 A source observation may remain unpromoted when:
 
-- organization scope is ambiguous;
-- object identity cannot be resolved;
+- organization or tenant scope is ambiguous;
+- canonical object identity cannot be resolved;
 - evidence is incomplete;
-- the source is untrusted or disputed;
-- the apparent event duplicates a stronger existing record;
-- the interpretation would require unsupported inference.
+- the source is untrusted, stale, or disputed;
+- the observation duplicates a stronger existing occurrence;
+- promotion would require unsupported inference.
 
-Multiple source observations may support one canonical event. One provider record may also describe multiple business events and therefore yield more than one canonical event when the meanings are distinct.
+Multiple source observations may support one canonical event. One source record may also contain multiple distinct business occurrences and therefore support multiple canonical events.
 
-Promotion must preserve the original evidence references and the transformation or interpretation path.
+Promotion must preserve the original evidence reference and normalization path.
 
 ## 7. Event Verification
 
-Event verification uses an epistemic dimension separate from the event's business class.
+J-119 uses a compact event-specific epistemic vocabulary:
 
-Initial verification states include:
+- **Reported** — a source asserts that the occurrence happened;
+- **Inferred** — Jason derives the occurrence from indirect evidence;
+- **Corroborated** — multiple independent or materially distinct evidence sources support the occurrence;
+- **Verified** — sufficient authoritative evidence supports the occurrence for its governed use;
+- **Disputed** — credible evidence conflicts with the occurrence or interpretation;
+- **Rejected** — the occurrence or interpretation was evaluated and not accepted as canonical.
 
-- Unknown
-- Reported
-- Observed
-- Inferred
-- Corroborated
-- Verified
-- Disputed
-- Rejected
-- Corrected
-- Superseded
+Correction and supersession are not verification states. They are governed J-118 relationships between records/events while the original event remains preserved.
 
-A completed Action event may still be only Reported if the only evidence is a provider message. A historical event may remain Verified even after the affected object has moved through later states.
+Where no event verification can be established, implementations must represent that explicitly rather than treating absence of a value as verification.
 
-Verification changes must be attributable and auditable. They must not silently rewrite the original source evidence.
+## 8. Time Semantics
 
-## 8. State Changes
+Canonical event time supports:
 
-J-119 does not define object state. J-116 does.
+- `occurred_at` — best-supported occurrence time;
+- `observed_at` — when a source detected or reported the occurrence;
+- `ingested_at` — when Jason accepted the source observation into a governed boundary;
+- `recorded_at` — when the canonical event was created.
 
-A State Change event should identify:
+When exact occurrence time is unavailable, the event may carry:
+
+- earliest supported occurrence time;
+- latest supported occurrence time;
+- source precision;
+- clock-skew or source-time uncertainty metadata.
+
+Jason must not convert a low-precision or untrusted source timestamp into false precision.
+
+## 9. State Changes
+
+J-119 does not define state. J-116 does.
+
+A State Change event should reference:
 
 - the affected canonical object;
-- the state dimension or dimensions that materially changed;
-- before-state reference or supported prior value;
-- after-state reference or supported resulting value;
-- actor or mechanism causing the change when known;
-- evidence for the change;
-- authority context when the change was intentional and governed;
+- the J-116 state dimension that changed;
+- supported before-state and after-state values or references;
+- actor or mechanism when known;
+- evidence;
+- authority context when intentional/governed;
 - occurrence and observation times.
 
-An event may report a state change without proving causation. For example, an alert may show that a service became unavailable without proving what caused the outage.
+A state transition may be observed without its cause being known.
 
-## 9. Relationship Changes
+## 10. Relationship Changes and Event-to-Event Relationships
 
 J-119 does not define relationship meaning. J-118 does.
 
-A Relationship Change event should reference the canonical relationship and describe the material occurrence, such as:
+Event-to-event concepts such as the following must be represented through governed J-118 relationships or governed subtypes of J-118 relationships:
 
-- relationship proposed;
-- relationship discovered;
-- relationship corroborated;
-- relationship verified;
-- relationship activated;
-- relationship disputed;
-- relationship suspended;
-- relationship revoked;
-- relationship expired;
-- relationship superseded.
+- correlated with;
+- preceded by / followed by;
+- caused by / resulted in;
+- part of / contains;
+- duplicate of;
+- corrects;
+- supersedes.
 
-The event may provide historical sequencing and causation context, but the current governed relationship state belongs to J-118.
-
-## 10. Correlation, Causation, and Sequence
-
-Jason must distinguish:
-
-- **correlated with** — events share meaningful context or identifiers;
-- **preceded by / followed by** — temporal or ordered relationship;
-- **caused by** — supported causal relationship;
-- **resulted in** — supported consequence relationship;
-- **part of** — event belongs to a broader incident, request, workflow, execution, or business occurrence;
-- **duplicate of** — two observations or event records describe the same occurrence;
-- **corrects / supersedes** — later governed record changes the accepted interpretation while preserving history.
-
-A shared ticket ID, device ID, user identity, timestamp window, or correlation ID is not sufficient by itself to assert causation.
+Correlation identifiers may be stored directly for efficient grouping, but a correlation key is not proof of a canonical relationship and never proves causation.
 
 ## 11. Provider and Connector Mapping
 
-Provider adapters may emit source observations using provider-native schemas internally, but the Central Orchestrator and governed normalization capabilities control promotion into canonical events.
+Provider adapters may emit source observations using provider-native schemas internally. Promotion into canonical events occurs only through the Central Orchestrator or another explicitly governed normalization capability.
 
 Examples:
 
-- Microsoft audit activity may map to Action, State Change, Decision, or Relationship Change depending on business meaning.
-- Datto RMM monitoring may map to Observation and later to State Change if the condition is verified.
-- Autotask ticket history may map to Request, Communication, Action, State Change, or Decision.
-- RocketCyber or other security findings may map initially to Observation, not automatically to Incident or verified compromise.
-- IT Glue modifications may map to Action and State Change while the knowledge/document object remains governed separately.
+- Microsoft audit activity may support Action, State Change, Relationship Change, or Communication events depending on business meaning;
+- Datto RMM monitoring may begin as Observation and later support State Change if the condition is sufficiently verified;
+- Autotask ticket history may support Communication, Action, or State Change events while Request, Decision, Approval, and Work Item remain J-117 objects;
+- RocketCyber or other security findings begin as Observation unless separate governed criteria establish an Incident or another canonical object;
+- IT Glue modifications may support Action and State Change events while Knowledge/Evidence objects remain governed separately.
 
-Provider adapters must not communicate directly with other providers to establish event truth. Cross-provider corroboration is coordinated through the Central Orchestrator and governed capabilities.
+Provider adapters must never communicate directly with other providers to establish event truth. Cross-provider corroboration is coordinated through the Central Orchestrator.
 
-## 12. Relationship to Orchestration Audit Events
+## 12. Orchestration Audit Events
 
-ORCH-002 established a durable append-only orchestration event store. Those orchestration lifecycle records remain authoritative evidence of what the Central Orchestrator recorded about an execution.
+ORCH-002 remains authoritative evidence of what the Central Orchestrator recorded about its own execution lifecycle.
 
-They are not automatically the canonical business Event Model.
+An orchestration record is eligible for promotion into a canonical business event only when all of the following are true:
 
-J-119 must allow a governed mapping where an orchestration event has material business meaning, while preserving separation between:
+1. the record describes a material business occurrence, not merely internal plumbing;
+2. organization/tenant context is resolved;
+3. relevant canonical subjects can be identified;
+4. provenance and original ORCH-002 evidence remain referenced;
+5. promotion adds provider-neutral business meaning;
+6. the resulting event does not overstate the external business outcome.
 
-- orchestration implementation history;
-- audit/evidence records;
-- canonical business events.
+For example, `orchestration.capability.completed` proves that Jason recorded capability completion under its orchestration contract. It does not by itself prove that the external provider reached the desired business state.
 
-For example, `orchestration.capability.completed` proves that Jason recorded a capability completion under its orchestration contract. It does not automatically prove that the external provider reached the intended business state. Provider-state evidence or subsequent verification may still be required.
+## 13. Deduplication
 
-## 13. Event Immutability and Correction
+Canonical deduplication must fail safe.
+
+Two observations may be considered candidates for the same canonical occurrence only when a governed rule evaluates a combination of materially relevant evidence such as:
+
+- organization/tenant;
+- source event identity;
+- canonical subject identity;
+- canonical event class/subtype;
+- occurrence-time window and source precision;
+- provider correlation identifiers;
+- event content fingerprint where appropriate.
+
+No single shared identifier, timestamp, user, device, or correlation key is sufficient by itself to collapse events.
+
+When uncertainty remains, preserve distinct records and relate them as possible duplicates rather than silently deleting or merging history.
+
+## 14. Event Immutability and Correction
 
 Material event records are append-only in meaning.
 
-Corrections must:
+A correction must:
 
-1. identify the original event;
-2. preserve the original record and evidence;
-3. state what interpretation is being corrected;
-4. identify the correcting authority or capability;
-5. provide supporting evidence;
-6. create an explicit `corrects` or `supersedes` relationship;
-7. update derived views without erasing historical reconstruction.
+1. preserve the original event and evidence;
+2. create the correcting event or governed record;
+3. identify the correcting actor/capability and evidence;
+4. establish an explicit J-118 `corrects` or `supersedes` relationship;
+5. allow derived views to prefer the corrected interpretation without erasing historical reconstruction.
 
-This preserves evidence-before-assertion and allows Jason to explain what it believed, what changed, and why.
-
-## 14. Security, Privacy, and Classification
-
-Event records may contain operational metadata that is itself sensitive even when the large evidence payload is stored separately.
+## 15. Security, Privacy, and Classification
 
 Every implementation must preserve:
 
 - organization and tenant isolation;
 - least-privilege retrieval;
-- sensitivity/classification labels;
-- purpose and policy restrictions where required;
+- classification and handling restrictions;
+- purpose/policy restrictions when required;
 - retention and evidence-preservation requirements;
-- redaction or minimization for communication and analytics surfaces;
-- prohibition on secret values in event metadata when a secret reference can be used instead.
+- redaction/minimization for communication and analytics surfaces;
+- secret references instead of secret values;
+- fail-closed cross-tenant correlation unless explicitly governed and authorized.
 
-Cross-tenant correlation must fail closed unless an explicit governed relationship and authority permit it.
-
-## 15. Events and Execution Authority
+## 16. Events and Execution Authority
 
 Events are evidence and history, not autonomous permission.
 
-No event may by itself authorize:
+No event by itself authorizes provider mutation, remediation, credential use, cross-tenant access, client communication, deletion, rollback, workflow replay, or retry.
 
-- a provider mutation;
-- remediation;
-- credential use;
-- cross-tenant access;
-- communication to a client;
-- deletion;
-- rollback;
-- workflow replay;
-- retry of an interrupted action.
+Execution remains subject to identity, J-118 authority relationships, policy, capability registration, approvals, execution policy, current-state verification, and the Central Orchestrator.
 
-Those decisions remain subject to identity, relationships, policy, capability registration, approvals, execution policy, current-state verification, and the Central Orchestrator.
-
-## 16. Minimum Conformance Rules
+## 17. Minimum Conformance Rules
 
 An implementation conforms to J-119 only when it:
 
-1. preserves organization/tenant context;
-2. distinguishes provider/source observations from canonical events;
-3. preserves immutable event identity;
-4. distinguishes occurrence, observation, ingestion, and recording time where available;
-5. records provenance and evidence references;
-6. does not manufacture unknown actors, objects, relationships, or causal links;
-7. distinguishes correlation from causation;
-8. uses J-116 for state meaning rather than inventing a parallel status model;
-9. uses J-118 for relationship meaning rather than embedding ad hoc links;
+1. preserves organization and tenant context;
+2. distinguishes source observations from canonical events;
+3. preserves immutable canonical event identity;
+4. uses J-117 objects rather than redefining Request, Decision, Approval, Evidence, or other canonical objects as event objects;
+5. distinguishes occurrence, observation, ingestion, and recording time where applicable;
+6. preserves provenance and evidence references;
+7. does not manufacture actors, objects, timestamps, relationships, authority, or causal links;
+8. uses J-116 for state meaning;
+9. uses J-118 for relationship, causation, correction, supersession, duplication, and event-to-event linkage meaning;
 10. preserves J-120 organization boundaries;
-11. uses artifact/evidence references for large payloads;
-12. keeps event history append-only in material meaning;
-13. makes corrections and supersession explicit;
+11. uses INF-013 references for large evidence payloads;
+12. keeps material event history append-only;
+13. uses the compact canonical event-class vocabulary unless a governed model revision establishes a new class;
 14. does not treat an event as execution authority;
-15. keeps provider-specific event names behind governed mapping boundaries.
+15. keeps provider-specific event names behind governed mapping boundaries;
+16. preserves ORCH-002 as orchestration evidence rather than automatically promoting implementation history into business truth.
 
-## 17. Questions For Foundation Review
+## 18. Approved Foundation Decision
 
-Before this model is promoted from Draft Foundation Model to Approved Foundation Model, the Architecture Authority should validate at least these questions:
+J-119 is approved as the canonical Event Model foundation.
 
-1. Is `Evidence` best retained as an event class, or should evidence lifecycle occurrences be represented under Action/Lifecycle with evidence relationships?
-2. Should `Lifecycle` remain a top-level class or be expressed entirely as State Change events?
-3. Which event verification states should be canonical versus implementation-specific subtypes?
-4. What minimum event fields are mandatory for every event versus conditionally required?
-5. Should causal relationships be represented directly on the event record, exclusively through J-118 relationships, or both with J-118 remaining authoritative?
-6. How should time uncertainty and provider clock skew be represented canonically?
-7. Which orchestration lifecycle records should be eligible for promotion into business events, if any?
-8. What deduplication rules are safe enough to prevent duplicate canonical events without suppressing distinct occurrences?
+The architecture decisions are:
 
-## 18. Current Decision
+- Request, Decision, Approval, Evidence, and other business concepts remain J-117 objects; events record occurrences involving them.
+- Lifecycle is not a separate top-level event class; lifecycle progression is represented through J-116 State Change.
+- Canonical event classes are Observation, Action, State Change, Relationship Change, and Communication.
+- Event verification uses Reported, Inferred, Corroborated, Verified, Disputed, and Rejected.
+- Correction and supersession are J-118 relationships, not verification states.
+- Event-to-event causation, sequence, containment, duplication, correction, and supersession are governed through J-118.
+- Time uncertainty remains explicit and must not be converted into false precision.
+- ORCH-002 records may be promoted only when they represent a material provider-neutral business occurrence and retain their original evidence reference.
+- Deduplication must use governed multi-factor evidence and preserve separate records when confidence is insufficient.
 
-J-119 is the active canonical-model workstream.
-
-The immediate objective is to review and refine this Draft Foundation Model until the event vocabulary, common event record, evidence boundary, time semantics, and relationship to orchestration are strong enough to become an approved dependency for future provider integration, cross-provider intelligence, operational memory, and governed automation.
+J-119 is now suitable as an authoritative dependency for provider normalization, operational memory, cross-provider intelligence, evidence reasoning, and future governed automation.
