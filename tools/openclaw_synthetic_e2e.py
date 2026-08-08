@@ -26,10 +26,12 @@ from jason_openclaw.runtime import (  # noqa: E402
 )
 from jason_openclaw.security_audit import SQLiteIngressSecurityAudit  # noqa: E402
 from kernel.identity_authority import (  # noqa: E402
+    DelegationValidator,
     ExecutionContextValidator,
     IdentityAuthorityService,
     SQLiteApprovalRepository,
     SQLiteAuthorityGrantRepository,
+    SQLiteDelegationRepository,
     SQLiteIdentityAuthorityStore,
     SQLiteIdentityRepository,
 )
@@ -149,8 +151,9 @@ def build_runtime(args):
         connector=connector,
         authenticator=authenticator,
         audit=ingress_audit,
-        machine_principal_bindings={args.machine_identity: args.principal_id},
+        machine_principal_bindings={args.machine_identity: args.machine_identity},
         require_machine_principal_binding=True,
+        delegation_validator=DelegationValidator(SQLiteDelegationRepository(authority_store)),
     )
     return ingress, authority_store, ingress_audit, orchestrator_audit
 
@@ -161,6 +164,16 @@ def run(args) -> int:
         raise ValueError(f"signed envelope must request {SYNTHETIC_CAPABILITY}")
     if envelope.get("principal", {}).get("principal_id") != args.principal_id:
         raise ValueError("signed envelope principal does not match expected principal")
+
+    delegated = args.principal_id != args.machine_identity
+    envelope_delegation_id = str(envelope.get("delegation_id", "")).strip() or None
+    if delegated:
+        if args.delegation_id is None:
+            raise ValueError("delegated human proof requires --delegation-id")
+        if envelope_delegation_id != args.delegation_id:
+            raise ValueError("signed envelope delegation does not match expected delegation")
+    elif envelope_delegation_id is not None:
+        raise ValueError("direct machine proof must not include delegation_id")
 
     ingress, authority_store, ingress_audit, orchestrator_audit = build_runtime(args)
     try:
@@ -186,6 +199,8 @@ def run(args) -> int:
             "status": "pass" if passed else "fail",
             "machine_identity": args.machine_identity,
             "principal_id": args.principal_id,
+            "delegated": delegated,
+            "delegation_id": args.delegation_id if delegated else None,
             "capability": SYNTHETIC_CAPABILITY,
             "correlation_id": correlation_id,
             "first_request_status": first.get("status"),
@@ -216,6 +231,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--key-registry", type=Path, default=Path("/var/lib/jason/openclaw/trusted-keys/registry.json"))
     p.add_argument("--machine-identity", default="svc-openclaw-gateway")
     p.add_argument("--principal-id", default="svc-openclaw-gateway")
+    p.add_argument("--delegation-id")
     return p
 
 
