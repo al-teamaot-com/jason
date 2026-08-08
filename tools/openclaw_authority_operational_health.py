@@ -6,7 +6,6 @@ import json
 import os
 import shutil
 import sqlite3
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,6 +79,8 @@ def registry_health(path: Path) -> dict[str, object]:
     records = data.get('keys', data if isinstance(data, list) else [])
     if isinstance(records, dict):
         records = list(records.values())
+    if not isinstance(records, list):
+        raise ValueError('trusted-key registry records are invalid')
     active = sum(1 for item in records if str(item.get('status', 'active')) == 'active')
     return {'present': True, 'active_records': active, 'mode': mode(path)}
 
@@ -126,8 +127,12 @@ def run(args: argparse.Namespace) -> int:
     delegation = active_delegation_state(args.authority_database) if args.authority_database.exists() else {}
     backup = backup_restore_proof(args.authority_database) if args.authority_database.exists() else {}
     registry = registry_health(args.key_registry)
-    if registry.get('present') and registry.get('mode') != '0o600':
+    if not registry.get('present'):
+        failures.append('key_registry_missing')
+    elif registry.get('mode') != '0o600':
         failures.append('key_registry_permissions')
+    elif int(registry.get('active_records', 0) or 0) < 1:
+        failures.append('key_registry_no_active_keys')
     if backup and not (
         backup.get('backup_integrity') == 'ok'
         and backup.get('restore_integrity') == 'ok'
