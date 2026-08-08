@@ -16,6 +16,7 @@ from .contracts import (
     PermissionMode,
     AuthorityOutcome,
 )
+from .delegation import DelegationRecord
 
 
 _SCHEMA = """
@@ -35,6 +36,18 @@ CREATE TABLE IF NOT EXISTS approvals (
   approval_id TEXT PRIMARY KEY,
   payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS delegations (
+  delegation_id TEXT PRIMARY KEY,
+  delegator_id TEXT NOT NULL,
+  delegate_id TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  revoked_at TEXT,
+  revoked_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_delegations_delegator
+  ON delegations(delegator_id);
+CREATE INDEX IF NOT EXISTS ix_delegations_delegate
+  ON delegations(delegate_id);
 CREATE TABLE IF NOT EXISTS execution_contexts (
   context_id TEXT PRIMARY KEY,
   payload TEXT NOT NULL,
@@ -136,6 +149,40 @@ class SQLiteIdentityAuthorityStore:
         p["expires_at"] = _dt(p.get("expires_at"))
         return ApprovalRecord(**p)
 
+    def put_delegation(self, record: DelegationRecord) -> None:
+        with self.connection:
+            self.connection.execute(
+                """INSERT OR REPLACE INTO delegations(
+                       delegation_id,delegator_id,delegate_id,payload,revoked_at,revoked_reason
+                   ) VALUES (?,?,?,?,NULL,NULL)""",
+                (record.delegation_id, record.delegator_id, record.delegate_id, _encode(record)),
+            )
+
+    def get_delegation(self, delegation_id: str) -> DelegationRecord | None:
+        row = self.connection.execute(
+            "SELECT payload,revoked_at FROM delegations WHERE delegation_id=?",
+            (delegation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        p = json.loads(row["payload"])
+        p["maximum_mode"] = PermissionMode(p["maximum_mode"])
+        p["effective_from"] = datetime.fromisoformat(p["effective_from"])
+        p["effective_until"] = datetime.fromisoformat(p["effective_until"])
+        if row["revoked_at"] is not None:
+            p["status"] = "revoked"
+        return DelegationRecord(**p)
+
+    def revoke_delegation(self, delegation_id: str, *, revoked_at: datetime, reason: str) -> bool:
+        if revoked_at.tzinfo is None or not reason.strip():
+            raise ValueError("delegation revocation requires timezone-aware time and reason")
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE delegations SET revoked_at=?, revoked_reason=? WHERE delegation_id=? AND revoked_at IS NULL",
+                (revoked_at.isoformat(), reason, delegation_id),
+            )
+        return cursor.rowcount == 1
+
     def put_context(self, context: ExecutionContext) -> None:
         with self.connection:
             self.connection.execute(
@@ -224,3 +271,14 @@ class SQLiteApprovalRepository:
         return self.store.get_approval(approval_id)
     def put(self, record: ApprovalRecord) -> None:
         self.store.put_approval(record)
+
+
+@dataclass(frozen=True)
+class SQLiteDelegationRepository:
+    store: SQLiteIdentityAuthorityStore
+    def get_delegation(self, delegation_id: str) -> DelegationRecord | None:
+        return self.store.get_delegation(delegation_id)
+    def put(self, record: DelegationRecord) -> None:
+        self.store.put_delegation(record)
+    def revoke(self, delegation_id: str, *, revoked_at: datetime, reason: str) -> bool:
+        return self.store.revoke_delegation(delegation_id, revoked_at=revoked_at, reason=reason)
