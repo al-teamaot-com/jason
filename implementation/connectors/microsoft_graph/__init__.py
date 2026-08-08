@@ -30,6 +30,26 @@ from connectors.microsoft_graph.consent import (
     parse_admin_consent_callback,
 )
 
+from connectors.microsoft_graph.service_catalog import (
+    MICROSOFT_ENDPOINTS,
+    MICROSOFT_PERMISSION_PROFILES,
+    MicrosoftCloud,
+    MicrosoftEndpointFamily,
+    MicrosoftOperationMode,
+    MicrosoftPermissionProfile,
+    MicrosoftService,
+    endpoint_for,
+    permission_profile,
+    validate_profile_for_services,
+)
+
+from connectors.microsoft_graph.platform import (
+    GovernedMicrosoftRequest,
+    MicrosoftCloudRequest,
+    MicrosoftRequestPolicyError,
+    build_governed_request,
+)
+
 __all__ = [
     "GRAPH_DEFAULT_SCOPE",
     "MICROSOFT_AUTHORITY_HOST",
@@ -54,4 +74,18 @@ __all__ = [
     "MicrosoftConsentValidationError",
     "build_admin_consent_request",
     "parse_admin_consent_callback",
+    "MICROSOFT_ENDPOINTS",
+    "MICROSOFT_PERMISSION_PROFILES",
+    "MicrosoftCloud",
+    "MicrosoftEndpointFamily",
+    "MicrosoftOperationMode",
+    "MicrosoftPermissionProfile",
+    "MicrosoftService",
+    "endpoint_for",
+    "permission_profile",
+    "validate_profile_for_services",
+    "GovernedMicrosoftRequest",
+    "MicrosoftCloudRequest",
+    "MicrosoftRequestPolicyError",
+    "build_governed_request",
 ]
