@@ -52,7 +52,7 @@ jobs:
   resource-convergence:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation
+      PYTHONPATH: implementation:implementation/connectors/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
