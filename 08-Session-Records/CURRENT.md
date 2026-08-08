@@ -5,7 +5,7 @@
 
 ## Resume Here
 
-The core 2026-08-08 architecture/runtime work now includes:
+The 2026-08-08 architecture/runtime sequence now includes:
 
 1. PR #72 — INF-010 Microsoft Cloud platform foundation — merged
 2. PR #73 — INF-011 Kaseya resource platform foundation — merged
@@ -15,37 +15,51 @@ The core 2026-08-08 architecture/runtime work now includes:
 6. PR #78 — INF-014 OpenClaw production ingress and governance gates — merged
 7. PR #79 — JKD-001 Identity and Authority runtime foundation — merged
 8. PR #80 — durable/revocable JKD-001 authority enforcement and OpenClaw context handoff — merged
+9. PR #81 — authority/OpenClaw governed host-preparation tooling — merged
+10. PR #82 — file-backed trusted OpenClaw public-key registry — merged
+11. PR #83 — machine identity binding and signed synthetic OpenClaw -> JKD-001 -> governance -> Central Orchestrator proof tooling — merged
+12. PR #84 — replay DB permission hardening and JKD-001 delegation foundation — merged
+13. PR #85 — durable governed OpenClaw human delegation — merged
+14. PR #86 — delegated-human host proof tooling — merged
 
 PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider credential boundary. Do not invent provider payload schemas or placeholder secrets while those credentials are unavailable.
 
-## What Is Proven
+## What Is Proven On The Jason Host
 
+- OpenClaw runs in Docker as container `openclaw-openclaw-gateway-1`, user `node` UID/GID 1000.
+- OpenClaw persistent secret/config mounts are under `/opt/jason/services/openclaw/data/`.
+- Dedicated Ed25519 OpenClaw machine identity exists. The private key remains only under the OpenClaw persistent auth-profile secret boundary; Jason stores only the registered public key and pinned fingerprint.
+- Jason authenticated a real signed request from OpenClaw using the file-backed trusted-key registry and rejected a tampered envelope.
 - Central Orchestrator remains the sole execution coordinator; no agent-to-agent/provider-to-provider coordination path was introduced.
 - OpenClaw is an ingress client only and can request registered named capabilities only.
-- OpenClaw production ingress supports Ed25519 signed-request authentication, freshness/expiry/nonce validation, replay protection, deterministic governance gates, and pre-orchestration security audit.
-- JKD-001 now provides executable identity, scoped authority grants, formal approvals, short-lived execution contexts, durable pilot state, decision audit, exact context validation, and explicit revocation.
-- Production-mode Central Orchestrator composition can require a valid JKD-001 execution context before capability resolution/provider selection.
-- OpenClaw can dispatch only with an execution context actually issued by JKD-001; caller-supplied authentication or booleans do not substitute for authority.
-- J-116 through J-120 canonical foundation models are approved.
-- INF-010 through INF-014 foundations are integrated.
-- CAP-001 canonical Autotask read capability is complete.
-- CAP-003 Autotask Business Context is live-validated and converged; CAP-002 is retired/superseded.
+- OpenClaw production ingress supports Ed25519 signed-request authentication, freshness/expiry/nonce validation, persistent replay protection, deterministic governance gates, pre-orchestration security audit, machine-to-principal binding, and explicit delegation validation.
+- JKD-001 provides executable identity, scoped authority grants, formal approvals, short-lived execution contexts, durable pilot state, decision audit, exact context validation, explicit context revocation, and durable delegation records.
+- Production Central Orchestrator composition requires a valid JKD-001 execution context before capability resolution/provider selection.
+- The direct machine-service synthetic path completed successfully; replay of the same signed envelope was rejected with `replay_detected`.
+- The delegated-human host proof completed successfully using synthetic human `synthetic-human-al`, OpenClaw service `svc-openclaw-gateway`, and observe-only capability `jason.synthetic.health`.
+- In the delegated proof, the human remained distinct from OpenClaw, the human's own authority grant was evaluated, delegation was validated, governance gates remained in path, and orchestration succeeded.
+- After explicit delegation revocation, a fresh signed request was rejected before authority/orchestration execution with `delegation_inactive`.
+- `/var/lib/jason/authority/authority.sqlite3`, `/var/lib/jason/openclaw/replay.sqlite3`, `/var/lib/jason/openclaw/security-audit.sqlite3`, and `/var/lib/jason/openclaw/orchestration-events.sqlite3` were all verified at owner-only mode `0600` after the host proof.
+- No provider credentials or provider APIs were used in the OpenClaw machine or delegated-human proofs.
+
+Host proof evidence is recorded in `08-Session-Records/OpenClaw-Delegated-Human-Host-Proof-2026-08-08.md`.
 
 ## Current Primary Workstream
 
-### Authority + OpenClaw Host Deployment Preparation
+### OpenClaw + JKD-001 Operational Hardening
 
-The next safe host-side step requires no provider API credentials and no OpenClaw private key.
+The next safe work requires no provider API credentials.
 
-Repository tooling prepares:
+Priorities:
 
-- `/var/lib/jason/authority` — owner-only JKD-001 state;
-- `/var/lib/jason/openclaw` — owner-only OpenClaw replay/security-audit state;
-- `/var/lib/jason/authority/authority.sqlite3` — durable pilot authority database;
-- governed `tools/identity_authority_admin.py` lifecycle commands;
-- `tools/prepare_authority_openclaw_host.sh` — structured host preparation with no network calls, secret resolution, or key generation.
+1. delegation lifecycle housekeeping that expires/deactivates stale records without deleting audit history;
+2. trusted OpenClaw machine-key rotation and revocation procedure with overlapping-key cutover support;
+3. production ingress/state health checks for authority DB, replay DB, security audit, orchestration audit, trusted-key registry, Docker/OpenClaw runtime, and key readability boundaries;
+4. backup and restore validation for JKD-001/OpenClaw SQLite state with owner-only permissions preserved;
+5. service packaging/runbook improvements so production composition is repeatable and observable;
+6. documentation and CatchMeUp integration for the above controls.
 
-Do not generate the OpenClaw signing private key until the actual OpenClaw runtime location is confirmed. The private signing key belongs with OpenClaw; Jason should register only the corresponding public key.
+Do not enable real human delegation to provider-backed capabilities until the operational controls above are complete and the relevant capability/provider authorization model has been explicitly reviewed.
 
 ## Parallel Blocked Workstream
 
@@ -55,21 +69,21 @@ The code has reached the live credential boundary.
 
 Needed later:
 
-- IT Glue logical secret `it_glue.readonly` with dedicated read-only `api_key`;
+- IT Glue logical secret `it_glue.readonly` with dedicated `api_key`; provider-level method restrictions may be limited, so Jason's observe/GET-only boundary remains important;
 - Datto RMM logical secret `datto_rmm.readonly` with durable `api_url`, `api_key`, and `api_secret`;
 - Datto bearer access token remains runtime-only and must never be persisted as the durable credential.
 
-After credentials exist, run exactly one bounded IT Glue configuration GET and one bounded Datto device search, sanitize response-shape inspection, then finalize normalization and INF-012 matching.
+Before live Datto use, re-verify the exact current OAuth token endpoint/request contract against official Datto documentation. Then run exactly one bounded IT Glue configuration GET and one bounded Datto device search, sanitize response-shape inspection, and finalize normalization/INF-012 matching.
 
 ## Immediate Next Actions
 
-1. merge the authority/OpenClaw host-deployment-prep branch after CI and constitutional review;
-2. update the Jason host to current `main`;
-3. run `tools/prepare_authority_openclaw_host.sh` and verify structured PASS output;
-4. confirm where the OpenClaw runtime actually executes;
-5. generate/provision the dedicated Ed25519 machine identity on that runtime, registering only its public key with Jason;
-6. deploy an enforced (`require_authority_context=True`) synthetic OpenClaw → JKD-001 → governance gates → Central Orchestrator path;
-7. perform the signed no-provider end-to-end test before enabling any live provider capability through OpenClaw.
+1. complete and validate the OpenClaw/JKD-001 operational-hardening branch;
+2. add delegation expiry/deactivation tooling and tests;
+3. add trusted-key rotation/revocation tooling and runbook;
+4. add host health/preflight checks for all production ingress and authority state;
+5. add owner-permission-preserving SQLite backup/restore proof tooling;
+6. update CatchMeUp to report machine trust, authority/delegation store health, security-state modes, and operational-hardening status;
+7. run the resulting non-provider host proof and record evidence.
 
 ## Outstanding Historical Recovery Note
 
