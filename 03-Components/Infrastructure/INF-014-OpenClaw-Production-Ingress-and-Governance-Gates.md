@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft implementation foundation with runtime bindings.
+Draft implementation foundation with runtime bindings and a concrete signed-transport reference implementation.
 
 ## Purpose
 
@@ -47,35 +47,51 @@ A specialized reasoning agent may later support a gate only when deterministic p
 
 ## Runtime bindings now implemented
 
-The branch includes three production-oriented adapters that require no provider credentials:
+The branch includes production-oriented adapters that require no provider credentials:
 
 - `JasonAuthorityEvaluator` binds the OpenClaw request identity/scope to a Jason authority-service protocol and fails closed on unknown decisions.
 - `GateChainPolicyEvaluator` maps the Central Orchestrator governance gate-chain result to the OpenClaw policy contract.
 - `OpenClawOrchestratorDispatcher` translates only explicitly versioned capabilities into `OrchestrationRequest` objects for the real `CentralOrchestrator` interface.
+- `SQLiteReplayStore` provides durable request-ID replay protection across process restarts.
+- `SQLiteIngressSecurityAudit` stores pre-orchestration transport-security events separately from the canonical orchestration event store because untrusted transport failures do not yet possess a trusted principal/capability context.
 
 The dispatcher deliberately sets `approval_present=False`. OpenClaw cannot manufacture or infer human approval from a requested mode. A future approval-record binding must supply verified approval state through a governed Jason service before an approval-required execution can proceed.
 
-The branch also includes `SQLiteReplayStore`, which provides durable request-ID replay protection across process restarts. The deployment path may later replace SQLite behind the same `ReplayStore` contract without changing OpenClaw capability logic.
+## Signed transport reference implementation
 
-## Production transport contract
+`Ed25519TransportAuthenticator` is the first concrete `TransportAuthenticator` implementation.
 
-The implementation intentionally depends on a `TransportAuthenticator` abstraction rather than choosing mTLS, signed requests, or another machine-identity mechanism inside the architecture.
+It uses asymmetric application-layer signing:
 
-Production deployment must bind that abstraction to an approved mechanism with:
+- the OpenClaw host retains the Ed25519 private signing key;
+- Jason stores/registers only the corresponding public key and key ID;
+- the signature covers the canonical request envelope, including identity scope, capability, arguments, timestamps, expiry, nonce, and key ID;
+- payload tampering invalidates the signature;
+- unknown key IDs fail closed;
+- signatures and private-key material are never written to audit output.
+
+Ed25519 is a deployment choice, not an architectural dependency. The `TransportAuthenticator` contract remains replaceable by mTLS or another approved machine-identity implementation.
+
+## Production transport requirements
+
+Production deployment must use:
 
 - a dedicated OpenClaw machine identity;
-- short-lived or rotatable credentials retrieved through the Secrets Broker;
+- a rotatable asymmetric signing key or an equivalent short-lived machine-identity mechanism;
 - authenticated integrity protection;
 - request timestamps and expiry;
 - unique nonce/request identity;
-- replay rejection;
+- durable replay rejection;
 - no credentials in prompts or capability arguments.
+
+The OpenClaw private signing key must be generated/stored on the OpenClaw side through the approved secret boundary. Jason needs only the public verification key; public-key fingerprints should be retained as deployment evidence.
 
 ## Fail-closed behavior
 
 The request must not reach capability dispatch when:
 
-- machine authentication fails;
+- machine authentication/signature validation fails;
+- the signing key ID is unregistered;
 - freshness metadata is absent or invalid;
 - a request is expired or not yet valid beyond permitted clock skew;
 - a request ID has already been claimed;
@@ -87,16 +103,18 @@ The request must not reach capability dispatch when:
 
 ## Audit requirements
 
-At minimum, correlated audit evidence should identify:
+Pre-orchestration security events and trusted orchestration events have distinct storage contracts.
 
-- transport authentication outcome and machine identity reference;
-- request and correlation IDs;
-- principal, organization, client, capability, and requested mode;
-- authority decision;
-- each material governance decision or summarized decision reference;
-- orchestration execution ID and dispatch outcome;
-- sanitized failure classification;
-- evidence/artifact references when material.
+Pre-orchestration audit may record:
+
+- transport authentication outcome;
+- request/correlation IDs supplied by the caller;
+- registered machine-identity reference when authentication succeeds far enough to establish it;
+- sanitized denial reason.
+
+It must not invent a trusted principal, capability, or execution ID merely to fit the orchestration event schema.
+
+After the structured request is trusted, correlated audit evidence should identify principal, organization, client, capability, requested mode, authority/gate decisions, orchestration execution ID, dispatch outcome, sanitized failure classification, and evidence/artifact references when material.
 
 Secret values, signatures, bearer tokens, private keys, and protected raw payloads must never be written to normal audit output.
 
@@ -104,16 +122,18 @@ Secret values, signatures, bearer tokens, private keys, and protected raw payloa
 
 The no-provider synthetic path must prove:
 
-1. an authenticated fresh request can reach a synthetic registered capability;
-2. invalid machine authentication never reaches dispatch;
-3. an expired request never reaches dispatch;
-4. replayed request IDs remain rejected across replay-store instances;
-5. authority denial never reaches dispatch;
-6. policy denial never reaches dispatch;
-7. approval-required outcomes stop before dispatch;
-8. arbitrary HTTP targets and unknown capabilities fail closed;
-9. identity, organization, client, correlation, capability, mode, and arguments are preserved into the real `OrchestrationRequest` contract;
-10. OpenClaw never self-asserts approval.
+1. a valid Ed25519 signature resolves only a registered OpenClaw machine identity;
+2. payload tampering fails authentication;
+3. invalid/unknown signing keys never reach dispatch;
+4. an expired request never reaches dispatch;
+5. replayed request IDs remain rejected across replay-store instances;
+6. authority denial never reaches dispatch;
+7. policy denial never reaches dispatch;
+8. approval-required outcomes stop before dispatch;
+9. arbitrary HTTP targets and unknown capabilities fail closed;
+10. identity, organization, client, correlation, capability, mode, and arguments are preserved into the real `OrchestrationRequest` contract;
+11. OpenClaw never self-asserts approval;
+12. pre-orchestration audit survives restart and strips secret/signature fields.
 
 No external provider credential is required for this validation.
 
@@ -130,11 +150,11 @@ This foundation does not:
 
 ## Next deployment work
 
-After the runtime-binding CI passes:
+After CI passes:
 
-1. choose and bind the production `TransportAuthenticator` mechanism (prefer short-lived machine identity with signed requests or mTLS rather than a static shared secret);
-2. bind `IdentityAuthorityService` to Jason's production identity/authority implementation;
-3. bind verified approval-record lookup into the orchestrator path rather than request payloads;
-4. bind ingress/audit output to Jason's governed event/evidence store;
-5. select the production location and retention policy for replay/idempotency state;
-6. run the full synthetic path against the deployed OpenClaw/Jason boundary before enabling any live provider capability through OpenClaw.
+1. bind `IdentityAuthorityService` to Jason's production identity/authority implementation;
+2. bind verified approval-record lookup into the orchestrator path rather than request payloads;
+3. decide production paths/retention for ingress security audit and replay state;
+4. generate a dedicated OpenClaw Ed25519 machine keypair through the governed secret workflow, retaining only the public key/fingerprint on Jason;
+5. wire OpenClaw request signing to the canonical envelope format;
+6. run the full synthetic signed request against the deployed OpenClaw/Jason boundary before enabling any live provider capability through OpenClaw.
