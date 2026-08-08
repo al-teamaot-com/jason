@@ -57,7 +57,7 @@ class Authenticator:
         return "machine-openclaw-prod"
 
 
-def envelope():
+def envelope(principal_id="svc-openclaw-gateway"):
     now = datetime.now(timezone.utc)
     return {
         "request_id": "req-1",
@@ -69,16 +69,16 @@ def envelope():
         "expires_at": (now + timedelta(minutes=2)).isoformat(),
         "nonce": "nonce-1",
         "principal": {
-            "principal_id": "person-al",
-            "channel": "teams",
-            "external_user_id": "openclaw-user-1",
+            "principal_id": principal_id,
+            "channel": "openclaw",
+            "external_user_id": "openclaw-machine-1",
             "organization_id": "aot",
             "client_id": "client-1",
         },
     }
 
 
-def build(*, auth=True, policy="allowed"):
+def build(*, auth=True, policy="allowed", bindings=None):
     dispatcher = Dispatcher()
     audit = Audit()
     connector = OpenClawConnector(
@@ -92,6 +92,11 @@ def build(*, auth=True, policy="allowed"):
         connector=connector,
         authenticator=Authenticator(auth),
         audit=audit,
+        machine_principal_bindings=(
+            bindings
+            if bindings is not None
+            else {"machine-openclaw-prod": "svc-openclaw-gateway"}
+        ),
     )
     return ingress, dispatcher, audit
 
@@ -119,6 +124,21 @@ def test_expired_request_never_reaches_dispatch():
     value["expires_at"] = (now - timedelta(minutes=5)).isoformat()
     result = ingress.handle(value)
     assert result["error_code"] == "request_expired"
+    assert dispatcher.calls == []
+
+
+def test_machine_identity_cannot_assert_different_principal():
+    ingress, dispatcher, audit = build()
+    result = ingress.handle(envelope("person-al"))
+    assert result["error_code"] == "machine_principal_binding_mismatch"
+    assert dispatcher.calls == []
+    assert audit.events[-1][1]["reason"] == "machine_principal_binding_mismatch"
+
+
+def test_unbound_machine_identity_fails_closed():
+    ingress, dispatcher, _ = build(bindings={})
+    result = ingress.handle(envelope())
+    assert result["error_code"] == "machine_principal_binding_missing"
     assert dispatcher.calls == []
 
 
