@@ -1,0 +1,18 @@
+[Unit]
+Description=Jason OpenClaw and JKD-001 Operational Health Snapshot
+After=local-fs.target docker.service
+ConditionPathExists=/var/lib/jason/authority/authority.sqlite3
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason
+ExecStart=/usr/bin/python3 /home/al/projects/jason/tools/openclaw_authority_health_snapshot.py --output /var/lib/jason/openclaw/operational-health.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadWritePaths=/var/lib/jason/openclaw
+UMask=0077

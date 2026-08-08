@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,8 +45,9 @@ def list_delegations(database: Path) -> int:
     return 0
 
 
-def deactivate_expired(database: Path, recorded_by: str, correlation_id: str) -> int:
+def deactivate_expired(database: Path, recorded_by: str, correlation_id: str | None) -> int:
     now = now_utc()
+    correlation = correlation_id or f'delegation-maintenance-{uuid.uuid4()}'
     changed: list[str] = []
     with sqlite3.connect(database) as connection:
         rows = connection.execute('SELECT delegation_id,payload FROM delegations').fetchall()
@@ -68,7 +70,7 @@ def deactivate_expired(database: Path, recorded_by: str, correlation_id: str) ->
                    VALUES (?,?,?,?,?,?,?)''',
                 (
                     'authority.delegation.expired',
-                    correlation_id,
+                    correlation,
                     recorded_by,
                     str(data['organization_id']),
                     str(data['capability']),
@@ -81,6 +83,7 @@ def deactivate_expired(database: Path, recorded_by: str, correlation_id: str) ->
     print(json.dumps({
         'status': 'pass',
         'action': 'deactivate_expired_delegations',
+        'correlation_id': correlation,
         'changed': changed,
         'changed_count': len(changed),
     }, sort_keys=True))
@@ -97,7 +100,7 @@ def main() -> int:
 
     cleanup = sub.add_parser('deactivate-expired')
     cleanup.add_argument('--recorded-by', required=True)
-    cleanup.add_argument('--correlation-id', required=True)
+    cleanup.add_argument('--correlation-id', default=None)
     cleanup.set_defaults(func=lambda args: deactivate_expired(args.database, args.recorded_by, args.correlation_id))
 
     args = p.parse_args()

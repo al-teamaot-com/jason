@@ -26,6 +26,7 @@ CANONICAL_DOCS = (
     "07-Roadmap/Jason-Roadmap-Status.json",
     "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
     "07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md",
+    "07-Operations/OpenClaw-JKD001-Operational-Hardening.md",
     "10-Milestones/M-001-Kernel-Foundation.md",
     "10-Milestones/M-002-Release-and-Recovery-Pipeline.md",
     "10-Milestones/M-003-Release-Governance-Hardening.md",
@@ -35,8 +36,14 @@ RELEVANT_SYSTEMD_UNITS = (
     "jason-openbao-backup.service",
     "jason-openbao-backup.timer",
     "jason-status-exporter.service",
+    "jason-delegation-maintenance.service",
+    "jason-delegation-maintenance.timer",
+    "jason-openclaw-authority-health.service",
+    "jason-openclaw-authority-health.timer",
     "docker.service",
 )
+
+OPENCLAW_OPERATIONAL_HEALTH = pathlib.Path("/var/lib/jason/openclaw/operational-health.json")
 
 
 def sanitize(text: str) -> str:
@@ -171,6 +178,42 @@ def protected_artifact_metadata(path):
         return f"unknown; metadata check unavailable: {sanitize(str(exc))}"
 
 
+def collect_openclaw_operational_health(lines):
+    lines.append("\n### OpenClaw / JKD-001 operational health")
+    if not OPENCLAW_OPERATIONAL_HEALTH.exists():
+        lines.append("- Operational health snapshot: missing (production operations package may not be installed yet).")
+        return
+    try:
+        payload = json.loads(OPENCLAW_OPERATIONAL_HEALTH.read_text(encoding="utf-8"))
+        age = max(0.0, dt.datetime.now().timestamp() - OPENCLAW_OPERATIONAL_HEALTH.stat().st_mtime)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        lines.append(f"- Operational health snapshot unavailable: {sanitize(str(exc))}")
+        return
+
+    delegations = payload.get("delegations", {}) if isinstance(payload.get("delegations"), dict) else {}
+    registry = payload.get("trusted_key_registry", {}) if isinstance(payload.get("trusted_key_registry"), dict) else {}
+    backup = payload.get("backup_restore_proof", {}) if isinstance(payload.get("backup_restore_proof"), dict) else {}
+    safe = {
+        "status": payload.get("status", "unknown"),
+        "snapshot_age_seconds": round(age, 1),
+        "failures": payload.get("failures", []),
+        "delegations": {
+            "active": delegations.get("active", 0),
+            "expired_active_records": delegations.get("expired_active_records", 0),
+            "inactive": delegations.get("inactive", 0),
+        },
+        "trusted_key_active_records": registry.get("active_records", 0),
+        "backup_restore": {
+            "backup_integrity": backup.get("backup_integrity"),
+            "restore_integrity": backup.get("restore_integrity"),
+            "counts_match": backup.get("counts_match"),
+        },
+        "provider_contacted": payload.get("provider_contacted", False),
+        "provider_credentials_used": payload.get("provider_credentials_used", False),
+    }
+    codeblock(lines, json.dumps(safe, indent=2, sort_keys=True), "json")
+
+
 def collect_runtime(repo, lines):
     heading(lines, "Runtime / Infrastructure")
 
@@ -190,6 +233,8 @@ def collect_runtime(repo, lines):
             code, state = run(["systemctl", "is-active", unit])
             status = state.splitlines()[0] if state else ("inactive/unknown" if code else "active")
             lines.append(f"- `{unit}`: {status}")
+
+    collect_openclaw_operational_health(lines)
 
     if shutil.which("curl"):
         _, health = run([
