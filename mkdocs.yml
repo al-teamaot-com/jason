@@ -46,6 +46,7 @@ nav:
       - INF-011 Kaseya Resource Platform Foundation: 03-Components/Infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
       - INF-012 Cross-Provider Relationship Foundation: 03-Components/Infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
       - INF-013 Artifact Evidence Storage Foundation: 03-Components/Infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
+      - INF-014 OpenClaw Production Ingress and Governance Gates: 03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
