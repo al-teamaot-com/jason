@@ -15,6 +15,13 @@ from .models import (
     ConnectorContractError,
     OpenClawPrincipal,
 )
+from .runtime import (
+    GateChainPolicyEvaluator,
+    IdentityAuthorityService,
+    JasonAuthorityEvaluator,
+    OpenClawOrchestratorDispatcher,
+    SQLiteReplayStore,
+)
 
 __all__ = [
     "AuditSink",
@@ -23,11 +30,16 @@ __all__ = [
     "CapabilityRequest",
     "CapabilityResponse",
     "ConnectorContractError",
+    "GateChainPolicyEvaluator",
     "GovernedOpenClawIngress",
+    "IdentityAuthorityService",
     "IngressAuditSink",
+    "JasonAuthorityEvaluator",
     "OpenClawConnector",
+    "OpenClawOrchestratorDispatcher",
     "OpenClawPrincipal",
     "PolicyEvaluator",
     "ReplayStore",
+    "SQLiteReplayStore",
     "TransportAuthenticator",
 ]
