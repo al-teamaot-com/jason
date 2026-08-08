@@ -24,6 +24,7 @@ nav:
       - M-003 Release Governance Hardening: 10-Milestones/M-003-Release-Governance-Hardening.md
   - Kernel:
       - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
+      - Identity and Authority Runtime Foundation: 03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
       - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
       - Secrets Broker: 03-Components/Kernel/JKD-003-Secrets-Broker.md
       - Execution Policy Engine: 03-Components/Kernel/JKD-004-Execution-Policy-Engine.md
