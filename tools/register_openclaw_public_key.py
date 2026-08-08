@@ -134,11 +134,12 @@ def legacy_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     lifecycle_commands = {'register', 'revoke', 'list'}
-    command = next((item for item in sys.argv[1:] if not item.startswith('-')), None)
-    if command in lifecycle_commands:
-        args = lifecycle_parser().parse_args()
+    argv = sys.argv[1:]
+    command = next((item for item in argv if item in lifecycle_commands), None)
+    if command is not None:
+        args = lifecycle_parser().parse_args(argv)
         return args.func(args)
-    return register(legacy_parser().parse_args())
+    return register(legacy_parser().parse_args(argv))
 
 
 if __name__ == '__main__':
