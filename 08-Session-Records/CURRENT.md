@@ -22,6 +22,7 @@ The 2026-08-08 architecture/runtime sequence now includes:
 13. PR #85 — durable governed OpenClaw human delegation — merged
 14. PR #86 — delegated-human host proof tooling — merged
 15. PR #87 — OpenClaw + JKD-001 operational hardening — merged
+16. PR #88 — trusted-key lifecycle CLI regression fix and AWS provider-family TODO — merged
 
 PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider credential boundary. Do not invent provider payload schemas or placeholder secrets while those credentials are unavailable.
 
@@ -40,25 +41,26 @@ PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider c
 - The delegated-human host proof completed successfully using synthetic human `synthetic-human-al`, OpenClaw service `svc-openclaw-gateway`, and observe-only capability `jason.synthetic.health`.
 - In the delegated proof, the human remained distinct from OpenClaw, the human's own authority grant was evaluated, delegation was validated, governance gates remained in path, and orchestration succeeded.
 - After explicit delegation revocation, a fresh signed request was rejected before authority/orchestration execution with `delegation_inactive`.
-- `/var/lib/jason/authority/authority.sqlite3`, `/var/lib/jason/openclaw/replay.sqlite3`, `/var/lib/jason/openclaw/security-audit.sqlite3`, and `/var/lib/jason/openclaw/orchestration-events.sqlite3` were all verified at owner-only mode `0600` after the host proof.
-- No provider credentials or provider APIs were used in the OpenClaw machine or delegated-human proofs.
+- Operational-health validation passed on the deployed host after PR #88: authority/replay/security-audit/orchestration-audit SQLite integrity all returned `ok`; trusted-key registry contained one active OpenClaw public-key record; all security-sensitive state and registry files were mode `0600`.
+- Ephemeral online SQLite backup -> restore proof passed with both backup and restore mode `0600`, integrity `ok`, and authority object counts matching live state.
+- Operational-health validation reported no provider contact and no provider credentials used.
+- The synthetic delegation record is expired by time but still retains `status=active`; maintenance should normalize this historical record to `expired` without deleting audit history.
 
 Host proof evidence is recorded in `08-Session-Records/OpenClaw-Delegated-Human-Host-Proof-2026-08-08.md`.
 
 ## Current Primary Workstream
 
-### OpenClaw + JKD-001 Operational Hardening
+### Production Packaging + OpenClaw Trust Operations
 
-Operational hardening is merged. Remaining host validation should confirm:
+Operational health is now proven on the live Jason host. Remaining no-provider work:
 
-1. delegation lifecycle housekeeping works against deployed state without deleting audit history;
-2. trusted OpenClaw key metadata can be safely listed and later rotated/revoked with overlap-first cutover;
-3. production ingress/state health checks pass for authority DB, replay DB, security audit, orchestration audit, trusted-key registry, Docker/OpenClaw runtime, and key readability boundaries;
-4. backup and restore validation passes for JKD-001/OpenClaw SQLite state with owner-only permissions preserved;
-5. service packaging/runbook improvements are repeatable and observable;
-6. CatchMeUp reports the above controls.
+1. integrate periodic delegation lifecycle maintenance so elapsed active records are normalized to `expired` without deleting history;
+2. package the production OpenClaw/Jason ingress composition as a repeatable service with explicit health/readiness behavior and owner-only state paths;
+3. integrate operational-health signals into the existing Jason observability/Command Center path;
+4. perform an overlap-first OpenClaw Ed25519 signing-key rotation proof: add new key, validate both keys, move signing to the new private key inside OpenClaw, prove continuity, then revoke the old public key;
+5. update CatchMeUp to report machine trust, active/revoked key count, delegation-state health, security-state modes, and backup/restore readiness.
 
-Do not enable real human delegation to provider-backed capabilities until the operational controls above are complete and the relevant capability/provider authorization model has been explicitly reviewed.
+Do not enable real human delegation to provider-backed capabilities until the relevant capability/provider authorization model has been explicitly reviewed and the production packaging/trust-rotation controls above are complete.
 
 ## Parallel / Future Provider Workstreams
 
@@ -94,12 +96,12 @@ Use "integrate before innovate": prefer AWS-native identity, audit, inventory, c
 
 ## Immediate Next Actions
 
-1. complete the deployed OpenClaw/JKD-001 operational-hardening host proof;
-2. fix and validate the OpenClaw trusted-key lifecycle CLI if host validation exposes regressions;
-3. add production service packaging/health monitoring;
-4. perform an overlap-first OpenClaw signing-key rotation proof without losing service continuity;
-5. update CatchMeUp to report machine trust, authority/delegation store health, security-state modes, and operational-hardening status;
-6. record AWS connection as a future governed provider workstream and design it after the current OpenClaw/JKD-001 production boundary is stable;
+1. package production OpenClaw/Jason ingress and authority composition with repeatable health/readiness checks;
+2. wire periodic delegation expiration maintenance and preserve full lifecycle history;
+3. integrate operational-health state into CatchMeUp and Jason Command Center telemetry;
+4. perform overlap-first OpenClaw signing-key rotation and old-key revocation proof;
+5. record the production-packaging and key-rotation host evidence;
+6. design AWS provider-family foundation after the OpenClaw/Jason production boundary is stable;
 7. return to PR #77 when approved IT Glue/Datto credentials exist.
 
 ## Outstanding Historical Recovery Note
