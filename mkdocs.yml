@@ -12,6 +12,12 @@ nav:
       - Manifesto: 01-Foundation/J-001-Manifesto.md
       - Constitution: 01-Foundation/J-002-Constitution.md
       - Professional Operating Principles: 01-Foundation/J-003-Professional-Operating-Principles.md
+  - Canonical Models:
+      - J-116 State Model: 02-Canonical-Models/J-116-State-Model.md
+      - J-117 Object Model: 02-Canonical-Models/J-117-Object-Model.md
+      - J-118 Relationship Model: 02-Canonical-Models/J-118-Relationship-Model.md
+      - J-119 Event Model: 02-Canonical-Models/J-119-Event-Model.md
+      - J-120 Organizational Model: 02-Canonical-Models/J-120-Organizational-Model.md
   - Milestones:
       - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
       - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
@@ -39,6 +45,7 @@ nav:
       - INF-010 Microsoft Cloud Platform Foundation: 03-Components/Infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
       - INF-011 Kaseya Resource Platform Foundation: 03-Components/Infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
       - INF-012 Cross-Provider Relationship Foundation: 03-Components/Infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
+      - INF-013 Artifact Evidence Storage Foundation: 03-Components/Infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
   - Capabilities:
       - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
       - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
