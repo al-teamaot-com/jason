@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
@@ -99,10 +100,10 @@ def list_keys(args) -> int:
     return 0
 
 
-def parser() -> argparse.ArgumentParser:
+def lifecycle_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description='Govern OpenClaw trusted public signing keys for Jason')
     p.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
-    sub = p.add_subparsers(dest='command')
+    sub = p.add_subparsers(dest='command', required=True)
 
     add = sub.add_parser('register')
     add.add_argument('--key-id', required=True)
@@ -121,19 +122,23 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def legacy_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description='Register an OpenClaw public signing key for Jason')
+    p.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
+    p.add_argument('--key-id', required=True)
+    p.add_argument('--machine-identity', required=True)
+    p.add_argument('--public-key', type=Path, required=True)
+    p.add_argument('--expected-fingerprint', required=True)
+    return p
+
+
 def main() -> int:
-    p = parser()
-    args = p.parse_args()
-    if args.command is None:
-        # Backward-compatible registration invocation used by existing runbooks.
-        legacy = argparse.ArgumentParser(description='Register an OpenClaw public signing key for Jason')
-        legacy.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
-        legacy.add_argument('--key-id', required=True)
-        legacy.add_argument('--machine-identity', required=True)
-        legacy.add_argument('--public-key', type=Path, required=True)
-        legacy.add_argument('--expected-fingerprint', required=True)
-        return register(legacy.parse_args())
-    return args.func(args)
+    lifecycle_commands = {'register', 'revoke', 'list'}
+    command = next((item for item in sys.argv[1:] if not item.startswith('-')), None)
+    if command in lifecycle_commands:
+        args = lifecycle_parser().parse_args()
+        return args.func(args)
+    return register(legacy_parser().parse_args())
 
 
 if __name__ == '__main__':
