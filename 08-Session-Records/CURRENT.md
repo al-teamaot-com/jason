@@ -5,16 +5,51 @@
 
 ## Resume Here
 
-The 2026-08-08 provider/infrastructure foundation integration workstream is complete on `main`:
+The provider/infrastructure foundation integration workstream is complete on `main`:
 
 1. PR #72 — **INF-010 Microsoft Cloud platform foundation**
 2. PR #73 — **INF-011 Kaseya resource platform foundation**
 3. PR #74 — **INF-012 Cross-provider relationship foundation**
 4. PR #75 — **INF-013 Artifact/evidence storage foundation**
+5. PR #76 — **J-119 Event Model**, approved and merged
 
-PR #76 advances and approves **J-119 Event Model**, completing the initial canonical-model foundation set alongside J-116, J-117, J-118, and J-120.
+The active branch is `feature/itglue-datto-resource-convergence`.
 
-Do not return to the former PR #72-#75 integration queue. Do not restart J-119 discovery after PR #76 is merged. ORCH-005 remains paused unless a current governance decision explicitly reactivates it.
+### Exact resume point
+
+The first governed IT Glue + Datto RMM convergence slice has reached the **live credential boundary**.
+
+Repository-side work now provides:
+
+- a provider-neutral convergence plan through INF-011;
+- one bounded IT Glue configuration GET and one bounded Datto RMM device search;
+- execution through the existing connector and secret-resolution boundaries;
+- exact organization-context enforcement across provider reads;
+- explicit denial of cross-organization correlation;
+- INF-012 relationship evidence only when selected identity attributes actually agree;
+- no provider-to-provider communication;
+- read-only execution only;
+- a credential-safe preflight command at `tools/resource_convergence_preflight.py`;
+- an operations checklist at `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`.
+
+Do **not** invent or guess live provider response schemas. The next step is controlled read-only validation with fresh credentials so Jason can observe the actual provider payloads and finalize normalization from evidence.
+
+## Credentials Needed Next
+
+### IT Glue
+
+- logical secret: `it_glue.readonly`
+- current connector credential field: `api_key`
+- provider base URL: `https://api.itglue.com`
+- first live operation: exact configuration GET through `it_glue.entity.get`
+
+### Datto RMM
+
+- logical secret: `datto_rmm.readonly`
+- current connector credential fields: `base_url`, `access_token`
+- first live operation: bounded device search through `datto_rmm.device.search`
+
+If the production Datto RMM credential is issued as an API key/secret or OAuth client rather than a durable bearer token, add token acquisition behind the existing secret/transport boundary before the live read. Do not place raw credentials in Git, chat, normal logs, evidence, or command history.
 
 ## What Is Proven
 
@@ -25,11 +60,7 @@ Do not return to the former PR #72-#75 integration queue. Do not restart J-119 d
 - INF-011 provider-neutral Kaseya/Datto resource gateway foundation is integrated.
 - INF-012 governed cross-provider relationship foundation is integrated.
 - INF-013 provider-neutral artifact/evidence reference boundary is integrated.
-- J-116 State Model is approved.
-- J-117 Object Model is approved.
-- J-118 Relationship Model is approved.
-- J-119 Event Model is approved in PR #76 and should be treated as authoritative once merged.
-- J-120 Organizational Model is approved.
+- J-116, J-117, J-118, J-119, and J-120 canonical foundation models are approved.
 - CAP-001 canonical Autotask read capability is complete.
 - CAP-003 Autotask Business Context is live-validated and converged; CAP-002 is retired/superseded.
 - Jason Command Center, Prometheus, Grafana, Ollama, OpenBao, and OpenClaw were healthy in the most recent host snapshot.
@@ -38,44 +69,35 @@ Do not return to the former PR #72-#75 integration queue. Do not restart J-119 d
 
 ### Governed IT Glue + Datto RMM Resource Convergence
 
-The next implementation slice should prove the merged foundations working together without introducing provider-specific parallel architecture.
+The bounded question is:
 
-Primary objectives:
+**Which Datto RMM device corresponds to this IT Glue configuration, and what evidence supports that relationship?**
 
-1. converge existing IT Glue and Datto RMM read adapters behind the INF-011 generic resource gateway;
-2. preserve organization/client scoping and fail closed on ambiguous tenant boundaries;
-3. produce provider resource evidence suitable for INF-012 relationship evaluation;
-4. route cross-provider relationship evaluation through the Central Orchestrator, never provider-to-provider communication;
-5. normalize material occurrences through J-119 only after the source/evidence boundary is satisfied;
-6. use INF-013 artifact/evidence references for large supporting payloads;
-7. keep the entire first slice read-only;
-8. preserve CAP-001/CAP-003 Autotask behavior and generic capability naming.
+The live validation sequence after credentials are provisioned is:
 
-A successful slice should demonstrate that Jason can answer a bounded cross-provider question such as: **which Datto RMM device corresponds to this IT Glue configuration, and what evidence supports that relationship?**
+1. select one controlled organization and one known configuration/device pair;
+2. resolve `it_glue.readonly` through Jason's approved secret provider;
+3. perform one exact IT Glue configuration GET;
+4. resolve `datto_rmm.readonly` through Jason's approved secret provider;
+5. perform one bounded Datto RMM device search;
+6. inspect only sanitized response-shape metadata and identity fields;
+7. finalize provider normalization for attributes actually present in the live payloads;
+8. evaluate INF-012 relationship evidence through the Central Orchestrator;
+9. emit J-119 events only for material provider-neutral occurrences;
+10. retain large/raw provider evidence behind INF-013 references rather than copying it into normal logs or chat.
 
-The answer must preserve source provenance, tenant context, confidence/verification state, canonical resource references, and evidence without granting execution authority.
-
-## J-119 Architecture Decisions
-
-The approved Event Model establishes:
-
-- Request, Decision, Approval, Evidence, and other business concepts remain J-117 objects; J-119 records occurrences involving them.
-- Canonical event classes are Observation, Action, State Change, Relationship Change, and Communication.
-- Lifecycle progression is represented through J-116 State Change, not a separate event class.
-- Event-to-event causation, correction, supersession, duplication, sequence, and containment resolve through J-118 relationships.
-- Event verification uses Reported, Inferred, Corroborated, Verified, Disputed, and Rejected.
-- Time uncertainty remains explicit; false precision is prohibited.
-- ORCH-002 remains orchestration evidence and is promoted only when a material provider-neutral business occurrence is established.
-- Deduplication uses governed multi-factor evidence and fails safe when confidence is insufficient.
+The first slice remains read-only and grants no execution authority.
 
 ## Queued Follow-ons
 
-After the IT Glue + Datto RMM convergence slice:
+After the IT Glue + Datto RMM convergence proof:
 
 1. **INF-010 deployment:** governed OpenBao certificate binding and controlled Microsoft test-tenant onboarding.
 2. **INF-011 expansion:** additional Kaseya/security-provider adapters only where verified APIs exist.
 3. **INF-013 physical store:** bind the first approved physical artifact/evidence store through the capability registry.
 4. broader INF-012 relationship and J-119 event normalization across providers.
+
+Additional providers — RocketCyber, SaaS Alerts, VulScan, Graphus, BullPhish, ID Agent, and Microsoft — should not receive credential contracts merely because they are listed in the resource catalog. Introduce credentials when a verified API and bounded first read are ready for controlled validation.
 
 ## Outstanding Historical Recovery Note
 
