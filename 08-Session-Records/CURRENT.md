@@ -5,35 +5,63 @@
 
 ## Resume Here
 
-Jason has moved beyond the earlier ORCH-005 recovery-eligibility pause. The immediate integration focus is the four open, mergeable draft foundations created on 2026-08-08:
+The 2026-08-08 provider/infrastructure foundation integration workstream is complete on `main`.
 
-1. PR #72 — **INF-010 Microsoft Cloud platform foundation** (`feature/microsoft-cloud-platform-foundation`)
-2. PR #73 — **INF-011 Kaseya resource platform foundation** (`feature/kaseya-resource-platform-foundation`)
-3. PR #74 — **INF-012 Cross-provider relationship foundation** (`feature/cross-provider-relationship-foundation`)
-4. PR #75 — **INF-013 Artifact/evidence storage foundation** (`feature/artifact-evidence-storage-foundation`)
+Merged in dependency order:
 
-Treat these as the active validation/integration queue. Do not restart from ORCH-005 unless a current roadmap or governance decision explicitly returns it to active work.
+1. PR #72 — **INF-010 Microsoft Cloud platform foundation**
+2. PR #73 — **INF-011 Kaseya resource platform foundation**
+3. PR #74 — **INF-012 Cross-provider relationship foundation**
+4. PR #75 — **INF-013 Artifact/evidence storage foundation**
+
+The canonical roadmap now controls the next primary workstream: **J-119 Event Model**.
+
+Do not return to the former PR #72-#75 integration queue. Do not restart from ORCH-005 unless a current roadmap or governance decision explicitly reactivates it.
 
 ## What Was Already Proven
 
 - Jason Kernel foundation is complete.
 - Central Orchestrator ORCH-001 through ORCH-004 are complete.
 - OpenBao INF-001, INF-002, and INF-003 are complete in the roadmap.
+- INF-010 Microsoft Cloud provider-family foundation is integrated.
+- INF-011 provider-neutral Kaseya/Datto resource gateway foundation is integrated.
+- INF-012 governed cross-provider relationship foundation is integrated.
+- INF-013 provider-neutral artifact/evidence reference boundary is integrated.
 - CAP-001 canonical Autotask read capability is complete.
 - CAP-003 Autotask Business Context is live-validated and converged; CAP-002 is retired/superseded.
 - Jason Command Center, Prometheus, Grafana, Ollama, OpenBao, and OpenClaw were healthy in the most recent host snapshot.
 - OpenBao recovery fingerprint, bootstrap retirement, and governed Raft restore evidence exist outside the repository.
 
-## Current Validation / Integration Order
+## Current Primary Workstream
 
-The preferred order is dependency-aware rather than chronological:
+### J-119 Event Model
 
-1. Validate PR #72 independently: Microsoft connector tests, `tools/microsoft_cloud_foundation_check.py`, connector suite, Kernel, release validation, strict docs.
-2. Validate PR #73: resource-gateway tests plus complete connector/Kernel/release/docs validation.
-3. Validate PR #74 after #73 because its relationship model is intended to bind to the generic resource gateway.
-4. Validate PR #75 after the preceding provider/resource boundaries because it establishes the central artifact/evidence reference contract those capabilities will use.
-5. Rebase/update branches as required against the then-current `main` before merge; do not merge stale branches solely because GitHub reports them mergeable.
-6. After the integration queue is complete, re-evaluate the roadmap and select the next governed capability/workstream.
+Build the next canonical Jason's World model using the same rule as J-116 through J-120: **model the business, not the software**.
+
+The Event Model must be provider-neutral and authoritative enough to become a dependency for orchestration, evidence, relationships, operational memory, and future automation. It must not collapse provider webhooks, logs, tickets, alerts, audit records, or orchestration lifecycle records into one vendor-shaped structure.
+
+Initial work should establish:
+
+- what constitutes a canonical Jason event versus source evidence about an event;
+- immutable event identity and organization/client boundary;
+- actor/principal, subject/object, relationship, and capability context;
+- occurrence time versus observation/ingestion time;
+- source/provenance and correlation/causation semantics;
+- classification and lifecycle/state-change semantics without granting execution authority;
+- links to J-116 State Model, J-117 Object Model, J-118 Relationship Model, and J-120 Organizational Model;
+- compatibility with the existing durable orchestration event store without making the orchestration store the canonical business model;
+- compatibility with INF-013 artifact/evidence references so large payloads remain by reference.
+
+## Queued Implementation Follow-ons
+
+These are deliberately secondary to the canonical Event Model unless a governance decision reprioritizes them:
+
+1. **INF-010 deployment:** governed OpenBao certificate binding and controlled Microsoft test-tenant onboarding.
+2. **INF-011 convergence:** bring IT Glue and Datto RMM adapters behind the generic resource gateway before adding additional Kaseya/security-provider adapters.
+3. **INF-012 binding:** connect provider resource evidence to canonical relationship evaluation/promotion through the Central Orchestrator.
+4. **INF-013 physical store:** bind the first approved physical artifact/evidence store through the capability registry.
+
+These follow-ons must preserve integrate-before-innovate and must not create parallel provider-specific architecture when an existing platform or generic capability can satisfy the requirement.
 
 ## Outstanding Historical Recovery Note
 
