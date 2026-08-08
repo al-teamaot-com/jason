@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Jason OpenClaw and JKD-001 operational health every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+Persistent=true
+RandomizedDelaySec=30s
+Unit=jason-openclaw-authority-health.service
+
+[Install]
+WantedBy=timers.target
