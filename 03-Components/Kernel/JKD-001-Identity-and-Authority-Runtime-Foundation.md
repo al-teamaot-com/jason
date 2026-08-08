@@ -2,11 +2,11 @@
 
 ## Status
 
-Draft implementation foundation.
+Production-hardening implementation foundation.
 
 ## Purpose
 
-Implement the first executable slice of the approved JKD-001 Identity and Authority Service so callers such as OpenClaw can receive a real, scoped, short-lived authority decision instead of relying on placeholder authorization logic.
+Implement the executable JKD-001 Identity and Authority Service so ingress paths such as OpenClaw receive a real, scoped, short-lived authority decision and downstream orchestration can require the issued execution context.
 
 ## Constitutional role
 
@@ -16,7 +16,7 @@ It does not invoke providers, capabilities, agents, or workflows.
 
 ## Implemented contracts
 
-The runtime foundation defines:
+The runtime defines:
 
 - canonical identity records;
 - scoped authority grants;
@@ -24,7 +24,10 @@ The runtime foundation defines:
 - permission levels: observe, recommend, request_approval, execute, administer;
 - authority requests;
 - five-result authority decisions: allowed, allowed_limited, approval_required, denied, indeterminate;
-- short-lived immutable execution contexts.
+- short-lived immutable execution contexts;
+- durable SQLite-backed pilot storage for identities, grants, approvals, issued contexts, revocation state, and authority-decision audit;
+- execution-context validation for exact correlation/principal/organization/client/capability/mode scope;
+- explicit context revocation.
 
 ## Evaluation rules
 
@@ -39,47 +42,53 @@ The service fails closed when:
 
 An organization-wide grant is not silently interpreted from a missing client ID. Grant and request client scopes must match exactly, including `None` only when the explicitly modeled request is itself organization/internal scoped.
 
-## Limited authority
+## Durable authority state
 
-If the request exceeds the grant but the grant still permits at least `recommend`, the service may return `allowed_limited` with a maximum mode. This never upgrades authority and does not permit execution beyond that ceiling.
+`SQLiteIdentityAuthorityStore` is the local production-pilot persistence boundary. The database is created with owner-only permissions and retains:
 
-## Approval binding
+- canonical identities;
+- authority grants;
+- approval records;
+- issued execution contexts;
+- revocation timestamp/reason;
+- sanitized authority decision audit records.
 
-Approval is a formal record. A valid approval must match:
+This SQLite implementation is replaceable behind repository/validator contracts. Callers do not receive direct storage access.
 
-- approval ID;
-- originating request ID;
-- capability;
-- organization;
-- client scope;
-- requesting principal;
-- approved status;
-- non-expired lifetime.
+## Execution context validation
 
-Free-form chat text, requested mode, or an OpenClaw payload flag cannot substitute for this record.
+Every governed context is bound to:
 
-## Execution context
-
-Allowed and safely limited outcomes receive a short-lived execution context containing:
-
-- context ID;
 - correlation ID;
-- principal;
-- organization/client scope;
+- principal ID;
+- organization ID;
+- exact client scope;
 - capability;
-- requested and maximum modes;
-- outcome;
-- matched authority grants;
-- authentication assurance;
-- issue and expiry timestamps.
+- maximum permission mode;
+- expiry.
 
-Default context lifetime is five minutes.
+A context fails validation when it is missing, expired, revoked, reused across scope/capability/correlation boundaries, or used for a mode above its authority ceiling.
 
-## Current storage boundary
+## Orchestrator enforcement
 
-The first implementation uses repository protocols with in-memory reference repositories so evaluation semantics can be validated independently of storage technology.
+`CentralOrchestrator` supports `require_authority_context=True`. In that mode:
 
-Before production deployment, identity, grants, approvals, and issued-context validation must be bound to governed durable storage. Storage must preserve auditability and revocation semantics without giving callers direct write access to authority records.
+1. an authority context ID is mandatory;
+2. the configured context enforcer validates it before capability resolution;
+3. any validation failure terminates the request before provider selection or invocation;
+4. the authority context ID is included in correlated orchestration audit metadata.
+
+`JKD001OrchestrationContextEnforcer` adapts the kernel context validator to this generic orchestrator boundary.
+
+Legacy/non-production callers remain compatible while enforcement is disabled. Production ingress must enable enforcement.
+
+## OpenClaw handoff
+
+OpenClaw's `JasonAuthorityEvaluator` now calls JKD-001 using a structured `AuthorityRequest`. Only an allowed decision with an issued execution context can produce a dispatchable context ID.
+
+`OpenClawOrchestratorDispatcher` consumes that issued context ID and places it on the real `OrchestrationRequest`. It no longer succeeds solely because a caller supplied an `authority_allowed` assertion.
+
+OpenClaw still cannot self-assert approval: `approval_present` remains false until a future governed approval-record integration supplies verified state.
 
 ## Validation
 
@@ -89,14 +98,17 @@ Dedicated CI verifies:
 2. cross-client access fails closed;
 3. requested authority cannot exceed the grant ceiling;
 4. approval-required requests stop without a formal approval record;
-5. valid exact-scope approval permits the governed request;
-6. wrong/expired approval fails closed;
-7. missing identity returns indeterminate rather than guessing.
+5. exact formal approval permits the governed request;
+6. durable context storage survives outside request memory;
+7. context revocation immediately fails validation;
+8. cross-scope context reuse is denied;
+9. required context failure happens before capability resolution;
+10. OpenClaw cannot dispatch without a context actually issued by JKD-001.
 
-## Next work
+## Remaining production work
 
-1. add durable identity/grant/approval repositories;
-2. add execution-context validation/revocation;
-3. add authority-decision audit events;
-4. bind OpenClaw `JasonAuthorityEvaluator` to this service using the structured decision/context rather than a string-only placeholder;
-5. bind the Central Orchestrator to require the issued execution context for downstream capability execution.
+1. select the production database path, backup/retention policy, and operating-system ownership on the Jason host;
+2. add governed administrative commands for identity/grant/approval lifecycle instead of direct database access;
+3. add explicit context-revocation audit events and retention cleanup for expired contexts;
+4. deploy the enforced orchestrator/OpenClaw composition on Jason;
+5. provision the OpenClaw Ed25519 machine identity and run the fully synthetic signed ingress test.
