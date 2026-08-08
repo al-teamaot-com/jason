@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from orchestrator import CentralOrchestrator, OrchestrationMode, OrchestrationRequest
+from orchestrator.gates import GateContext, GateOutcome, GovernanceGateChain
 
 from .models import CapabilityRequest
 
@@ -43,6 +44,30 @@ class JasonAuthorityEvaluator:
         if decision not in {"allowed", "denied", "approval_required"}:
             return "denied"
         return decision
+
+
+@dataclass(frozen=True, slots=True)
+class GateChainPolicyEvaluator:
+    gates: GovernanceGateChain
+
+    def evaluate(self, request: CapabilityRequest) -> str:
+        result = self.gates.evaluate(
+            GateContext(
+                correlation_id=request.correlation_id,
+                principal_id=request.principal.principal_id,
+                organization_id=request.principal.organization_id,
+                client_id=request.principal.client_id,
+                capability=request.capability,
+                requested_mode=request.requested_mode,
+                arguments=dict(request.arguments),
+            )
+        )
+        mapping = {
+            GateOutcome.ALLOW: "allowed",
+            GateOutcome.DENY: "denied",
+            GateOutcome.APPROVAL_REQUIRED: "approval_required",
+        }
+        return mapping[result.outcome]
 
 
 @dataclass(frozen=True, slots=True)
