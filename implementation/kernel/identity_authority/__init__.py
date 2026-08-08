@@ -13,9 +13,16 @@ from .context_validation import (
     ContextValidationResult,
     ExecutionContextValidator,
 )
+from .delegation import (
+    DelegationRecord,
+    DelegationValidationRequest,
+    DelegationValidationResult,
+    DelegationValidator,
+)
 from .durable import (
     SQLiteApprovalRepository,
     SQLiteAuthorityGrantRepository,
+    SQLiteDelegationRepository,
     SQLiteIdentityAuthorityStore,
     SQLiteIdentityRepository,
 )
@@ -34,6 +41,10 @@ __all__ = [
     "AuthorityRequest",
     "ContextValidationRequest",
     "ContextValidationResult",
+    "DelegationRecord",
+    "DelegationValidationRequest",
+    "DelegationValidationResult",
+    "DelegationValidator",
     "ExecutionContext",
     "ExecutionContextValidator",
     "IdentityAuthorityService",
@@ -44,6 +55,7 @@ __all__ = [
     "PermissionMode",
     "SQLiteApprovalRepository",
     "SQLiteAuthorityGrantRepository",
+    "SQLiteDelegationRepository",
     "SQLiteIdentityAuthorityStore",
     "SQLiteIdentityRepository",
 ]
