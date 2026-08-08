@@ -8,6 +8,8 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
 
+DEFAULT_REGISTRY = Path('/var/lib/jason/openclaw/trusted-keys/registry.json')
+
 
 def fingerprint(path: Path) -> str:
     key = load_pem_public_key(path.read_bytes())
@@ -15,50 +17,124 @@ def fingerprint(path: Path) -> str:
     return hashlib.sha256(der).hexdigest()
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Register an OpenClaw public signing key for Jason")
-    parser.add_argument("--registry", type=Path, default=Path("/var/lib/jason/openclaw/trusted-keys/registry.json"))
-    parser.add_argument("--key-id", required=True)
-    parser.add_argument("--machine-identity", required=True)
-    parser.add_argument("--public-key", type=Path, required=True)
-    parser.add_argument("--expected-fingerprint", required=True)
-    args = parser.parse_args()
+def load_registry(path: Path) -> dict:
+    payload = {'version': 1, 'keys': []}
+    if path.exists():
+        payload = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(payload.get('keys'), list):
+        raise ValueError('existing registry keys field is invalid')
+    return payload
 
+
+def write_registry(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = {'version': 1, 'keys': sorted(payload['keys'], key=lambda item: item['key_id'])}
+    path.write_text(json.dumps(normalized, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    path.chmod(0o600)
+
+
+def register(args) -> int:
     actual = fingerprint(args.public_key)
     if actual != args.expected_fingerprint:
-        print(json.dumps({"status":"fail","reason":"fingerprint_mismatch","actual_fingerprint":actual}, sort_keys=True))
+        print(json.dumps({'status':'fail','reason':'fingerprint_mismatch','actual_fingerprint':actual}, sort_keys=True))
         return 2
-
-    args.registry.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": 1, "keys": []}
-    if args.registry.exists():
-        payload = json.loads(args.registry.read_text(encoding="utf-8"))
-        if not isinstance(payload.get("keys"), list):
-            raise ValueError("existing registry keys field is invalid")
-
+    payload = load_registry(args.registry)
     record = {
-        "key_id": args.key_id,
-        "machine_identity": args.machine_identity,
-        "public_key_path": str(args.public_key),
-        "sha256_fingerprint": actual,
-        "status": "active",
+        'key_id': args.key_id,
+        'machine_identity': args.machine_identity,
+        'public_key_path': str(args.public_key),
+        'sha256_fingerprint': actual,
+        'status': 'active',
     }
-    keys = [item for item in payload["keys"] if item.get("key_id") != args.key_id]
+    keys = [item for item in payload['keys'] if item.get('key_id') != args.key_id]
     keys.append(record)
-    payload = {"version": 1, "keys": sorted(keys, key=lambda item: item["key_id"])}
-    args.registry.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    args.registry.chmod(0o600)
-
+    payload['keys'] = keys
+    write_registry(args.registry, payload)
     print(json.dumps({
-        "status": "pass",
-        "action": "openclaw_public_key_registered",
-        "key_id": args.key_id,
-        "machine_identity": args.machine_identity,
-        "fingerprint": actual,
-        "registry": str(args.registry),
+        'status': 'pass',
+        'action': 'openclaw_public_key_registered',
+        'key_id': args.key_id,
+        'machine_identity': args.machine_identity,
+        'fingerprint': actual,
+        'registry': str(args.registry),
     }, sort_keys=True))
     return 0
 
 
-if __name__ == "__main__":
+def revoke(args) -> int:
+    payload = load_registry(args.registry)
+    changed = False
+    for item in payload['keys']:
+        if item.get('key_id') == args.key_id:
+            if item.get('status', 'active') != 'revoked':
+                item['status'] = 'revoked'
+                changed = True
+            break
+    else:
+        print(json.dumps({'status':'fail','action':'openclaw_public_key_revoke','reason':'key_not_found','key_id':args.key_id}, sort_keys=True))
+        return 2
+    write_registry(args.registry, payload)
+    print(json.dumps({
+        'status': 'pass',
+        'action': 'openclaw_public_key_revoked',
+        'key_id': args.key_id,
+        'changed': changed,
+        'reason': args.reason,
+    }, sort_keys=True))
+    return 0
+
+
+def list_keys(args) -> int:
+    payload = load_registry(args.registry)
+    safe = [
+        {
+            'key_id': item.get('key_id'),
+            'machine_identity': item.get('machine_identity'),
+            'sha256_fingerprint': item.get('sha256_fingerprint'),
+            'status': item.get('status', 'active'),
+        }
+        for item in payload['keys']
+    ]
+    print(json.dumps({'status':'pass','registry':str(args.registry),'keys':safe}, indent=2, sort_keys=True))
+    return 0
+
+
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description='Govern OpenClaw trusted public signing keys for Jason')
+    p.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
+    sub = p.add_subparsers(dest='command')
+
+    add = sub.add_parser('register')
+    add.add_argument('--key-id', required=True)
+    add.add_argument('--machine-identity', required=True)
+    add.add_argument('--public-key', type=Path, required=True)
+    add.add_argument('--expected-fingerprint', required=True)
+    add.set_defaults(func=register)
+
+    revoke_p = sub.add_parser('revoke')
+    revoke_p.add_argument('--key-id', required=True)
+    revoke_p.add_argument('--reason', required=True)
+    revoke_p.set_defaults(func=revoke)
+
+    listing = sub.add_parser('list')
+    listing.set_defaults(func=list_keys)
+    return p
+
+
+def main() -> int:
+    p = parser()
+    args = p.parse_args()
+    if args.command is None:
+        # Backward-compatible registration invocation used by existing runbooks.
+        legacy = argparse.ArgumentParser(description='Register an OpenClaw public signing key for Jason')
+        legacy.add_argument('--registry', type=Path, default=DEFAULT_REGISTRY)
+        legacy.add_argument('--key-id', required=True)
+        legacy.add_argument('--machine-identity', required=True)
+        legacy.add_argument('--public-key', type=Path, required=True)
+        legacy.add_argument('--expected-fingerprint', required=True)
+        return register(legacy.parse_args())
+    return args.func(args)
+
+
+if __name__ == '__main__':
     raise SystemExit(main())
