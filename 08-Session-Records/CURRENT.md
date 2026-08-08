@@ -13,43 +13,43 @@ The provider/infrastructure foundation integration workstream is complete on `ma
 4. PR #75 — **INF-013 Artifact/evidence storage foundation**
 5. PR #76 — **J-119 Event Model**, approved and merged
 
-The active branch is `feature/itglue-datto-resource-convergence`.
+The active branch is `feature/itglue-datto-resource-convergence` and draft PR #77 carries the first governed IT Glue + Datto RMM convergence slice.
 
 ### Exact resume point
 
-The first governed IT Glue + Datto RMM convergence slice has reached the **live credential boundary**.
+The slice is at the **live credential boundary**, with credential plumbing prepared without introducing live secrets.
 
-Repository-side work now provides:
+Repository-side work provides:
 
-- a provider-neutral convergence plan through INF-011;
+- provider-neutral convergence through INF-011;
 - one bounded IT Glue configuration GET and one bounded Datto RMM device search;
-- execution through the existing connector and secret-resolution boundaries;
-- exact organization-context enforcement across provider reads;
-- explicit denial of cross-organization correlation;
-- INF-012 relationship evidence only when selected identity attributes actually agree;
-- no provider-to-provider communication;
-- read-only execution only;
-- a credential-safe preflight command at `tools/resource_convergence_preflight.py`;
-- an operations checklist at `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`.
+- exact organization-context enforcement and cross-organization denial;
+- INF-012 relationship evidence only from corroborated identity attributes;
+- no provider-to-provider communication and no mutation authority;
+- credential-safe preflight at `tools/resource_convergence_preflight.py`;
+- operations/rotation guidance at `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`;
+- Datto durable credential contract with runtime bearer-token acquisition;
+- CI coverage that rejects the obsolete persisted Datto bearer-token shape.
 
-Do **not** invent or guess live provider response schemas. The next step is controlled read-only validation with fresh credentials so Jason can observe the actual provider payloads and finalize normalization from evidence.
+Do **not** invent live response schemas. Do **not** create placeholder secrets. The next live dependency is fresh dedicated provider credentials.
 
 ## Credentials Needed Next
 
 ### IT Glue
 
 - logical secret: `it_glue.readonly`
-- current connector credential field: `api_key`
+- durable field: `api_key`
 - provider base URL: `https://api.itglue.com`
 - first live operation: exact configuration GET through `it_glue.entity.get`
 
 ### Datto RMM
 
 - logical secret: `datto_rmm.readonly`
-- current connector credential fields: `base_url`, `access_token`
+- durable fields: `api_url`, `api_key`, `api_secret`
+- runtime-only material: `access_token`
 - first live operation: bounded device search through `datto_rmm.device.search`
 
-If the production Datto RMM credential is issued as an API key/secret or OAuth client rather than a durable bearer token, add token acquisition behind the existing secret/transport boundary before the live read. Do not place raw credentials in Git, chat, normal logs, evidence, or command history.
+Jason must acquire the Datto bearer token at runtime behind the connector/secret boundary. Do not persist the bearer token in OpenBao and do not place raw credentials in Git, chat, normal logs, evidence, or command history.
 
 ## What Is Proven
 
@@ -63,7 +63,7 @@ If the production Datto RMM credential is issued as an API key/secret or OAuth c
 - J-116, J-117, J-118, J-119, and J-120 canonical foundation models are approved.
 - CAP-001 canonical Autotask read capability is complete.
 - CAP-003 Autotask Business Context is live-validated and converged; CAP-002 is retired/superseded.
-- Jason Command Center, Prometheus, Grafana, Ollama, OpenBao, and OpenClaw were healthy in the most recent host snapshot.
+- PR #77 passed an explicit J-002 Article I-XVIII constitutional review at the no-secret/no-network boundary.
 
 ## Current Primary Workstream
 
@@ -73,20 +73,21 @@ The bounded question is:
 
 **Which Datto RMM device corresponds to this IT Glue configuration, and what evidence supports that relationship?**
 
-The live validation sequence after credentials are provisioned is:
+When credentials become available:
 
-1. select one controlled organization and one known configuration/device pair;
-2. resolve `it_glue.readonly` through Jason's approved secret provider;
-3. perform one exact IT Glue configuration GET;
-4. resolve `datto_rmm.readonly` through Jason's approved secret provider;
-5. perform one bounded Datto RMM device search;
-6. inspect only sanitized response-shape metadata and identity fields;
-7. finalize provider normalization for attributes actually present in the live payloads;
-8. evaluate INF-012 relationship evidence through the Central Orchestrator;
-9. emit J-119 events only for material provider-neutral occurrences;
-10. retain large/raw provider evidence behind INF-013 references rather than copying it into normal logs or chat.
+1. provision dedicated least-privilege credentials directly into the approved OpenBao paths using non-echoing input;
+2. verify only required field presence, never values;
+3. select one controlled organization and known configuration/device pair;
+4. perform one exact IT Glue configuration GET;
+5. acquire a Datto bearer token at runtime from the durable API credentials;
+6. perform one bounded Datto RMM device search;
+7. inspect only sanitized response-shape metadata and identity fields;
+8. finalize normalization from attributes actually present in the live payloads;
+9. evaluate INF-012 relationship evidence through the Central Orchestrator;
+10. emit J-119 events only for material provider-neutral occurrences;
+11. retain large/raw evidence behind INF-013 references.
 
-The first slice remains read-only and grants no execution authority.
+The slice remains read-only and grants no execution authority.
 
 ## Queued Follow-ons
 
@@ -97,7 +98,7 @@ After the IT Glue + Datto RMM convergence proof:
 3. **INF-013 physical store:** bind the first approved physical artifact/evidence store through the capability registry.
 4. broader INF-012 relationship and J-119 event normalization across providers.
 
-Additional providers — RocketCyber, SaaS Alerts, VulScan, Graphus, BullPhish, ID Agent, and Microsoft — should not receive credential contracts merely because they are listed in the resource catalog. Introduce credentials when a verified API and bounded first read are ready for controlled validation.
+Additional providers — RocketCyber, SaaS Alerts, VulScan, Graphus, BullPhish, ID Agent, and Microsoft — should not receive credential contracts merely because they are listed. Introduce credentials only when a verified API and bounded first read are ready.
 
 ## Outstanding Historical Recovery Note
 
