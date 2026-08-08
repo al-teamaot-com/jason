@@ -11,6 +11,8 @@ on:
       - "implementation/orchestrator/tests/test_service.py"
       - "implementation/connectors/openclaw/src/jason_openclaw/runtime.py"
       - "implementation/connectors/openclaw/tests/test_runtime.py"
+      - "tools/identity_authority_admin.py"
+      - "tools/prepare_authority_openclaw_host.sh"
       - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
       - ".github/workflows/identity-authority.yml"
   pull_request:
@@ -23,6 +25,8 @@ on:
       - "implementation/orchestrator/tests/test_service.py"
       - "implementation/connectors/openclaw/src/jason_openclaw/runtime.py"
       - "implementation/connectors/openclaw/tests/test_runtime.py"
+      - "tools/identity_authority_admin.py"
+      - "tools/prepare_authority_openclaw_host.sh"
       - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
       - ".github/workflows/identity-authority.yml"
 
@@ -41,8 +45,12 @@ jobs:
           python-version: "3.12"
       - name: Install tests
         run: python -m pip install --upgrade pip pytest
-      - name: Compile authority, orchestrator, and OpenClaw binding
-        run: python -m compileall -q implementation/kernel/identity_authority implementation/orchestrator implementation/connectors/openclaw/src
+      - name: Compile authority, orchestrator, OpenClaw, and admin tooling
+        run: python -m compileall -q implementation/kernel/identity_authority implementation/orchestrator implementation/connectors/openclaw/src tools/identity_authority_admin.py
+      - name: Validate host preparation shell
+        run: bash -n tools/prepare_authority_openclaw_host.sh
+      - name: Validate admin health command
+        run: python tools/identity_authority_admin.py --database /tmp/jason-authority-test.sqlite3 health
       - name: Test durable identity and authority service
         run: python -m pytest implementation/kernel/tests/test_identity_authority.py -q
       - name: Test orchestrator authority-context enforcement
