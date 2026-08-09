@@ -96,12 +96,39 @@ connectors:
       - first_graph_read_capability
       - controlled_test_tenant_onboarding
       - production_validation
+  aws:
+    status: platform_foundation_built
+    priority: 8
+    mode: governed_read_first
+    secret: aws.readonly.assume_role
+    credential_model: sts_runtime_only
+    service_families:
+      - sts
+      - organizations
+      - iam
+      - config
+      - securityhub
+      - guardduty
+      - cloudtrail
+      - ec2
+      - s3
+      - rds
+      - backup
+      - ssm
+    next:
+      - openbao_role_binding
+      - controlled_test_account
+      - sts_get_caller_identity_validation
+      - organizations_account_discovery
+      - first_regional_inventory_read
+      - normalized_resource_adapter
+      - orchestrated_live_read_validation
   teams_approvals:
     status: planned
-    priority: 8
+    priority: 9
   opentelemetry:
     status: planned
-    priority: 9
+    priority: 10
   object_storage:
     status: planned
-    priority: 10
+    priority: 11
