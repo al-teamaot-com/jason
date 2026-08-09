@@ -24,6 +24,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "it_glue.readonly": (
         "secret/data/connectors/it-glue/production/read-only"
     ),
+    "datto_rmm.readonly": (
+        "secret/data/connectors/datto-rmm/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -37,6 +40,13 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "it_glue.readonly": frozenset(
         {
             "api_key",
+        }
+    ),
+    "datto_rmm.readonly": frozenset(
+        {
+            "api_url",
+            "api_key",
+            "api_secret",
         }
     ),
 }
