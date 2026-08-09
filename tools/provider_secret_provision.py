@@ -97,7 +97,14 @@ def require_string(data: Mapping[str, Any], key: str, description: str) -> str:
 
 def provider_policy_text(provider: str) -> str:
     secret_path = str(PROVIDERS[provider]["secret_path"])
-    return f'path "{secret_path}" {{\n  capabilities = ["read"]\n}}\n'
+    return (
+        f'path "{secret_path}" {{\n'
+        '  capabilities = ["read"]\n'
+        '}\n\n'
+        'path "auth/token/revoke-self" {\n'
+        '  capabilities = ["update"]\n'
+        '}\n'
+    )
 
 
 def collect_values(provider: str) -> dict[str, str]:
