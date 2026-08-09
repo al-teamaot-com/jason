@@ -36,18 +36,21 @@ def test_it_glue_contract_reuses_existing_production_identity() -> None:
     )
 
 
-def test_provider_policies_are_exactly_read_only() -> None:
+def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
         assert policy == (
             f'path "{spec["secret_path"]}" {{\n'
             '  capabilities = ["read"]\n'
+            '}\n\n'
+            'path "auth/token/revoke-self" {\n'
+            '  capabilities = ["update"]\n'
             '}\n'
         )
         assert '"create"' not in policy
-        assert '"update"' not in policy
         assert '"delete"' not in policy
         assert '"sudo"' not in policy
+        assert policy.count('"update"') == 1
 
 
 def test_runtime_design_contains_no_persistent_token_path() -> None:
