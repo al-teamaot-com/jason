@@ -1,0 +1,56 @@
+name: Validate IT Glue Datto Resource Convergence
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/resource_convergence.py'
+      - 'implementation/connectors/tests/test_resource_convergence.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/core/relationships.py'
+      - 'tools/resource_convergence_preflight.py'
+      - '.github/workflows/resource-convergence.yml'
+  push:
+    paths:
+      - 'implementation/connectors/resource_convergence.py'
+      - 'implementation/connectors/tests/test_resource_convergence.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/core/relationships.py'
+      - 'tools/resource_convergence_preflight.py'
+      - '.github/workflows/resource-convergence.yml'
+
+jobs:
+  validate-resource-convergence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Compile convergence boundary
+        run: |
+          python -m py_compile implementation/connectors/resource_convergence.py
+          python -m py_compile tools/resource_convergence_preflight.py
+      - name: Run convergence and relationship tests
+        env:
+          PYTHONPATH: implementation
+        run: |
+          python -m pytest implementation/connectors/tests/test_resource_convergence.py -q
+          python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
+          python -m pytest implementation/connectors/tests/test_relationships.py -q
+      - name: Verify no-network bounded preflight
+        run: |
+          python tools/resource_convergence_preflight.py > /tmp/convergence.json
+          python - <<'PY'
+          import json
+          with open('/tmp/convergence.json', encoding='utf-8') as handle:
+              result = json.load(handle)
+          assert result['status'] == 'live_provider_boundaries_verified'
+          assert result['network_contacted'] is False
+          assert result['secret_resolved'] is False
+          assert result['candidate_limit'] == 5
+          assert result['provider_live_read_verified'] == {'it_glue': True, 'datto_rmm': True}
+          assert [x['capability'] for x in result['provider_reads']] == [
+              'it_glue.entity.get', 'datto_rmm.device.search'
+          ]
+          PY
