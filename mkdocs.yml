@@ -62,6 +62,7 @@ nav:
       - OpenBao Initialization and Recovery Record: 07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
       - OpenClaw + JKD-001 Operational Hardening: 07-Operations/OpenClaw-JKD001-Operational-Hardening.md
       - OpenClaw + JKD-001 Production Packaging: 07-Operations/OpenClaw-JKD001-Production-Packaging.md
+      - OpenClaw Ed25519 Key Rotation: 07-Operations/OpenClaw-Ed25519-Key-Rotation.md
       - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
       - INF-010 Microsoft Cloud Deployment Checklist: 07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
