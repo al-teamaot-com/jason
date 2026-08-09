@@ -61,6 +61,7 @@ nav:
       - Bootstrap and Secrets Management: 07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: 07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
+      - Provider Secret Provisioning: 07-Operations/Provider-Secret-Provisioning.md
       - OpenClaw + JKD-001 Operational Hardening: 07-Operations/OpenClaw-JKD001-Operational-Hardening.md
       - OpenClaw + JKD-001 Production Packaging: 07-Operations/OpenClaw-JKD001-Production-Packaging.md
       - OpenClaw Ed25519 Key Rotation: 07-Operations/OpenClaw-Ed25519-Key-Rotation.md
