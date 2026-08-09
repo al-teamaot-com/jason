@@ -83,9 +83,15 @@ def translate_datto_rmm_resource(query: ResourceQuery) -> ConnectorInvocation:
             )
         if query.operation is ResourceOperation.QUERY:
             filters = query.filters or {}
+            arguments: dict[str, Any] = {
+                "search": filters.get("search", ""),
+                "page": 1,
+            }
+            if query.page_size is not None:
+                arguments["max"] = query.page_size
             return ConnectorInvocation(
                 capability="datto_rmm.device.search",
-                arguments={"search": filters.get("search", "")},
+                arguments=arguments,
             )
 
     if query.resource_type == "alert" and query.operation is ResourceOperation.QUERY:
