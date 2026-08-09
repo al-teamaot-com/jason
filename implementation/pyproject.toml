@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
   "jsonschema>=4.23,<5",
   "msal>=1.35,<2",
+  "PyJWT[crypto]>=2.9,<3",
 ]
 
 [project.optional-dependencies]
