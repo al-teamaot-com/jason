@@ -54,7 +54,7 @@ class GovernedAwsRequest:
     parameters: Mapping[str, object]
 
 
-_ALLOWED_FOUNDATION_ACTIONS = {
+_ALLOWED_FOUNDATION_MODES = {
     AwsOperationMode.READ,
     AwsOperationMode.RECOMMEND,
 }
@@ -63,7 +63,7 @@ _ALLOWED_FOUNDATION_ACTIONS = {
 def build_governed_request(request: AwsCloudRequest) -> GovernedAwsRequest:
     profile = service_profile(request.service)
 
-    if request.mode not in _ALLOWED_FOUNDATION_ACTIONS:
+    if request.mode not in _ALLOWED_FOUNDATION_MODES:
         raise AwsRequestPolicyError('AWS foundation enables only read/recommend modes')
 
     if request.action not in profile.read_actions:
@@ -71,8 +71,10 @@ def build_governed_request(request: AwsCloudRequest) -> GovernedAwsRequest:
             f'AWS action {request.action!r} is not in the governed read catalog for {request.service.value!r}'
         )
 
-    if request.mode is AwsOperationMode.RECOMMEND and request.service is AwsService.STS and request.action == 'AssumeRole':
-        raise AwsRequestPolicyError('STS AssumeRole is a credential bridge, not a recommendation capability')
+    if request.service is AwsService.STS and request.action == 'AssumeRole':
+        raise AwsRequestPolicyError(
+            'STS AssumeRole is reserved for the Jason secret/credential broker boundary and is not an ordinary capability'
+        )
 
     return GovernedAwsRequest(
         provider_name='aws',
