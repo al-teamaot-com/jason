@@ -1,6 +1,6 @@
 # JKD-003 — Secrets Broker
 
-**Version:** 0.3
+**Version:** 0.4
 **Status:** Draft for governed review
 **Owner:** Jason Architecture Authority
 
@@ -40,11 +40,7 @@ Configured secret provider
 Least-privilege credential
 ```
 
-The orchestrator authorizes work but must not retrieve, possess, transmit, log, or expose secret values.
-
-The Secrets Broker resolves secret material but must not authorize business operations.
-
-A connector may use secret material only while executing an already authorized operation.
+The orchestrator authorizes work but must not retrieve, possess, transmit, log, or expose secret values. The Secrets Broker resolves secret material but must not authorize business operations. A connector may use secret material only while executing an already authorized operation.
 
 ## Governing rules
 
@@ -56,27 +52,31 @@ A connector may use secret material only while executing an already authorized o
 6. Static bootstrap credentials require explicit approval, restricted storage, rotation, and retirement criteria.
 7. Failure is closed. Jason must not silently fall back to environment variables, files, or another provider.
 8. Provider selection is deployment configuration, not capability logic.
-9. A provider may be replaced without modifying CAP-001 or any other capability contract.
+9. A provider may be replaced without modifying capability contracts.
 10. Provider-specific features are optional optimizations and may not become required by the broker contract.
 11. Production OpenBao provider connectors use provider-specific least-privilege AppRoles for runtime secret resolution unless the Architecture Authority explicitly approves a replacement design.
 12. A shared persistent provider runtime token, shared orphan token, or provider-wide reusable bearer token is prohibited.
-13. Provisioning authority and runtime resolution authority must remain separate. A provisioning login may create/update the approved secret record and AppRole configuration, but its administrative token must not become runtime state.
+13. Provisioning authority and runtime resolution authority must remain separate. A provisioning login may create/update approved secret records and AppRole configuration, but its administrative token must not become runtime state.
 14. Runtime OpenBao service tokens must be short-lived, narrowly scoped, and explicitly revoked after the bounded secret read. The current production baseline is a five-minute maximum lifetime and two-use limit.
 15. New provider integrations must reuse the canonical JKD-003 resolver and onboarding pattern before introducing provider-specific secret-authentication code.
 16. A second production secret-authentication pattern requires documented business justification, security review, migration/retirement criteria, and normal governance approval before implementation.
+17. Operator secret lifecycle actions use one canonical command surface and explicit state transitions: `status`, `create`, `update`, `verify`, `rotate-identity`, `deactivate`, and `reactivate`.
+18. Production KV v2 create/update operations must use compare-and-set semantics. Blind overwrite is prohibited.
+19. Routine deactivation revokes runtime identity while preserving encrypted secret history. Irreversible secret destruction and provider-side credential revocation are separate governed retirement actions.
+20. Provider identity rotation must install replacement runtime identity material before revoking the previous identity wherever the secret provider supports overlap.
 
 ## Production OpenBao identity invariant
 
 For the current OpenBao deployment, the canonical production provider flow is:
 
 ```text
-Provisioning ceremony
+Provisioning/lifecycle ceremony
   ↓
 OpenBao userpass administrative login
   ↓
 Temporary administrative token
   ↓
-Provider-specific read-only policy + AppRole + secret record
+Provider-specific policy/AppRole and CAS-protected KV operation
   ↓
 Administrative token revoked
 
@@ -95,7 +95,44 @@ Service token revoked
 
 The RoleID and SecretID are bootstrap/runtime identity artifacts and require restricted storage plus governed rotation. The service token is ephemeral and must not be written to disk.
 
+The canonical provider runtime policy grants only:
+
+- `read` on that provider's exact KV secret path; and
+- `update` on `auth/token/revoke-self`.
+
+The self-revoke permission is not provider-secret write authority.
+
 `/etc/jason/openbao.token` is not a production provider runtime identity. A file such as `/etc/jason/openbao-provider.token` must not be introduced as a shared provider credential.
+
+## Canonical lifecycle
+
+The supported operator entrypoint is:
+
+```bash
+python3 tools/provider_secret.py <action> <provider>
+```
+
+### Create/update
+
+`create` is valid only when the provider secret does not exist. `update` is valid only when it does. Both use KV v2 metadata and CAS. Neither retrieves or prints the previous secret value.
+
+### Verify
+
+Verification resolves the allow-listed fields through the normal provider-specific AppRole and canonical resolver. It prints no values and the temporary runtime token self-revokes.
+
+### Rotate identity
+
+AppRole SecretID rotation installs new protected identity material before revoking the previous SecretID accessor. Provider API credentials are not changed by identity rotation.
+
+### Deactivate/reactivate
+
+`deactivate` removes runtime AppRole access and local runtime identity artifacts while preserving the encrypted KV history. `reactivate` creates fresh provider-specific AppRole identity material against the existing KV secret. Deactivation does not claim to revoke the API key at the external provider.
+
+Permanent secret destruction and provider-side API credential revocation require a separate governed retirement procedure because they are not generally reversible.
+
+### Status
+
+Status is metadata-only. It may report secret version/presence, runtime identity artifact state, and rotation expiry metadata, but it must not retrieve or display secret values.
 
 ## Canonical request
 
@@ -168,8 +205,10 @@ A different deployment may map the same logical names to Azure Key Vault secret 
 - Use a provider-specific runtime identity rather than a shared provider identity.
 - Keep service tokens ephemeral and revoke them after use.
 - Protect RoleID and SecretID artifacts as root-owned bootstrap/runtime identity material.
-- Support dual-secret rotation where the provider permits it.
-- CI must enforce the production identity invariant and reject known persistent-token regressions.
+- Use KV v2 CAS for create/update.
+- Support overlap-first identity rotation where possible.
+- Preserve reversible deactivation separately from irreversible retirement.
+- CI must enforce the production identity and lifecycle invariant and reject known persistent-token or blind-write regressions.
 
 ## Initial logical secret contracts
 
@@ -195,7 +234,7 @@ Expected fields:
 - `api_key`
 - `api_secret`
 
-Runtime policy and AppRole are provider-specific and read-only. The Datto bearer access token derived from these values is runtime-only and must not be persisted.
+The Datto bearer access token derived from these values is runtime-only and must not be persisted.
 
 ### `it_glue.readonly`
 
@@ -207,7 +246,7 @@ Expected fields:
 
 - `api_key`
 
-The secret must contain only the provider API key. The IT Glue API base URL is non-secret provider configuration and must not be stored in OpenBao.
+The IT Glue API base URL is non-secret provider configuration and must not be stored in OpenBao.
 
 ## Provider onboarding definition of done
 
@@ -216,23 +255,27 @@ A new production provider is not complete until:
 - a stable logical secret contract exists;
 - a canonical provider secret path exists;
 - exact allowed fields are documented and tested;
-- a provider-specific read-only policy exists;
+- a provider-specific runtime policy exists;
 - a provider-specific AppRole exists;
 - protected RoleID and SecretID storage plus rotation metadata exist;
-- the canonical resolver can authenticate, read the allow-listed fields, and revoke its temporary token;
-- credential-safe preflight succeeds without network or secret entry;
-- CI enforces absence of the persistent-token regression;
-- live provider validation runs only through the authorized connector path.
+- the canonical resolver can authenticate, read allow-listed fields, and revoke its temporary token;
+- the canonical lifecycle command supports credential-safe preflight;
+- create/update use KV v2 CAS;
+- identity rotation, deactivate/reactivate, status, and verify behavior are defined;
+- CI enforces absence of persistent-token and blind-write regressions;
+- live provider validation runs only through the authorized connector path;
+- provider-side credential retirement criteria are documented.
 
 ## Definition of Done
 
-JKD-003 Version 0.3 is complete when:
+JKD-003 Version 0.4 is complete when:
 
 - a provider-neutral protocol exists;
 - an in-memory synthetic provider passes contract tests;
 - at least one real provider adapter passes the same tests;
 - production OpenBao providers conform to the AppRole runtime invariant;
+- operator lifecycle actions are exposed through one canonical command surface;
 - CAP-001 consumes only logical secret names;
 - secret values are absent from audit, memory, exceptions, and test snapshots;
 - switching providers requires configuration only;
-- CI prevents reintroduction of persistent shared provider runtime tokens.
+- CI prevents reintroduction of persistent shared provider runtime tokens or blind KV writes.
