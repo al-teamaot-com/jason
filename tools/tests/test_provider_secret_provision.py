@@ -56,6 +56,8 @@ def test_runtime_design_contains_no_persistent_token_path() -> None:
     assert "create-orphan" not in source
     assert '"period": "24h"' not in source
     assert '"token_ttl": "5m"' in source
+    assert '"token_max_ttl": "5m"' in source
+    assert '"token_explicit_max_ttl": "5m"' in source
     assert '"token_num_uses": 2' in source
     assert "auth/approle/role/" in source
     assert "auth/token/revoke-self" in source
@@ -68,3 +70,39 @@ def test_live_provisioning_uses_hidden_admin_and_secret_prompts() -> None:
     assert "api_key" in source
     assert "api_secret" in source
     assert "secret_values_printed" in source
+
+
+def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
+    text = Path("07-Operations/Provider-Secret-Provisioning.md").read_text(
+        encoding="utf-8"
+    )
+    assert "canonical production onboarding pattern" in text
+    assert "provider-specific OpenBao AppRoles" in text
+    assert "shared persistent provider runtime token is prohibited" in text
+    assert "runtime_token_persisted=false" in text
+    assert "Do not create `/etc/jason/openbao-provider.token`" in text
+    assert "create the provider runtime orphan token" not in text
+    assert "--admin-token-file" not in text
+
+
+def test_jkd003_contains_production_identity_invariant() -> None:
+    text = Path("03-Components/Kernel/JKD-003-Secrets-Broker.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Production OpenBao identity invariant" in text
+    assert "provider-specific least-privilege AppRoles" in text
+    assert "shared persistent provider runtime token" in text
+    assert "five-minute maximum lifetime and two-use limit" in text
+    assert "CI must enforce the production identity invariant" in text
+    assert "A second production secret-authentication pattern requires" in text
+
+
+def test_canonical_resolver_self_revokes_runtime_token() -> None:
+    source = Path(
+        "implementation/connectors/core/openbao_secrets.py"
+    ).read_text(encoding="utf-8")
+    assert "auth/approle/login" in source
+    assert "auth/token/revoke-self" in source
+    assert "finally:" in source
+    assert '"datto_rmm.readonly"' in source
+    assert '"it_glue.readonly"' in source
