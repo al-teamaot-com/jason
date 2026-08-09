@@ -19,6 +19,8 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
