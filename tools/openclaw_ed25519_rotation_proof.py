@@ -39,11 +39,26 @@ const fs = require('fs');
 const crypto = require('crypto');
 const keyPath = process.argv[1];
 const envelope = JSON.parse(fs.readFileSync(0, 'utf8'));
+
+function canonicalize(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+  if (value !== null && typeof value === 'object') {
+    const output = {};
+    for (const key of Object.keys(value).sort()) {
+      output[key] = canonicalize(value[key]);
+    }
+    return output;
+  }
+  return value;
+}
+
 const body = {};
-for (const name of Object.keys(envelope).sort()) {
+for (const name of Object.keys(envelope)) {
   if (name !== 'signature') body[name] = envelope[name];
 }
-const canonical = JSON.stringify(body);
+const canonical = JSON.stringify(canonicalize(body));
 const signature = crypto.sign(null, Buffer.from(canonical, 'utf8'), fs.readFileSync(keyPath));
 envelope.signature = signature.toString('base64');
 process.stdout.write(JSON.stringify(envelope));
