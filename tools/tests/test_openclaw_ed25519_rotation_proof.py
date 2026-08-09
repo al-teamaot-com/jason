@@ -41,25 +41,38 @@ def test_test_envelope_binds_machine_identity_and_synthetic_capability() -> None
     assert envelope['principal']['organization_id'] == 'aot'
 
 
-def test_node_canonical_json_matches_transport_canonical_shape() -> None:
+def recursive_canonicalize(value):
+    if isinstance(value, list):
+        return [recursive_canonicalize(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: recursive_canonicalize(value[key])
+            for key in sorted(value)
+        }
+    return value
+
+
+def test_node_recursive_canonical_json_matches_transport_shape() -> None:
     envelope = module.test_envelope('openclaw-gateway-2')
     envelope['signature'] = 'ignored'
 
     body = {
         key: value
-        for key, value in sorted(envelope.items())
+        for key, value in envelope.items()
         if key != 'signature'
     }
 
-    node_equivalent = json.dumps(body, separators=(',', ':'), ensure_ascii=False)
+    node_equivalent = json.dumps(
+        recursive_canonicalize(body),
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
 
-    assert node_equivalent == json.dumps(
-        {
-            key: value
-            for key, value in envelope.items()
-            if key != 'signature'
-        },
+    python_transport_equivalent = json.dumps(
+        body,
         sort_keys=True,
         separators=(',', ':'),
         ensure_ascii=False,
     )
+
+    assert node_equivalent == python_transport_equivalent
