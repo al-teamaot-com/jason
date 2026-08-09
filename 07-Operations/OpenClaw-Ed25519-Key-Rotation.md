@@ -42,6 +42,14 @@ Jason trusted public-key state:
 /var/lib/jason/openclaw/trusted-keys/registry.json
 ```
 
+Replacement public keys must remain inside the trusted-key directory. For the first production rotation the replacement path was:
+
+```text
+/var/lib/jason/openclaw/trusted-keys/openclaw-jason-ed25519-v2.pub.pem
+```
+
+Do not validate or store the replacement public key one directory higher at `/var/lib/jason/openclaw/`.
+
 Private keys must never be copied to `/var/lib/jason`, Git, normal logs, evidence, chat, or command output.
 
 ## Required controls
@@ -69,6 +77,8 @@ python3 tools/openclaw_ed25519_rotation_proof.py \
 ```
 
 Before revocation, the tool must report both keys accepted. After revoking the old public-key record, rerun with `--expect-old-revoked`; it must report the old key rejected and the new key accepted.
+
+The signing implementation must use the same recursive canonical JSON contract as `jason_openclaw.signed_transport.canonical_signed_payload()`: all object keys, including nested objects, are sorted before compact UTF-8 JSON serialization. A top-level-only sort is not sufficient.
 
 ## Stop conditions
 

@@ -5,7 +5,7 @@
 
 ## Resume Here
 
-The architecture/runtime sequence now includes merged PRs #72–#76 and #78–#90, covering INF-010 through INF-014, J-119, JKD-001 runtime/durability, OpenClaw production ingress/governance, machine trust, governed human delegation, operational hardening, key lifecycle tooling, AWS TODO capture, and deployed production operations/observability.
+The architecture/runtime sequence now includes merged PRs #72–#76 and #78–#92, covering INF-010 through INF-014, J-119, JKD-001 runtime/durability, OpenClaw production ingress/governance, machine trust, governed human delegation, operational hardening, key lifecycle tooling, production operations/observability, and the first governed overlap-first Ed25519 signing-key rotation.
 
 PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider credential boundary. Do not invent provider payload schemas or placeholder secrets while those credentials are unavailable.
 
@@ -13,49 +13,61 @@ PR #77 remains the IT Glue + Datto RMM convergence branch at the live-provider c
 
 - OpenClaw runs in Docker as `openclaw-openclaw-gateway-1`, user `node` UID/GID 1000.
 - OpenClaw persistent secret/config mounts are under `/opt/jason/services/openclaw/data/`.
-- Dedicated Ed25519 OpenClaw machine identity exists. The private key remains only in the OpenClaw persistent auth-profile secret boundary; Jason stores only the public key and pinned fingerprint.
-- Jason verified a real signed request from OpenClaw and rejected tampering.
+- OpenClaw machine trust uses Ed25519 application-layer signatures. Private keys remain only inside the OpenClaw persistent auth-profile secret boundary; Jason stores only public keys and pinned fingerprints.
+- Jason verified real signed OpenClaw requests and rejected tampering.
 - OpenClaw is ingress/transport only; the Central Orchestrator remains the sole execution coordinator.
 - JKD-001 provides scoped identity/authority, formal approvals, short-lived contexts, revocation, durable delegation, and authority audit.
 - The direct machine-service path completed through signature -> JKD-001 -> governance -> Central Orchestrator -> synthetic capability, and replay was rejected.
 - The delegated-human path kept the human principal distinct from `svc-openclaw-gateway`, evaluated the human's own observe authority, validated explicit delegation, completed through governance/orchestration, and failed closed after delegation revocation.
-- Operational-health validation passed: authority/replay/security-audit/orchestration-audit SQLite integrity `ok`, all security-sensitive state and key-registry files mode `0600`, one active OpenClaw public signing key, backup/restore integrity `ok`, restored counts matched live state, and no provider contact/credentials occurred.
 - Production operations packaging from PR #90 is deployed on Jason.
 - `jason-delegation-maintenance.timer` is active and automatically normalized the historical elapsed synthetic delegation to `expired` while preserving history.
 - `jason-openclaw-authority-health.timer` is active and writes `/var/lib/jason/openclaw/operational-health.json` with mode `0600`.
-- Operational health snapshot reports zero expired-active delegation records, one active trusted signing key, successful backup/restore proof, and no provider contact or credential use.
 - Command Center Prometheus metrics for OpenClaw/JKD-001 operational health are live.
 - CatchMeUp reports the production operations timers and sanitized OpenClaw/JKD-001 operational-health state.
+- Operational health after signing-key cutover passed: all security-state SQLite integrity checks `ok`, backup/restore proof passed, restored counts matched, zero expired-active delegation records remained, one active trusted signing key remained, and no provider contact/credential use occurred.
 
-Host proof evidence is recorded in `08-Session-Records/OpenClaw-Delegated-Human-Host-Proof-2026-08-08.md`; production-packaging host output is reflected in this checkpoint and CatchMeUp runtime state.
+## OpenClaw Signing-Key Rotation — Proven
+
+The first overlap-first production rotation from `openclaw-gateway-1` to `openclaw-gateway-2` completed successfully.
+
+- Both keys were active and cryptographically accepted during overlap.
+- Key #2 completed a full governed synthetic execution through OpenClaw ingress, JKD-001, governance, and the Central Orchestrator.
+- Replay protection remained active.
+- Only after key #2 continuity was proven was key #1's Jason public-trust record revoked.
+- Post-revocation proof rejected key #1 and continued to accept key #2.
+- Final registry state: `openclaw-gateway-2` active; `openclaw-gateway-1` revoked.
+- Replacement public-key fingerprint: `fb6612b03009b2cecca812458ac35c75fd3d4f23efa29ed631e905ff03d235b7`.
+- Replacement public key: `/var/lib/jason/openclaw/trusted-keys/openclaw-jason-ed25519-v2.pub.pem`.
+- Replacement private key remains only inside OpenClaw at `/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem`.
+- The old private key remains only inside the OpenClaw secret boundary for the governed rollback/retention window; Jason no longer accepts it.
+
+Host evidence:
+
+- `08-Session-Records/OpenClaw-Delegated-Human-Host-Proof-2026-08-08.md`
+- `08-Session-Records/OpenClaw-Ed25519-Key-Rotation-Host-Proof-2026-08-09.md`
 
 ## Current Primary Workstream
 
-### Overlap-First OpenClaw Ed25519 Signing-Key Rotation
+### AWS Provider-Family Foundation
 
-Branch `agent/openclaw-ed25519-rotation-proof` prepares the first governed production signing-key rotation proof.
+The OpenClaw/Jason production trust boundary has now completed machine trust, delegated-human proof, operational packaging, monitoring, backup/restore proof, lifecycle automation, and signing-key rotation. The next independent no-IT-Glue/Datto-key workstream is the AWS provider-family foundation.
 
-The workstream adds:
+AWS must be added as a governed provider family, not ad hoc SDK access. Initial design must include:
 
-1. reusable `tools/openclaw_ed25519_rotation_proof.py` continuity/fail-closed proof tooling;
-2. CI tests for rotation-proof invariants;
-3. operator runbook `07-Operations/OpenClaw-Ed25519-Key-Rotation.md`;
-4. explicit overlap-first stop conditions preventing old-key revocation until replacement-key continuity is proven.
+1. provider-neutral AWS resource and capability contracts;
+2. identity-first organization/account/region scope;
+3. least-privilege/read-only roles for the first live validation;
+4. OpenBao-backed durable role/configuration and runtime-only STS credentials;
+5. Central-Orchestrator-only provider access;
+6. normalized provider responses with no raw secret persistence;
+7. audit/evidence for account, region, capability, authority context, provider request, and sanitized outcome;
+8. controlled test-account validation before broader use;
+9. an AWS service catalog review covering Organizations, IAM, CloudTrail, Config, Security Hub, GuardDuty, EC2, S3, RDS, Backup, and Systems Manager;
+10. integrate-before-innovate: prefer AWS-native identity, audit, inventory, configuration, security, and automation capabilities over custom replacements.
 
-The host proof sequence is:
+No AWS credential should be placed into Git, chat, ordinary logs, or static application configuration. Live AWS work begins only after the credential/role boundary is explicitly provisioned through Jason's secret and authority model.
 
-1. generate key #2 only inside the OpenClaw persistent auth-profile secret boundary;
-2. derive/export only key #2 public material to Jason;
-3. register key ID `openclaw-gateway-2` while key #1 remains active;
-4. prove both key #1 and key #2 authenticate during overlap;
-5. prove a governed synthetic request using key #2;
-6. revoke only the key #1 public registry record;
-7. prove key #1 is rejected and key #2 remains accepted;
-8. refresh operational health/CatchMeUp and record non-secret rotation evidence.
-
-No provider credential or provider API is involved in this rotation proof. Rotation does not grant authority or alter JKD-001 grants/delegations.
-
-## Parallel / Future Provider Workstreams
+## Parallel / Blocked Provider Workstream
 
 ### IT Glue + Datto RMM — PR #77
 
@@ -65,18 +77,12 @@ Blocked only on approved credentials:
 - Datto RMM logical secret `datto_rmm.readonly` with durable `api_url`, `api_key`, `api_secret`; bearer access token remains runtime-only.
 - Before live Datto use, re-verify the current OAuth token endpoint/request contract against official vendor documentation.
 
-### AWS Connection — TODO
-
-AWS must be added as a governed provider family, not ad hoc SDK access. Initial design must include provider-neutral resources/capabilities, identity-first organization/account/region scope, least-privilege/read-only roles, OpenBao-backed durable role/configuration, runtime-only STS credentials, Central-Orchestrator-only access, audit/evidence, and controlled test-account validation. Review Organizations, IAM, CloudTrail, Config, Security Hub, GuardDuty, EC2, S3, RDS, Backup, and Systems Manager before expanding scope.
-
-Use **integrate before innovate**: prefer AWS-native identity, audit, inventory, configuration, and security capabilities over custom replacements.
-
 ## Immediate Next Actions
 
-1. validate/merge the overlap-first Ed25519 rotation tooling/runbook;
-2. perform the production key #1 -> key #2 overlap rotation proof on Jason;
-3. record host rotation evidence and refresh operational health/CatchMeUp;
-4. begin the AWS provider-family foundation once the OpenClaw/Jason production trust boundary has completed key-rotation proof;
+1. record/merge the successful signing-key rotation evidence and exact public-key location correction;
+2. begin the AWS provider-family foundation as a separate governed branch/PR;
+3. define AWS account/region/resource normalization, capabilities, identity/authority scope, and credential binding without requiring a live AWS credential;
+4. build credential-safe AWS preflight and synthetic tests up to the live-credential boundary;
 5. return to PR #77 when approved IT Glue/Datto credentials exist.
 
 ## Outstanding Historical Recovery Note
