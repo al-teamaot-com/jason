@@ -1,16 +1,14 @@
 """Governed bridge from provider-neutral approvals into JKD-001 and orchestration.
 
-The bridge makes approval channel output useful without making the channel an
-authority. Accepted channel responses are converted to formal JKD-001 approval
-records, re-evaluated by JKD-001 for the original requester, and only then used
-to produce an orchestration request carrying a short-lived authority context.
+Accepted channel responses are persisted as formal JKD-001 approval records and
+re-evaluated for the original requester before orchestration can resume.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Callable, Protocol
 
 from connectors.src.jason_connectors.approval_requests import AcceptedApproval
 from kernel.identity_authority import (
@@ -21,8 +19,8 @@ from kernel.identity_authority import (
     IdentityAuthorityService,
     IdentityRecord,
     PermissionMode,
-    permission_rank,
 )
+from kernel.identity_authority.contracts import permission_rank
 
 from .contracts import OrchestrationRequest
 
@@ -45,7 +43,7 @@ class JKD001ApprovalAuthorityChecker:
 
     identities: IdentityLookup
     grants: GrantLookup
-    clock: callable = lambda: datetime.now(timezone.utc)
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def can_approve(
         self,
@@ -58,15 +56,12 @@ class JKD001ApprovalAuthorityChecker:
     ) -> bool:
         now = self._now()
         identity = self.identities.get(approver_identity_id)
-        if identity is None or identity.status != "active":
-            return False
-        if identity.organization_id != organization_id:
+        if identity is None or identity.status != "active" or identity.organization_id != organization_id:
             return False
         try:
             requested = PermissionMode(requested_mode)
         except ValueError:
             return False
-
         for grant in self.grants.list_for_subject(approver_identity_id):
             if grant.status != "active":
                 continue
@@ -78,8 +73,6 @@ class JKD001ApprovalAuthorityChecker:
                 continue
             if grant.effective_until is not None and now >= grant.effective_until:
                 continue
-            # Approving an action requires approval authority and cannot exceed
-            # the approver's own maximum authority for the requested mode.
             if permission_rank(grant.permission) < permission_rank(PermissionMode.REQUEST_APPROVAL):
                 continue
             if permission_rank(grant.permission) < permission_rank(requested):
@@ -123,7 +116,7 @@ class ApprovalResumeBridge:
         if not authentication_assurance.strip():
             raise ValueError("authentication_assurance must be non-empty")
 
-        record = ApprovalRecord(
+        self.approvals.put(ApprovalRecord(
             approval_id=accepted.approval_id,
             request_id=accepted.request_id,
             capability=accepted.capability,
@@ -134,30 +127,24 @@ class ApprovalResumeBridge:
             decided_by=accepted.decided_by,
             decided_at=accepted.decided_at,
             expires_at=accepted.expires_at,
-        )
-        self.approvals.put(record)
-
+        ))
         try:
             mode = PermissionMode(original_request.requested_mode)
         except ValueError as exc:
             raise PermissionError("orchestration requested mode is not a JKD-001 mode") from exc
-
-        decision = self.authority.evaluate(
-            AuthorityRequest(
-                request_id=original_request.execution_id,
-                correlation_id=original_request.correlation_id,
-                principal_id=original_request.principal_id,
-                organization_id=original_request.organization_id,
-                client_id=original_request.client_id,
-                capability=original_request.capability_name,
-                requested_mode=mode,
-                authentication_assurance=authentication_assurance,
-                approval_id=accepted.approval_id,
-            )
-        )
+        decision = self.authority.evaluate(AuthorityRequest(
+            request_id=original_request.execution_id,
+            correlation_id=original_request.correlation_id,
+            principal_id=original_request.principal_id,
+            organization_id=original_request.organization_id,
+            client_id=original_request.client_id,
+            capability=original_request.capability_name,
+            requested_mode=mode,
+            authentication_assurance=authentication_assurance,
+            approval_id=accepted.approval_id,
+        ))
         if decision.outcome is not AuthorityOutcome.ALLOWED or decision.execution_context is None:
             raise PermissionError("JKD-001 did not issue execution authority after approval")
-
         return replace(
             original_request,
             authority_allowed=True,
