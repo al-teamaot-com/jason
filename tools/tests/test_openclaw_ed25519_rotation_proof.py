@@ -39,3 +39,27 @@ def test_test_envelope_binds_machine_identity_and_synthetic_capability() -> None
     assert envelope['arguments']['rotation_proof'] is True
     assert envelope['principal']['principal_id'] == 'svc-openclaw-gateway'
     assert envelope['principal']['organization_id'] == 'aot'
+
+
+def test_node_canonical_json_matches_transport_canonical_shape() -> None:
+    envelope = module.test_envelope('openclaw-gateway-2')
+    envelope['signature'] = 'ignored'
+
+    body = {
+        key: value
+        for key, value in sorted(envelope.items())
+        if key != 'signature'
+    }
+
+    node_equivalent = json.dumps(body, separators=(',', ':'), ensure_ascii=False)
+
+    assert node_equivalent == json.dumps(
+        {
+            key: value
+            for key, value in envelope.items()
+            if key != 'signature'
+        },
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
