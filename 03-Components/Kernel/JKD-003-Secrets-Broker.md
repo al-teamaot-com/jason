@@ -1,6 +1,6 @@
 # JKD-003 — Secrets Broker
 
-**Version:** 0.2
+**Version:** 0.3
 **Status:** Draft for governed review
 **Owner:** Jason Architecture Authority
 
@@ -58,6 +58,44 @@ A connector may use secret material only while executing an already authorized o
 8. Provider selection is deployment configuration, not capability logic.
 9. A provider may be replaced without modifying CAP-001 or any other capability contract.
 10. Provider-specific features are optional optimizations and may not become required by the broker contract.
+11. Production OpenBao provider connectors use provider-specific least-privilege AppRoles for runtime secret resolution unless the Architecture Authority explicitly approves a replacement design.
+12. A shared persistent provider runtime token, shared orphan token, or provider-wide reusable bearer token is prohibited.
+13. Provisioning authority and runtime resolution authority must remain separate. A provisioning login may create/update the approved secret record and AppRole configuration, but its administrative token must not become runtime state.
+14. Runtime OpenBao service tokens must be short-lived, narrowly scoped, and explicitly revoked after the bounded secret read. The current production baseline is a five-minute maximum lifetime and two-use limit.
+15. New provider integrations must reuse the canonical JKD-003 resolver and onboarding pattern before introducing provider-specific secret-authentication code.
+16. A second production secret-authentication pattern requires documented business justification, security review, migration/retirement criteria, and normal governance approval before implementation.
+
+## Production OpenBao identity invariant
+
+For the current OpenBao deployment, the canonical production provider flow is:
+
+```text
+Provisioning ceremony
+  ↓
+OpenBao userpass administrative login
+  ↓
+Temporary administrative token
+  ↓
+Provider-specific read-only policy + AppRole + secret record
+  ↓
+Administrative token revoked
+
+Authorized runtime connector
+  ↓
+Provider-specific protected RoleID + SecretID
+  ↓
+OpenBao AppRole login
+  ↓
+Short-lived provider-specific service token
+  ↓
+One allow-listed KV v2 read
+  ↓
+Service token revoked
+```
+
+The RoleID and SecretID are bootstrap/runtime identity artifacts and require restricted storage plus governed rotation. The service token is ephemeral and must not be written to disk.
+
+`/etc/jason/openbao.token` is not a production provider runtime identity. A file such as `/etc/jason/openbao-provider.token` must not be introduced as a shared provider credential.
 
 ## Canonical request
 
@@ -111,11 +149,12 @@ Example:
 secrets:
   provider: openbao
   mappings:
-    autotask.readonly: kv/data/jason/providers/autotask/readonly
-    datto_rmm.readonly: kv/data/jason/providers/datto-rmm/readonly
+    autotask.readonly: secret/data/connectors/autotask/production/read-only
+    datto_rmm.readonly: secret/data/connectors/datto-rmm/production/read-only
+    it_glue.readonly: secret/data/connectors/it-glue/production/read-only
 ```
 
-A different deployment may map the same logical names to Azure Key Vault secret names, AWS ARNs, or another platform without changing Jason code.
+A different deployment may map the same logical names to Azure Key Vault secret names, AWS ARNs, or another platform without changing capability code.
 
 ## Security controls
 
@@ -125,8 +164,12 @@ A different deployment may map the same logical names to Azure Key Vault secret 
 - Validate secret schema before use.
 - Record access metadata without values.
 - Enforce client and capability boundaries before resolution.
-- Use least privilege and separate read-only from write-capable credentials.
+- Use least privilege and separate read-only runtime authority from write-capable provisioning authority.
+- Use a provider-specific runtime identity rather than a shared provider identity.
+- Keep service tokens ephemeral and revoke them after use.
+- Protect RoleID and SecretID artifacts as root-owned bootstrap/runtime identity material.
 - Support dual-secret rotation where the provider permits it.
+- CI must enforce the production identity invariant and reject known persistent-token regressions.
 
 ## Initial logical secret contracts
 
@@ -138,15 +181,21 @@ Expected fields:
 - `secret`
 - `integration_code`
 
-The Autotask connector discovers the appropriate REST API zone at runtime
-using the unauthenticated `zoneInformation` endpoint and the API username.
+The Autotask connector discovers the appropriate REST API zone at runtime using the unauthenticated `zoneInformation` endpoint and the API username.
 
 ### `datto_rmm.readonly`
 
+Approved provider path:
+
+`secret/data/connectors/datto-rmm/production/read-only`
+
 Expected fields:
 
-- provider-defined read-only API identity fields
-- base URL or account endpoint when required
+- `api_url`
+- `api_key`
+- `api_secret`
+
+Runtime policy and AppRole are provider-specific and read-only. The Datto bearer access token derived from these values is runtime-only and must not be persisted.
 
 ### `it_glue.readonly`
 
@@ -158,18 +207,32 @@ Expected fields:
 
 - `api_key`
 
-The secret must contain only the provider API key.
+The secret must contain only the provider API key. The IT Glue API base URL is non-secret provider configuration and must not be stored in OpenBao.
 
-The IT Glue API base URL is non-secret provider configuration and
-must not be stored in OpenBao.
+## Provider onboarding definition of done
+
+A new production provider is not complete until:
+
+- a stable logical secret contract exists;
+- a canonical provider secret path exists;
+- exact allowed fields are documented and tested;
+- a provider-specific read-only policy exists;
+- a provider-specific AppRole exists;
+- protected RoleID and SecretID storage plus rotation metadata exist;
+- the canonical resolver can authenticate, read the allow-listed fields, and revoke its temporary token;
+- credential-safe preflight succeeds without network or secret entry;
+- CI enforces absence of the persistent-token regression;
+- live provider validation runs only through the authorized connector path.
 
 ## Definition of Done
 
-JKD-003 Version 0.1 is complete when:
+JKD-003 Version 0.3 is complete when:
 
 - a provider-neutral protocol exists;
 - an in-memory synthetic provider passes contract tests;
 - at least one real provider adapter passes the same tests;
+- production OpenBao providers conform to the AppRole runtime invariant;
 - CAP-001 consumes only logical secret names;
 - secret values are absent from audit, memory, exceptions, and test snapshots;
-- switching providers requires configuration only.
+- switching providers requires configuration only;
+- CI prevents reintroduction of persistent shared provider runtime tokens.
