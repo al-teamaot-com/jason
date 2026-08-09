@@ -1,8 +1,9 @@
 """Provider-neutral continuation of an approval-authorized orchestration request.
 
 Approval channels may produce a freshly JKD-001-authorized request, but only the
-Central Orchestrator may resume execution. This boundary makes that handoff explicit
-and records the resume event only after the orchestrator has actually been invoked.
+Central Orchestrator may resume execution. This boundary makes that handoff explicit,
+claims the approval continuation before execution to prevent replay, and records the
+resume event only after the orchestrator has actually been invoked.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from typing import Callable, Protocol
 from uuid import uuid4
 
 from .approval_audit import ApprovalAuditEvent, ApprovalAuditEventType, ApprovalAuditRecorder
+from .approval_continuation_guard import ApprovalContinuationClaim, ApprovalContinuationGuard
 from .contracts import OrchestrationRequest, OrchestrationResult
 
 
@@ -24,6 +26,7 @@ class OrchestratorExecutor(Protocol):
 class ApprovalExecutionContinuation:
     orchestrator: OrchestratorExecutor
     audit: ApprovalAuditRecorder
+    continuation_guard: ApprovalContinuationGuard
     event_id_factory: Callable[[], str] = lambda: str(uuid4())
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
@@ -42,6 +45,19 @@ class ApprovalExecutionContinuation:
             raise PermissionError("approval-authorized continuation requires approval evidence")
         if not request.authority_allowed or not request.authority_context_id:
             raise PermissionError("approval-authorized continuation requires fresh JKD-001 authority")
+
+        now = self._now()
+        self.continuation_guard.claim(
+            ApprovalContinuationClaim(
+                approval_id=approval_id,
+                organization_id=request.organization_id,
+                request_id=request.execution_id,
+                correlation_id=request.correlation_id,
+                capability=request.capability_name,
+                authority_context_id=request.authority_context_id,
+                claimed_at=now,
+            )
+        )
 
         result = self.orchestrator.execute(request)
         self.audit.record(
