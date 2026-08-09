@@ -120,20 +120,72 @@ class CanonicalRelationship:
             raise ValueError("Relationship confidence must be between 0 and 1.")
 
 
+@dataclass(frozen=True, slots=True)
+class CanonicalPromotionPolicy:
+    """Versioned policy-as-data for admitting provider evidence as canonical truth."""
+
+    policy_id: str
+    policy_version: str
+    organization_id: str
+    allowed_relationships: frozenset[str]
+    minimum_confidence: float = 1.0
+    allowed_verification_states: frozenset[VerificationState] = frozenset(
+        {VerificationState.VERIFIED}
+    )
+    allowed_source_providers: frozenset[str] | None = None
+    allowed_target_providers: frozenset[str] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.policy_id.strip() or not self.policy_version.strip():
+            raise ValueError("canonical promotion policy id and version are required")
+        if not self.organization_id.strip():
+            raise ValueError("canonical promotion policy organization is required")
+        if not self.allowed_relationships:
+            raise ValueError("canonical promotion policy requires allowed relationships")
+        unknown = self.allowed_relationships - CANONICAL_RELATIONSHIPS
+        if unknown:
+            raise ValueError(f"canonical promotion policy contains unknown relationships: {sorted(unknown)}")
+        if not 0.0 <= self.minimum_confidence <= 1.0:
+            raise ValueError("canonical promotion minimum confidence must be between 0 and 1")
+        if not self.allowed_verification_states:
+            raise ValueError("canonical promotion policy requires verification states")
+
+    def authorize(self, evidence: ProviderRelationshipEvidence) -> None:
+        if evidence.source.organization_id != self.organization_id:
+            raise PermissionError("canonical promotion policy organization mismatch")
+        if evidence.target.organization_id != self.organization_id:
+            raise PermissionError("canonical promotion target organization mismatch")
+        if evidence.canonical_relationship not in self.allowed_relationships:
+            raise PermissionError("canonical relationship is not allowed by promotion policy")
+        if evidence.verification not in self.allowed_verification_states:
+            raise PermissionError("relationship verification state is not allowed by promotion policy")
+        if evidence.confidence < self.minimum_confidence:
+            raise PermissionError("relationship confidence is below promotion policy threshold")
+        if self.allowed_source_providers is not None:
+            if evidence.source.provider not in self.allowed_source_providers:
+                raise PermissionError("relationship source provider is not allowed by promotion policy")
+        if self.allowed_target_providers is not None:
+            if evidence.target.provider not in self.allowed_target_providers:
+                raise PermissionError("relationship target provider is not allowed by promotion policy")
+
+
 def promote_provider_evidence(
     evidence: ProviderRelationshipEvidence,
     *,
     relationship_id: str,
     established_by: str,
+    policy: CanonicalPromotionPolicy,
     state: RelationshipState = RelationshipState.ACTIVE,
 ) -> CanonicalRelationship:
-    if evidence.verification not in {
-        VerificationState.CORROBORATED,
-        VerificationState.VERIFIED,
-    }:
-        raise ValueError(
-            "Provider relationship evidence must be corroborated or verified before canonical promotion."
-        )
+    """Promote evidence only after an explicit versioned policy admits it.
+
+    Provider evidence never becomes canonical truth merely because a provider read
+    succeeded or because evidence is corroborated. Promotion is an independent
+    governed decision. This function grants no execution authority.
+    """
+    if not relationship_id.strip() or not established_by.strip():
+        raise ValueError("canonical promotion relationship_id and established_by are required")
+    policy.authorize(evidence)
 
     return CanonicalRelationship(
         relationship_id=relationship_id,
@@ -148,6 +200,7 @@ def promote_provider_evidence(
             f"provider:{evidence.provider}",
             f"authority:{evidence.source_authority}",
             f"observed:{evidence.observed_at.isoformat()}",
+            f"promotion-policy:{policy.policy_id}@{policy.policy_version}",
         ),
         effective_at=evidence.observed_at,
     )
