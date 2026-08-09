@@ -132,11 +132,37 @@ class SQLiteIdentityAuthorityStore:
         return tuple(result)
 
     def put_approval(self, record: ApprovalRecord) -> None:
+        """Persist a formal approval once; identical retries are idempotent.
+
+        Approval records are authority evidence. Reusing an approval ID for different
+        scope, requester, approver, timing, or status must fail closed rather than
+        replacing the historical authority object.
+        """
+        payload = _encode(record)
         with self.connection:
-            self.connection.execute(
-                "INSERT OR REPLACE INTO approvals(approval_id,payload) VALUES (?,?)",
-                (record.approval_id, _encode(record)),
-            )
+            existing = self.connection.execute(
+                "SELECT payload FROM approvals WHERE approval_id=?",
+                (record.approval_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["payload"] == payload:
+                    return
+                raise ValueError("conflicting JKD-001 approval_id reuse is not permitted")
+            try:
+                self.connection.execute(
+                    "INSERT INTO approvals(approval_id,payload) VALUES (?,?)",
+                    (record.approval_id, payload),
+                )
+            except sqlite3.IntegrityError as exc:
+                # A competing writer may have inserted the same approval after our
+                # initial lookup. Treat an exact replay as idempotent, otherwise fail.
+                existing = self.connection.execute(
+                    "SELECT payload FROM approvals WHERE approval_id=?",
+                    (record.approval_id,),
+                ).fetchone()
+                if existing is not None and existing["payload"] == payload:
+                    return
+                raise ValueError("conflicting JKD-001 approval_id reuse is not permitted") from exc
 
     def get_approval(self, approval_id: str) -> ApprovalRecord | None:
         row = self.connection.execute(
