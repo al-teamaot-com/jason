@@ -1,0 +1,57 @@
+name: Validate IT Glue Live Read Foundation
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_it_glue_operations.py'
+      - 'implementation/connectors/tests/test_it_glue_secret_contract.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'tools/it_glue_live_read.py'
+      - '.github/workflows/it-glue-live-read.yml'
+  push:
+    paths:
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_it_glue_operations.py'
+      - 'implementation/connectors/tests/test_it_glue_secret_contract.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'tools/it_glue_live_read.py'
+      - '.github/workflows/it-glue-live-read.yml'
+
+jobs:
+  validate-it-glue-live-read:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Compile IT Glue live-read boundary
+        run: |
+          python -m py_compile implementation/connectors/it_glue/connector.py
+          python -m py_compile implementation/connectors/it_glue/operations.py
+          python -m py_compile tools/it_glue_live_read.py
+      - name: Run IT Glue operation, secret, and resource translation tests
+        env:
+          PYTHONPATH: implementation
+        run: |
+          python -m pytest implementation/connectors/tests/test_it_glue_operations.py -q
+          python -m pytest implementation/connectors/tests/test_it_glue_secret_contract.py -q
+          python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
+      - name: Verify credential-safe live-read preflight
+        run: |
+          python tools/it_glue_live_read.py > /tmp/itglue-live-preflight.json
+          python - <<'PY'
+          import json
+          with open('/tmp/itglue-live-preflight.json', encoding='utf-8') as handle:
+              result = json.load(handle)
+          assert result['status'] == 'credential_safe_preflight'
+          assert result['network_contacted'] is False
+          assert result['provider_credentials_used'] is False
+          assert result['maximum_records'] == 1
+          assert result['capability'] == 'it_glue.entity.query'
+          assert result['entity'] == 'Organizations'
+          PY
