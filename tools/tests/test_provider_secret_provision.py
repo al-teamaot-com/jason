@@ -54,49 +54,70 @@ def test_provider_policies_are_read_only_except_self_revoke() -> None:
 
 
 def test_runtime_design_contains_no_persistent_token_path() -> None:
-    source = Path("tools/provider_secret_provision.py").read_text(encoding="utf-8")
-    assert "openbao-provider.token" not in source
-    assert "create-orphan" not in source
-    assert '"period": "24h"' not in source
-    assert '"token_ttl": "5m"' in source
-    assert '"token_max_ttl": "5m"' in source
-    assert '"token_explicit_max_ttl": "5m"' in source
-    assert '"token_num_uses": 2' in source
-    assert "auth/approle/role/" in source
-    assert "auth/token/revoke-self" in source
+    sources = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in (
+            "tools/provider_secret.py",
+            "tools/provider_secret_lifecycle.py",
+            "tools/provider_secret_provision.py",
+            "tools/provider_secret_kv_write.py",
+        )
+    )
+    assert "openbao-provider.token" not in sources
+    assert "create-orphan" not in sources
+    assert '"period": "24h"' not in sources
+    assert '"token_ttl": "5m"' in sources
+    assert '"token_max_ttl": "5m"' in sources
+    assert '"token_explicit_max_ttl": "5m"' in sources
+    assert '"token_num_uses": 2' in sources
+    assert "auth/approle/role/" in sources
+    assert "auth/token/revoke-self" in sources
 
 
 def test_live_provisioning_uses_hidden_admin_and_secret_prompts() -> None:
-    source = Path("tools/provider_secret_provision.py").read_text(encoding="utf-8")
-    assert "getpass.getpass" in source
-    assert "OpenBao password for" in source
-    assert "api_key" in source
-    assert "api_secret" in source
-    assert "secret_values_printed" in source
+    sources = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in (
+            "tools/provider_secret_lifecycle.py",
+            "tools/provider_secret_provision.py",
+        )
+    )
+    assert "getpass.getpass" in sources
+    assert "OpenBao password for" in sources
+    assert "api_key" in sources
+    assert "api_secret" in sources
+    assert "secret_values_printed" in sources
 
 
 def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
     text = Path("07-Operations/Provider-Secret-Provisioning.md").read_text(
         encoding="utf-8"
     )
-    assert "canonical production onboarding pattern" in text
+    assert "canonical production lifecycle" in text
+    assert "python3 tools/provider_secret.py <action> <provider>" in text
     assert "provider-specific OpenBao AppRoles" in text
     assert "shared persistent provider runtime token is prohibited" in text
-    assert "runtime_token_persisted=false" in text
+    assert "KV v2 create/update operations use compare-and-set" in text
+    assert "auth/token/revoke-self" in text
+    assert "Deactivation is intentionally reversible" in text
     assert "Do not create `/etc/jason/openbao-provider.token`" in text
     assert "create the provider runtime orphan token" not in text
     assert "--admin-token-file" not in text
 
 
-def test_jkd003_contains_production_identity_invariant() -> None:
+def test_jkd003_contains_production_identity_and_lifecycle_invariant() -> None:
     text = Path("03-Components/Kernel/JKD-003-Secrets-Broker.md").read_text(
         encoding="utf-8"
     )
+    assert "**Version:** 0.4" in text
     assert "## Production OpenBao identity invariant" in text
     assert "provider-specific least-privilege AppRoles" in text
     assert "shared persistent provider runtime token" in text
     assert "five-minute maximum lifetime and two-use limit" in text
-    assert "CI must enforce the production identity invariant" in text
+    assert "CI must enforce the production identity and lifecycle invariant" in text
+    assert "Production KV v2 create/update operations must use compare-and-set" in text
+    assert "Routine deactivation revokes runtime identity while preserving" in text
+    assert "Provider identity rotation must install replacement runtime identity" in text
     assert "A second production secret-authentication pattern requires" in text
 
 
