@@ -98,6 +98,21 @@ def test_datto_device_and_related_resource_translation() -> None:
     assert jobs.arguments == {"device_uid": "device-123"}
 
 
+def test_datto_device_query_preserves_bounded_page_size() -> None:
+    invocation = translate_datto_rmm_resource(
+        ResourceQuery(
+            provider="datto_rmm",
+            resource_type="device",
+            operation=ResourceOperation.QUERY,
+            organization_id="aot",
+            filters={},
+            page_size=1,
+        )
+    )
+    assert invocation.capability == "datto_rmm.device.search"
+    assert invocation.arguments == {"search": "", "page": 1, "max": 1}
+
+
 def test_adapter_fails_closed_for_untranslated_operation() -> None:
     with pytest.raises(ValueError, match="No Datto RMM resource translation"):
         translate_datto_rmm_resource(
