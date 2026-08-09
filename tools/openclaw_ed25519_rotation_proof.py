@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 DEFAULT_REGISTRY = Path('/var/lib/jason/openclaw/trusted-keys/registry.json')
@@ -45,7 +43,8 @@ const body = {};
 for (const name of Object.keys(envelope).sort()) {
   if (name !== 'signature') body[name] = envelope[name];
 }
-const signature = crypto.sign(null, Buffer.from(JSON.stringify(body), 'utf8'), fs.readFileSync(keyPath));
+const canonical = JSON.stringify(body);
+const signature = crypto.sign(null, Buffer.from(canonical, 'utf8'), fs.readFileSync(keyPath));
 envelope.signature = signature.toString('base64');
 process.stdout.write(JSON.stringify(envelope));
 '''
