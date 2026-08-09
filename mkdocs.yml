@@ -66,6 +66,7 @@ nav:
       - OpenClaw Ed25519 Key Rotation: 07-Operations/OpenClaw-Ed25519-Key-Rotation.md
       - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
       - INF-010 Microsoft Cloud Deployment Checklist: 07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
+      - INF-015 AWS Provider Deployment Checklist: 07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:
