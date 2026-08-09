@@ -7,9 +7,12 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Mapping
+from typing import Mapping
 
-from tools import provider_secret_provision as base
+try:
+    from tools import provider_secret_provision as base
+except ModuleNotFoundError:
+    import provider_secret_provision as base
 
 
 def metadata_path(secret_path: str) -> str:
