@@ -1,0 +1,56 @@
+name: Validate AWS Provider Foundation
+
+on:
+  push:
+    paths:
+      - "implementation/connectors/aws/**"
+      - "implementation/connectors/tests/test_aws_provider_foundation.py"
+      - "implementation/connectors/connector-catalog.yaml"
+      - "tools/aws_provider_foundation_check.py"
+      - "03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
+      - "07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md"
+      - ".github/workflows/aws-provider-foundation.yml"
+  pull_request:
+    paths:
+      - "implementation/connectors/aws/**"
+      - "implementation/connectors/tests/test_aws_provider_foundation.py"
+      - "implementation/connectors/connector-catalog.yaml"
+      - "tools/aws_provider_foundation_check.py"
+      - "03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
+      - "07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md"
+      - ".github/workflows/aws-provider-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  aws-provider-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile AWS foundation
+        run: |
+          python -m compileall -q \
+            implementation/connectors/aws \
+            implementation/connectors/tests/test_aws_provider_foundation.py \
+            tools/aws_provider_foundation_check.py
+      - name: Test AWS provider foundation
+        env:
+          PYTHONPATH: implementation/connectors
+        run: python -m pytest implementation/connectors/tests/test_aws_provider_foundation.py -q
+      - name: Verify credential-safe preflight
+        run: |
+          python tools/aws_provider_foundation_check.py > /tmp/aws-preflight.json
+          python - <<'PY'
+          import json
+          with open('/tmp/aws-preflight.json', encoding='utf-8') as handle:
+              report = json.load(handle)
+          assert report['status'] == 'credential_boundary_reached'
+          assert report['network_contacted'] is False
+          assert report['credential_resolved'] is False
+          PY
