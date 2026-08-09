@@ -1,0 +1,30 @@
+name: Validate Approval Requests
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/src/jason_connectors/approval_requests.py'
+      - 'implementation/connectors/microsoft_graph/teams_approval_channel.py'
+      - 'implementation/connectors/tests/test_approval_requests.py'
+      - '03-Components/Approval-Requests-Foundation.md'
+      - '.github/workflows/approval-requests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'implementation/connectors/src/jason_connectors/approval_requests.py'
+      - 'implementation/connectors/microsoft_graph/teams_approval_channel.py'
+      - 'implementation/connectors/tests/test_approval_requests.py'
+      - '03-Components/Approval-Requests-Foundation.md'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile approval boundary
+        run: python -m py_compile implementation/connectors/src/jason_connectors/approval_requests.py implementation/connectors/microsoft_graph/teams_approval_channel.py
+      - name: Run approval tests
+        run: python -m unittest implementation.connectors.tests.test_approval_requests -v
