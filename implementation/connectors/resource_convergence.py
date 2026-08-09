@@ -125,6 +125,84 @@ class GovernedResourceExecutor:
         return connector.execute(request)
 
 
+def build_relationship_evidence(
+    *,
+    source: IdentityEvidence,
+    target: IdentityEvidence,
+    matched_attributes: tuple[str, ...],
+    canonical_relationship: str = "represents",
+    provider_relationship: str = "governed_identity_corroboration",
+    confidence: float,
+    verification: VerificationState = VerificationState.CORROBORATED,
+    observed_at: datetime | None = None,
+) -> ProviderRelationshipEvidence:
+    """Build provider-neutral relationship evidence from exact governed matches.
+
+    This function produces evidence only. It does not promote the relationship to
+    canonical truth and it grants no identity, capability, approval, or execution
+    authority. Source and target may come from any governed provider boundary.
+    """
+    for evidence in (source, target):
+        if not evidence.provider.strip():
+            raise ResourceConvergenceError("relationship evidence provider is required")
+        if not evidence.resource_type.strip():
+            raise ResourceConvergenceError("relationship evidence resource_type is required")
+        if not evidence.external_id.strip():
+            raise ResourceConvergenceError("relationship evidence external_id is required")
+        if not evidence.organization_id.strip():
+            raise ResourceConvergenceError("relationship evidence organization_id is required")
+        if not evidence.source_authority.strip():
+            raise ResourceConvergenceError("relationship evidence source_authority is required")
+
+    if source.organization_id != target.organization_id:
+        raise ResourceConvergenceError("Cross-organization relationship evidence is denied")
+    if not matched_attributes:
+        raise ResourceConvergenceError("At least one governed matching attribute is required")
+    if len(set(matched_attributes)) != len(matched_attributes):
+        raise ResourceConvergenceError("Matching attributes must be unique")
+    if not canonical_relationship.strip() or not provider_relationship.strip():
+        raise ResourceConvergenceError("relationship names must be non-empty")
+
+    normalized_matches: list[str] = []
+    for attribute in matched_attributes:
+        if not attribute.strip():
+            raise ResourceConvergenceError("Matching attribute names must be non-empty")
+        left = source.attributes.get(attribute, "").strip().casefold()
+        right = target.attributes.get(attribute, "").strip().casefold()
+        if not left or left != right:
+            raise ResourceConvergenceError(f"Matching attribute is absent or inconsistent: {attribute}")
+        normalized_matches.append(attribute)
+
+    timestamp = observed_at or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        raise ResourceConvergenceError("relationship evidence timestamp must be timezone-aware")
+
+    return ProviderRelationshipEvidence(
+        provider="jason_resource_convergence",
+        source=ResourceRef(
+            provider=source.provider,
+            resource_type=source.resource_type,
+            external_id=source.external_id,
+            organization_id=source.organization_id,
+        ),
+        target=ResourceRef(
+            provider=target.provider,
+            resource_type=target.resource_type,
+            external_id=target.external_id,
+            organization_id=target.organization_id,
+        ),
+        provider_relationship=provider_relationship,
+        canonical_relationship=canonical_relationship,
+        verification=verification,
+        confidence=confidence,
+        observed_at=timestamp.astimezone(timezone.utc),
+        source_authority=(
+            f"central-orchestrator:{source.source_authority}+{target.source_authority}"
+        ),
+        metadata={"matched_attributes": ",".join(normalized_matches)},
+    )
+
+
 def build_configuration_device_relationship_evidence(
     *,
     configuration: IdentityEvidence,
@@ -133,42 +211,15 @@ def build_configuration_device_relationship_evidence(
     confidence: float,
     verification: VerificationState = VerificationState.CORROBORATED,
 ) -> ProviderRelationshipEvidence:
+    """Compatibility wrapper for the original IT Glue -> Datto convergence path."""
     if configuration.provider != "it_glue" or configuration.resource_type != "configuration":
         raise ResourceConvergenceError("configuration evidence must identify an IT Glue configuration")
     if device.provider != "datto_rmm" or device.resource_type != "device":
         raise ResourceConvergenceError("device evidence must identify a Datto RMM device")
-    if configuration.organization_id != device.organization_id:
-        raise ResourceConvergenceError("Cross-organization device correlation is denied")
-    if not matched_attributes:
-        raise ResourceConvergenceError("At least one governed matching attribute is required")
-
-    for attribute in matched_attributes:
-        left = configuration.attributes.get(attribute, "").strip().casefold()
-        right = device.attributes.get(attribute, "").strip().casefold()
-        if not left or left != right:
-            raise ResourceConvergenceError(f"Matching attribute is absent or inconsistent: {attribute}")
-
-    return ProviderRelationshipEvidence(
-        provider="jason_resource_convergence",
-        source=ResourceRef(
-            provider="it_glue",
-            resource_type="configuration",
-            external_id=configuration.external_id,
-            organization_id=configuration.organization_id,
-        ),
-        target=ResourceRef(
-            provider="datto_rmm",
-            resource_type="device",
-            external_id=device.external_id,
-            organization_id=device.organization_id,
-        ),
-        provider_relationship="governed_identity_corroboration",
-        canonical_relationship="represents",
-        verification=verification,
+    return build_relationship_evidence(
+        source=configuration,
+        target=device,
+        matched_attributes=matched_attributes,
         confidence=confidence,
-        observed_at=datetime.now(timezone.utc),
-        source_authority=(
-            f"central-orchestrator:{configuration.source_authority}+{device.source_authority}"
-        ),
-        metadata={"matched_attributes": ",".join(matched_attributes)},
+        verification=verification,
     )

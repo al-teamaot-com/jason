@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,6 +13,7 @@ from connectors.resource_convergence import (
     ResourceConvergenceError,
     build_configuration_device_plan,
     build_configuration_device_relationship_evidence,
+    build_relationship_evidence,
 )
 
 
@@ -153,4 +155,87 @@ def test_match_fails_closed_on_inconsistent_attribute():
             device=device,
             matched_attributes=("serial_number",),
             confidence=0.5,
+        )
+
+
+def test_provider_neutral_evidence_supports_microsoft_and_autotask():
+    source = IdentityEvidence(
+        provider="microsoft_graph",
+        resource_type="user",
+        external_id="entra-user-1",
+        organization_id="org-208",
+        attributes={"email": "User@Example.com"},
+        source_authority="graph-user-read",
+    )
+    target = IdentityEvidence(
+        provider="autotask",
+        resource_type="contact",
+        external_id="contact-7",
+        organization_id="org-208",
+        attributes={"email": "user@example.com"},
+        source_authority="autotask-contact-read",
+    )
+    observed = datetime(2026, 8, 9, 19, 0, tzinfo=timezone.utc)
+    evidence = build_relationship_evidence(
+        source=source,
+        target=target,
+        matched_attributes=("email",),
+        canonical_relationship="maps_to",
+        confidence=0.96,
+        observed_at=observed,
+    )
+    assert evidence.source.provider == "microsoft_graph"
+    assert evidence.target.provider == "autotask"
+    assert evidence.canonical_relationship == "maps_to"
+    assert evidence.observed_at == observed
+    assert evidence.source_authority == "central-orchestrator:graph-user-read+autotask-contact-read"
+
+
+def test_provider_neutral_evidence_denies_cross_organization_correlation():
+    source = IdentityEvidence(
+        provider="aws",
+        resource_type="account",
+        external_id="111111111111",
+        organization_id="org-208",
+        attributes={"domain": "example.com"},
+    )
+    target = IdentityEvidence(
+        provider="microsoft_graph",
+        resource_type="tenant",
+        external_id="tenant-2",
+        organization_id="org-999",
+        attributes={"domain": "example.com"},
+    )
+    with pytest.raises(ResourceConvergenceError, match="Cross-organization"):
+        build_relationship_evidence(
+            source=source,
+            target=target,
+            matched_attributes=("domain",),
+            canonical_relationship="maps_to",
+            confidence=0.8,
+        )
+
+
+def test_provider_neutral_evidence_requires_unique_matching_attributes():
+    source = IdentityEvidence("it_glue", "configuration", "1", "org-208", {"name": "host"})
+    target = IdentityEvidence("datto_rmm", "device", "2", "org-208", {"name": "host"})
+    with pytest.raises(ResourceConvergenceError, match="unique"):
+        build_relationship_evidence(
+            source=source,
+            target=target,
+            matched_attributes=("name", "name"),
+            confidence=0.9,
+        )
+
+
+def test_provider_neutral_evidence_rejects_naive_timestamp():
+    source = IdentityEvidence("it_glue", "configuration", "1", "org-208", {"name": "host"})
+    target = IdentityEvidence("datto_rmm", "device", "2", "org-208", {"name": "host"})
+    with pytest.raises(ResourceConvergenceError, match="timezone-aware"):
+        build_relationship_evidence(
+            source=source,
+            target=target,
+            matched_attributes=("name",),
+            confidence=0.9,
+            observed_at=datetime(2026, 8, 9, 19, 0),
         )
