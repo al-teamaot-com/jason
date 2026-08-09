@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from implementation.connectors.src.jason_connectors.approval_requests import (
@@ -27,16 +28,10 @@ class Authority:
 
 def request() -> ApprovalRequest:
     return ApprovalRequest(
-        approval_id="apr-1",
-        request_id="req-1",
-        correlation_id="corr-1",
-        organization_id="org-a",
-        client_id="client-a",
-        requested_by="user-requester",
-        capability="microsoft.resource.execute",
-        requested_mode="execute",
-        requested_at=NOW,
-        expires_at=NOW + timedelta(minutes=10),
+        approval_id="apr-1", request_id="req-1", correlation_id="corr-1",
+        organization_id="org-a", client_id="client-a", requested_by="user-requester",
+        capability="microsoft.resource.execute", requested_mode="execute",
+        requested_at=NOW, expires_at=NOW + timedelta(minutes=10),
         authorized_approver_ids=("user-approver",),
         evidence_references=(ApprovalEvidenceReference("artifact-1", "org-a", "a" * 64),),
     )
@@ -49,8 +44,7 @@ class ApprovalRequestTests(unittest.TestCase):
         service.create(request(), now=NOW)
         response = parse_teams_response(
             {"approval_id": "apr-1", "organization_id": "org-a", "decision": "approve", "channel_response_id": "teams-1"},
-            authenticated_identity_id="user-approver",
-            decided_at=NOW + timedelta(minutes=1),
+            authenticated_identity_id="user-approver", decided_at=NOW + timedelta(minutes=1),
         )
         with self.assertRaises(PermissionError):
             service.accept_response(response, now=NOW + timedelta(minutes=1))
@@ -90,8 +84,7 @@ class ApprovalRequestTests(unittest.TestCase):
             ), now=NOW + timedelta(minutes=11))
 
     def test_evidence_cannot_cross_organization(self) -> None:
-        bad = request()
-        bad = ApprovalRequest(**{**bad.__dict__, "evidence_references": (ApprovalEvidenceReference("artifact-1", "org-b", "b" * 64),)})
+        bad = replace(request(), evidence_references=(ApprovalEvidenceReference("artifact-1", "org-b", "b" * 64),))
         with self.assertRaises(ValueError):
             bad.validate()
 
