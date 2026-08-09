@@ -39,3 +39,40 @@ def test_test_envelope_binds_machine_identity_and_synthetic_capability() -> None
     assert envelope['arguments']['rotation_proof'] is True
     assert envelope['principal']['principal_id'] == 'svc-openclaw-gateway'
     assert envelope['principal']['organization_id'] == 'aot'
+
+
+def recursive_canonicalize(value):
+    if isinstance(value, list):
+        return [recursive_canonicalize(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: recursive_canonicalize(value[key])
+            for key in sorted(value)
+        }
+    return value
+
+
+def test_node_recursive_canonical_json_matches_transport_shape() -> None:
+    envelope = module.test_envelope('openclaw-gateway-2')
+    envelope['signature'] = 'ignored'
+
+    body = {
+        key: value
+        for key, value in envelope.items()
+        if key != 'signature'
+    }
+
+    node_equivalent = json.dumps(
+        recursive_canonicalize(body),
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
+
+    python_transport_equivalent = json.dumps(
+        body,
+        sort_keys=True,
+        separators=(',', ':'),
+        ensure_ascii=False,
+    )
+
+    assert node_equivalent == python_transport_equivalent
