@@ -18,9 +18,11 @@ For the RMM-managed device domain:
 
 A missing, stale, or unmatched IT Glue configuration must therefore leave the documentation relationship unresolved without erasing or downgrading the valid Datto managed-device authority observation.
 
-When corroborated, the relationship direction is:
+Provider authority and relationship direction are separate concerns. When documentation is corroborated, the canonical relationship follows J-118:
 
-`Datto managed device -> represented_by -> IT Glue configuration`
+`IT Glue configuration -> represents -> Datto managed-device observation`
+
+Datto remains the authoritative provider for managed-device existence and operational identity even though the documentation representation is the source of the canonical `represents` relationship.
 
 ## Required backend state
 
@@ -166,7 +168,7 @@ Expected execution sequence:
 5. Jason accepts the Datto authority observation independently of IT Glue matching.
 6. The IT Glue projector marks its configuration as a documentation observation.
 7. Jason compares only the explicitly requested governed matching attributes.
-8. If the attributes corroborate, Jason returns relationship evidence with semantic direction `Datto device -> represented_by -> IT Glue configuration` and status `corroborated`.
+8. If the attributes corroborate, Jason returns relationship evidence with canonical direction `IT Glue configuration -> represents -> Datto managed-device observation` and status `corroborated`.
 9. If the attributes are absent or inconsistent, Jason returns relationship status `unresolved`, no relationship evidence, and preserves the Datto managed-device authority decision.
 10. No canonical relationship is created by this command.
 
@@ -185,7 +187,7 @@ The documentation relationship portion is `corroborated` only when:
 
 - the IT Glue observation is bound to the same organization;
 - each requested matching attribute exists on both observations and matches after normalization;
-- relationship evidence points from Datto RMM to IT Glue;
+- relationship evidence uses `IT Glue configuration -> represents -> Datto managed-device observation`;
 - relationship evidence remains evidence-only and has not been promoted into the canonical relationship registry.
 
 An `unresolved` documentation relationship is an acceptable and expected outcome when the Datto device is valid but the IT Glue record cannot be safely linked.
