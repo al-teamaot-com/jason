@@ -80,7 +80,17 @@ class Orchestrator:
             stage=ExecutionStage.COMPLETED,
             reason_codes=("capability_completed",),
             resolution=None,
-            output={"hostname": "AOT-50282", "session_state": "available"},
+            output={
+                "provider": "datto_rmm",
+                "data": {
+                    "devices": [
+                        {
+                            "hostname": "AOT-50282",
+                            "lastUser": "AOT\\example.user",
+                        }
+                    ]
+                },
+            },
             attempts=1,
             provider_id="datto_rmm",
         )
@@ -88,7 +98,8 @@ class Orchestrator:
 
 class Renderer:
     def render(self, result):
-        return f"{result.output['hostname']}: {result.output['session_state']}"
+        device = result.output["data"]["devices"][0]
+        return f"{device['hostname']}: last user {device['lastUser']}"
 
 
 class Transport:
@@ -120,8 +131,11 @@ def principal():
 
 def intent():
     return ConversationIntent(
-        capability_name="endpoint.session.read",
-        arguments={"hostname": "AOT-50282"},
+        capability_name="endpoint.device.search",
+        arguments={
+            "hostname": "AOT-50282",
+            "requested_facts": ("last logged in user",),
+        },
         requested_mode="observe",
         risk="low",
     )
@@ -141,7 +155,7 @@ def build_flow(*, bound_principal=None, resolved_intent=None, request_factory=No
     return flow, orchestrator, transport
 
 
-def test_routes_authenticated_teams_request_through_named_capability_and_orchestrator():
+def test_routes_authenticated_teams_request_through_broad_endpoint_capability_and_orchestrator():
     flow, orchestrator, transport = build_flow()
 
     result = flow.handle(TeamsConversationRequest(text="Who is logged into AOT-50282?", identity=identity()))
@@ -149,10 +163,15 @@ def test_routes_authenticated_teams_request_through_named_capability_and_orchest
     assert result.transport_message_id == "teams-message-2"
     assert len(orchestrator.requests) == 1
     request = orchestrator.requests[0]
-    assert request.capability_name == "endpoint.session.read"
-    assert request.arguments == {"hostname": "AOT-50282"}
+    assert request.capability_name == "endpoint.device.search"
+    assert request.arguments == {
+        "hostname": "AOT-50282",
+        "requested_facts": ("last logged in user",),
+    }
     assert request.requester_kind == "human"
-    assert transport.sent == [("conversation-1", "AOT-50282: available", "corr-1")]
+    assert transport.sent == [
+        ("conversation-1", "AOT-50282: last user AOT\\example.user", "corr-1")
+    ]
 
 
 def test_unknown_teams_identity_fails_before_intent_or_orchestration():
@@ -213,6 +232,6 @@ def test_request_factory_cannot_change_bound_identity_or_human_requester(factory
 def test_intent_rejects_direct_agent_invocation_arguments():
     with pytest.raises(ValueError, match="direct agent invocation is prohibited"):
         ConversationIntent(
-            capability_name="endpoint.session.read",
+            capability_name="endpoint.device.search",
             arguments={"target_agent": "datto-agent"},
         )
