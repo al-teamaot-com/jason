@@ -21,6 +21,6 @@ where = ["."]
 include = ["connectors*", "kernel*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "connectors", "connectors/src"]
 testpaths = ["connectors/tests"]
 addopts = "-q"
