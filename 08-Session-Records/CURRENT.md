@@ -5,11 +5,13 @@
 
 ## Resume Here
 
-Project Jason has completed the first physical-host operational validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model.
+Project Jason has completed the 2026-08-10 physical-host validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model. PR #136 was governance-reviewed and merged to `main` as `ac5344a`.
 
-PR #136 (`feature/operational-live-proof-runbook`) contains the host-proof runbook, bounded provider discovery tools, accepted ADR-004, the Datto managed-device authority implementation, and all documentation corrections from the 2026-08-10 morning host session. Focused host tests and the applicable GitHub release gates passed before final governance/merge handling.
+The repository-wide connector regression baseline discovered during that host validation was repaired through PR #138 and merged to `main` as `35de7c1`. The full connector suite now collects and passes on the physical Jason host.
 
-A separate repository-wide connector regression-baseline problem is tracked in issue #137 and must be resolved before the first live Teams approval round-trip.
+The active branch is `feature/microsoft-teams-certificate-authorization`. The current workstream is the first live Teams approval round-trip. During pre-deployment inspection, Jason correctly stopped before provisioning Microsoft credentials because the existing Graph channel-post path relied on an application credential model that is not appropriate for normal Teams channel posting. Issue #139 records the correction.
+
+The preferred architecture is now to reuse the already-installed OpenClaw Microsoft Teams channel strictly as transport/ingress while Jason retains all identity, approval, policy, authority, orchestration, replay, recovery, and audit decisions.
 
 ## What Is Proven On The Jason Host
 
@@ -84,15 +86,78 @@ The live proof passed:
 - no provider mutation occurred;
 - no raw provider payload or secret material was printed or persisted.
 
-The selected IT Glue documentation relationship remained `unresolved` because the requested serial-number attribute was absent or inconsistent across the governed observations. This is the expected fail-closed behavior: the Datto managed-device authority remains valid while documentation reconciliation remains unresolved.
+The selected IT Glue documentation relationship remained `unresolved` because the requested serial-number attribute was absent or inconsistent across the governed observations. This is expected fail-closed behavior: Datto managed-device authority remains valid while documentation reconciliation remains unresolved.
 
-Host proof:
+Host proof: `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`.
 
-- `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+## Regression Baseline — Resolved
+
+Issue #137 was opened when the broad connector suite exposed stale test/package assumptions unrelated to PR #136. The fixes were isolated to the regression baseline, validated on the physical Jason host, and merged through PR #138 as `35de7c1`.
+
+Host result after the fix:
+
+- full connector test collection succeeded;
+- the complete `implementation/connectors/tests` suite passed 100%;
+- the working tree remained clean.
+
+This cleared the test-baseline blocker for the Teams approval workstream.
+
+## ADR-005 — OpenClaw Teams Transport Boundary
+
+ADR-005 records the Teams transport convergence decision.
+
+### Decision
+
+- OpenClaw is the supported Microsoft Teams transport/ingress provider for Jason approval interactions.
+- Jason does not import OpenClaw TypeScript internals by filesystem path.
+- Jason integrates through a supported OpenClaw external capability boundary.
+- OpenClaw does not decide whether a Teams response is a valid Jason approval.
+- Microsoft authentication is identity evidence, not execution authority.
+- Jason binds Microsoft tenant/object identity to the governed Jason organization/identity before producing a provider-neutral approval response.
+- Approval policy, immutable approval records, fresh authority contexts, replay protection, recovery authorization, and continuation remain Jason responsibilities.
+- Central Orchestrator alone resumes or retries execution.
+
+This was reviewed against the Jason Constitution/Canon and found consistent with human governance, evidence-before-assertion, separation of responsibilities, vendor independence, and institutional-memory requirements.
+
+### OpenClaw capability evidence observed on host
+
+The installed OpenClaw Teams channel provides:
+
+- proactive message delivery using stored conversation references;
+- direct Adaptive Card delivery through `sendAdaptiveCardMSTeams`;
+- organization/team/channel scoping through OpenClaw configuration;
+- allowlist checks for card-action invokes;
+- authenticated `adaptiveCard/action` handling after Bot Framework JWT validation;
+- a supported Gateway `send` boundary with idempotency/deduplication and delivery receipt identifiers;
+- a deliberately restricted admin HTTP RPC allowlist that does not expose normal message/session sends.
+
+Jason therefore uses the supported Gateway send path rather than weakening the admin RPC allowlist or duplicating a Teams bot stack.
+
+## Teams Transport Adapter — Host Validation
+
+Branch: `feature/microsoft-teams-certificate-authorization`.
+
+The branch now contains:
+
+- `05-ADR/ADR-005-OpenClaw-Teams-Transport-Boundary.md`;
+- updated `07-Operations/Teams-Approval-Deployment-and-Recovery.md`;
+- `08-Session-Records/Teams-Approval-Transport-Decision-2026-08-10.md`;
+- `implementation/connectors/microsoft_graph/openclaw_teams_approval_transport.py`;
+- `implementation/connectors/microsoft_graph/openclaw_teams_approval_runtime.py`;
+- `implementation/connectors/tests/test_openclaw_teams_approval_transport.py`.
+
+Physical-host validation at branch revision `1adbf26` passed:
+
+- 15 focused OpenClaw Teams transport / approval delivery / approval ingress tests passed;
+- the full connector regression suite passed 100%;
+- all required ADR/runbook/session records were present;
+- the working tree remained clean.
+
+The branch is ahead of `main` only by the Teams transport convergence changes and documentation.
 
 ## Documentation Reconciled On 2026-08-10
 
-The physical host session exposed several operational documentation gaps. They are now explicitly recorded rather than left as tribal knowledge:
+The morning physical-host session and subsequent Teams workstream exposed several operational/documentation gaps. They are now explicitly recorded rather than left as tribal knowledge:
 
 1. historical `jason-secret` token-file health behavior versus canonical provider AppRole runtime;
 2. project-local `.venv` bootstrap and pytest requirement;
@@ -102,48 +167,30 @@ The physical host session exposed several operational documentation gaps. They a
 6. Datto RMM managed-device authority and IT Glue documentation role;
 7. J-118 canonical `represents` relationship direction;
 8. acceptable unresolved documentation relationship behavior;
-9. repository-wide connector regression-baseline defects discovered during host validation;
-10. the requirement that Teams approval work cannot proceed to a live round-trip until its test baseline is clean.
-
-Updated/added records include:
-
-- `05-ADR/ADR-004-Datto-RMM-Managed-Device-Authority.md`;
-- `07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md`;
-- `07-Operations/Jason-Secret-Provider-Deployment-Record.md`;
-- `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`;
-- `07-Operations/OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md`;
-- `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`;
-- `08-Session-Records/README.md`;
-- this checkpoint;
-- PR #136 validation/governance summary;
-- issue #137 regression-baseline record.
-
-## Regression Baseline — Issue #137
-
-The focused PR #136 authority/convergence scope passed. GitHub `Validate Jason` and `Validate IT Glue Datto Resource Convergence` passed on the validated branch history.
-
-A broader host connector-suite run exposed unrelated pre-existing defects that are tracked in issue #137:
-
-- stale Microsoft bounded-automation expected error text;
-- Microsoft JWKS tests using JWT fixtures rejected by the installed PyJWT before mocked verification paths;
-- relationship-registry test use of `__dict__` on a `slots=True` dataclass;
-- Teams approval delivery tests constructing `ApprovalRequest(summary=...)` although the current contract no longer accepts `summary`;
-- package-layout collection problems for artifact-evidence and AWS provider tests under the declared implementation packaging.
-
-These failures must not be hidden, waived, or fixed by weakening implementation behavior. The Teams approval delivery failures are blocking before the live Teams approval round-trip.
+9. repository-wide connector regression-baseline defects and their resolution through PR #138;
+10. Teams live credential/configuration state was absent when inspected, so no secret was provisioned prematurely;
+11. the original Graph app-only channel-post design was stopped before live provisioning because its permission model was inappropriate for normal approval delivery;
+12. OpenClaw Teams was verified as the preferred reusable transport/ingress boundary;
+13. the OpenClaw transport design was checked against the Constitution/Canon before implementation;
+14. the supported Gateway `send` boundary is preferred over OpenClaw implementation-file imports or broadening admin HTTP RPC;
+15. host validation of the thin Teams transport adapter and full connector regression suite passed.
 
 ## Current Primary Workstream
 
-### Restore clean connector regression baseline, then Teams approval round-trip
+### Complete Teams transport governance and perform first live approval round-trip
 
-Immediate priority is issue #137 after PR #136 governance/merge completion.
+Immediate next steps:
 
-1. establish the canonical full regression command for the Jason host;
-2. repair stale/brittle tests and package configuration without weakening fail-closed behavior;
-3. make dependency-sensitive JWT test fixtures deterministic;
-4. update Teams approval delivery tests to the current `ApprovalRequest` contract;
-5. run the normal branch -> tests -> release validation -> PR -> governance review -> merge workflow;
-6. only after the Teams delivery/ingress boundary is green perform the first live Teams approval round-trip.
+1. validate the exact installed OpenClaw Gateway `send` request mapping used by the Jason adapter;
+2. run release validation for the feature branch;
+3. open PR for issue #139, perform governance review, and merge only after green validation;
+4. deploy only the non-secret target/identity bindings and whatever existing OpenClaw Teams configuration is required by the approved runbook;
+5. perform one harmless/no-side-effect approval request through the live Teams delivery path;
+6. submit one authenticated Teams approval/deny action;
+7. verify Jason tenant/identity binding, approval authorization, immutable audit, fresh JKD-001 authority context, replay protection, and Central Orchestrator continuation;
+8. preserve sanitized evidence and update this checkpoint after the live round-trip.
+
+A successful Teams button click alone is not proof. The full authority and evidence chain must be observed.
 
 ## Provider Authority Rule
 
