@@ -25,7 +25,7 @@ class StubConnector:
         )
 
 
-def test_operational_command_wires_governed_reads_to_evidence() -> None:
+def test_operational_command_wires_datto_authority_to_documentation_evidence() -> None:
     it_glue = StubConnector("it_glue")
     datto = StubConnector("datto_rmm")
     runner = OperationalConvergenceRunner({"it_glue": it_glue, "datto_rmm": datto})
@@ -41,8 +41,12 @@ def test_operational_command_wires_governed_reads_to_evidence() -> None:
         )
     )
 
-    assert observation.evidence.source.external_id == "321"
-    assert observation.evidence.target.external_id == "device-1"
+    assert observation.managed_device_authority.device.external_id == "device-1"
+    assert observation.managed_device_authority.authoritative_provider == "datto_rmm"
+    assert observation.relationship_status == "corroborated"
+    assert observation.evidence is not None
+    assert observation.evidence.source.external_id == "device-1"
+    assert observation.evidence.target.external_id == "321"
     assert observation.evidence.metadata == {"matched_attributes": "serial_number"}
     assert observation.evidence.confidence == 1.0
     assert it_glue.requests[0].context.organization_id == "org-1"
