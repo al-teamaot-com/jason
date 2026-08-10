@@ -5,9 +5,9 @@
 
 ## Resume Here
 
-Project Jason has now completed the first physical-host operational validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model.
+Project Jason has completed the first physical-host operational validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model.
 
-PR #136 (`feature/operational-live-proof-runbook`) contains the host-proof runbook, bounded provider discovery tools, accepted ADR-004, the Datto managed-device authority implementation, and the 2026-08-10 documentation corrections. The branch passed focused host tests and both GitHub release gates before final governance completion.
+PR #136 (`feature/operational-live-proof-runbook`) contains the host-proof runbook, bounded provider discovery tools, accepted ADR-004, the Datto managed-device authority implementation, and all documentation corrections from the 2026-08-10 morning host session. Focused host tests and the applicable GitHub release gates passed before final governance/merge handling.
 
 A separate repository-wide connector regression-baseline problem is tracked in issue #137 and must be resolved before the first live Teams approval round-trip.
 
@@ -42,7 +42,7 @@ A separate repository-wide connector regression-baseline problem is tracked in i
 - A bounded governed IT Glue live read succeeded with maximum one returned record.
 - Connector audit emitted `connector.requested` and `connector.completed`.
 - Raw provider payloads and credentials were not printed or persisted.
-- `tools/it_glue_configuration_discovery.py` now provides a bounded, sanitized operator path for selecting a controlled configuration without source introspection or raw provider dumps.
+- `tools/it_glue_configuration_discovery.py` provides a bounded, sanitized operator path for selecting a controlled configuration without source introspection or raw provider dumps.
 
 ### Datto RMM
 
@@ -52,7 +52,7 @@ A separate repository-wide connector regression-baseline problem is tracked in i
 - A bounded governed `datto_rmm.device.search` live read succeeded with maximum one returned device.
 - Connector audit emitted `connector.requested` and `connector.completed`.
 - Raw provider payloads, API credentials, and OAuth tokens were not printed or persisted.
-- `tools/datto_rmm_device_discovery.py` now provides bounded sanitized operator discovery.
+- `tools/datto_rmm_device_discovery.py` provides bounded sanitized operator discovery.
 
 ## ADR-004 — Managed Device Authority
 
@@ -102,7 +102,8 @@ The physical host session exposed several operational documentation gaps. They a
 6. Datto RMM managed-device authority and IT Glue documentation role;
 7. J-118 canonical `represents` relationship direction;
 8. acceptable unresolved documentation relationship behavior;
-9. repository-wide connector regression-baseline defects discovered during host validation.
+9. repository-wide connector regression-baseline defects discovered during host validation;
+10. the requirement that Teams approval work cannot proceed to a live round-trip until its test baseline is clean.
 
 Updated/added records include:
 
@@ -112,11 +113,14 @@ Updated/added records include:
 - `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`;
 - `07-Operations/OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md`;
 - `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`;
-- this checkpoint.
+- `08-Session-Records/README.md`;
+- this checkpoint;
+- PR #136 validation/governance summary;
+- issue #137 regression-baseline record.
 
 ## Regression Baseline — Issue #137
 
-The focused PR #136 authority/convergence scope passed. GitHub `Validate Jason` and `Validate IT Glue Datto Resource Convergence` also passed on the finalized branch history.
+The focused PR #136 authority/convergence scope passed. GitHub `Validate Jason` and `Validate IT Glue Datto Resource Convergence` passed on the validated branch history.
 
 A broader host connector-suite run exposed unrelated pre-existing defects that are tracked in issue #137:
 
@@ -132,7 +136,7 @@ These failures must not be hidden, waived, or fixed by weakening implementation 
 
 ### Restore clean connector regression baseline, then Teams approval round-trip
 
-Immediate priority is issue #137.
+Immediate priority is issue #137 after PR #136 governance/merge completion.
 
 1. establish the canonical full regression command for the Jason host;
 2. repair stale/brittle tests and package configuration without weakening fail-closed behavior;
