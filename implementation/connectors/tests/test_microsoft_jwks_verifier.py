@@ -28,7 +28,9 @@ class FakeFetcher:
 
 def token_with_header(header):
     encoded = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b"=").decode()
-    return f"{encoded}.e30.signature"
+    payload = base64.urlsafe_b64encode(b"{}").rstrip(b"=").decode()
+    signature = base64.urlsafe_b64encode(b"signature").rstrip(b"=").decode()
+    return f"{encoded}.{payload}.{signature}"
 
 
 class MicrosoftJwksVerifierTests(unittest.TestCase):

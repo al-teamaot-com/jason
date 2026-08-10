@@ -34,7 +34,7 @@ def request(org="org-a"):
         requested_mode="execute",
         requested_at=NOW,
         expires_at=NOW + timedelta(minutes=10),
-        summary="Update ticket status after governed review.",
+        authorized_approver_ids=("approver-1",),
     )
 
 

@@ -77,7 +77,7 @@ def test_bounded_automation_is_fail_closed() -> None:
         permission_profile_name="directory-read",
         mode=MicrosoftOperationMode.BOUNDED_AUTOMATION,
     )
-    with pytest.raises(MicrosoftRequestPolicyError, match="not enabled"):
+    with pytest.raises(MicrosoftRequestPolicyError, match="does not support requested mode"):
         build_governed_request(request)
 
 
