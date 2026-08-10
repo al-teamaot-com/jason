@@ -165,7 +165,7 @@ The IT Glue documentation relationship remained `unresolved` because the request
 
 The focused PR #136 managed-device authority/convergence test scope passed.
 
-GitHub Actions for the finalized branch passed:
+GitHub Actions for the validated authority/convergence branch history passed:
 
 - `Validate Jason`;
 - `Validate IT Glue Datto Resource Convergence`.
@@ -182,7 +182,7 @@ The Teams approval baseline defects are explicitly blocking before the planned l
 
 ## Documentation corrected during this session
 
-PR #136 now updates or adds the following operational/architecture documentation so the morning's work is not dependent on chat history:
+PR #136 updates or adds the following operational/architecture documentation so the morning's work is not dependent on chat history:
 
 - `05-ADR/ADR-004-Datto-RMM-Managed-Device-Authority.md`;
 - `07-Operations/OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md`;
@@ -190,9 +190,14 @@ PR #136 now updates or adds the following operational/architecture documentation
 - `07-Operations/Jason-Secret-Provider-Deployment-Record.md`;
 - `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`;
 - this host-proof session record;
-- `08-Session-Records/CURRENT.md` resume checkpoint.
+- `08-Session-Records/README.md`;
+- `08-Session-Records/CURRENT.md` resume checkpoint;
+- PR #136 validation/governance summary;
+- issue #137 regression-baseline record.
 
 PR #136 also contains the bounded discovery and live authority-proof tools used by those runbooks.
+
+The documentation set explicitly records every operational defect encountered during the morning session: historical wrapper/AppRole ambiguity, missing project-local test environment, direct resolver `ConnectorContext` requirement, speculative implementation-name risk, missing safe discovery path, source-of-truth decision for managed devices, canonical relationship-direction correction, unresolved documentation behavior, and the broader regression-baseline defects discovered before Teams approval work.
 
 ## Security invariants preserved
 
