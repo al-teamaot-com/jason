@@ -211,7 +211,15 @@ def build_configuration_device_relationship_evidence(
     confidence: float,
     verification: VerificationState = VerificationState.CORROBORATED,
 ) -> ProviderRelationshipEvidence:
-    """Compatibility wrapper for the original IT Glue -> Datto convergence path."""
+    """Build evidence that IT Glue documentation represents an authoritative Datto device.
+
+    Datto RMM remains the authoritative external provider for managed-device
+    existence and operational identity. Relationship direction is independent of
+    provider authority: J-118 defines `represents` as representation -> represented
+    object, so the IT Glue configuration is the relationship source and the Datto
+    managed-device observation is the target. The resulting relationship remains
+    evidence only until Jason separately promotes the mapping under policy.
+    """
     if configuration.provider != "it_glue" or configuration.resource_type != "configuration":
         raise ResourceConvergenceError("configuration evidence must identify an IT Glue configuration")
     if device.provider != "datto_rmm" or device.resource_type != "device":
@@ -220,6 +228,8 @@ def build_configuration_device_relationship_evidence(
         source=configuration,
         target=device,
         matched_attributes=matched_attributes,
+        canonical_relationship="represents",
+        provider_relationship="managed_device_documentation_corroboration",
         confidence=confidence,
         verification=verification,
     )

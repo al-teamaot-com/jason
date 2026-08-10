@@ -5,13 +5,17 @@ from typing import Callable, Mapping
 
 from connectors.core.contracts import ConnectorContext, ConnectorResult
 from connectors.core.relationships import ProviderRelationshipEvidence, VerificationState
+from connectors.managed_device_authority import (
+    ManagedDeviceAuthorityDecision,
+    establish_managed_device_authority,
+)
 from connectors.resource_convergence import (
     ConfigurationDeviceConvergencePlan,
     GovernedResourceExecutor,
     IdentityEvidence,
     ResourceConvergenceError,
     build_configuration_device_plan,
-    build_relationship_evidence,
+    build_configuration_device_relationship_evidence,
 )
 
 
@@ -51,15 +55,27 @@ class LiveConfigurationDeviceConvergenceRequest:
 @dataclass(frozen=True, slots=True)
 class LiveConvergenceObservation:
     provider_results: Mapping[str, ConnectorResult]
-    evidence: ProviderRelationshipEvidence
+    managed_device_authority: ManagedDeviceAuthorityDecision
+    relationship_evidence: ProviderRelationshipEvidence | None
+    relationship_status: str
+    relationship_reason: str | None = None
+
+    @property
+    def evidence(self) -> ProviderRelationshipEvidence | None:
+        """Compatibility alias for callers that previously read `.evidence`."""
+        return self.relationship_evidence
 
 
 class LiveConfigurationDeviceConvergenceService:
-    """Run bounded IT Glue + Datto reads and produce relationship evidence only.
+    """Observe Datto authority and optionally corroborate IT Glue documentation.
 
-    Projection of provider payloads into IdentityEvidence is injected so provider
-    schema parsing remains separate from orchestration. The service never promotes
-    evidence into canonical truth and grants no identity or execution authority.
+    Datto RMM is authoritative for existence and operational identity of an
+    RMM-managed device. IT Glue is a documentation observation. Failure to prove
+    the IT Glue relationship must not erase or downgrade the Datto device
+    authority decision, but it must fail closed for relationship creation.
+
+    The service never creates a Jason canonical object, promotes a provider
+    mapping into canonical truth, or grants execution authority.
     """
 
     def __init__(
@@ -109,19 +125,35 @@ class LiveConfigurationDeviceConvergenceService:
         configuration = self._it_glue_projector(results["it_glue"], request.organization_id)
         device = self._datto_projector(results["datto_rmm"], request.organization_id)
         if configuration.provider != "it_glue" or configuration.resource_type != "configuration":
-            raise ResourceConvergenceError("IT Glue projector returned an invalid identity boundary")
+            raise ResourceConvergenceError("IT Glue projector returned an invalid documentation boundary")
         if device.provider != "datto_rmm" or device.resource_type != "device":
-            raise ResourceConvergenceError("Datto projector returned an invalid identity boundary")
+            raise ResourceConvergenceError("Datto projector returned an invalid device authority boundary")
         if configuration.organization_id != request.organization_id or device.organization_id != request.organization_id:
             raise PermissionError("projected provider evidence organization mismatch")
 
-        evidence = build_relationship_evidence(
-            source=configuration,
-            target=device,
-            matched_attributes=request.matched_attributes,
-            canonical_relationship="represents",
-            provider_relationship="live_configuration_device_corroboration",
-            confidence=request.confidence,
-            verification=VerificationState.CORROBORATED,
+        authority = establish_managed_device_authority(device)
+
+        try:
+            relationship = build_configuration_device_relationship_evidence(
+                configuration=configuration,
+                device=device,
+                matched_attributes=request.matched_attributes,
+                confidence=request.confidence,
+                verification=VerificationState.CORROBORATED,
+            )
+        except ResourceConvergenceError as exc:
+            return LiveConvergenceObservation(
+                provider_results=results,
+                managed_device_authority=authority,
+                relationship_evidence=None,
+                relationship_status="unresolved",
+                relationship_reason=str(exc),
+            )
+
+        return LiveConvergenceObservation(
+            provider_results=results,
+            managed_device_authority=authority,
+            relationship_evidence=relationship,
+            relationship_status="corroborated",
+            relationship_reason=None,
         )
-        return LiveConvergenceObservation(provider_results=results, evidence=evidence)

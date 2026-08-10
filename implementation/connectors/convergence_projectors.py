@@ -4,6 +4,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from connectors.core.contracts import ConnectorResult
+from connectors.managed_device_authority import (
+    DATTO_MANAGED_DEVICE_AUTHORITY,
+    IT_GLUE_DEVICE_DOCUMENTATION_AUTHORITY,
+)
 from connectors.resource_convergence import IdentityEvidence, ResourceConvergenceError
 
 
@@ -85,7 +89,7 @@ def project_it_glue_configuration(result: ConnectorResult, organization_id: str)
         external_id=external_id,
         organization_id=organization_id,
         attributes=attributes,
-        source_authority="it_glue:governed-live-read",
+        source_authority=IT_GLUE_DEVICE_DOCUMENTATION_AUTHORITY,
     )
 
 
@@ -123,5 +127,5 @@ def project_datto_rmm_device(result: ConnectorResult, organization_id: str) -> I
         external_id=external_id,
         organization_id=organization_id,
         attributes=attributes,
-        source_authority="datto_rmm:governed-live-read",
+        source_authority=DATTO_MANAGED_DEVICE_AUTHORITY,
     )

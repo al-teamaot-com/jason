@@ -7,6 +7,7 @@ import pytest
 
 from connectors.core.contracts import ConnectorContext, ConnectorResult
 from connectors.core.relationships import VerificationState
+from connectors.managed_device_authority import DATTO_MANAGED_DEVICE_AUTHORITY
 from connectors.resource_convergence import (
     GovernedResourceExecutor,
     IdentityEvidence,
@@ -106,7 +107,7 @@ def test_executor_denies_cross_organization_query():
         executor.execute(plan.reads[0].query, context("org-208"))
 
 
-def test_corroborated_identity_evidence_builds_relationship_evidence():
+def test_corroborated_documentation_evidence_represents_authoritative_datto_device():
     configuration = IdentityEvidence(
         provider="it_glue",
         resource_type="configuration",
@@ -120,6 +121,7 @@ def test_corroborated_identity_evidence_builds_relationship_evidence():
         external_id="device-1",
         organization_id="org-208",
         attributes={"serial_number": "abc123", "name": "DEVICE-A"},
+        source_authority=DATTO_MANAGED_DEVICE_AUTHORITY,
     )
     evidence = build_configuration_device_relationship_evidence(
         configuration=configuration,
@@ -148,6 +150,7 @@ def test_match_fails_closed_on_inconsistent_attribute():
         external_id="device-1",
         organization_id="org-208",
         attributes={"serial_number": "XYZ999"},
+        source_authority=DATTO_MANAGED_DEVICE_AUTHORITY,
     )
     with pytest.raises(ResourceConvergenceError, match="inconsistent"):
         build_configuration_device_relationship_evidence(
