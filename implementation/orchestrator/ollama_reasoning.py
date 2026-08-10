@@ -157,7 +157,8 @@ class OllamaResourceCapabilityReasoner:
         candidate_metadata = [
             {
                 "capability_name": item.capability_name,
-                "description": item.description,
+                "display_name": item.display_name,
+                "business_purpose": item.business_purpose,
                 "metadata": dict(item.metadata),
             }
             for item in candidates
