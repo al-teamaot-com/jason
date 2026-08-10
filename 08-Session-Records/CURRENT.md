@@ -1,129 +1,157 @@
 # Project Jason — Current Session Checkpoint
 
-**Updated:** 2026-08-09
-**Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py`.
+**Updated:** 2026-08-10  
+**Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py` and the applicable host-proof records.
 
 ## Resume Here
 
-Project Jason has now completed the first successful governed live Datto RMM read from the production Jason host.
+Project Jason has now completed the first physical-host operational validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model.
 
-Recent merged work includes the OpenClaw/JKD-001 production trust sequence, AWS provider-family foundation, canonical OpenBao provider-secret AppRole hardening, CAS-aware provider-secret provisioning, Datto RMM AppRole self-revoke correction, and the first bounded Datto RMM live-read path.
+PR #136 (`feature/operational-live-proof-runbook`) contains the host-proof runbook, bounded provider discovery tools, accepted ADR-004, the Datto managed-device authority implementation, and the 2026-08-10 documentation corrections. The branch passed focused host tests and both GitHub release gates before final governance completion.
 
-The historical draft PR #77 remains open but is no longer the authoritative Datto RMM implementation path. Datto RMM credential provisioning and the first live read have been absorbed into current `main` through PRs #96–#99. PR #77 should be reconciled or retired as remaining IT Glue/cross-provider convergence work is brought current.
+A separate repository-wide connector regression-baseline problem is tracked in issue #137 and must be resolved before the first live Teams approval round-trip.
 
 ## What Is Proven On The Jason Host
 
-- OpenClaw runs in Docker as `openclaw-openclaw-gateway-1`, user `node` UID/GID 1000.
-- OpenClaw persistent secret/config mounts are under `/opt/jason/services/openclaw/data/`.
-- OpenClaw machine trust uses Ed25519 application-layer signatures. Private keys remain only inside the OpenClaw persistent auth-profile secret boundary; Jason stores only public keys and pinned fingerprints.
-- Jason verified real signed OpenClaw requests and rejected tampering.
-- OpenClaw is ingress/transport only; the Central Orchestrator remains the sole execution coordinator.
-- JKD-001 provides scoped identity/authority, formal approvals, short-lived contexts, revocation, durable delegation, and authority audit.
-- The direct machine-service path completed through signature -> JKD-001 -> governance -> Central Orchestrator -> synthetic capability, and replay was rejected.
-- The delegated-human path kept the human principal distinct from `svc-openclaw-gateway`, evaluated the human's own observe authority, validated explicit delegation, completed through governance/orchestration, and failed closed after delegation revocation.
-- Production operations packaging from PR #90 is deployed on Jason.
-- `jason-delegation-maintenance.timer` is active and automatically normalized the historical elapsed synthetic delegation to `expired` while preserving history.
-- `jason-openclaw-authority-health.timer` is active and writes `/var/lib/jason/openclaw/operational-health.json` with mode `0600`.
-- Command Center Prometheus metrics for OpenClaw/JKD-001 operational health are live.
-- CatchMeUp reports the production operations timers and sanitized OpenClaw/JKD-001 operational-health state.
-- Operational health after signing-key cutover passed: all security-state SQLite integrity checks `ok`, backup/restore proof passed, restored counts matched, zero expired-active delegation records remained, one active trusted signing key remained, and no provider contact/credential use occurred during that proof.
-- Datto RMM logical secret `datto_rmm.readonly` is stored in OpenBao with durable fields `api_url`, `api_key`, and `api_secret`.
-- Datto RMM runtime secret access uses a provider-specific OpenBao AppRole through JKD-003.
-- Datto RMM AppRole artifacts are protected as `root:root` mode `0600`.
-- No shared persistent provider runtime token is used.
-- The Datto AppRole token can read only its provider secret and revoke itself.
-- Datto OAuth bearer tokens are acquired at runtime and are not persisted.
-- The first live `datto_rmm.device.search` proof succeeded with a maximum of one provider record.
-- The first live Datto proof emitted `connector.requested` and `connector.completed` audit events.
-- The live proof retained only sanitized count/shape metadata; no raw device record, API credential, bearer token, or provider response body was printed or persisted.
+### OpenClaw / authority foundation
 
-## OpenClaw Signing-Key Rotation — Proven
+- OpenClaw runs in Docker and remains ingress/transport only; the Central Orchestrator is the sole execution coordinator.
+- OpenClaw machine trust uses Ed25519 application-layer signatures with private keys retained only inside the OpenClaw secret boundary.
+- JKD-001 provides scoped identity/authority, approvals, short-lived contexts, revocation, durable delegation, and authority audit.
+- Direct machine-service and delegated-human paths completed through governance/orchestration and fail closed after revocation/replay.
+- Production OpenClaw operations timers and sanitized operational health are deployed.
 
-The first overlap-first production rotation from `openclaw-gateway-1` to `openclaw-gateway-2` completed successfully.
+### OpenBao / provider secret runtime
 
-- Both keys were active and cryptographically accepted during overlap.
-- Key #2 completed a full governed synthetic execution through OpenClaw ingress, JKD-001, governance, and the Central Orchestrator.
-- Replay protection remained active.
-- Only after key #2 continuity was proven was key #1's Jason public-trust record revoked.
-- Post-revocation proof rejected key #1 and continued to accept key #2.
-- Final registry state: `openclaw-gateway-2` active; `openclaw-gateway-1` revoked.
-- Replacement public-key fingerprint: `fb6612b03009b2cecca812458ac35c75fd3d4f23efa29ed631e905ff03d235b7`.
-- Replacement public key: `/var/lib/jason/openclaw/trusted-keys/openclaw-jason-ed25519-v2.pub.pem`.
-- Replacement private key remains only inside OpenClaw at `/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem`.
-- The old private key remains only inside the OpenClaw secret boundary for the governed rollback/retention window; Jason no longer accepts it.
-
-Host evidence:
-
-- `08-Session-Records/OpenClaw-Delegated-Human-Host-Proof-2026-08-08.md`
-- `08-Session-Records/OpenClaw-Ed25519-Key-Rotation-Host-Proof-2026-08-09.md`
-- `08-Session-Records/Datto-RMM-First-Live-Read-Host-Proof-2026-08-09.md`
-
-## Current Primary Workstream
-
-### Datto RMM Provider Expansion
-
-Datto RMM is no longer at the credential boundary. The first governed live read is proven. Next work should expand only through registered read-only capabilities and governed resource queries.
-
-Priorities:
-
-1. validate and normalize additional live response shapes for existing registered capabilities;
-2. preserve organization/client scoping and bounded pagination;
-3. avoid retaining raw provider payloads when sanitized normalized evidence is sufficient;
-4. keep OAuth bearer tokens runtime-only;
-5. continue emitting connector/audit evidence for each governed provider read;
-6. reconcile the Datto portions of historical draft PR #77 with current `main` and retire duplicated/stale implementation where appropriate.
-
-## Parallel Provider Workstreams
+- OpenBao runs in Docker and is exposed only on host loopback `127.0.0.1:8200` for the pilot.
+- OpenBao version observed during the 2026-08-10 preflight: 2.6.1.
+- OpenBao was initialized, unsealed, and active/non-standby.
+- Production provider secrets use provider-specific OpenBao AppRoles through JKD-003.
+- Provider runtime AppRole tokens are short-lived, may read only the provider-specific secret plus self-revoke, and are not persisted.
+- Shared persistent provider runtime tokens are prohibited.
+- `/usr/local/bin/jason-secret` remains a historical commissioning/general wrapper and is **not** the canonical production-provider readiness path.
+- `jason-secret --health` / `--contract-test` may return `DENIED: OpenBao token file is not configured` while provider-specific AppRole runtime is healthy. Operators must not create a persistent provider token merely to satisfy that historical wrapper path.
+- Host-side Python validation uses `~/projects/jason/.venv` built from `implementation[dev]`; system Python cannot be assumed to contain pytest.
+- Direct `OpenBaoSecretResolver.resolve()` validation requires the logical secret plus a governed `ConnectorContext` with a non-empty correlation ID.
 
 ### IT Glue
 
-IT Glue remains the next provider needed for the original cross-provider convergence objective.
+- `it_glue.readonly` resolves through the canonical provider-specific AppRole lifecycle.
+- Required durable field: `api_key`.
+- Live AppRole resolution succeeded with secret values suppressed and temporary token self-revocation.
+- A bounded governed IT Glue live read succeeded with maximum one returned record.
+- Connector audit emitted `connector.requested` and `connector.completed`.
+- Raw provider payloads and credentials were not printed or persisted.
+- `tools/it_glue_configuration_discovery.py` now provides a bounded, sanitized operator path for selecting a controlled configuration without source introspection or raw provider dumps.
 
-- logical secret: `it_glue.readonly`;
-- durable field: `api_key`;
-- runtime identity: provider-specific OpenBao AppRole through JKD-003;
-- provision and validate independently before creating any IT Glue <-> Datto relationship evidence.
+### Datto RMM
 
-No cross-provider relationship evidence should be treated as execution authority.
+- `datto_rmm.readonly` resolves through the canonical provider-specific AppRole lifecycle.
+- Durable fields: `api_url`, `api_key`, `api_secret`.
+- Datto OAuth bearer tokens are acquired at runtime and are not persisted.
+- A bounded governed `datto_rmm.device.search` live read succeeded with maximum one returned device.
+- Connector audit emitted `connector.requested` and `connector.completed`.
+- Raw provider payloads, API credentials, and OAuth tokens were not printed or persisted.
+- `tools/datto_rmm_device_discovery.py` now provides bounded sanitized operator discovery.
 
-### AWS Provider-Family Foundation
+## ADR-004 — Managed Device Authority
 
-AWS platform foundation is merged. Live AWS work remains at the controlled credential/role boundary:
+ADR-004 is accepted and implemented.
 
-- use OpenBao-backed durable role/configuration;
-- prefer STS AssumeRole with runtime-only credentials;
-- begin live validation with STS GetCallerIdentity;
-- preserve account/organization/region scope and read-only governance.
+For the **RMM-managed device domain**:
 
-## Immediate Next Actions
+- Datto RMM is the authoritative external provider for managed-device existence, stable Datto external UID, and governed operational identity/state.
+- IT Glue is a documentation observation and cannot independently establish or override managed-device operational identity.
+- Jason remains authoritative for provider-independent canonical Asset/Device identity, tenant/organization binding, cross-provider mappings, verification state, promotion decisions, policy, approvals, and execution authority.
 
-1. merge the Datto RMM first-live-read host-proof checkpoint update;
-2. reconcile or retire the stale Datto portions of draft PR #77;
-3. continue bounded DRMM response-shape validation for existing registered capabilities as needed;
-4. provision IT Glue through the canonical AppRole secret workflow;
-5. validate the first governed IT Glue live read independently;
-6. only then resume IT Glue + Datto cross-provider convergence/evidence work.
+Provider authority is separate from relationship direction. J-118 canonical semantics remain:
 
-## Provider Secret Architecture — Canonical Rule
+`IT Glue configuration -> represents -> Datto managed-device observation`
 
-Production provider secrets use provider-specific OpenBao AppRoles through JKD-003.
+No new inverse canonical relationship `represented_by` was admitted.
 
-- provisioning authority is temporary and separate from runtime authority;
-- runtime AppRole tokens are short-lived and self-revoked;
-- provider runtime policies may read only the specific provider secret plus `auth/token/revoke-self`;
-- shared persistent provider runtime tokens are prohibited;
-- KV-v2 provider secret writes use compare-and-set semantics;
-- future providers must reuse this pattern unless an explicit architecture review approves a replacement.
+## 2026-08-10 Live Managed-Device Authority Proof
 
-## Outstanding Historical Recovery Note
+The live proof passed:
 
-A prior operator session stopped while temporarily enabling a legacy OpenBao root-recovery endpoint because a `generate-root` setting already existed. Multiple pre-root-recovery configuration backups exist under `/opt/jason/infrastructure/openbao/config/`. Do not overwrite an existing `generate-root` setting without first inspecting live configuration and governed recovery records.
+- exactly one bounded Datto device observation was accepted;
+- source authority was `datto_rmm:managed-device-authority`;
+- the stable external Datto device identifier was present;
+- approved operational identity metadata was present;
+- both Datto and IT Glue connector audit boundaries fired;
+- no canonical Jason object was created;
+- no canonical relationship was promoted;
+- no provider mutation occurred;
+- no raw provider payload or secret material was printed or persisted.
+
+The selected IT Glue documentation relationship remained `unresolved` because the requested serial-number attribute was absent or inconsistent across the governed observations. This is the expected fail-closed behavior: the Datto managed-device authority remains valid while documentation reconciliation remains unresolved.
+
+Host proof:
+
+- `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+
+## Documentation Reconciled On 2026-08-10
+
+The physical host session exposed several operational documentation gaps. They are now explicitly recorded rather than left as tribal knowledge:
+
+1. historical `jason-secret` token-file health behavior versus canonical provider AppRole runtime;
+2. project-local `.venv` bootstrap and pytest requirement;
+3. required `ConnectorContext` for direct OpenBao resolver validation;
+4. verified implementation/tool names rather than guessed class names;
+5. supported bounded/sanitized provider object discovery;
+6. Datto RMM managed-device authority and IT Glue documentation role;
+7. J-118 canonical `represents` relationship direction;
+8. acceptable unresolved documentation relationship behavior;
+9. repository-wide connector regression-baseline defects discovered during host validation.
+
+Updated/added records include:
+
+- `05-ADR/ADR-004-Datto-RMM-Managed-Device-Authority.md`;
+- `07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md`;
+- `07-Operations/Jason-Secret-Provider-Deployment-Record.md`;
+- `07-Operations/IT-Glue-Datto-Resource-Convergence-Checklist.md`;
+- `07-Operations/OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md`;
+- `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`;
+- this checkpoint.
+
+## Regression Baseline — Issue #137
+
+The focused PR #136 authority/convergence scope passed. GitHub `Validate Jason` and `Validate IT Glue Datto Resource Convergence` also passed on the finalized branch history.
+
+A broader host connector-suite run exposed unrelated pre-existing defects that are tracked in issue #137:
+
+- stale Microsoft bounded-automation expected error text;
+- Microsoft JWKS tests using JWT fixtures rejected by the installed PyJWT before mocked verification paths;
+- relationship-registry test use of `__dict__` on a `slots=True` dataclass;
+- Teams approval delivery tests constructing `ApprovalRequest(summary=...)` although the current contract no longer accepts `summary`;
+- package-layout collection problems for artifact-evidence and AWS provider tests under the declared implementation packaging.
+
+These failures must not be hidden, waived, or fixed by weakening implementation behavior. The Teams approval delivery failures are blocking before the live Teams approval round-trip.
+
+## Current Primary Workstream
+
+### Restore clean connector regression baseline, then Teams approval round-trip
+
+Immediate priority is issue #137.
+
+1. establish the canonical full regression command for the Jason host;
+2. repair stale/brittle tests and package configuration without weakening fail-closed behavior;
+3. make dependency-sensitive JWT test fixtures deterministic;
+4. update Teams approval delivery tests to the current `ApprovalRequest` contract;
+5. run the normal branch -> tests -> release validation -> PR -> governance review -> merge workflow;
+6. only after the Teams delivery/ingress boundary is green perform the first live Teams approval round-trip.
+
+## Provider Authority Rule
+
+Authority is assigned by **resource domain and attribute**, not by one globally authoritative provider.
+
+The accepted device rule is the first formal example. Future assignments for users, tickets, agreements, cloud identity, security state, knowledge, and other resources require explicit policy/architecture decisions rather than assumption.
 
 ## Interaction Rules For Future Sessions
 
-- Continue Jason in larger workstreams/batches; do not default to one-command-at-a-time guidance.
-- Treat this checkpoint, current GitHub state, and a fresh CatchMeUp host snapshot together as authoritative resume context.
+- Continue Jason in larger workstreams/batches; do not default to one-command-at-a-time guidance unless a host-sensitive step requires it.
+- Treat this checkpoint, current GitHub state, applicable ADRs/runbooks, and a fresh CatchMeUp host snapshot together as authoritative resume context.
 - Reconcile conflicts between checkpoint/GitHub/host state before destructive or security-sensitive changes.
 - Agents never invoke or communicate with other agents directly; all coordination goes through the Central Orchestrator.
 - Preserve identity-first authorization, policy-as-data, versioned workflows/prompts/policies, provider-neutral capability boundaries, centralized evidence by reference, event-based auditability, and integrate-before-innovate.
-- Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, private signing keys, or secret values in chat, repository content, logs, or evidence.
+- Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, RoleIDs, SecretIDs, OAuth bearer tokens, private signing keys, or secret values in chat, repository content, logs, or evidence.
