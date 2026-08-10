@@ -45,8 +45,9 @@ def test_operational_command_wires_datto_authority_to_documentation_evidence() -
     assert observation.managed_device_authority.authoritative_provider == "datto_rmm"
     assert observation.relationship_status == "corroborated"
     assert observation.evidence is not None
-    assert observation.evidence.source.external_id == "device-1"
-    assert observation.evidence.target.external_id == "321"
+    assert observation.evidence.source.external_id == "321"
+    assert observation.evidence.target.external_id == "device-1"
+    assert observation.evidence.canonical_relationship == "represents"
     assert observation.evidence.metadata == {"matched_attributes": "serial_number"}
     assert observation.evidence.confidence == 1.0
     assert it_glue.requests[0].context.organization_id == "org-1"
