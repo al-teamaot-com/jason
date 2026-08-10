@@ -16,31 +16,101 @@ Before using this runbook, `main` must contain the validated implementations for
 - operator-facing operational convergence command;
 - provider-neutral relationship evidence and tenant isolation.
 
-The operator should record the exact Git commit deployed to the Jason host.
+The operator must record the exact Git commit deployed to the Jason host.
+
+## Canonical host bootstrap
+
+Host validation is performed from the Jason repository with a project-local Python virtual environment. Do not assume `pytest` or Jason development dependencies are installed in system Python.
+
+```bash
+cd ~/projects/jason
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e './implementation[dev]'
+.venv/bin/python --version
+.venv/bin/python -m pytest --version
+```
+
+Reusing an existing `.venv` is permitted when it was built from the current checkout and remains healthy.
+
+## Canonical provider secret runtime
+
+Production IT Glue and Datto RMM reads use provider-specific OpenBao AppRole runtime authentication. They do **not** depend on a persistent shared provider token file.
+
+Expected bootstrap paths are:
+
+- `/opt/jason/bootstrap/secrets/openbao/itglue-read-approle/role-id`
+- `/opt/jason/bootstrap/secrets/openbao/itglue-read-approle/secret-id`
+- `/opt/jason/bootstrap/secrets/openbao/datto-rmm-read-approle/role-id`
+- `/opt/jason/bootstrap/secrets/openbao/datto-rmm-read-approle/secret-id`
+
+The production resolver logs in through AppRole, obtains a short-lived service token, performs the allow-listed KV v2 read, and revokes the temporary token. Provider runtime tokens must not be persisted.
+
+### Important historical `jason-secret` distinction
+
+`jason-secret --health` and `jason-secret --contract-test` exercise the historical/general token-file contract and can return:
+
+`DENIED: OpenBao token file is not configured.`
+
+That result does **not** by itself prove that the production provider AppRole runtime is unhealthy. Do not create, copy, expose, or broaden a persistent provider token merely to make the historical wrapper health check pass. Validate production provider readiness through the canonical AppRole resolver and provider-specific bootstrap identities.
+
+Direct `OpenBaoSecretResolver.resolve()` validation requires both the governed logical name and a `ConnectorContext` containing a non-empty correlation ID. Validation output must report only success/failure and approved field names; it must never print resolved values, RoleIDs, SecretIDs, OpenBao tokens, or provider credentials.
 
 ## Host prerequisites
 
-The Jason host must satisfy all of the following before provider contact:
+The Jason host must satisfy all of the following before convergence provider contact:
 
-1. The repository checkout is clean and on the approved `main` revision.
-2. The canonical `jason-secret` wrapper is installed and functioning.
-3. OpenBao is reachable through the approved Jason secret-provider boundary.
-4. The logical secrets required by the governed connectors exist and are readable by the Jason runtime identity:
+1. The repository checkout is clean and on the approved revision/branch for the proof.
+2. The project `.venv` is healthy and contains the current Jason implementation plus development dependencies.
+3. OpenBao is reachable locally, initialized, unsealed, and using the approved provider-specific AppRole boundary.
+4. The logical secrets required by the governed connectors resolve through their provider AppRoles:
    - `it_glue.readonly`
    - `datto_rmm.readonly`
 5. No secret values are echoed, copied into shell history, written into source files, or stored in test evidence.
 6. The operator has a valid Jason organization identifier for the client being tested.
-7. A harmless known IT Glue configuration is selected.
+7. A harmless known IT Glue configuration is selected through the bounded discovery procedure below or by an already-known non-secret identifier.
 8. A bounded Datto RMM search hint is selected that should resolve to exactly one known device.
-9. At least one explicit matching attribute is known in advance, preferably a stable device attribute such as serial number. Hostname/name matching may be used for the first proof only when the test objects are already known to be unique.
+9. At least one explicit matching attribute is known, preferably serial number. Hostname/name matching may be used for the first proof only when the test objects are known to be unique.
 
 If any prerequisite cannot be proven, stop. Do not widen the search or guess provider mappings.
+
+## Safe IT Glue configuration discovery
+
+Operators must not reverse-engineer internal class names or dump raw IT Glue responses to locate a test configuration. Use the supported bounded discovery tool.
+
+Credential-safe preflight:
+
+```bash
+cd ~/projects/jason
+.venv/bin/python tools/it_glue_configuration_discovery.py
+```
+
+The preflight must report `network_contacted: false`, `maximum_records: 1`, and `entity: Configurations`.
+
+A live discovery remains GET-only, is bounded to one returned configuration, uses the production IT Glue AppRole resolver, and prints only the configuration external ID plus approved identity attributes (`name`, `hostname`, `serial_number`) when present. Raw provider payloads and credentials are not printed or persisted.
+
+When a known IT Glue organization ID is available, constrain discovery with `--organization-id`. When a known configuration name is available, also constrain with `--name`.
+
+```bash
+sudo env PYTHONPATH=/home/al/projects/jason/implementation \
+/home/al/projects/jason/.venv/bin/python \
+tools/it_glue_configuration_discovery.py \
+  --live-read \
+  --organization-id '<KNOWN_IT_GLUE_ORGANIZATION_ID>' \
+  --name '<KNOWN_CONFIGURATION_NAME>'
+```
+
+Do not put secret values in these arguments. If no safe organization/name constraint is available, the tool still limits the provider response to one record; the operator must verify the candidate is appropriate before using it for convergence.
+
+The supported bounded IT Glue read implementation is `ItGlueLiveReadService` with `ItGlueLiveReadRequest`. Operator runbooks should reference supported tools/services and must not invent or infer implementation class names.
 
 ## Safe test-object requirements
 
 The selected IT Glue configuration and Datto RMM device must belong to the same Jason organization/client boundary. The test must not use production mutation capabilities.
 
-The Datto candidate limit should remain `1` for the first proof. If the search cannot resolve one unambiguous candidate, the proof fails closed and a better search hint must be selected.
+The Datto candidate limit remains `1` for the first proof. If the search cannot resolve one unambiguous candidate, the proof fails closed and a better search hint must be selected.
+
+Use the identity attributes emitted by bounded IT Glue discovery to form the Datto search hint. Prefer a stable serial number when Datto search supports the value reliably; otherwise use a unique hostname/name. Do not broaden to unbounded inventory enumeration merely to find a match.
 
 ## Preflight evidence to record
 
@@ -55,8 +125,8 @@ Record non-secret evidence for:
 - selected IT Glue configuration ID;
 - bounded Datto search hint description, avoiding sensitive data where possible;
 - explicit matching attribute names;
-- confirmation that `it_glue.readonly` resolved through the approved secret boundary;
-- confirmation that `datto_rmm.readonly` resolved through the approved secret boundary;
+- confirmation that `it_glue.readonly` resolved through the provider-specific AppRole boundary;
+- confirmation that `datto_rmm.readonly` resolved through the provider-specific AppRole boundary;
 - connector registration for `it_glue` and `datto_rmm`;
 - capability registration for `it_glue.entity.get` and `datto_rmm.device.search`.
 
