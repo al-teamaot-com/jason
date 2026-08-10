@@ -98,7 +98,13 @@ class SecretResolver(Protocol):
 class EmailTransport(Protocol):
     provider_id: str
 
-    def send(self, *, message: EmailMessage, credentials: Mapping[str, str]) -> ProviderSendResult: ...
+    def send(
+        self, *, message: EmailMessage, credentials: Mapping[str, str]
+    ) -> ProviderSendResult: ...
+
+
+class EmailAuditSink(Protocol):
+    def append(self, event_type: str, payload: Mapping[str, Any]) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,18 +115,15 @@ class EmailSendPolicy:
     max_recipients: int = 25
 
     def sender_allowed(self, sender: str) -> bool:
-        allowed = {self.default_sender.casefold(), *(item.casefold() for item in self.allowed_senders)}
+        allowed = {
+            self.default_sender.casefold(),
+            *(item.casefold() for item in self.allowed_senders),
+        }
         return sender.casefold() in allowed
 
 
 class GovernedEmailSendInvoker:
-    """Orchestrator-compatible CAP-004 invoker.
-
-    Authority, approval, capability resolution, provider selection, and policy
-    decisions occur before this invoker is called. This class validates the
-    canonical message, resolves only the named SES secret through JKD-003, and
-    invokes the already selected provider transport.
-    """
+    """Orchestrator-compatible CAP-004 invoker with mandatory safe audit events."""
 
     def __init__(
         self,
@@ -128,10 +131,12 @@ class GovernedEmailSendInvoker:
         secrets: SecretResolver,
         transport: EmailTransport,
         policy: EmailSendPolicy,
+        audit: EmailAuditSink,
     ) -> None:
         self._secrets = secrets
         self._transport = transport
         self._policy = policy
+        self._audit = audit
 
     def invoke(
         self,
@@ -139,14 +144,26 @@ class GovernedEmailSendInvoker:
         request: OrchestrationRequest,
         resolution: CapabilityResolutionResult,
     ) -> InvocationResult:
-        if request.capability_name != CAPABILITY_NAME or resolution.capability_name != CAPABILITY_NAME:
-            raise EmailValidationError("CAP-004 received an unexpected capability name.")
+        if (
+            request.capability_name != CAPABILITY_NAME
+            or resolution.capability_name != CAPABILITY_NAME
+        ):
+            raise EmailValidationError(
+                "CAP-004 received an unexpected capability name."
+            )
         if resolution.selected_provider_id != self._transport.provider_id:
-            raise EmailProviderMismatchError("Resolved provider does not match the bound email transport.")
+            raise EmailProviderMismatchError(
+                "Resolved provider does not match the bound email transport."
+            )
         if self._transport.provider_id != SES_PROVIDER_ID:
-            raise EmailProviderMismatchError("CAP-004 SES invoker is bound to an unexpected provider.")
+            raise EmailProviderMismatchError(
+                "CAP-004 SES invoker is bound to an unexpected provider."
+            )
 
         message = self._message_from_arguments(request.arguments)
+        audit_base = self._audit_metadata(request, message)
+        self._audit.append("email.send.attempted", audit_base)
+
         lease: SecretLease | None = None
         try:
             lease = self._secrets.resolve(
@@ -161,14 +178,33 @@ class GovernedEmailSendInvoker:
             )
             credentials = self._validate_secret(lease.values)
             result = self._transport.send(message=message, credentials=credentials)
+            if result.provider != self._transport.provider_id:
+                raise EmailProviderMismatchError(
+                    "Transport returned an unexpected provider identity."
+                )
+            if not result.accepted:
+                raise EmailCapabilityError("Email provider did not accept the message.")
+        except Exception as exc:
+            error_code = str(
+                getattr(exc, "error_code", "EMAIL_CAPABILITY_FAILED")
+            )
+            self._audit.append(
+                "email.send.failed",
+                {**audit_base, "error_code": error_code},
+            )
+            raise
         finally:
             if lease is not None:
                 self._secrets.revoke(lease)
 
-        if result.provider != self._transport.provider_id:
-            raise EmailProviderMismatchError("Transport returned an unexpected provider identity.")
-        if not result.accepted:
-            raise EmailCapabilityError("Email provider did not accept the message.")
+        self._audit.append(
+            "email.send.completed",
+            {
+                **audit_base,
+                "message_id": result.message_id,
+                "accepted": True,
+            },
+        )
 
         return InvocationResult(
             output={
@@ -176,10 +212,27 @@ class GovernedEmailSendInvoker:
                 "message_id": result.message_id,
                 "accepted": result.accepted,
                 "recipient_count": message.recipient_count,
-                "subject_sha256": sha256(message.subject.encode("utf-8")).hexdigest(),
+                "subject_sha256": audit_base["subject_sha256"],
             },
             attempts=1,
         )
+
+    @staticmethod
+    def _audit_metadata(
+        request: OrchestrationRequest, message: EmailMessage
+    ) -> dict[str, Any]:
+        return {
+            "execution_id": request.execution_id,
+            "correlation_id": request.correlation_id,
+            "principal_id": request.principal_id,
+            "organization_id": request.organization_id,
+            "client_id": request.client_id,
+            "capability": CAPABILITY_NAME,
+            "provider": SES_PROVIDER_ID,
+            "sender": message.sender,
+            "recipient_count": message.recipient_count,
+            "subject_sha256": sha256(message.subject.encode("utf-8")).hexdigest(),
+        }
 
     def _message_from_arguments(self, arguments: Mapping[str, Any]) -> EmailMessage:
         prohibited = sorted(_PROHIBITED_ARGUMENTS.intersection(arguments))
@@ -195,7 +248,9 @@ class GovernedEmailSendInvoker:
         reply_to = self._addresses(arguments.get("reply_to"), "reply_to")
 
         if bcc and not self._policy.allow_bcc:
-            raise EmailValidationError("BCC is not permitted by the active CAP-004 policy.")
+            raise EmailValidationError(
+                "BCC is not permitted by the active CAP-004 policy."
+            )
 
         subject = str(arguments.get("subject", "")).strip()
         if not subject:
@@ -204,17 +259,23 @@ class GovernedEmailSendInvoker:
         text_body = self._optional_body(arguments.get("text_body"))
         html_body = self._optional_body(arguments.get("html_body"))
         if text_body is None and html_body is None:
-            raise EmailValidationError("At least one of text_body or html_body is required.")
+            raise EmailValidationError(
+                "At least one of text_body or html_body is required."
+            )
 
         requested_sender = str(arguments.get("from_address", "")).strip()
         sender = requested_sender or self._policy.default_sender
         self._validate_address(sender, "from_address")
         if not self._policy.sender_allowed(sender):
-            raise EmailSenderDeniedError("Requested sender is not allowed by CAP-004 policy.")
+            raise EmailSenderDeniedError(
+                "Requested sender is not allowed by CAP-004 policy."
+            )
 
         count = len(to) + len(cc) + len(bcc)
         if count > self._policy.max_recipients:
-            raise EmailValidationError("Recipient count exceeds the CAP-004 policy limit.")
+            raise EmailValidationError(
+                "Recipient count exceeds the CAP-004 policy limit."
+            )
 
         return EmailMessage(
             sender=sender,
@@ -234,7 +295,13 @@ class GovernedEmailSendInvoker:
         rendered = str(value)
         return rendered if rendered.strip() else None
 
-    def _addresses(self, value: Any, field_name: str, *, required: bool = False) -> tuple[str, ...]:
+    def _addresses(
+        self,
+        value: Any,
+        field_name: str,
+        *,
+        required: bool = False,
+    ) -> tuple[str, ...]:
         if value is None:
             items: Sequence[Any] = ()
         elif isinstance(value, str):
@@ -242,11 +309,15 @@ class GovernedEmailSendInvoker:
         elif isinstance(value, Sequence):
             items = value
         else:
-            raise EmailValidationError(f"{field_name} must be a string or sequence of strings.")
+            raise EmailValidationError(
+                f"{field_name} must be a string or sequence of strings."
+            )
 
         addresses = tuple(str(item).strip() for item in items if str(item).strip())
         if required and not addresses:
-            raise EmailValidationError(f"{field_name} requires at least one address.")
+            raise EmailValidationError(
+                f"{field_name} requires at least one address."
+            )
         for address in addresses:
             self._validate_address(address, field_name)
         return addresses
@@ -254,15 +325,26 @@ class GovernedEmailSendInvoker:
     @staticmethod
     def _validate_address(address: str, field_name: str) -> None:
         _, parsed = parseaddr(address)
-        if parsed != address or "@" not in parsed or parsed.startswith("@") or parsed.endswith("@"):
-            raise EmailValidationError(f"{field_name} contains a malformed email address.")
+        if (
+            parsed != address
+            or "@" not in parsed
+            or parsed.startswith("@")
+            or parsed.endswith("@")
+        ):
+            raise EmailValidationError(
+                f"{field_name} contains a malformed email address."
+            )
 
     @staticmethod
     def _validate_secret(values: Mapping[str, str]) -> Mapping[str, str]:
         required = {"access_key_id", "secret_access_key"}
-        missing = sorted(name for name in required if not str(values.get(name, "")).strip())
+        missing = sorted(
+            name for name in required if not str(values.get(name, "")).strip()
+        )
         allowed = required | {"session_token"}
         unexpected = sorted(set(values) - allowed)
         if missing or unexpected:
-            raise EmailSecretError("SES secret payload does not match the approved CAP-004 schema.")
+            raise EmailSecretError(
+                "SES secret payload does not match the approved CAP-004 schema."
+            )
         return dict(values)
