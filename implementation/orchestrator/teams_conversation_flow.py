@@ -56,19 +56,34 @@ class BoundConversationPrincipal:
 
 @dataclass(frozen=True, slots=True)
 class ConversationIntent:
-    """Provider-neutral capability request derived from human language."""
+    """Provider-neutral governed capability request derived from human language.
+
+    execution_mode describes how Jason may satisfy the capability (for example,
+    deterministic provider execution). permission_mode describes what authority the
+    human is requesting (for example, observe). Keeping them separate prevents a
+    read-only authority request from being confused with execution-provider policy.
+    """
 
     capability_name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)
     capability_version: str | None = None
-    requested_mode: str = "observe"
+    execution_mode: str = "deterministic"
+    permission_mode: str = "observe"
     risk: str = "low"
 
     def __post_init__(self) -> None:
         if not self.capability_name.strip():
             raise ValueError("conversation intent capability_name is required")
-        if not self.requested_mode.strip() or not self.risk.strip():
-            raise ValueError("conversation intent mode and risk are required")
+        if not self.execution_mode.strip() or not self.permission_mode.strip() or not self.risk.strip():
+            raise ValueError("conversation intent execution mode, permission mode, and risk are required")
+        if self.permission_mode not in {
+            "observe",
+            "recommend",
+            "request_approval",
+            "execute",
+            "administer",
+        }:
+            raise ValueError("conversation intent permission_mode is invalid")
         forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:
@@ -197,5 +212,9 @@ class TeamsConversationFlow:
             raise PermissionError("orchestration request client does not match bound Teams identity")
         if orchestration_request.capability_name != intent.capability_name:
             raise PermissionError("request factory changed the governed capability intent")
+        if orchestration_request.requested_mode != intent.execution_mode:
+            raise PermissionError("request factory changed the governed execution mode")
+        if orchestration_request.permission_mode != intent.permission_mode:
+            raise PermissionError("request factory changed the governed permission mode")
         if orchestration_request.requester_kind != "human":
             raise PermissionError("Teams conversational requests must retain human requester identity")
