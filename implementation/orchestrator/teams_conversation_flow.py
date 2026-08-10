@@ -1,0 +1,201 @@
+"""Governed conversational ingress for Microsoft Teams via OpenClaw.
+
+OpenClaw is an authenticated transport/interface provider only. This module accepts
+transport evidence, re-binds the Microsoft identity to Jason identity/organization,
+resolves provider-neutral user intent into a named Jason capability, and hands the
+request to the Central Orchestrator. It never invokes a provider, shell command,
+node, tool, or agent directly.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Protocol
+
+from .contracts import OrchestrationRequest, OrchestrationResult
+from .service import CentralOrchestrator
+
+
+@dataclass(frozen=True, slots=True)
+class TeamsConversationPrincipalEvidence:
+    """Authenticated transport identity evidence supplied by the Teams boundary."""
+
+    microsoft_tenant_id: str
+    microsoft_object_id: str
+    authentication_assurance: str
+    conversation_id: str
+    message_id: str
+
+    def __post_init__(self) -> None:
+        values = {
+            "microsoft_tenant_id": self.microsoft_tenant_id,
+            "microsoft_object_id": self.microsoft_object_id,
+            "authentication_assurance": self.authentication_assurance,
+            "conversation_id": self.conversation_id,
+            "message_id": self.message_id,
+        }
+        missing = sorted(name for name, value in values.items() if not value.strip())
+        if missing:
+            raise ValueError("Teams identity evidence fields are empty: " + ", ".join(missing))
+
+
+@dataclass(frozen=True, slots=True)
+class BoundConversationPrincipal:
+    """Jason-owned identity and tenant binding derived from transport evidence."""
+
+    principal_id: str
+    organization_id: str
+    client_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.principal_id.strip() or not self.organization_id.strip():
+            raise ValueError("bound Jason principal and organization are required")
+        if self.client_id is not None and not self.client_id.strip():
+            raise ValueError("client_id must be non-empty when supplied")
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationIntent:
+    """Provider-neutral capability request derived from human language."""
+
+    capability_name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    capability_version: str | None = None
+    requested_mode: str = "observe"
+    risk: str = "low"
+
+    def __post_init__(self) -> None:
+        if not self.capability_name.strip():
+            raise ValueError("conversation intent capability_name is required")
+        if not self.requested_mode.strip() or not self.risk.strip():
+            raise ValueError("conversation intent mode and risk are required")
+        forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
+        present = sorted(forbidden.intersection(self.arguments))
+        if present:
+            raise ValueError(
+                "direct agent invocation is prohibited; request a named capability instead: "
+                + ", ".join(present)
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class TeamsConversationRequest:
+    text: str
+    identity: TeamsConversationPrincipalEvidence
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("Teams conversation text is required")
+
+
+class TeamsConversationIdentityBinder(Protocol):
+    def bind(self, evidence: TeamsConversationPrincipalEvidence) -> BoundConversationPrincipal | None: ...
+
+
+class ConversationIntentResolver(Protocol):
+    def resolve(
+        self,
+        *,
+        text: str,
+        principal: BoundConversationPrincipal,
+    ) -> ConversationIntent | None: ...
+
+
+class ConversationOrchestrationRequestFactory(Protocol):
+    """Build a fully governed request, including policy/data/budget context."""
+
+    def build(
+        self,
+        *,
+        principal: BoundConversationPrincipal,
+        intent: ConversationIntent,
+        identity: TeamsConversationPrincipalEvidence,
+    ) -> OrchestrationRequest: ...
+
+
+class TeamsConversationResponseRenderer(Protocol):
+    def render(self, result: OrchestrationResult) -> str: ...
+
+
+class TeamsConversationTransport(Protocol):
+    def send(
+        self,
+        *,
+        conversation_id: str,
+        text: str,
+        correlation_id: str,
+    ) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class TeamsConversationFlowResult:
+    orchestration: OrchestrationResult
+    transport_message_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TeamsConversationFlow:
+    """Route one authenticated Teams turn through Jason governance and orchestration."""
+
+    identity_binder: TeamsConversationIdentityBinder
+    intent_resolver: ConversationIntentResolver
+    request_factory: ConversationOrchestrationRequestFactory
+    orchestrator: CentralOrchestrator
+    response_renderer: TeamsConversationResponseRenderer
+    transport: TeamsConversationTransport
+
+    def handle(self, request: TeamsConversationRequest) -> TeamsConversationFlowResult:
+        principal = self.identity_binder.bind(request.identity)
+        if principal is None:
+            raise PermissionError("Teams identity is not bound to a governed Jason principal")
+
+        intent = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
+        if intent is None:
+            raise LookupError("no governed Jason capability intent could be resolved")
+
+        orchestration_request = self.request_factory.build(
+            principal=principal,
+            intent=intent,
+            identity=request.identity,
+        )
+        self._validate_bound_request(
+            orchestration_request=orchestration_request,
+            principal=principal,
+            intent=intent,
+        )
+
+        result = self.orchestrator.execute(orchestration_request)
+        response_text = self.response_renderer.render(result).strip()
+        if not response_text:
+            raise RuntimeError("conversation response renderer returned empty text")
+
+        transport_message_id = self.transport.send(
+            conversation_id=request.identity.conversation_id,
+            text=response_text,
+            correlation_id=orchestration_request.correlation_id,
+        )
+        if not transport_message_id.strip():
+            raise RuntimeError("Teams transport did not return a message identifier")
+
+        return TeamsConversationFlowResult(
+            orchestration=result,
+            transport_message_id=transport_message_id.strip(),
+        )
+
+    @staticmethod
+    def _validate_bound_request(
+        *,
+        orchestration_request: OrchestrationRequest,
+        principal: BoundConversationPrincipal,
+        intent: ConversationIntent,
+    ) -> None:
+        if orchestration_request.principal_id != principal.principal_id:
+            raise PermissionError("orchestration request principal does not match bound Teams identity")
+        if orchestration_request.organization_id != principal.organization_id:
+            raise PermissionError("orchestration request organization does not match bound Teams identity")
+        if orchestration_request.client_id != principal.client_id:
+            raise PermissionError("orchestration request client does not match bound Teams identity")
+        if orchestration_request.capability_name != intent.capability_name:
+            raise PermissionError("request factory changed the governed capability intent")
+        if orchestration_request.requester_kind != "human":
+            raise PermissionError("Teams conversational requests must retain human requester identity")
