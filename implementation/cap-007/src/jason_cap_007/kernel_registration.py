@@ -31,7 +31,11 @@ CAPABILITY_VERSION = "0.1"
 
 
 def email_send_capability() -> CapabilityDefinition:
-    """Return the conservative pilot definition for governed email sending."""
+    """Return the conservative pilot definition for governed email sending.
+
+    JAC-007 is the communication/service-delivery architectural mapping for this
+    vertical slice; the stable operational identity remains communication.email.send.
+    """
     return CapabilityDefinition(
         capability_name=CAPABILITY_NAME,
         version=CAPABILITY_VERSION,
@@ -86,6 +90,7 @@ def email_send_capability() -> CapabilityDefinition:
         created_at=REGISTERED_AT,
         metadata={
             "roadmap_id": "CAP-007",
+            "architectural_domain": "communication-and-service-delivery",
             "initial_provider": SES_PROVIDER_ID,
             "secret_name": "aws_ses.sendmail",
             "pilot_scope": "explicit-approval-only",
