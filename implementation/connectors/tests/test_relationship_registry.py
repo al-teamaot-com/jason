@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -45,10 +46,9 @@ def test_exact_duplicate_register_is_idempotent(tmp_path) -> None:
 
 def test_conflicting_relationship_id_reuse_fails_closed(tmp_path) -> None:
     registry = SQLiteCanonicalRelationshipRegistry(tmp_path / "relationships.sqlite3")
-    registry.register(relationship(), changed_by="orchestrator", reason="first")
-    conflicting = CanonicalRelationship(
-        **{**relationship().__dict__, "relationship_type": "maps_to"}
-    )
+    original = relationship()
+    registry.register(original, changed_by="orchestrator", reason="first")
+    conflicting = replace(original, relationship_type="maps_to")
     with pytest.raises(CanonicalRelationshipRegistryError, match="conflicting"):
         registry.register(conflicting, changed_by="orchestrator", reason="collision")
 
