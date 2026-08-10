@@ -59,6 +59,7 @@ def request(capability="autotask.ticket.get"):
             "correlation_id": "corr-runtime-1",
             "capability": capability,
             "requested_mode": "observe",
+            "execution_mode": "deterministic",
             "arguments": {"ticket_id": "12445279"},
             "principal": {
                 "principal_id": "person-al",
@@ -100,16 +101,20 @@ def allowed_decision():
     )
 
 
-def test_authority_adapter_preserves_identity_scope_and_caches_issued_context():
+def test_authority_adapter_preserves_identity_scope_and_uses_permission_mode():
     service = AuthorityService(allowed_decision())
     evaluator = JasonAuthorityEvaluator(service)
 
-    assert evaluator.evaluate(request()) == "allowed"
+    capability_request = request()
+    assert capability_request.permission_mode == "observe"
+    assert capability_request.execution_mode == "deterministic"
+    assert evaluator.evaluate(capability_request) == "allowed"
     submitted = service.calls[0]
     assert submitted.principal_id == "person-al"
     assert submitted.organization_id == "aot"
     assert submitted.client_id == "client-jbf"
     assert submitted.capability == "autotask.ticket.get"
+    assert submitted.requested_mode is PermissionMode.OBSERVE
     assert evaluator.context_id_for("req-runtime-1") == "ctx-openclaw-1"
 
 
@@ -118,7 +123,7 @@ def test_gate_chain_adapter_returns_approval_required():
     assert evaluator.evaluate(request()) == "approval_required"
 
 
-def test_dispatcher_passes_issued_context_and_never_self_approves():
+def test_dispatcher_passes_issued_context_and_separates_execution_from_permission():
     orchestrator = Orchestrator()
     evaluator = JasonAuthorityEvaluator(AuthorityService(allowed_decision()))
     assert evaluator.evaluate(request()) == "allowed"
@@ -135,6 +140,28 @@ def test_dispatcher_passes_issued_context_and_never_self_approves():
     assert submitted.authority_context_id == "ctx-openclaw-1"
     assert submitted.approval_present is False
     assert submitted.requester_kind == "service"
+    assert submitted.requested_mode == "deterministic"
+    assert submitted.permission_mode == "observe"
+
+
+def test_legacy_openclaw_payload_defaults_execution_strategy_to_deterministic():
+    legacy = CapabilityRequest.from_payload(
+        {
+            "request_id": "req-legacy-1",
+            "correlation_id": "corr-legacy-1",
+            "capability": "autotask.ticket.get",
+            "requested_mode": "observe",
+            "arguments": {"ticket_id": "12445279"},
+            "principal": {
+                "principal_id": "person-al",
+                "channel": "teams",
+                "external_user_id": "openclaw-user-1",
+                "organization_id": "aot",
+            },
+        }
+    )
+    assert legacy.permission_mode == "observe"
+    assert legacy.execution_mode == "deterministic"
 
 
 def test_dispatcher_fails_closed_when_no_context_was_issued():
