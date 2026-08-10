@@ -17,6 +17,8 @@ By the end of the session:
 5. Jason authenticated to Microsoft Graph using app-only certificate authentication.
 6. Jason installed its Teams app for a user who had never contacted the bot.
 7. Immediately afterward, OpenClaw successfully initiated a Teams message to that user.
+8. The combined certificate/private-key PEM was hardened from world-readable `0644` to `0640`, while preserving OpenClaw access.
+9. A live outbound Teams message succeeded after the permission hardening, providing a regression proof that the security change did not break transport.
 
 ## Infrastructure created or validated
 
@@ -106,6 +108,36 @@ OpenClaw `certificatePath` was updated to:
 `/run/jason-secrets/microsoft-teams/jason-approval-bot-combined.pem`
 
 After gateway restart, direct outbound Teams delivery succeeded.
+
+### Combined PEM permission hardening
+
+The proof-of-concept combined PEM initially had host mode `0644`, which exposed the private key to all local users. This was corrected on 2026-08-10.
+
+OpenClaw container runtime identity was verified as:
+
+`uid=1000(node) gid=1000(node) groups=1000(node)`
+
+The host file was changed to owner `root`, numeric group GID `1000`, and mode `0640`.
+
+Final host display:
+
+`-rw-r----- 1 root al ... /opt/jason/bootstrap/secrets/microsoft-teams/jason-approval-bot-combined.pem`
+
+Important namespace detail: on the host, GID `1000` resolves to group `al`; inside the OpenClaw container, the same numeric GID `1000` resolves to group `node`. Numeric UID/GID semantics are what control bind-mount access.
+
+Container read verification returned:
+
+`[PASS] OpenClaw can read combined PEM`
+
+A live outbound Teams regression test was then sent with message text `Jason security cleanup verification`.
+
+Result:
+
+- `deliveryStatus: sent`
+- Teams message ID: `1786384497021`
+- Existing direct conversation reference remained functional.
+
+Conclusion: the private-key-bearing combined PEM is no longer world-readable, and OpenClaw Teams outbound messaging remains operational.
 
 ## Microsoft Teams app publication
 
@@ -241,7 +273,7 @@ The specific joke text is incidental; the operational proof is that a user with 
 3. Move identity resolution to Microsoft Entra/authoritative directory lookup.
 4. Add centralized audit events and evidence references.
 5. Add bounded retries and timeouts for app installation/conversation availability.
-6. Harden certificate permissions and stop using world-readable combined PEM permissions.
+6. ~~Harden certificate permissions and stop using world-readable combined PEM permissions.~~ Completed and regression-tested 2026-08-10.
 7. Delete temporary `/tmp/jason_graph_token` after tests and do not use a persistent plaintext token file in production.
 8. Store secret references centrally (prefer OpenBao/SecretRefs).
 9. Explicitly configure trusted OpenClaw plugins and command owner.
@@ -260,4 +292,9 @@ The Teams capability should not be considered complete unless all of these conti
 - Organization Teams app can be checked/installed for a target user.
 - New-user install returns a successful idempotent state.
 - OpenClaw can then proactively message that user.
+- Private-key-bearing runtime files use least-privilege permissions and remain readable only by the required runtime identity/administrators.
 - Every install/send action can be tied to an auditable Jason workflow identity and purpose.
+
+## Session closeout status
+
+Documentation through the final completed action on 2026-08-10 is current. The Teams integration is operational, proactive new-user bootstrap is proven, and the immediate combined-PEM world-readable permission issue has been remediated and regression-tested. Remaining checklist items are explicitly tracked as future production-hardening work rather than undocumented session work.
