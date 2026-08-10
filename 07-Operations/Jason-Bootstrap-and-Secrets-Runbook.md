@@ -4,7 +4,7 @@
 
 Jason shall use a governed bootstrap process and an external secrets service. The current pilot default is **OpenBao**, an open-source, self-hosted secrets and encryption management system.
 
-Jason application code, GitHub, configuration files, container images, logs, test fixtures, and documentation shall never contain live credentials.
+Jason application code, GitHub, configuration files, container images, logs, test fixtures, chat, and documentation shall never contain live credentials.
 
 ## Canonical deployment record
 
@@ -18,7 +18,7 @@ That record is the source of truth for the actual runtime type, service or conta
 
 A capability or runbook must not ask an operator to discover or invent any of those values. If a required value is absent or marked `UNVERIFIED`, dependent live execution is blocked until the deployment record is completed through a governed change.
 
-The presence of a service file, backup timer, container, process, or configuration fragment does not by itself prove that the Secrets Broker is operationally ready.
+The presence of a service file, backup timer, container, process, configuration fragment, RoleID file, or SecretID file does not by itself prove that the Secrets Broker is operationally ready.
 
 ## Bootstrap behavior
 
@@ -74,19 +74,80 @@ it_glue.readonly
 
 Provider-specific paths are maintained only in the approved Secrets Broker mapping and the canonical deployment record where appropriate.
 
-Each integration receives its own policy and application identity. CAP-001 receives read-only access only to the logical secrets needed by its configured providers.
+Each provider receives its own policy and runtime identity. Provider runtimes receive read access only to the one logical secret required by that provider plus the minimum token self-revocation capability.
 
-## Canonical secret command
+## Canonical production provider runtime
 
-The intended operator and connector interface is:
+Production provider integrations use **provider-specific OpenBao AppRoles through JKD-003**. This is the canonical runtime contract for Autotask, IT Glue, and Datto RMM on the Jason pilot host.
+
+The runtime sequence is:
+
+1. read the provider-specific RoleID and SecretID from the protected host bootstrap directory;
+2. authenticate to OpenBao through AppRole;
+3. receive a short-lived service token;
+4. read exactly one allow-listed KV v2 provider secret;
+5. revoke the temporary token through `auth/token/revoke-self`;
+6. keep provider access tokens, OAuth bearer tokens, and secret values runtime-only.
+
+Provider runtime AppRole artifacts are stored under:
 
 ```text
-jason-secret <logical-secret-name>
+/opt/jason/bootstrap/secrets/openbao/<provider>-read-approle/role-id
+/opt/jason/bootstrap/secrets/openbao/<provider>-read-approle/secret-id
 ```
 
-The approved executable path must be recorded in the canonical deployment record. Until that path is verified, installed, and contract-tested, provider-dependent live operations remain blocked.
+The concrete paths, owners, modes, policies, and logical mappings are maintained in the deployment record.
 
-A runbook must never prompt for an "approved secret command path" or other infrastructure value that should already exist in the deployment record.
+Shared persistent provider runtime tokens are prohibited.
+
+## Historical `jason-secret` wrapper distinction
+
+`/usr/local/bin/jason-secret` remains a governed commissioning/general secret-wrapper boundary, but its historical token-file health and contract-test path is **not the canonical production provider runtime**.
+
+Commands such as:
+
+```text
+jason-secret --health
+jason-secret --contract-test <logical-name>
+```
+
+may return:
+
+```text
+DENIED: OpenBao token file is not configured.
+```
+
+when the production provider-specific AppRole runtime is healthy.
+
+Operators must **not** create, restore, copy, broaden, or persist a provider runtime token merely to make the historical wrapper health check pass. Production provider readiness must instead be validated through the provider-specific AppRole resolver, its bounded contract tests, and a governed provider live-read preflight.
+
+The wrapper remains useful only where a runbook explicitly identifies the wrapper contract as the intended boundary. Runbooks must not assume wrapper health proves production provider readiness.
+
+## Direct resolver validation contract
+
+`OpenBaoSecretResolver.resolve()` requires both:
+
+- the governed logical secret name; and
+- a `ConnectorContext` with a non-empty correlation ID and the active organization/capability context.
+
+Direct validation examples must use the actual contract. Validation output may report success/failure and approved field names, but must never print RoleIDs, SecretIDs, temporary OpenBao tokens, provider credentials, OAuth bearer tokens, or resolved values.
+
+## Host Python validation environment
+
+Host-side development and operational validation uses a project-local virtual environment. System Python must not be assumed to contain Jason test dependencies.
+
+Canonical bootstrap from the repository root:
+
+```bash
+cd ~/projects/jason
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e './implementation[dev]'
+.venv/bin/python --version
+.venv/bin/python -m pytest --version
+```
+
+Reusing `.venv` is permitted when it was built from the current checkout and remains healthy.
 
 ## Autotask credential fields
 
@@ -104,25 +165,36 @@ The values are entered only after the read-only API user and security level have
 
 ## Readiness verification
 
-Before a capability performs a live provider read, verify all of the following from repository-controlled documentation and automated checks:
+Before a production provider capability performs a live read, verify all of the following from repository-controlled documentation and automated checks:
 
 1. The canonical deployment record exists and has no blocking `UNVERIFIED` fields required by the operation.
-2. The canonical secret wrapper exists at the documented path.
-3. A no-value health check succeeds.
-4. The requested logical secret mapping exists.
-5. Provider authentication and policy are approved.
-6. Audit logging is enabled or covered by an approved, time-bounded exception.
-7. Backup and restore evidence is current for self-hosted providers.
-8. The dependent capability uses logical secret names only.
-9. The operator command contains exact values from approved configuration and does not require infrastructure discovery.
+2. OpenBao is reachable at the documented listener, initialized, unsealed, and active.
+3. The provider-specific RoleID and SecretID artifacts exist at the documented protected paths.
+4. The canonical AppRole resolver tests pass in the project `.venv`.
+5. The requested logical secret mapping exists and resolves through the provider-specific AppRole without printing values.
+6. The provider policy permits only the provider secret read plus required self-revocation behavior.
+7. Provider authentication and capability policy are approved.
+8. Audit logging is enabled or covered by an approved, time-bounded exception.
+9. Backup and restore evidence is current for self-hosted providers.
+10. The dependent capability uses logical secret names only.
+11. The provider live-read tool performs a credential-safe preflight before network contact.
+12. The operator command contains exact values from approved configuration and does not require infrastructure discovery.
 
 ## Failure behavior
 
 If OpenBao is unavailable, sealed, unauthorized, undocumented, or returns an unexpected secret version, Jason must fail closed. It must not fall back to environment files containing live production credentials.
 
+If a provider AppRole cannot authenticate, cannot read exactly its approved secret, or cannot revoke its temporary token, provider execution is blocked.
+
 If deployment facts are absent, Jason must identify the missing deployment-record fields and stop. It must not ask the operator to guess.
 
 A local `.env` file may be used only for non-sensitive development settings. Live secrets remain in OpenBao.
+
+## 2026-08-10 host validation lesson
+
+The first physical host validation exposed an important operational ambiguity: the historical wrapper emitted `DENIED: OpenBao token file is not configured` while the production provider AppRole runtime was healthy. The investigation also found that system Python did not include `pytest` and that direct resolver examples must pass `ConnectorContext`.
+
+These are now documented as explicit contracts rather than tribal knowledge. Future host validation must begin from this runbook and the deployment record instead of rediscovering those requirements interactively.
 
 ## Future profiles
 
