@@ -19,7 +19,7 @@ class JKD001OrchestrationContextEnforcer:
         if request.authority_context_id is None:
             return "AUTHORITY_CONTEXT_REQUIRED"
         try:
-            mode = PermissionMode(request.requested_mode)
+            mode = PermissionMode(request.permission_mode)
         except ValueError:
             return "AUTHORITY_CONTEXT_MODE_INVALID"
         result = self.validator.validate(

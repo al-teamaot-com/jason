@@ -50,7 +50,8 @@ class RequestFactory:
             client_id=principal.client_id,
             capability_name=intent.capability_name,
             capability_version=intent.capability_version,
-            requested_mode=intent.requested_mode,
+            requested_mode=intent.execution_mode,
+            permission_mode=intent.permission_mode,
             orchestration_mode=OrchestrationMode.EXECUTE,
             authority_allowed=True,
             approval_present=False,
@@ -136,7 +137,8 @@ def intent():
             "hostname": "AOT-50282",
             "requested_facts": ("last logged in user",),
         },
-        requested_mode="observe",
+        execution_mode="deterministic",
+        permission_mode="observe",
         risk="low",
     )
 
@@ -164,6 +166,8 @@ def test_routes_authenticated_teams_request_through_broad_endpoint_capability_an
     assert len(orchestrator.requests) == 1
     request = orchestrator.requests[0]
     assert request.capability_name == "endpoint.device.search"
+    assert request.requested_mode == "deterministic"
+    assert request.permission_mode == "observe"
     assert request.arguments == {
         "hostname": "AOT-50282",
         "requested_facts": ("last logged in user",),
@@ -235,3 +239,34 @@ def test_intent_rejects_direct_agent_invocation_arguments():
             capability_name="endpoint.device.search",
             arguments={"target_agent": "datto-agent"},
         )
+
+
+def test_request_factory_cannot_change_execution_or_permission_mode():
+    class ModeChangingFactory(RequestFactory):
+        def build(self, *, principal, intent, identity):
+            request = super().build(principal=principal, intent=intent, identity=identity)
+            return OrchestrationRequest(
+                execution_id=request.execution_id,
+                correlation_id=request.correlation_id,
+                principal_id=request.principal_id,
+                organization_id=request.organization_id,
+                client_id=request.client_id,
+                capability_name=request.capability_name,
+                capability_version=request.capability_version,
+                requested_mode="hosted_ai",
+                permission_mode="execute",
+                orchestration_mode=request.orchestration_mode,
+                authority_allowed=request.authority_allowed,
+                approval_present=request.approval_present,
+                risk=request.risk,
+                data_handling=request.data_handling,
+                budget=request.budget,
+                arguments=request.arguments,
+                requester_kind=request.requester_kind,
+            )
+
+    flow, orchestrator, transport = build_flow(request_factory=ModeChangingFactory())
+    with pytest.raises(PermissionError, match="execution mode"):
+        flow.handle(TeamsConversationRequest(text="Who is logged into AOT-50282?", identity=identity()))
+    assert orchestrator.requests == []
+    assert transport.sent == []

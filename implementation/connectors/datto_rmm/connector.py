@@ -99,13 +99,27 @@ class DattoRmmConnector(ConnectorBase):
         arguments: Mapping[str, Any],
     ) -> tuple[str, Mapping[str, Any] | None]:
         if capability == "datto_rmm.device.get":
-            return f"/api/v2/device/{arguments['device_uid']}", None
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+            return f"/api/v2/device/{device_uid}", None
         if capability == "datto_rmm.device.search":
             params: dict[str, Any] = {
                 "page": int(arguments.get("page", 1)),
                 "max": min(int(arguments.get("max", 1)), 250),
             }
-            search = str(arguments.get("search", "")).strip()
+            # Canonical resource inquiries use provider-neutral selectors. The
+            # connector translates them into Datto's broad account-device search
+            # rather than requiring a workflow-specific script or component.
+            search = str(
+                arguments.get("search")
+                or arguments.get("hostname")
+                or arguments.get("name")
+                or arguments.get("resource_id")
+                or ""
+            ).strip()
             if search:
                 params["search"] = search
             return "/api/v2/account/devices", params

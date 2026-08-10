@@ -41,7 +41,8 @@ def request() -> OrchestrationRequest:
         client_id="aot",
         capability_name="endpoint.device.search",
         capability_version="1.0",
-        requested_mode="observe",
+        requested_mode="deterministic",
+        permission_mode="observe",
         orchestration_mode=OrchestrationMode.EXECUTE,
         authority_allowed=True,
         approval_present=False,
@@ -55,7 +56,7 @@ def request() -> OrchestrationRequest:
     )
 
 
-def test_invoker_preserves_identity_scope_and_maps_canonical_capability() -> None:
+def test_invoker_preserves_identity_scope_authority_and_maps_canonical_capability() -> None:
     connector = FakeConnector()
     invoker = GovernedConnectorCapabilityInvoker(
         connectors={"datto_rmm": connector},
@@ -71,6 +72,7 @@ def test_invoker_preserves_identity_scope_and_maps_canonical_capability() -> Non
     assert connector.received.context.organization_id == "aot"
     assert connector.received.context.client_id == "aot"
     assert connector.received.context.capability == "datto_rmm.device.search"
+    assert connector.received.context.mode == "observe"
     assert result.output["provider"] == "datto_rmm"
 
 

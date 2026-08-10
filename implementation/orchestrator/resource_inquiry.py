@@ -13,7 +13,8 @@ class ResourceInquiry:
     resource_type: str
     resource_selector: Mapping[str, Any]
     requested_facts: tuple[str, ...]
-    requested_mode: str = "observe"
+    execution_mode: str = "deterministic"
+    permission_mode: str = "observe"
 
     def __post_init__(self) -> None:
         if not self.resource_type.strip():
@@ -22,7 +23,9 @@ class ResourceInquiry:
             raise ValueError("at least one requested fact is required")
         if not all(fact.strip() for fact in self.requested_facts):
             raise ValueError("requested facts must be non-empty")
-        if self.requested_mode != "observe":
+        if not self.execution_mode.strip():
+            raise ValueError("execution_mode is required")
+        if self.permission_mode != "observe":
             raise PermissionError("resource inquiry planning is read-only")
 
 
@@ -92,10 +95,14 @@ class GovernedResourceInquiryPlanner:
                 raise PermissionError(
                     "resource plan selected a capability outside the governed candidate set"
                 )
-            if inquiry.requested_mode not in capability.permitted_execution_modes:
-                raise PermissionError("resource plan selected a capability that does not permit observe mode")
+            if inquiry.execution_mode not in capability.permitted_execution_modes:
+                raise PermissionError(
+                    "resource plan selected a capability that does not permit the requested execution mode"
+                )
             if capability.metadata.get("provider_neutral", "false").lower() != "true":
                 raise PermissionError("resource inquiry plans must use provider-neutral capabilities")
+            if capability.metadata.get("read_only", "false").lower() != "true":
+                raise PermissionError("resource inquiry plans may only use declared read-only capabilities")
             validated.append(step)
 
         return ResourceInquiryPlan(
@@ -105,9 +112,11 @@ class GovernedResourceInquiryPlanner:
 
     @staticmethod
     def _eligible(capability: CapabilityDefinition, inquiry: ResourceInquiry) -> bool:
-        if inquiry.requested_mode not in capability.permitted_execution_modes:
+        if inquiry.execution_mode not in capability.permitted_execution_modes:
             return False
         if capability.metadata.get("provider_neutral", "false").lower() != "true":
+            return False
+        if capability.metadata.get("read_only", "false").lower() != "true":
             return False
         resource_types = {
             item.strip()

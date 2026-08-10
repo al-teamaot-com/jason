@@ -55,6 +55,7 @@ class OrchestrationRequest:
     organization_id: str
     capability_name: str
     capability_version: str | None
+    # Execution strategy used by capability/provider resolution, e.g. deterministic.
     requested_mode: str
     orchestration_mode: OrchestrationMode
     authority_allowed: bool
@@ -68,6 +69,8 @@ class OrchestrationRequest:
     policy_ids: tuple[str, ...] = ()
     artifact_references: tuple[ArtifactReference, ...] = ()
     requester_kind: str = "human"
+    # Human/service authority mode is intentionally separate from execution strategy.
+    permission_mode: str = "observe"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
     authority_context_id: str | None = None
@@ -82,6 +85,7 @@ class OrchestrationRequest:
             "requested_mode": self.requested_mode,
             "risk": self.risk,
             "requester_kind": self.requester_kind,
+            "permission_mode": self.permission_mode,
         }
         missing = sorted(name for name, value in required.items() if not value.strip())
         if missing:
@@ -92,6 +96,14 @@ class OrchestrationRequest:
             raise ValueError("authority_context_id must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
+        if self.permission_mode not in {
+            "observe",
+            "recommend",
+            "request_approval",
+            "execute",
+            "administer",
+        }:
+            raise ValueError("permission_mode is not a recognized authority mode.")
         forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:

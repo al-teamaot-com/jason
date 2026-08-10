@@ -16,7 +16,8 @@ class GovernedConnectorCapabilityInvoker:
 
     Provider selection is owned by governed capability resolution. This adapter only
     permits the resolved provider to execute the requested canonical capability and
-    preserves the Jason identity/client scope in the connector context.
+    preserves Jason identity/client scope and authority mode in the connector context.
+    Execution strategy and authority permission are intentionally separate concepts.
     """
 
     connectors: Mapping[str, Connector]
@@ -56,7 +57,7 @@ class GovernedConnectorCapabilityInvoker:
                 organization_id=request.organization_id,
                 client_id=request.client_id,
                 capability=provider_capability,
-                mode=request.requested_mode,
+                mode=request.permission_mode,
             ),
             arguments=request.arguments,
         )

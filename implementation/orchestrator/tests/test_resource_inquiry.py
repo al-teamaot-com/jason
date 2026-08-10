@@ -25,7 +25,13 @@ from orchestrator.resource_inquiry import (
 NOW = datetime(2026, 8, 10, tzinfo=timezone.utc)
 
 
-def capability(name: str, *, provider_neutral: bool = True, resource_types: str = "endpoint"):
+def capability(
+    name: str,
+    *,
+    provider_neutral: bool = True,
+    resource_types: str = "endpoint",
+    read_only: bool = True,
+):
     return CapabilityDefinition(
         capability_name=name,
         version="1.0",
@@ -33,10 +39,10 @@ def capability(name: str, *, provider_neutral: bool = True, resource_types: str 
         lifecycle_status=CapabilityLifecycle.ACTIVE,
         business_purpose="Retrieve governed endpoint information.",
         owner_service="Jason Resource Intelligence",
-        architectural_capability_ids=frozenset({"JAC-006"}),
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
         risk_level=CapabilityRisk.LOW,
         data_classifications=frozenset({"internal"}),
-        permitted_execution_modes=frozenset({"observe"}),
+        permitted_execution_modes=frozenset({"deterministic"}),
         input_schema_reference="schema://resource-query/1.0",
         output_schema_reference="schema://resource-result/1.0",
         invoking_roles=frozenset({"orchestrator"}),
@@ -60,6 +66,7 @@ def capability(name: str, *, provider_neutral: bool = True, resource_types: str 
         metadata={
             "provider_neutral": "true" if provider_neutral else "false",
             "resource_types": resource_types,
+            "read_only": "true" if read_only else "false",
         },
     )
 
@@ -142,11 +149,21 @@ def test_planner_fails_closed_when_no_registered_resource_capability_exists():
         planner.plan(inquiry())
 
 
-def test_resource_inquiry_rejects_non_read_mode():
+def test_resource_inquiry_rejects_non_read_permission_mode():
     with pytest.raises(PermissionError, match="read-only"):
         ResourceInquiry(
             resource_type="endpoint",
             resource_selector={"hostname": "AOT-50282"},
             requested_facts=("last logged in user",),
-            requested_mode="change",
+            permission_mode="execute",
         )
+
+
+def test_planner_excludes_capabilities_not_declared_read_only():
+    planner = GovernedResourceInquiryPlanner(
+        registry=registry_service(capability("endpoint.device.change", read_only=False)),
+        reasoner=Reasoner("endpoint.device.change"),
+    )
+
+    with pytest.raises(LookupError, match="no governed read capabilities"):
+        planner.plan(inquiry())
