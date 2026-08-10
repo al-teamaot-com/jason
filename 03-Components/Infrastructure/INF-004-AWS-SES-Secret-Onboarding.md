@@ -3,7 +3,7 @@
 **Status:** Foundation
 **Owner:** Jason Architecture Authority
 **Consumes:** JKD-003 Secrets Broker, INF-001 Secret Provider Foundation
-**Supports:** CAP-004 Governed Email Send
+**Supports:** CAP-007 Governed Email Send
 
 ## Purpose
 
@@ -13,7 +13,7 @@ AWS SES credentials are operational provider credentials. They are not capabilit
 
 ## Logical secret
 
-CAP-004 requests only this provider-neutral logical name:
+CAP-007 requests only this provider-neutral logical name:
 
 ```text
 aws_ses.sendmail
@@ -55,7 +55,7 @@ Optional field:
 session_token
 ```
 
-No other fields are permitted by CAP-004 Version 0.1.
+No other fields are permitted by CAP-007 Version 0.1.
 
 AWS region, default sender address, SES endpoint behavior, provider ID, sender policy, and recipient policy are non-secret configuration and must remain outside the secret payload.
 
@@ -64,7 +64,7 @@ AWS region, default sender address, SES endpoint behavior, provider ID, sender p
 The normal runtime path is:
 
 ```text
-Authorized CAP-004 execution
+Authorized CAP-007 execution
   -> JKD-003 Secrets Broker
   -> logical secret aws_ses.sendmail
   -> provider-specific OpenBao AppRole
@@ -79,16 +79,14 @@ The Central Orchestrator must never receive or persist the SES credential values
 
 ## AWS credential authority
 
-The AWS identity represented by this secret must be dedicated to Jason email delivery and limited to the minimum SES send permissions required by the approved deployment.
-
-It must not receive unrelated AWS administrative authority.
+The AWS identity represented by this secret must be dedicated to Jason email delivery and limited to the minimum SES send permissions required by the approved deployment. It must not receive unrelated AWS administrative authority.
 
 Static AWS access credentials are permitted only as the initial compatibility mechanism. The deployment should prefer workload identity or short-lived AWS credentials when the hosting environment supports them safely. Static credentials require documented rotation and retirement criteria.
 
 ## Provisioning rules
 
 1. Credential values are entered only through the governed secret lifecycle ceremony.
-2. Values must never be pasted into GitHub, documentation, tickets, chat, command history, or CAP-004 arguments.
+2. Values must never be pasted into GitHub, documentation, tickets, chat, command history, or CAP-007 arguments.
 3. The provider lifecycle must use the canonical JKD-003 create/update/verify/rotate/deactivate/reactivate model.
 4. KV v2 create/update must use compare-and-set semantics.
 5. Verification must confirm field presence and runtime resolution without printing values.
@@ -97,7 +95,7 @@ Static AWS access credentials are permitted only as the initial compatibility me
 
 ## Readiness gate
 
-CAP-004 live execution remains blocked until all of the following are verified:
+CAP-007 live execution remains blocked until all of the following are verified:
 
 - `aws_ses.sendmail` is represented in the canonical provider-secret lifecycle catalog;
 - the OpenBao path exists through governed provisioning;
@@ -106,7 +104,7 @@ CAP-004 live execution remains blocked until all of the following are verified:
 - the SES AWS identity has least-privilege send authority;
 - the configured SES region is known and non-secret;
 - the configured sender identity is approved and verified with SES;
-- CAP-004 check-only succeeds without secret resolution;
+- CAP-007 check-only succeeds without secret resolution;
 - audit validation confirms no credential values or message bodies are persisted.
 
 ## Definition of Done
