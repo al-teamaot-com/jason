@@ -40,6 +40,14 @@ connectors:
       - datto_rmm.alerts.list
       - datto_rmm.patch_status.get
       - datto_rmm.component_results.list
+    canonical_mappings:
+      endpoint.device.search: datto_rmm.device.search
+      endpoint.device.read: datto_rmm.device.get
+      endpoint.device.audit.read: datto_rmm.patch_status.get
+    notes:
+      - Provider-neutral endpoint capabilities are selected by Jason governance before connector invocation.
+      - Datto RMM remains an implementation provider and is never selected directly by Teams, OpenClaw, or an agent.
+      - Interactive Windows session identity is not yet declared as a Datto RMM capability because the existing connector does not expose a verified session endpoint.
   it_glue:
     status: foundation_built
     priority: 4
