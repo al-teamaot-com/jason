@@ -10,7 +10,7 @@
 
 Jason can observe the same physical endpoint in multiple provider systems. Datto RMM manages the endpoint operationally, while IT Glue primarily documents it. Treating the two provider records as equal authorities creates avoidable ambiguity when names differ, documentation is stale, or one provider omits an identity attribute from a particular API response.
 
-The existing physical AOT workflow already treats Datto RMM as the operational inventory for managed endpoints. Host validation also demonstrated that a bounded Datto search can establish a managed device even when an IT Glue configuration cannot yet be safely corroborated to that device.
+The existing physical AOT workflow already treats Datto RMM as the operational inventory for managed endpoints. The 2026-08-10 physical Jason-host validation demonstrated that a bounded Datto search can establish a managed device even when an IT Glue configuration cannot yet be safely corroborated to that device.
 
 J-117 remains controlling: a provider record is not the Jason canonical object itself, and Jason canonical identity must remain provider-independent.
 
@@ -69,6 +69,23 @@ The convergence workflow becomes:
 6. otherwise retain the Datto managed device and mark the documentation relationship unresolved;
 7. require separate policy-controlled promotion before a relationship becomes canonical.
 
+## Host validation result
+
+The first accepted live proof on 2026-08-10 established a single bounded Datto managed-device observation and preserved it when the selected IT Glue documentation relationship could not be corroborated on the requested serial-number attribute.
+
+The live result proved that:
+
+- Datto managed-device authority can be established independently from IT Glue documentation quality;
+- an unresolved IT Glue relationship does not erase the authoritative Datto observation;
+- no canonical Jason object is created merely by observing the Datto device;
+- no cross-provider relationship is promoted as a side effect of observation;
+- no provider mutation is required;
+- raw provider payloads and secrets remain outside repository evidence.
+
+The durable host-proof record is:
+
+`08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+
 ## Alternatives considered
 
 ### Equal-provider corroboration before recognizing a device
@@ -91,6 +108,8 @@ Rejected. J-118 requires the smallest useful canonical relationship vocabulary a
 
 This ADR narrows authority by resource domain and attribute rather than declaring one provider globally authoritative. Future authority assignments for users, tickets, agreements, knowledge, security state, Microsoft identities, cloud resources, or other objects require their own policy or architecture decision.
 
+The accepted authority rule is therefore a pattern for explicit **authority by resource domain and attribute**, not a global provider-precedence rule.
+
 ## Validation requirements
 
 Implementation must prove that:
@@ -101,3 +120,5 @@ Implementation must prove that:
 - corroborated mappings use the existing canonical `represents` relationship from IT Glue documentation to the Datto managed-device observation;
 - provider mismatch and tenant mismatch still fail closed;
 - no canonical promotion occurs as a side effect of observation.
+
+These requirements passed the focused PR #136 authority/convergence suite and the applicable GitHub release gates before governance completion.
