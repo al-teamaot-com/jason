@@ -1,11 +1,19 @@
 # Teams Integration Security Cleanup Checklist
 
-This checklist captures hardening work that should follow the successful 2026-08-10 proof-of-concept.
+This checklist captures hardening work that follows the successful 2026-08-10 proof-of-concept.
 
 ## Immediate
 
-- [ ] Replace mode `0644` on `jason-approval-bot-combined.pem` with least-privilege ownership/group and mode `0640` or tighter.
-- [ ] Confirm only the OpenClaw runtime identity and authorized administrators can read the private key.
+- [x] Replace mode `0644` on `jason-approval-bot-combined.pem` with least-privilege ownership/group and mode `0640` or tighter.
+  - Completed 2026-08-10.
+  - Host path: `/opt/jason/bootstrap/secrets/microsoft-teams/jason-approval-bot-combined.pem`
+  - Final host mode: `0640` (`-rw-r-----`).
+  - File owner: `root`.
+  - Group is numeric GID `1000`; the host displays this as `al`, while the OpenClaw container maps GID `1000` to group `node`.
+- [x] Confirm only the OpenClaw runtime group and authorized administrators can read the combined private-key PEM.
+  - OpenClaw runtime identity verified as `uid=1000(node) gid=1000(node) groups=1000(node)`.
+  - Container read test returned `[PASS] OpenClaw can read combined PEM`.
+  - Outbound Teams regression test after hardening returned `deliveryStatus: sent`, proving the permission change did not break the Teams transport.
 - [ ] Delete `/tmp/jason_graph_token` after testing.
 - [ ] Ensure future Graph tokens are memory-only or short-lived protected runtime artifacts.
 - [ ] Run `openclaw secrets audit --check`.
