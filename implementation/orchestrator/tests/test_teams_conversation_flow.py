@@ -98,7 +98,7 @@ class Orchestrator:
 
 
 class Renderer:
-    def render(self, result):
+    def render(self, result, intent):
         device = result.output["data"]["devices"][0]
         return f"{device['hostname']}: last user {device['lastUser']}"
 

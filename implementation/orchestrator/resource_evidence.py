@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping, Protocol, Sequence
+
+from .contracts import OrchestrationResult, OrchestrationStatus
+from .teams_conversation_flow import ConversationIntent
+
+
+class StructuredResourceEvidenceReasoner(Protocol):
+    """Identify evidence paths for requested facts without authority to assert values.
+
+    The reasoner may inspect the provider result and say where a requested fact appears.
+    Jason deterministically dereferences that path and uses the actual provider value;
+    a model-supplied value is never trusted as evidence.
+    """
+
+    def locate(
+        self,
+        *,
+        requested_facts: tuple[str, ...],
+        data: Any,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedResourceFact:
+    requested_fact: str
+    value: Any
+    json_pointer: str
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedResourceEvidenceInterpreter:
+    reasoner: StructuredResourceEvidenceReasoner
+
+    def interpret(
+        self,
+        *,
+        result: OrchestrationResult,
+        requested_facts: tuple[str, ...],
+    ) -> tuple[VerifiedResourceFact, ...]:
+        if result.status is not OrchestrationStatus.SUCCEEDED:
+            raise LookupError("resource evidence is unavailable because orchestration did not succeed")
+        if not requested_facts or not all(item.strip() for item in requested_facts):
+            raise ValueError("requested_facts must be non-empty")
+
+        provider = str(result.output.get("provider", "")).strip()
+        if not provider or not result.provider_id or provider != result.provider_id:
+            raise RuntimeError("resource result provider provenance is missing or inconsistent")
+        if "data" not in result.output:
+            raise RuntimeError("resource result does not contain provider data")
+        data = result.output["data"]
+
+        proposals = tuple(
+            self.reasoner.locate(
+                requested_facts=requested_facts,
+                data=data,
+            )
+        )
+        if not proposals:
+            raise LookupError("requested facts were not located in governed provider evidence")
+
+        allowed_facts = set(requested_facts)
+        verified: list[VerifiedResourceFact] = []
+        seen: set[str] = set()
+        for proposal in proposals:
+            if not isinstance(proposal, Mapping):
+                raise ValueError("resource evidence proposal must be an object")
+            requested_fact = str(proposal.get("requested_fact", "")).strip()
+            pointer = str(proposal.get("json_pointer", "")).strip()
+            if requested_fact not in allowed_facts:
+                raise PermissionError("evidence reasoner attempted to assert an unrequested fact")
+            if requested_fact in seen:
+                raise ValueError("evidence reasoner returned duplicate requested facts")
+            if not pointer.startswith("/"):
+                raise ValueError("resource evidence must use an absolute JSON Pointer")
+
+            actual = _resolve_json_pointer(data, pointer)
+            verified.append(
+                VerifiedResourceFact(
+                    requested_fact=requested_fact,
+                    value=actual,
+                    json_pointer=pointer,
+                )
+            )
+            seen.add(requested_fact)
+
+        missing = tuple(fact for fact in requested_facts if fact not in seen)
+        if missing:
+            raise LookupError(
+                "governed provider evidence did not support all requested facts: "
+                + ", ".join(missing)
+            )
+        return tuple(verified)
+
+
+def _resolve_json_pointer(document: Any, pointer: str) -> Any:
+    """Resolve RFC 6901-style JSON Pointer against provider evidence."""
+
+    current = document
+    for raw_segment in pointer.split("/")[1:]:
+        segment = raw_segment.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, Mapping):
+            if segment not in current:
+                raise LookupError(f"resource evidence pointer does not exist: {pointer}")
+            current = current[segment]
+            continue
+        if isinstance(current, (list, tuple)):
+            try:
+                index = int(segment)
+            except ValueError as error:
+                raise LookupError(f"resource evidence pointer has invalid list index: {pointer}") from error
+            if index < 0 or index >= len(current):
+                raise LookupError(f"resource evidence pointer is outside the result: {pointer}")
+            current = current[index]
+            continue
+        raise LookupError(f"resource evidence pointer traverses a scalar value: {pointer}")
+    return current
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedTeamsResourceResponseRenderer:
+    """Render only facts deterministically verified against governed provider evidence."""
+
+    interpreter: GovernedResourceEvidenceInterpreter
+
+    def render(self, result: OrchestrationResult, intent: ConversationIntent) -> str:
+        raw_requested_facts = intent.arguments.get("requested_facts", ())
+        if not isinstance(raw_requested_facts, (list, tuple)):
+            raise ValueError("conversation resource intent is missing requested_facts")
+        requested_facts = tuple(str(item).strip() for item in raw_requested_facts)
+        facts = self.interpreter.interpret(
+            result=result,
+            requested_facts=requested_facts,
+        )
+
+        subject = _resource_subject(intent.arguments)
+        source = result.provider_id or "governed provider"
+        if len(facts) == 1:
+            fact = facts[0]
+            return f"{subject} — {fact.requested_fact}: {_display_value(fact.value)}. Source: {source}."
+
+        rendered = "; ".join(
+            f"{fact.requested_fact}: {_display_value(fact.value)}" for fact in facts
+        )
+        return f"{subject} — {rendered}. Source: {source}."
+
+
+def _resource_subject(arguments: Mapping[str, Any]) -> str:
+    for key in ("hostname", "name", "resource_id", "serial_number"):
+        value = arguments.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return "Requested resource"
+
+
+def _display_value(value: Any) -> str:
+    if value is None:
+        return "not reported"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    raise ValueError("resource evidence fact must resolve to a scalar value")

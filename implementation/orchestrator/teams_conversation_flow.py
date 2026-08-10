@@ -129,7 +129,7 @@ class ConversationOrchestrationRequestFactory(Protocol):
 
 
 class TeamsConversationResponseRenderer(Protocol):
-    def render(self, result: OrchestrationResult) -> str: ...
+    def render(self, result: OrchestrationResult, intent: ConversationIntent) -> str: ...
 
 
 class TeamsConversationTransport(Protocol):
@@ -180,7 +180,7 @@ class TeamsConversationFlow:
         )
 
         result = self.orchestrator.execute(orchestration_request)
-        response_text = self.response_renderer.render(result).strip()
+        response_text = self.response_renderer.render(result, intent).strip()
         if not response_text:
             raise RuntimeError("conversation response renderer returned empty text")
 
