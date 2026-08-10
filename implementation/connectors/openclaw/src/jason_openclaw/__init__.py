@@ -8,6 +8,10 @@ from .connector import (
     PolicyEvaluator,
     ReplayStore,
 )
+from .conversation_ingress import (
+    GovernedOpenClawTeamsConversationIngress,
+    OpenClawTeamsConversationEnvelope,
+)
 from .ingress import GovernedOpenClawIngress, IngressAuditSink, TransportAuthenticator
 from .models import (
     CapabilityRequest,
@@ -24,9 +28,11 @@ __all__ = [
     "CapabilityResponse",
     "ConnectorContractError",
     "GovernedOpenClawIngress",
+    "GovernedOpenClawTeamsConversationIngress",
     "IngressAuditSink",
     "OpenClawConnector",
     "OpenClawPrincipal",
+    "OpenClawTeamsConversationEnvelope",
     "PolicyEvaluator",
     "ReplayStore",
     "TransportAuthenticator",
