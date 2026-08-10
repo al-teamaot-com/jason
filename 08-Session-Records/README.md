@@ -41,6 +41,8 @@ Each record should include:
 - `Datto-RMM-First-Live-Read-Host-Proof-2026-08-09.md` — first governed Datto RMM live-read proof.
 - `IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md` — physical Jason-host validation of canonical OpenBao provider AppRole runtime, IT Glue/Datto bounded live reads and discovery, Datto managed-device authority, documentation reconciliation behavior, and the regression-baseline defects discovered before the Teams approval round-trip.
 
+The 2026-08-10 proof is intentionally linked from the bootstrap/secrets runbook, secret-provider deployment record, convergence checklist, live convergence runbook, ADR-004, and `CURRENT.md` so the operational facts do not depend on chat history.
+
 ## Source-of-Truth Rule
 
 Session records provide history and context.
