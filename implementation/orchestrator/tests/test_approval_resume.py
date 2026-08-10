@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from connectors.src.jason_connectors.approval_requests import AcceptedApproval
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
@@ -33,7 +34,15 @@ def request() -> OrchestrationRequest:
         organization_id="org-a", client_id="client-a", capability_name="microsoft.resource.execute",
         capability_version=None, requested_mode="execute", orchestration_mode=OrchestrationMode.EXECUTE,
         authority_allowed=False, approval_present=False, risk="high",
-        data_handling=DataHandlingPolicy(), budget=ExecutionBudget(),
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+            retention_allowed=False,
+        ),
+        budget=ExecutionBudget(
+            maximum_estimated_cost=Decimal("0"),
+            maximum_attempts=1,
+        ),
     )
 
 
