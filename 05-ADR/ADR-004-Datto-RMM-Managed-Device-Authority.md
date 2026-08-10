@@ -43,13 +43,17 @@ Jason remains authoritative for:
 7. Ambiguous Datto search results remain fail-closed; authority requires one governed device observation.
 8. Secrets, provider access tokens, and raw provider payloads remain outside canonical object and evidence records unless explicitly governed by a protected evidence mechanism.
 
-## Relationship direction
+## Relationship direction and provider authority
 
-When a relationship is corroborated, the semantic direction is:
+Provider authority and canonical relationship direction are separate concerns.
 
-`Datto managed device -> represented_by -> IT Glue configuration`
+J-118 already defines the canonical relationship `represents` as the representation pointing to the object it represents. Therefore, when documentation is corroborated, the canonical relationship evidence is:
 
-The Datto device is the authoritative provider observation for the managed endpoint. The IT Glue configuration is the documentation representation. This direction does not make the Datto provider record the Jason canonical object.
+`IT Glue configuration -> represents -> Datto managed-device observation`
+
+Datto RMM is still the authoritative external provider for managed-device existence and operational identity. The relationship direction does not make IT Glue authoritative for the device and does not make the Datto provider record the Jason canonical object.
+
+Jason must not introduce an inverse canonical relationship such as `represented_by` merely to place the authoritative provider on the source side. If an inverse view is useful to operators, it may be presented as a derived view while preserving the canonical `represents` relationship in stored evidence.
 
 ## Operational consequence
 
@@ -59,7 +63,7 @@ The convergence workflow becomes:
 2. recognize the Datto observation as authoritative for the managed-device domain;
 3. locate or read a candidate IT Glue configuration;
 4. compare governed identity attributes;
-5. create relationship evidence only when sufficient attributes corroborate the mapping;
+5. create `IT Glue configuration -> represents -> Datto managed-device observation` evidence only when sufficient attributes corroborate the mapping;
 6. otherwise retain the Datto managed device and mark the documentation relationship unresolved;
 7. require separate policy-controlled promotion before a relationship becomes canonical.
 
@@ -77,6 +81,10 @@ Rejected for RMM-managed endpoints. IT Glue is optimized for documentation and m
 
 Rejected. This violates J-117 provider independence. Datto is authoritative within the managed-device provider domain, while Jason retains the canonical object identity and governed mapping model.
 
+### New inverse canonical relationship `represented_by`
+
+Rejected. J-118 requires the smallest useful canonical relationship vocabulary and already defines `represents`. Provider authority does not justify adding a synonymous inverse relationship to the canonical model.
+
 ## Governance impact
 
 This ADR narrows authority by resource domain and attribute rather than declaring one provider globally authoritative. Future authority assignments for users, tickets, agreements, knowledge, security state, Microsoft identities, cloud resources, or other objects require their own policy or architecture decision.
@@ -88,6 +96,6 @@ Implementation must prove that:
 - a governed Datto device projection is marked with managed-device authority;
 - a non-Datto observation cannot establish managed-device authority;
 - unmatched IT Glue documentation leaves relationship state unresolved while preserving the Datto authority observation;
-- corroborated mappings point from the Datto device to the IT Glue configuration;
+- corroborated mappings use the existing canonical `represents` relationship from IT Glue documentation to the Datto managed-device observation;
 - provider mismatch and tenant mismatch still fail closed;
 - no canonical promotion occurs as a side effect of observation.
