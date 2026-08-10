@@ -107,7 +107,7 @@ def test_executor_denies_cross_organization_query():
         executor.execute(plan.reads[0].query, context("org-208"))
 
 
-def test_corroborated_documentation_evidence_points_from_datto_device_to_it_glue():
+def test_corroborated_documentation_evidence_represents_authoritative_datto_device():
     configuration = IdentityEvidence(
         provider="it_glue",
         resource_type="configuration",
@@ -129,10 +129,10 @@ def test_corroborated_documentation_evidence_points_from_datto_device_to_it_glue
         matched_attributes=("serial_number", "name"),
         confidence=0.98,
     )
-    assert evidence.canonical_relationship == "represented_by"
+    assert evidence.canonical_relationship == "represents"
     assert evidence.verification is VerificationState.CORROBORATED
-    assert evidence.source.provider == "datto_rmm"
-    assert evidence.target.provider == "it_glue"
+    assert evidence.source.provider == "it_glue"
+    assert evidence.target.provider == "datto_rmm"
     assert evidence.metadata == {"matched_attributes": "serial_number,name"}
 
 
