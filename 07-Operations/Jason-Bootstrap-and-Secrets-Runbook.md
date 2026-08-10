@@ -196,6 +196,12 @@ The first physical host validation exposed an important operational ambiguity: t
 
 These are now documented as explicit contracts rather than tribal knowledge. Future host validation must begin from this runbook and the deployment record instead of rediscovering those requirements interactively.
 
+The durable proof is recorded in:
+
+`08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+
+The same session exposed unrelated repository-wide connector regression-baseline defects, tracked in issue #137. Those defects do not alter the OpenBao/AppRole readiness result, but they must be repaired before the first live Teams approval round-trip.
+
 ## Future profiles
 
 The bootstrap framework may later add:
