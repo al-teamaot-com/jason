@@ -107,6 +107,8 @@ The 2026-08-10 live proof authorizes continued **observe-only, bounded, register
 
 For RMM-managed devices, ADR-004 establishes Datto RMM as the authoritative external provider for managed-device existence and operational identity. IT Glue remains a documentation observation. Jason retains provider-independent canonical identity and cross-provider mapping authority.
 
+Issue #137 tracks unrelated repository-wide connector regression-baseline defects discovered during the host session. Those defects do not change this secret-provider readiness decision, but the Teams approval delivery baseline must be repaired before the first live Teams approval round-trip.
+
 ## Change rule
 
 Any change to the provider runtime, endpoint, wrapper, authentication method, AppRole policy, logical mappings, storage backend, audit device, backup process, recovery method, token lifecycle, ownership, escalation path, or readiness gates must update this record in the same governed change.
