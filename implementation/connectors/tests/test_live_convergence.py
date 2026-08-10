@@ -82,9 +82,9 @@ def test_live_convergence_establishes_datto_authority_and_returns_documentation_
     assert observation.managed_device_authority.device.external_id == "dev-42"
     assert observation.relationship_status == "corroborated"
     assert observation.evidence is not None
-    assert observation.evidence.source.provider == "datto_rmm"
-    assert observation.evidence.target.provider == "it_glue"
-    assert observation.evidence.canonical_relationship == "represented_by"
+    assert observation.evidence.source.provider == "it_glue"
+    assert observation.evidence.target.provider == "datto_rmm"
+    assert observation.evidence.canonical_relationship == "represents"
     assert observation.evidence.metadata == {"matched_attributes": "serial,hostname"}
     assert observation.evidence.confidence == 0.95
 
