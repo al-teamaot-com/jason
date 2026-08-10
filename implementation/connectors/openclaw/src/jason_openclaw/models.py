@@ -26,8 +26,17 @@ class CapabilityRequest:
     capability: str
     arguments: Mapping[str, Any]
     principal: OpenClawPrincipal
+    # Backward-compatible transport field: requested_mode has historically meant
+    # human/service authority (observe/recommend/execute), not provider strategy.
     requested_mode: str = "observe"
+    # Execution strategy is separate and is evaluated by Jason capability/provider
+    # resolution. Older OpenClaw callers default safely to deterministic execution.
+    execution_mode: str = "deterministic"
     requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def permission_mode(self) -> str:
+        return self.requested_mode
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> "CapabilityRequest":
@@ -55,9 +64,19 @@ class CapabilityRequest:
                 f"Missing principal fields: {', '.join(principal_missing)}"
             )
 
-        requested_mode = str(payload.get("requested_mode", "observe"))
-        if requested_mode not in {"observe", "recommend", "request_approval", "execute"}:
+        requested_mode = str(payload.get("requested_mode", "observe")).strip()
+        if requested_mode not in {
+            "observe",
+            "recommend",
+            "request_approval",
+            "execute",
+            "administer",
+        }:
             raise ConnectorContractError("Unsupported requested_mode.")
+
+        execution_mode = str(payload.get("execution_mode", "deterministic")).strip()
+        if not execution_mode or execution_mode.startswith("http") or "/" in execution_mode:
+            raise ConnectorContractError("execution_mode must be a logical execution strategy.")
 
         principal = OpenClawPrincipal(
             principal_id=str(principal_payload["principal_id"]),
@@ -81,6 +100,7 @@ class CapabilityRequest:
             arguments=dict(arguments),
             principal=principal,
             requested_mode=requested_mode,
+            execution_mode=execution_mode,
         )
 
 
