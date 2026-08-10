@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Type
 
 from .http import RuntimeHttpApplication
 
 
-class JasonRuntimeHttpServer(ThreadingHTTPServer):
-    daemon_threads = True
+class JasonRuntimeHttpServer(HTTPServer):
+    """Single-worker internal HTTP server.
+
+    The current durable JKD-001 and ingress audit stores intentionally retain SQLite
+    connections on their owning runtime objects. Serial request handling preserves
+    that ownership model and avoids silently making those connections cross-thread.
+    Scale-out must introduce an explicit concurrency-safe state layer first.
+    """
+
     allow_reuse_address = True
 
     def __init__(self, server_address, application: RuntimeHttpApplication):
