@@ -94,13 +94,17 @@ def email_send_capability() -> CapabilityDefinition:
 
 
 def aws_ses_provider() -> ExecutionProvider:
-    """Return the pilot provider record for AWS SES."""
+    """Return the pilot provider record for AWS SES.
+
+    HEALTHY here means the provider is eligible for the controlled pilot record;
+    live activation still requires the separate readiness and check-only gates.
+    """
     return ExecutionProvider(
         provider_id=SES_PROVIDER_ID,
         display_name="AWS Simple Email Service",
         provider_type=ProviderType.EXTERNAL_CONNECTOR,
         lifecycle_status=ProviderLifecycle.AVAILABLE,
-        health_status=ProviderHealth.UNKNOWN,
+        health_status=ProviderHealth.HEALTHY,
         approval_status=ProviderApproval.PILOT,
         execution_modes=frozenset({"deterministic"}),
         capabilities=frozenset({CAPABILITY_NAME}),
@@ -111,7 +115,7 @@ def aws_ses_provider() -> ExecutionProvider:
             maximum_execution_seconds=30,
         ),
         features=ProviderFeatures(structured_output=True),
-        pricing_profile_id=None,
+        pricing_profile_id="aws-ses-pilot-foundation",
         stewardship=ProviderStewardship(
             technology_steward="technology-steward",
             business_justification="AWS SES is the initial replaceable transport for governed outbound email.",
@@ -130,6 +134,7 @@ def aws_ses_provider() -> ExecutionProvider:
             "secret_name": "aws_ses.sendmail",
             "credentials": "JKD-003-only",
             "automatic_fallback": "prohibited",
+            "activation_gate": "controlled-pilot-readiness-required",
         },
     )
 
