@@ -1,12 +1,72 @@
 # Jason Management Console
 
-The Jason Management Console is the governed web interface for configuring, observing, and administering Jason.
+The Jason Management Console is the governed operational and administrative interface for Jason.
 
-It is intentionally **not** a bypass around the orchestrator, Kernel, policy engine, or approval controls. The console is a client of governed Jason capabilities and management APIs.
+## UI strategy: Grafana first
+
+Grafana is the preferred primary operations console for Jason. This follows Jason's integrate-before-innovate principle: use Grafana for dashboards, observability, status views, alerting, exploration, and operational navigation rather than maintaining a parallel custom dashboard stack.
+
+Jason remains authoritative for identity, authorization, policy, approvals, capability resolution, configuration semantics, execution, and audit.
+
+Grafana is therefore a client of Jason, not a control-plane bypass.
+
+```text
+Grafana
+   |
+   +--> dashboards / alerts / operational views
+   |
+   +--> Jason app pages when specialized management UX is required
+                |
+                v
+       Jason Management API
+                |
+                v
+           Orchestrator
+                |
+     +----------+-----------+
+     |          |           |
+ Identity    Policy      Approval
+     |          |           |
+     +----------+-----------+
+                |
+                v
+       Capability Resolution
+                |
+                v
+       Approved Provider
+                |
+                v
+          Audit / Evidence
+```
+
+## Responsibility boundary
+
+### Grafana owns
+
+- system and component health visualization;
+- capability and provider operational dashboards;
+- audit and execution visualization;
+- metrics, logs, traces, and alert presentation;
+- platform stewardship dashboards;
+- read-only operational exploration;
+- navigation into Jason-specific management pages.
+
+### Jason owns
+
+- authenticated principal and organization context;
+- identity-first authorization;
+- capability visibility and grants;
+- deterministic policy evaluation;
+- risk classification;
+- human approvals;
+- configuration validation and mutation;
+- secret lifecycle operations;
+- provider selection and invocation;
+- evidence and permanent audit records.
 
 ## Initial scope
 
-The first slice is read-only and operationally safe. It establishes the navigation and page model for:
+The first slice is read-only and operationally safe:
 
 - System overview and health
 - Capability registry
@@ -16,47 +76,48 @@ The first slice is read-only and operationally safe. It establishes the navigati
 - Audit and execution history
 - Identity and access visibility
 - Configuration inventory
-- Secrets metadata (names/status only; never secret values)
+- Secrets metadata only; never secret values
 - Platform/dependency review status
 
-Configuration changes will be added only after the corresponding governed management capabilities, authorization checks, validation, audit events, and approval requirements exist.
+Configuration changes are added only after corresponding governed management capabilities, authorization checks, validation, audit events, and approval requirements exist.
 
 ## Architectural rules
 
-1. The console never invokes providers directly.
-2. The console never invokes agents directly.
-3. All consequential operations route through the central orchestrator and normal governance gates.
-4. Missing authority, organization isolation, or capability resolution fails closed.
-5. Secret values are never rendered into the browser after storage.
-6. Every state-changing operation must produce an auditable execution/event record.
-7. The UI should discover capabilities and configuration schemas from Jason rather than hard-code vendor-specific workflows where practical.
-8. Read-only visibility should arrive before write controls.
+1. Grafana never invokes providers directly.
+2. Grafana never invokes agents directly.
+3. Grafana is not an authorization authority for Jason operations.
+4. All consequential operations route through the central orchestrator and normal governance gates.
+5. Missing authority, organization isolation, or capability resolution fails closed.
+6. Secret values are never returned for display after storage.
+7. Every state-changing operation must produce an auditable execution/event record.
+8. The interface discovers capabilities and configuration schemas from Jason rather than hard-coding vendor-specific workflows where practical.
+9. Read-only visibility arrives before write controls.
+10. Grafana dashboards and provisioning should be stored as version-controlled artifacts where practical.
 
-## Proposed navigation
+## Planned Grafana navigation
 
 ```text
-Dashboard
-Capabilities
-Connectors
-Governance
-Approvals
-Audit
-Identity & Access
-Configuration
-Secrets
-Platform Stewardship
-System
+Jason
+  Overview
+  Capabilities
+  Connectors
+  Governance
+  Approvals
+  Audit
+  Identity & Access
+  Configuration
+  Secrets
+  Platform Stewardship
+  System
 ```
 
-## Foundation implementation
+Standard Grafana dashboards should be used where visualization is sufficient. A Jason Grafana app plugin may provide custom pages for management workflows that cannot be represented cleanly as dashboards.
 
-This directory begins with a static prototype so the information architecture can be reviewed before a framework or deployment choice becomes architectural baggage.
+## Files
 
-Files:
+- `management-api-v0.1.yaml` — initial read-only Management API contract.
+- `grafana/README.md` — Grafana integration design and implementation sequence.
+- `grafana/provisioning/dashboards/jason.yaml` — dashboard-as-code provisioning baseline.
+- `grafana/dashboards/jason-overview.json` — initial Jason overview dashboard shell.
 
-- `prototype/index.html` — management console shell and dashboard prototype
-- `prototype/styles.css` — visual baseline
-- `prototype/app.js` — navigation/demo behavior
-- `management-api-v0.1.yaml` — initial read-only API contract for the console
-
-The prototype contains no production credentials and performs no live operations.
+The earlier standalone HTML/CSS/JavaScript prototype was intentionally retired before merge. Grafana now provides the UI foundation rather than Jason maintaining a second general-purpose dashboard framework.
