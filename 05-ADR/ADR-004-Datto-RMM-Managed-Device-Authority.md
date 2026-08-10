@@ -1,6 +1,8 @@
 # ADR-004 — Datto RMM Managed-Device Authority
 
-**Status:** Proposed for governance review  
+**Status:** Accepted and implemented  
+**Decision owner:** Jason Architecture Authority  
+**Implemented:** 2026-08-10  
 **Decision scope:** RMM-managed device identity, existence, and operational state  
 **Affected providers:** Datto RMM, IT Glue, Jason canonical object and relationship services
 
