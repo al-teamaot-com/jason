@@ -119,5 +119,8 @@ Standard Grafana dashboards should be used where visualization is sufficient. A 
 - `grafana/README.md` — Grafana integration design and implementation sequence.
 - `grafana/provisioning/dashboards/jason.yaml` — dashboard-as-code provisioning baseline.
 - `grafana/dashboards/jason-overview.json` — initial Jason overview dashboard shell.
+- `../../deploy/grafana/compose.yaml` — local Grafana deployment baseline.
+- `../../deploy/grafana/.env.example` — non-secret environment template.
+- `../../deploy/grafana/README.md` — bootstrap, security boundary, and production prerequisites.
 
 The earlier standalone HTML/CSS/JavaScript prototype was intentionally retired before merge. Grafana now provides the UI foundation rather than Jason maintaining a second general-purpose dashboard framework.
