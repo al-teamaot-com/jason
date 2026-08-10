@@ -20,20 +20,11 @@ class AwsSesConfig:
 
 
 class AwsSesTransport:
-    """AWS SES v2 transport.
-
-    Region is non-secret deployment configuration. AWS credentials arrive only
-    from the authorized JKD-003 secret lease supplied by CAP-004.
-    """
+    """AWS SES v2 transport bound to an already-authorized CAP-007 execution."""
 
     provider_id = SES_PROVIDER_ID
 
-    def __init__(
-        self,
-        *,
-        config: AwsSesConfig,
-        client_factory: Callable[..., Any] | None = None,
-    ) -> None:
+    def __init__(self, *, config: AwsSesConfig, client_factory: Callable[..., Any] | None = None) -> None:
         self._config = config
         self._client_factory = client_factory or self._default_client_factory
 
@@ -54,8 +45,6 @@ class AwsSesTransport:
         except SesTransportError:
             raise
         except Exception as exc:
-            # Do not propagate provider exception text: SDK errors may contain
-            # request details that do not belong in normal orchestration output.
             raise SesTransportError("AWS SES send failed.") from exc
 
     @staticmethod
@@ -65,22 +54,15 @@ class AwsSesTransport:
             destination["CcAddresses"] = list(message.cc)
         if message.bcc:
             destination["BccAddresses"] = list(message.bcc)
-
         body: dict[str, Any] = {}
         if message.text_body is not None:
             body["Text"] = {"Data": message.text_body, "Charset": "UTF-8"}
         if message.html_body is not None:
             body["Html"] = {"Data": message.html_body, "Charset": "UTF-8"}
-
         request: dict[str, Any] = {
             "FromEmailAddress": message.sender,
             "Destination": destination,
-            "Content": {
-                "Simple": {
-                    "Subject": {"Data": message.subject, "Charset": "UTF-8"},
-                    "Body": body,
-                }
-            },
+            "Content": {"Simple": {"Subject": {"Data": message.subject, "Charset": "UTF-8"}, "Body": body}},
         }
         if message.reply_to:
             request["ReplyToAddresses"] = list(message.reply_to)
@@ -89,5 +71,4 @@ class AwsSesTransport:
     @staticmethod
     def _default_client_factory(**kwargs: Any) -> Any:
         import boto3
-
         return boto3.client(**kwargs)
