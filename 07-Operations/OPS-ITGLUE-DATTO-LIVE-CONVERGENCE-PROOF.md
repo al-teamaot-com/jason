@@ -18,11 +18,11 @@ For the RMM-managed device domain:
 
 A missing, stale, or unmatched IT Glue configuration must therefore leave the documentation relationship unresolved without erasing or downgrading the valid Datto managed-device authority observation.
 
-Provider authority and relationship direction are separate concerns. When documentation is corroborated, the canonical relationship follows J-118:
+When corroborated, the canonical J-118 relationship direction is:
 
 `IT Glue configuration -> represents -> Datto managed-device observation`
 
-Datto remains the authoritative provider for managed-device existence and operational identity even though the documentation representation is the source of the canonical `represents` relationship.
+Provider authority and relationship direction are separate concerns. Do not introduce or persist an inverse `represented_by` canonical relationship.
 
 ## Required backend state
 
@@ -52,6 +52,8 @@ python3 -m venv .venv
 ```
 
 Reusing an existing `.venv` is permitted when it was built from the current checkout and remains healthy.
+
+The full host bootstrap and secret-runtime distinction are maintained in `07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md` and `07-Operations/Jason-Secret-Provider-Deployment-Record.md`.
 
 ## Canonical provider secret runtime
 
@@ -118,24 +120,11 @@ A live discovery is GET-only, bounded to `max=1`, AppRole-backed, and prints onl
 
 An ambiguous Datto result is not authoritative. Improve the bounded search hint rather than widening inventory enumeration.
 
-## Preflight evidence to record
+## Credential-safe preflight
 
-Record non-secret evidence for:
+Every live proof tool must support a no-network preflight before provider contact. The preflight must disclose only non-secret execution intent such as provider, capability, maximum record count, whether filters/search are supplied, and whether network contact or provider credentials will be used.
 
-- UTC timestamp;
-- Jason host identifier;
-- deployed Git commit SHA;
-- Jason organization ID;
-- operator/principal ID;
-- correlation ID generated for the proof;
-- selected Datto device UID and safe search-hint description;
-- selected IT Glue configuration ID when one is being evaluated;
-- explicit matching attribute names;
-- confirmation that both logical provider secrets resolved through provider-specific AppRole boundaries;
-- connector registration for `it_glue` and `datto_rmm`;
-- capability registration for `it_glue.entity.get` and `datto_rmm.device.search`.
-
-Record only presence/readiness of secrets, never secret material.
+A preflight must not resolve or print provider secret values.
 
 ## Positive authority proof
 
@@ -151,6 +140,12 @@ Jason passes the managed-device authority proof when:
 6. no provider mutation, canonical object creation, or canonical mapping promotion occurs.
 
 At this point Jason has evidence that the RMM-managed device exists even if IT Glue documentation is absent or unresolved.
+
+The supported operator proof utility is:
+
+`tools/managed_device_authority_live_proof.py`
+
+It must be run first in credential-safe preflight mode and then in explicit live-read mode only after the preflight is accepted.
 
 ## Documentation relationship proof
 
@@ -168,7 +163,7 @@ Expected execution sequence:
 5. Jason accepts the Datto authority observation independently of IT Glue matching.
 6. The IT Glue projector marks its configuration as a documentation observation.
 7. Jason compares only the explicitly requested governed matching attributes.
-8. If the attributes corroborate, Jason returns relationship evidence with canonical direction `IT Glue configuration -> represents -> Datto managed-device observation` and status `corroborated`.
+8. If the attributes corroborate, Jason returns `IT Glue configuration -> represents -> Datto managed-device observation` relationship evidence with status `corroborated`.
 9. If the attributes are absent or inconsistent, Jason returns relationship status `unresolved`, no relationship evidence, and preserves the Datto managed-device authority decision.
 10. No canonical relationship is created by this command.
 
@@ -187,10 +182,31 @@ The documentation relationship portion is `corroborated` only when:
 
 - the IT Glue observation is bound to the same organization;
 - each requested matching attribute exists on both observations and matches after normalization;
-- relationship evidence uses `IT Glue configuration -> represents -> Datto managed-device observation`;
+- relationship evidence points from IT Glue documentation to the Datto managed-device observation using canonical `represents`;
 - relationship evidence remains evidence-only and has not been promoted into the canonical relationship registry.
 
 An `unresolved` documentation relationship is an acceptable and expected outcome when the Datto device is valid but the IT Glue record cannot be safely linked.
+
+## 2026-08-10 completed host proof
+
+The first physical-host proof completed successfully and is recorded at:
+
+`08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+
+The proof established:
+
+- canonical provider-specific AppRole resolution for IT Glue and Datto RMM;
+- bounded governed live reads for both providers;
+- bounded sanitized discovery paths;
+- one valid Datto managed-device authority observation;
+- connector audit events for both providers;
+- no persistent provider runtime token;
+- no canonical object creation;
+- no canonical relationship promotion;
+- no provider mutation;
+- no raw provider payload or secret material printed or persisted.
+
+The selected IT Glue documentation relationship remained `unresolved` because the requested serial-number attribute was absent or inconsistent across the governed observations. The Datto authority observation remained valid as designed.
 
 ## Negative / fail-closed proof cases
 
@@ -234,9 +250,15 @@ The final proof package should be stored through INF-013 artifact/evidence stora
 
 Large provider responses should not be copied into tickets, chat, or repository documentation. Store artifacts centrally and pass immutable references.
 
+## Validation baseline note
+
+The focused authority/convergence test scope and GitHub release gates passed for PR #136. A broader host connector-suite run exposed unrelated pre-existing test and package-boundary defects. Those are tracked in issue #137 and must be resolved before the live Teams approval round-trip.
+
+Do not weaken fail-closed production behavior to make stale tests pass, and do not treat issue #137 as permission to bypass the clean release gate for future Teams approval work.
+
 ## Success criteria
 
-The operational milestone may distinguish two outcomes:
+The operational milestone distinguishes two outcomes:
 
 **Datto managed-device authority proven** when the bounded Datto authority proof passes.
 
@@ -246,4 +268,4 @@ A valid Datto managed device with unresolved IT Glue documentation is not a fail
 
 ## After the proof
 
-Do not immediately enable automated canonical promotion or side-effecting actions because an observation succeeded. The next governed step is to use the authoritative Datto observation and any corroborated documentation mapping as inputs to explicit policy-controlled canonical object/mapping promotion and, separately, to low-risk Central-Orchestrator action workflows requiring their own authorization and approval gates.
+Do not immediately enable automated canonical promotion or side-effecting actions because an observation succeeded. The next governed workstream is issue #137: restore a clean repository-wide connector regression baseline, especially the Teams approval delivery boundary, then perform the first live Teams approval round-trip under the normal branch -> tests -> release validation -> PR -> governance review -> merge workflow.
