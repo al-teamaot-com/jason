@@ -28,6 +28,7 @@ class MicrosoftIdentityBinding:
     microsoft_object_id: str
     jason_identity_id: str
     client_id: str | None = None
+    email_address: str | None = None
     status: str = "active"
 
     def __post_init__(self) -> None:
@@ -42,6 +43,10 @@ class MicrosoftIdentityBinding:
             raise ValueError("Microsoft identity binding fields are empty: " + ", ".join(missing))
         if self.client_id is not None and not self.client_id.strip():
             raise ValueError("client_id must be non-empty when supplied")
+        if self.email_address is not None:
+            email = self.email_address.strip()
+            if not email or "@" not in email or email.startswith("@") or email.endswith("@"):
+                raise ValueError("email_address must be a valid non-empty address when supplied")
 
 
 class MicrosoftIdentityBindingReader(Protocol):
@@ -83,4 +88,5 @@ class JasonTeamsIdentityBinder:
             principal_id=identity.identity_id,
             organization_id=identity.organization_id,
             client_id=binding.client_id,
+            email_address=binding.email_address,
         )
