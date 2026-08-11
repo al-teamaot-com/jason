@@ -129,6 +129,28 @@ The Orchestrator shall not treat a registry entry as permission. Identity, polic
 
 All remediation or topology-changing actions initiated because of registry drift shall return through the normal orchestration and governance path.
 
+## Governed Query Surface
+
+Jason shall expose operational-state knowledge through reusable, provider-neutral, read-only capabilities rather than through conversational memory, hard-coded workflow scripts, direct file access by agents, or bypasses around the Central Orchestrator.
+
+The initial governed query surface is:
+
+- `system.registry.search` — locate registered operational entities using grounded human-supplied selectors;
+- `system.registry.read` — read one entity by durable System Registry resource identifier; and
+- `system.registry.trace` — trace registered dependency relationships between two System Registry entities.
+
+These capabilities are resolved and invoked through the normal Capability Registry, provider-resolution, identity, policy, authority, audit, and Central Orchestrator path. Their current deterministic internal provider is `system_registry`, whose authoritative source is the governed production registry plus append-only lifecycle history.
+
+The query provider is evidence-producing only. It shall have no method to mutate declared state, append lifecycle events, repair drift, change production services, alter governance, or retrieve secret values.
+
+Query responses may include registered dependencies, reverse dependents, effective lifecycle, verification status, authority references, evidence references, source version, and credential *references*. Secret material is prohibited.
+
+Natural-language interpretation may determine what System Registry resource and facts the human is asking about, but it shall not invent topology, select an unregistered provider, or treat model output as authoritative evidence. Returned facts shall be grounded in deterministic System Registry data.
+
+Ambiguous identity-like searches shall fail closed rather than silently selecting the first result. A durable `resource_id` is the authoritative identity for a specific registry entity.
+
+The query surface does not change the constitutional authority boundary: the System Registry describes operational state; the Central Orchestrator governs work; and any mutation or remediation must return through normal authorization and governance.
+
 ## Monitoring and Observation
 
 Monitoring systems and authorized providers may submit observations to the registry through governed interfaces.

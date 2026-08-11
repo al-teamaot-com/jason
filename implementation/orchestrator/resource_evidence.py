@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -123,12 +124,10 @@ def _resolve_json_pointer(document: Any, pointer: str) -> Any:
 class GovernedTeamsResourceResponseRenderer:
     """Render only facts deterministically verified against governed provider evidence.
 
-    Discovery selectors such as hostnames and human-readable names never become
-    resource identity merely because a provider returned a first result. Endpoint
-    discovery must expose a canonical resource_matches collection; Jason proceeds
-    only when exactly one candidate remains and that candidate carries a durable
-    resource_id. Multiple matches produce a clarification request without exposing
-    cross-site candidate details.
+    Discovery selectors never become durable resource identity merely because a
+    provider returned a first result. Endpoint and System Registry name discovery
+    expose canonical resource_matches. Ambiguous identity-like searches fail closed;
+    broad System Registry filters may intentionally return a governed result set.
     """
 
     interpreter: GovernedResourceEvidenceInterpreter
@@ -152,6 +151,27 @@ class GovernedTeamsResourceResponseRenderer:
                 raise LookupError(
                     "endpoint discovery produced one candidate without a durable resource identity"
                 )
+
+        if intent.capability_name == "system.registry.search":
+            matches = _canonical_resource_matches(result)
+            if not matches:
+                return f"{subject} — no matching System Registry entity was found. Source: {source}."
+            identity_like = any(
+                str(intent.arguments.get(key, "")).strip()
+                for key in ("name", "registry_id", "query")
+            )
+            if identity_like and len(matches) > 1:
+                return (
+                    f"{subject} is ambiguous: {len(matches)} System Registry entities matched. "
+                    "Please specify the durable registry resource_id or a more exact name. "
+                    f"No entity was selected. Source: {source}."
+                )
+            if len(matches) == 1:
+                resource_id = str(matches[0].get("resource_id", "")).strip()
+                if not resource_id:
+                    raise LookupError(
+                        "System Registry discovery produced one candidate without durable resource identity"
+                    )
 
         raw_requested_facts = intent.arguments.get("requested_facts", ())
         if not isinstance(raw_requested_facts, (list, tuple)):
@@ -187,7 +207,15 @@ def _canonical_resource_matches(result: OrchestrationResult) -> tuple[Mapping[st
 
 
 def _resource_subject(arguments: Mapping[str, Any]) -> str:
-    for key in ("hostname", "name", "resource_id", "serial_number"):
+    for key in (
+        "hostname",
+        "name",
+        "registry_id",
+        "resource_id",
+        "serial_number",
+        "from",
+        "query",
+    ):
         value = arguments.get(key)
         if value is not None and str(value).strip():
             return str(value).strip()
@@ -201,4 +229,6 @@ def _display_value(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, (str, int, float)):
         return str(value)
-    raise ValueError("resource evidence fact must resolve to a scalar value")
+    if isinstance(value, (Mapping, list, tuple)):
+        return json.dumps(value, sort_keys=True, separators=(", ", ": "))
+    raise ValueError("resource evidence fact must resolve to JSON-compatible evidence")

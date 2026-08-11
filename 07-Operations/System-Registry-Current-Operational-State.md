@@ -7,8 +7,8 @@
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
-- Registered entities: `18`
-- Effective lifecycle counts: `registered=14, verified=4`
+- Registered entities: `22`
+- Effective lifecycle counts: `configured=4, registered=14, verified=4`
 
 ## Verified current physical topology
 
@@ -26,6 +26,9 @@
 | `capability.communication-email-send` | `capability` | `registered` | `capability-registry-and-live-pilot-proof` |
 | `capability.endpoint-device-read` | `capability` | `registered` | `capability-registry-and-provider-proof` |
 | `capability.endpoint-device-search` | `capability` | `registered` | `capability-registry-and-provider-proof` |
+| `capability.system-registry-read` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
+| `capability.system-registry-search` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
+| `capability.system-registry-trace` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
 | `component.central-orchestrator` | `component` | `registered` | `runtime-composition-source-and-health` |
 | `credential.openbao.aws-ses-sendmail` | `credential_reference` | `registered` | `provider-credential-status` |
 | `credential.openbao.datto-rmm-readonly` | `credential_reference` | `registered` | `provider-credential-status` |
@@ -37,6 +40,7 @@
 | `provider.aws-ses` | `provider` | `registered` | `governed-cap007-provider-proof` |
 | `provider.datto-rmm` | `provider` | `registered` | `governed-provider-read` |
 | `provider.microsoft-graph` | `provider` | `registered` | `microsoft-exact-user-read` |
+| `provider.system-registry` | `provider` | `configured` | `governed-system-registry-read` |
 
 ## Interpretation boundary
 
