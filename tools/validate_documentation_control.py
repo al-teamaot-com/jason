@@ -14,6 +14,7 @@ REQUIRED_FILES = (
     "docs/control/DOCUMENTATION-REGISTER.md",
     "docs/control/DOCUMENTATION-MIGRATION-ISSUES.md",
     "docs/control/HOW-TO-DOCUMENT-JASON.md",
+    "docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md",
     "docs/control/HANDOFF-TEMPLATE.md",
     "docs/control/DOCUMENT-TEMPLATE.md",
     "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
@@ -58,6 +59,11 @@ REQUIRED_DOC_DIRECTORIES = (
     "docs/archive",
 )
 
+IMPLEMENTATION_README_ROOTS = (
+    "implementation",
+    "infrastructure",
+)
+
 
 def fail(message: str) -> None:
     raise RuntimeError(message)
@@ -89,7 +95,7 @@ def main() -> int:
         fail("Governed backlog must remain under docs/roadmaps, not repository-root TODO.md")
 
     index = read("docs/index.md")
-    for path in REQUIRED_FILES[1:8]:
+    for path in REQUIRED_FILES[1:9]:
         relative = path.removeprefix("docs/")
         if relative not in index:
             fail(f"docs/index.md does not link to required control record: {relative}")
@@ -149,6 +155,19 @@ def main() -> int:
     if not (ROOT / "docs/decisions/ADR-007-Teams-Proactive-Messaging.md").is_file():
         fail("Corrected ADR-007 Teams proactive messaging record is missing")
 
+    implementation_index = read("docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md")
+    for root in IMPLEMENTATION_README_ROOTS:
+        base = ROOT / root
+        if not base.is_dir():
+            continue
+        for readme in sorted(base.rglob("README.md")):
+            relative = readme.relative_to(ROOT).as_posix()
+            if relative not in implementation_index:
+                fail(
+                    "Material implementation-local README is not represented in "
+                    f"the implementation documentation index: {relative}"
+                )
+
     mkdocs = read("mkdocs.yml")
     if "docs_dir: docs" not in mkdocs:
         fail("MkDocs must publish directly from the canonical docs tree")
@@ -159,6 +178,7 @@ def main() -> int:
         "control/CURRENT.md",
         "control/DOCUMENTATION-REGISTER.md",
         "control/HOW-TO-DOCUMENT-JASON.md",
+        "control/IMPLEMENTATION-DOCUMENTATION-INDEX.md",
         "standards/J-404-Documentation-Governance-and-Continuity.md",
         "decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
         "engineering/README.md",
@@ -168,16 +188,16 @@ def main() -> int:
             fail(f"MkDocs navigation is missing documentation-control record: {path}")
 
     catch_me_up = read("tools/catch_me_up.py")
-    required_current_paths = (
+    required_current_signals = (
         "docs/control/CURRENT.md",
         "docs/control/HOW-TO-DOCUMENT-JASON.md",
         "docs/roadmaps/Jason-Roadmap-Status.json",
         "docs/operations/System-Registry-Current-Operational-State.md",
-        "docs/sessions",
+        "collect_session_records",
     )
-    for path in required_current_paths:
-        if path not in catch_me_up:
-            fail(f"CatchMeUp is missing consolidated documentation path: {path}")
+    for signal in required_current_signals:
+        if signal not in catch_me_up:
+            fail(f"CatchMeUp is missing consolidated continuity signal: {signal}")
 
     print("Documentation control-plane validation: PASS")
     return 0
