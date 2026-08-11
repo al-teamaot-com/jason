@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping, Sequence
 
 from connectors.core.connector_base import ConnectorBase, PreparedRequest
@@ -11,6 +12,8 @@ class DattoRmmConnector(ConnectorBase):
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
     default_device_search_max = 25
+    fallback_discovery_page_size = 250
+    fallback_discovery_max_pages = 20
 
     capabilities = frozenset(
         {
@@ -158,6 +161,13 @@ class DattoRmmConnector(ConnectorBase):
         Exactly one match may proceed to an exact GET, and only after Datto supplied a
         durable device UID. Pure discovery calls without requested_facts remain search
         operations and do not trigger the exact read.
+
+        Datto's hostname filter may behave as an exact filter. If the human supplied a
+        grounded name fragment such as ``50282`` and that exact provider query returns
+        no records, the connector performs bounded account discovery and compares the
+        human fragment only against provider-returned hostnames. It never manufactures
+        a prefix, site, tenant, or hostname. A unique durable UID may be resolved only
+        after complete discovery; ambiguity or incomplete discovery fails closed.
         """
 
         search_request = self._prepare_provider_request(
@@ -174,7 +184,18 @@ class DattoRmmConnector(ConnectorBase):
         discovery = self._normalize_result("datto_rmm.device.search", search_payload)
         matches = discovery["resource_matches"]
 
-        if len(matches) != 1:
+        hostname_reference = self._hostname_reference(request.arguments)
+        if not matches and hostname_reference:
+            discovery = self._execute_hostname_fragment_discovery(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+                hostname_reference=hostname_reference,
+            )
+            matches = discovery["resource_matches"]
+
+        if len(matches) != 1 or discovery.get("discovery_complete") is False:
             return discovery
 
         resource_id = str(matches[0].get("resource_id", "")).strip()
@@ -202,6 +223,102 @@ class DattoRmmConnector(ConnectorBase):
             # summary record returned by the discovery request.
             "provider_data": read_payload,
         }
+
+    def _execute_hostname_fragment_discovery(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+        hostname_reference: str,
+    ) -> Mapping[str, Any]:
+        """Discover provider hostnames matching one grounded human identifier segment.
+
+        The fallback deliberately removes only the hostname filter that produced zero
+        results. A human-supplied site constraint, when present, is retained. Pages are
+        bounded and must reach a short page before discovery is considered complete.
+        The connector never treats a single candidate from an incomplete scan as unique.
+        """
+
+        site = str(request.arguments.get("site") or "").strip()
+        provider_pages: list[Any] = []
+        matches: list[Mapping[str, str]] = []
+        seen_resource_ids: set[str] = set()
+        discovery_complete = False
+
+        for page in range(1, self.fallback_discovery_max_pages + 1):
+            arguments: dict[str, Any] = {
+                "page": page,
+                "max": self.fallback_discovery_page_size,
+            }
+            if site:
+                arguments["site"] = site
+
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments=arguments,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
+            provider_pages.append(payload)
+            records = self._device_records(payload)
+
+            for record in records:
+                match = self._canonical_device_match(record)
+                hostname = str(match.get("hostname", "")).strip()
+                if not hostname or not self._hostname_reference_matches(
+                    reference=hostname_reference,
+                    hostname=hostname,
+                ):
+                    continue
+                resource_id = str(match.get("resource_id", "")).strip()
+                dedupe_key = resource_id or f"{hostname.casefold()}|{match.get('site_id', '')}"
+                if dedupe_key in seen_resource_ids:
+                    continue
+                seen_resource_ids.add(dedupe_key)
+                matches.append(match)
+
+            if len(records) < self.fallback_discovery_page_size:
+                discovery_complete = True
+                break
+
+        return {
+            "resource_matches": matches,
+            "provider_data": {
+                "discovery_mode": "hostname_fragment",
+                "hostname_reference": hostname_reference,
+                "pages": provider_pages,
+            },
+            "discovery_complete": discovery_complete,
+        }
+
+    @staticmethod
+    def _hostname_reference(arguments: Mapping[str, Any]) -> str:
+        return str(arguments.get("hostname") or arguments.get("name") or "").strip()
+
+    @staticmethod
+    def _hostname_reference_matches(*, reference: str, hostname: str) -> bool:
+        """Match a grounded human reference as a hostname identifier segment.
+
+        Exact hostnames match directly. Otherwise the reference must be delimited by
+        non-alphanumeric hostname punctuation, so ``50282`` matches ``AOT-50282`` but
+        not ``AOT-150282``. This is discovery only and never infers what a prefix means.
+        """
+
+        normalized_reference = reference.strip()
+        normalized_hostname = hostname.strip()
+        if not normalized_reference or not normalized_hostname:
+            return False
+        if normalized_reference.casefold() == normalized_hostname.casefold():
+            return True
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(normalized_reference)}(?![A-Za-z0-9])"
+        return re.search(pattern, normalized_hostname, flags=re.IGNORECASE) is not None
 
     @classmethod
     def _normalize_result(cls, capability: str, payload: Any) -> Any:
