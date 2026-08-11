@@ -81,6 +81,7 @@ nav:
       - CAP-001 Autotask Live-Read Validation: components/capabilities/CAP-001-Autotask-Live-Read-Validation.md
       - CAP-001 Autotask Live-Read Command: components/capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
+      - Operations Authority Map: operations/README.md
       - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
