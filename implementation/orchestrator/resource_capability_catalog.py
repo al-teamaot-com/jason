@@ -15,6 +15,7 @@ from kernel.capabilities import (
 from kernel.execution_providers import (
     ExecutionProvider,
     ExecutionProviderRegistryService,
+    InMemoryExecutionProviderRegistry,
     ProviderApproval,
     ProviderFeatures,
     ProviderHealth,
@@ -59,14 +60,18 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
         evidence=CapabilityEvidence(
             required=True,
             requirements=("provider result", "source provider identity"),
-            verification_requirements=("resource selector remains in authorized scope",),
+            verification_requirements=(
+                "resource selector remains in authorized scope",
+                "ambiguous selectors never auto-select a resource",
+                "a unique discovery candidate exposes a durable resource identifier",
+            ),
         ),
         dependencies=frozenset(),
         idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
         idempotency_key_required=False,
         timeout_seconds=30,
         maximum_attempts=2,
-        failure_behavior="Fail closed without shell, node, or agent fallback.",
+        failure_behavior="Fail closed without shell, node, agent, or first-match fallback.",
         tenant_isolation_required=True,
         client_isolation_required=False,
         stewardship=CapabilityStewardship(
@@ -93,9 +98,17 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
                 "online offline operating system ip address mac address hardware software "
                 "device identifier serial number inventory"
             ),
+            "identity_semantics": (
+                "Human-readable names, hostnames, aliases, labels, serial-like tokens, and "
+                "site labels are discovery selectors, not durable identity. Discovery must "
+                "observe ambiguity and may proceed only after one authorized candidate is "
+                "resolved to a durable resource_id. Never select the first provider result."
+            ),
             "planning_guidance": (
                 "Prefer this capability when the human names an endpoint but does not "
-                "already supply its durable provider-neutral resource identifier."
+                "already supply its durable provider-neutral resource identifier. Treat "
+                "the supplied name/hostname as discovery criteria and require explicit "
+                "disambiguation when more than one authorized resource remains."
             ),
         },
     )
@@ -153,6 +166,7 @@ def endpoint_device_read(now: datetime) -> CapabilityDefinition:
                 "device details hostname last user logged in user site status operating "
                 "system ip address mac address hardware software serial number inventory"
             ),
+            "identity_semantics": "resource_id is a durable resolved endpoint identity",
             "planning_guidance": (
                 "Prefer this capability when a durable endpoint resource identifier is already known."
             ),
