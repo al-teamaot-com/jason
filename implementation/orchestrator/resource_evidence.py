@@ -121,11 +121,38 @@ def _resolve_json_pointer(document: Any, pointer: str) -> Any:
 
 @dataclass(frozen=True, slots=True)
 class GovernedTeamsResourceResponseRenderer:
-    """Render only facts deterministically verified against governed provider evidence."""
+    """Render only facts deterministically verified against governed provider evidence.
+
+    Discovery selectors such as hostnames and human-readable names never become
+    resource identity merely because a provider returned a first result. Endpoint
+    discovery must expose a canonical resource_matches collection; Jason proceeds
+    only when exactly one candidate remains and that candidate carries a durable
+    resource_id. Multiple matches produce a clarification request without exposing
+    cross-site candidate details.
+    """
 
     interpreter: GovernedResourceEvidenceInterpreter
 
     def render(self, result: OrchestrationResult, intent: ConversationIntent) -> str:
+        source = result.provider_id or "governed provider"
+        subject = _resource_subject(intent.arguments)
+
+        if intent.capability_name == "endpoint.device.search":
+            matches = _canonical_resource_matches(result)
+            if not matches:
+                return f"{subject} — no matching managed endpoint was found. Source: {source}."
+            if len(matches) > 1:
+                return (
+                    f"{subject} is ambiguous: {len(matches)} managed endpoints matched. "
+                    "Please specify the site/client or a durable resource identifier. "
+                    f"No device was selected. Source: {source}."
+                )
+            resource_id = str(matches[0].get("resource_id", "")).strip()
+            if not resource_id:
+                raise LookupError(
+                    "endpoint discovery produced one candidate without a durable resource identity"
+                )
+
         raw_requested_facts = intent.arguments.get("requested_facts", ())
         if not isinstance(raw_requested_facts, (list, tuple)):
             raise ValueError("conversation resource intent is missing requested_facts")
@@ -135,8 +162,6 @@ class GovernedTeamsResourceResponseRenderer:
             requested_facts=requested_facts,
         )
 
-        subject = _resource_subject(intent.arguments)
-        source = result.provider_id or "governed provider"
         if len(facts) == 1:
             fact = facts[0]
             return f"{subject} — {fact.requested_fact}: {_display_value(fact.value)}. Source: {source}."
@@ -145,6 +170,20 @@ class GovernedTeamsResourceResponseRenderer:
             f"{fact.requested_fact}: {_display_value(fact.value)}" for fact in facts
         )
         return f"{subject} — {rendered}. Source: {source}."
+
+
+def _canonical_resource_matches(result: OrchestrationResult) -> tuple[Mapping[str, Any], ...]:
+    if result.status is not OrchestrationStatus.SUCCEEDED:
+        raise LookupError("resource discovery is unavailable because orchestration did not succeed")
+    data = result.output.get("data")
+    if not isinstance(data, Mapping):
+        raise RuntimeError("resource discovery result must contain canonical provider data")
+    raw_matches = data.get("resource_matches")
+    if not isinstance(raw_matches, (list, tuple)):
+        raise RuntimeError("resource discovery result is missing canonical resource_matches")
+    if not all(isinstance(item, Mapping) for item in raw_matches):
+        raise RuntimeError("resource discovery returned an invalid canonical resource match")
+    return tuple(raw_matches)
 
 
 def _resource_subject(arguments: Mapping[str, Any]) -> str:
