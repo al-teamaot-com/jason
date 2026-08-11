@@ -63,6 +63,7 @@ def test_structured_client_enforces_explicit_generation_budget():
     ) == {"resolved": False}
 
     request = transport.calls[0]
+    assert request["json"]["think"] is False
     assert request["json"]["options"] == {
         "temperature": 0,
         "num_predict": 64,
@@ -108,6 +109,7 @@ def test_resource_inquiry_reasoner_returns_only_provider_neutral_structure():
         "permission_mode": "observe",
     }
     request = transport.calls[0]["json"]
+    assert request["think"] is False
     assert request["stream"] is False
     assert request["options"] == {"temperature": 0, "num_predict": 160}
     assert request["format"]["additionalProperties"] is False
@@ -138,6 +140,7 @@ def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
 
     assert result["resource_type"] == "endpoint"
     request = transport.calls[0]["json"]
+    assert request["think"] is False
     resource_type_schema = request["format"]["properties"]["resource_type"]
     selector_schema = request["format"]["properties"]["resource_selector"]
     assert resource_type_schema["enum"] == ["endpoint"]
@@ -166,6 +169,7 @@ def test_capability_reasoner_selects_only_candidate_and_builds_arguments_determi
         "hostname": "AOT-50282",
         "requested_facts": ["last logged in user"],
     }
+    assert transport.calls[0]["json"]["think"] is False
     assert transport.calls[0]["json"]["options"]["num_predict"] == 64
 
 
@@ -231,4 +235,5 @@ def test_evidence_reasoner_returns_locations_not_values():
             "value": "model-asserted-value-must-be-ignored",
         },
     )
+    assert transport.calls[0]["json"]["think"] is False
     assert transport.calls[0]["json"]["options"]["num_predict"] == 96
