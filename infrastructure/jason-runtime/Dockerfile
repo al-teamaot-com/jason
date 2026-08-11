@@ -3,7 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONPATH=/app/implementation:/app/implementation/connectors/openclaw/src:/app/implementation/runtime_service/src
+    PYTHONPATH=/app/implementation:/app/implementation/cap-007/src:/app/implementation/connectors/openclaw/src:/app/implementation/runtime_service/src
 
 WORKDIR /app
 
