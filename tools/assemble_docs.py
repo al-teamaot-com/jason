@@ -13,7 +13,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 # Transitional canonical roots retained while the documentation migration is in progress.
 # The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
-    "03-Components",
     "05-ADR",
     "07-Operations",
     "08-Session-Records",
@@ -27,6 +26,7 @@ CONSOLIDATED_DIRECTORIES = (
     ("docs/governance", "governance"),
     ("docs/architecture", "architecture"),
     ("docs/models", "models"),
+    ("docs/components", "components"),
     ("docs/standards", "standards"),
     ("docs/roadmaps", "roadmaps"),
     ("docs/journal", "journal"),
