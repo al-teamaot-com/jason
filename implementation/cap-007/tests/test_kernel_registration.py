@@ -10,7 +10,7 @@ from jason_cap_007.kernel_registration import (
 from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
 from kernel.execution_policy import CostEstimator, DataHandlingPolicy, ExecutionBudget, ExecutionPolicyEngine, InMemoryPricingRegistry
 from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
-from kernel.resolution import CapabilityResolutionRequest, GovernedCapabilityResolutionEngine, ResolutionOutcome
+from kernel.resolution import CapabilityResolutionRequest, CapabilityResolutionStatus, GovernedCapabilityResolutionEngine, ResolutionOutcome
 
 
 def _engine():
@@ -24,7 +24,8 @@ def _engine():
     )
 
 
-def _request(*, approval_present: bool, allow_pilot_capability: bool, allow_pilot_provider: bool):
+def _request(*, approval_present: bool, allow_pilot_capability: bool,
+             allow_pilot_provider: bool, idempotency_key: str | None = None):
     return CapabilityResolutionRequest(
         execution_id="exec-email-1",
         correlation_id="corr-email-1",
@@ -42,6 +43,7 @@ def _request(*, approval_present: bool, allow_pilot_capability: bool, allow_pilo
         policy_ids=("cap-007-pilot",),
         allow_pilot_capability=allow_pilot_capability,
         allow_pilot_provider=allow_pilot_provider,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -69,8 +71,24 @@ def test_pilot_requires_explicit_approval_before_provider_resolution():
     assert result.reason_codes == ("capability_approval_required",)
 
 
-def test_approved_pilot_resolves_only_to_aws_ses():
+def test_approved_pilot_requires_idempotency_key_before_provider_resolution():
     result = _engine().resolve(_request(approval_present=True, allow_pilot_capability=True, allow_pilot_provider=True))
+    assert result.outcome is ResolutionOutcome.UNRESOLVED
+    assert result.capability_status is CapabilityResolutionStatus.IDEMPOTENCY_KEY_MISSING
+    assert result.reason_codes == ("idempotency_key_required",)
+    assert result.selected_provider_id is None
+    assert result.execution_plan is None
+
+
+def test_approved_pilot_resolves_only_to_aws_ses_with_idempotency_key():
+    result = _engine().resolve(
+        _request(
+            approval_present=True,
+            allow_pilot_capability=True,
+            allow_pilot_provider=True,
+            idempotency_key="cap007-test-send-001",
+        )
+    )
     assert result.outcome is ResolutionOutcome.RESOLVED
     assert result.selected_provider_id == "aws-ses"
     assert result.execution_plan is not None
