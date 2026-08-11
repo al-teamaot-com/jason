@@ -1,0 +1,67 @@
+{
+  "id": "jason-bridge",
+  "name": "Jason Bridge",
+  "description": "Claims ordinary Microsoft Teams messages and forwards only authenticated transport evidence and user text to the governed Jason runtime.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["microsoftTenantId"],
+    "properties": {
+      "microsoftTenantId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "runtimeUrl": {
+        "type": "string",
+        "default": "http://jason-runtime:8080/v1/openclaw/teams/conversation"
+      },
+      "keyId": {
+        "type": "string",
+        "default": "openclaw-gateway-2"
+      },
+      "privateKeyPath": {
+        "type": "string",
+        "default": "/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem"
+      },
+      "requestTimeoutMs": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 40000,
+        "default": 30000
+      },
+      "passthroughAuthorizedCommands": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "uiHints": {
+    "microsoftTenantId": {
+      "label": "Microsoft Tenant ID",
+      "help": "Non-secret tenant identifier asserted only after the Microsoft Teams channel has authenticated the inbound Bot Framework activity."
+    },
+    "runtimeUrl": {
+      "label": "Jason Runtime URL",
+      "help": "Internal governed Jason conversation ingress. Keep this on the private OpenClaw/Jason network."
+    },
+    "keyId": {
+      "label": "Jason Transport Key ID"
+    },
+    "privateKeyPath": {
+      "label": "Transport Private Key Path",
+      "help": "Path inside the OpenClaw secret boundary. The key itself is never sent as configuration or payload."
+    },
+    "requestTimeoutMs": {
+      "label": "Jason Request Timeout",
+      "advanced": true
+    },
+    "passthroughAuthorizedCommands": {
+      "label": "Pass Through Authorized OpenClaw Commands",
+      "help": "When enabled, already-authorized slash commands remain OpenClaw control-plane operations rather than Jason conversations.",
+      "advanced": true
+    }
+  }
+}
