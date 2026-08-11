@@ -13,16 +13,10 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 # Transitional canonical roots retained while the documentation migration is in progress.
 # The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
-    "01-Governance",
     "03-Components",
     "05-ADR",
     "07-Operations",
     "08-Session-Records",
-)
-
-# Existing publishing-only material retained at its historical assembled path during migration.
-PUBLISHING_DIRECTORIES = (
-    "docs/governance",
 )
 
 # Consolidated documentation sources are authored under docs/ and published at stable
@@ -59,11 +53,6 @@ def main() -> int:
     BUILD_ROOT.mkdir(parents=True, exist_ok=False)
 
     for directory_name in CANONICAL_DIRECTORIES:
-        source = REPOSITORY_ROOT / directory_name
-        destination = BUILD_ROOT / directory_name
-        copy_directory(source, destination)
-
-    for directory_name in PUBLISHING_DIRECTORIES:
         source = REPOSITORY_ROOT / directory_name
         destination = BUILD_ROOT / directory_name
         copy_directory(source, destination)
