@@ -100,6 +100,8 @@ Documentation completeness requires both directions of discoverability:
 
 The index is not an excuse to keep stale README files. Package-adjacent documentation must evolve with the implementation it describes.
 
-## Current limitations
+## Current CI enforcement
 
-This index records the implementation/deployment README files identified during the 2026-08-11 documentation consolidation. Future CI should evolve toward automatically inventorying README files outside `docs/` and requiring either an index entry or an explicit non-material exception.
+`tools/validate_documentation_control.py` inventories every tracked `README.md` beneath `implementation/` and `infrastructure/` and requires that its repository-relative path appear in this index. It also requires this index to be linked from `docs/index.md` and exposed in MkDocs navigation.
+
+This is a discoverability control, not an authority grant. Passing the index check proves that an implementation-local README is discoverable; it does not prove that the README is current, approved, or an authoritative source for governance, architecture, operational topology, or security policy.
