@@ -65,6 +65,14 @@ from orchestrator.resource_evidence import (
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
+from orchestrator.system_registry_resource import (
+    GovernedSystemRegistryCapabilityInvoker,
+    SYSTEM_REGISTRY_READ,
+    SYSTEM_REGISTRY_SEARCH,
+    SYSTEM_REGISTRY_TRACE,
+    load_production_system_registry,
+    register_system_registry_resource_foundation,
+)
 from orchestrator.teams_conversation_flow import TeamsConversationFlow
 from orchestrator.teams_identity_binding import JasonTeamsIdentityBinder
 from orchestrator.teams_identity_binding_sqlite import (
@@ -305,10 +313,16 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    now = datetime.now(timezone.utc)
     register_endpoint_resource_foundation(
         capabilities=capabilities,
         providers=providers,
-        now=datetime.now(timezone.utc),
+        now=now,
+    )
+    register_system_registry_resource_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
@@ -363,6 +377,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_READ): "datto_rmm.device.get",
         },
     )
+    system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
+        registry=load_production_system_registry()
+    )
 
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
@@ -384,6 +401,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers = CapabilityInvokerRegistry()
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
+    invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
+    invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
+    invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
