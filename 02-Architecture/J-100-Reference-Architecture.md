@@ -12,6 +12,9 @@ Defines mission, policy, authority, and architectural compliance.
 ### Orchestration
 Coordinates work, routes requests, and enforces governance. It never embeds implementation-specific logic.
 
+### System Registry
+Maintains Jason's authoritative, machine-readable operational topology and system-state record. It relates declared, observed, and verified state for production components, capabilities, providers, dependencies, identity bindings, governance paths, credential references, deployments, and verification methods. It is authoritative for operational description but never self-authorizing and never silently remediates drift.
+
 ### Capability Registry
 Defines the capabilities Jason provides. Capabilities are enduring; implementations are replaceable.
 
@@ -31,19 +34,23 @@ Preserves institutional knowledge, evidence, and architectural artifacts as dura
 Applies governance, approvals, security, compliance, and business rules before actions are taken.
 
 ### Audit
-Records significant decisions, actions, approvals, and evidence sufficient for independent review.
+Records significant decisions, actions, approvals, changes, and evidence sufficient for independent review and historical reconstruction.
 
 ### Communications
 Provides controlled interaction with people and external systems through governed interfaces.
 
 ### Monitoring
-Observes the health of Jason's components and reports conditions affecting dependable operation.
+Observes the health and material operational state of Jason's components. Monitoring may supply observed-state evidence to the System Registry but does not redefine declared state or independently authorize remediation.
 
 ## Architectural Rule
 
 No component may bypass Governance, Policy, or Audit.
 
 No component shall depend directly on a specific external product, provider, or implementation. All external interaction occurs through the Connector Framework.
+
+No production component, capability, provider, dependency, identity binding, or governance path is considered operational until represented in the System Registry with a defined verification method.
+
+The System Registry describes and verifies operational topology; the Central Orchestrator remains the sole coordination authority for governed changes and remediation.
 
 ## Definition of Completion
 
