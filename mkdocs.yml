@@ -21,6 +21,12 @@ nav:
       - Constitution: foundation/J-002-Constitution.md
       - Professional Operating Principles: foundation/J-003-Professional-Operating-Principles.md
       - Architectural Review and Decision Framework: foundation/J-006-Architectural-Review-and-Decision-Framework.md
+  - Architecture:
+      - Authority Map: architecture/README.md
+      - J-100 Reference Architecture: architecture/J-100-Reference-Architecture.md
+      - J-101 Capability Registry: architecture/J-101-Capability-Registry.md
+      - J-102 Governed Approval Architecture: architecture/J-102-Governed-Approval-Architecture.md
+      - J-103 System Registry: architecture/J-103-System-Registry.md
   - Canonical Models:
       - J-116 State Model: models/J-116-State-Model.md
       - J-117 Object Model: models/J-117-Object-Model.md
