@@ -2,7 +2,7 @@ site_name: Project Jason
 site_description: TeamAOT's governed operational platform and professional decision-support architecture
 repo_name: al-teamaot-com/jason
 repo_url: https://github.com/al-teamaot-com/jason
-docs_dir: .build/docs
+docs_dir: docs
 site_dir: site
 theme:
   name: material
@@ -36,10 +36,6 @@ nav:
       - J-118 Relationship Model: models/J-118-Relationship-Model.md
       - J-119 Event Model: models/J-119-Event-Model.md
       - J-120 Organizational Model: models/J-120-Organizational-Model.md
-  - Milestones:
-      - M-001 Kernel Foundation: milestones/M-001-Kernel-Foundation.md
-      - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
-      - M-003 Release Governance Hardening: milestones/M-003-Release-Governance-Hardening.md
   - Kernel:
       - Identity and Authority: components/kernel/JKD-001-Identity-and-Authority-Service.md
       - Identity and Authority Runtime Foundation: components/kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
@@ -94,9 +90,20 @@ nav:
       - Canonical Sources and Generated Artifacts: standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
       - Documentation Governance and Continuity: standards/J-404-Documentation-Governance-and-Continuity.md
   - Decisions:
-      - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
+      - ADR-001 Vertical Slice First: decisions/ADR-001-Vertical-Slice-First.md
+      - ADR-002 Documentation Layout (Superseded): decisions/ADR-002-Canonical-Documentation-Layout.md
+      - ADR-003 Autotask Connector Convergence: decisions/ADR-003-Autotask-Connector-Convergence.md
+      - ADR-004 Datto RMM Managed-Device Authority: decisions/ADR-004-Datto-RMM-Managed-Device-Authority.md
+      - ADR-005 OpenClaw Teams Transport Boundary: decisions/ADR-005-OpenClaw-Teams-Transport-Boundary.md
+      - ADR-006 Governed Conversational Routing: decisions/ADR-006-Governed-Conversational-Interface-Routing.md
+      - ADR-007 Teams Proactive Messaging: decisions/ADR-007-Teams-Proactive-Messaging.md
+      - ADR-008 Documentation Control Plane Consolidation: decisions/ADR-008-Documentation-Control-Plane-Consolidation.md
   - Roadmap:
       - Capability Register: roadmaps/Jason-Capability-Register.md
+  - Milestones:
+      - M-001 Kernel Foundation: milestones/M-001-Kernel-Foundation.md
+      - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
+      - M-003 Release Governance Hardening: milestones/M-003-Release-Governance-Hardening.md
 plugins:
   - search
 markdown_extensions:
@@ -105,7 +112,3 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-exclude_docs: |
-  implementation/
-  .github/
-  site/
