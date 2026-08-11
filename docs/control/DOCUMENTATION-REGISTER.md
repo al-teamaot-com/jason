@@ -16,11 +16,13 @@ Start here when you need to answer any of these questions:
 
 For consistent authoring, use `docs/control/HOW-TO-DOCUMENT-JASON.md`.
 
+For implementation-local README discovery, use `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`.
+
 For remaining authority/reconciliation issues, use `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md`.
 
 ## Current physical rule
 
-All governed human-facing Project Jason documentation is now physically consolidated under `docs/`, except implementation-local documentation that has a justified need to remain beside code, schemas, deployment packages, or tests.
+All governed human-facing Project Jason documentation is now physically consolidated under `docs/`, except implementation-local documentation that has a justified need to remain beside code, schemas, deployment packages, or tests and is registered in `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`.
 
 Conventional repository entry/control files may remain at repository root:
 
@@ -50,6 +52,7 @@ MkDocs consumes `docs/` directly. The former mixed-source `.build/docs` assembly
 | Operating procedure | `docs/operations/` | Procedures must reference current authority and evidence sources. |
 | Historical proof | `docs/sessions/` and bounded evidence references | Proves what occurred at a point in time. |
 | Current work/resume point | `docs/control/CURRENT.md` | References authoritative evidence instead of duplicating volatile state. |
+| Implementation-local README discovery | `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` | Index grants discoverability only; package README files remain supporting implementation documentation. |
 | Architecture observations | `docs/journal/` | Non-governing until promoted through normal governance. |
 | Active governed roadmap/backlog | `docs/roadmaps/` | Historical/superseded roadmaps belong in `docs/archive/`. |
 | Milestone declarations | `docs/milestones/` | Release/documentation readiness tooling consumes this location. |
@@ -66,6 +69,7 @@ docs/
     DOCUMENTATION-REGISTER.md
     DOCUMENTATION-MIGRATION-ISSUES.md
     HOW-TO-DOCUMENT-JASON.md
+    IMPLEMENTATION-DOCUMENTATION-INDEX.md
     HANDOFF-TEMPLATE.md
     DOCUMENT-TEMPLATE.md
   foundation/
@@ -139,7 +143,7 @@ This exception is bounded:
 - material implementation-local documentation must be discoverable from the documentation control plane;
 - future sessions must not copy every README into `docs/` merely for centralization.
 
-The implementation-documentation index is the control mechanism for that exception once completed.
+`docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` is the control mechanism for that exception. Documentation CI inventories README files beneath `implementation/` and `infrastructure/` and fails if a discovered README is not represented in the index.
 
 ## High-value continuity records
 
@@ -147,6 +151,7 @@ The implementation-documentation index is the control mechanism for that excepti
 - `docs/control/CURRENT.md` — canonical resume point.
 - `docs/control/HOW-TO-DOCUMENT-JASON.md` — repeatable authoring/update procedure for future sessions.
 - `docs/control/DOCUMENTATION-REGISTER.md` — this authority/source map.
+- `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` — discovery/control boundary for package-adjacent documentation.
 - `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` — remaining reconciliation issues.
 - `docs/standards/J-404-Documentation-Governance-and-Continuity.md` — documentation governance.
 - `docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md` — decision superseding the old numbered-root layout.
@@ -179,7 +184,7 @@ New governed human-facing documentation belongs under `docs/`.
 
 Before adding a document, future sessions must consult `docs/control/HOW-TO-DOCUMENT-JASON.md` and search the Documentation Register/current documentation tree to avoid duplicate authority.
 
-Implementation-local README files may remain beside code only when adjacency is operationally useful. They must not quietly become the sole owner of a material architecture, governance, authority, security, or operating rule.
+Implementation-local README files may remain beside code only when adjacency is operationally useful. They must be represented in `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` and must not quietly become the sole owner of a material architecture, governance, authority, security, or operating rule.
 
 Repository-root `README.md`, `CONTRIBUTING.md`, and `SECURITY.md` are conventional navigation/control entry points only; durable project truth belongs under `docs/` or in explicitly structured machine-readable sources such as the System Registry.
 
