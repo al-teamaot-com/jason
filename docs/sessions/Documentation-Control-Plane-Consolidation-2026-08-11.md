@@ -1,8 +1,8 @@
 # Project Jason Documentation Control-Plane Consolidation — 2026-08-11
 
-**Status:** Consolidation/reconciliation substantially complete; final path audit and merge-readiness validation pending  
+**Status:** Documentation consolidation and reconciliation complete; final broader CI and PR/base readiness review pending  
 **Classification:** Historical implementation/reconciliation evidence  
-**Workstream:** Offline documentation standardization  
+**Workstream:** Documentation standardization  
 **Branch:** `docs/documentation-standardization-2026-08-11`  
 **Draft PR:** `#161 — Standardize Project Jason documentation control plane`  
 **Authority:** Jason continuity/institutional-memory principles, J-403, J-404, ADR-008, and approved Platform Integrity reconciliation  
@@ -10,17 +10,17 @@
 
 ## Purpose
 
-Preserve the bounded result of the 2026-08-11 offline documentation-standardization work so a future session does not have to reconstruct what was moved, why authority was reconciled, or which work remains from chat history.
+Preserve the bounded result of the 2026-08-11 documentation-standardization work so a future session does not have to reconstruct what was moved, why authority was reconciled, or which checks remain from chat history.
 
-The work was initiated while the operator was away from the physical Jason host. No host-sensitive or production-runtime remediation was performed.
+The work was performed without changing the physical Jason production runtime. No host-sensitive or production-runtime remediation was performed.
 
-## Problem being corrected
+## Problem corrected
 
 Jason documentation had accumulated across numbered repository roots, publishing directories, operational/session records, a separate engineering architecture tree, implementation-local README files, root backlog material, generated documentation, and conversation handoffs.
 
-The information was present, but safe reconstruction required prior knowledge of where earlier sessions happened to put it.
+The information was present, but safe reconstruction required prior knowledge of historical repository layout.
 
-The consolidation goal is:
+The consolidation goal was:
 
 > durable project knowledge is discoverable from one human-facing documentation control plane, while each material fact retains one authoritative owner and current operational truth remains structured rather than conversational.
 
@@ -102,9 +102,9 @@ Resolution:
 - the historical source text is preserved at `docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md` and explicitly marked Historical/Superseded as governing authority;
 - its durable requirements were extracted into `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` beneath the Constitution;
 - J-405 preserves approved-platform-contract, central-orchestration, prohibited-bypass, workload-identity/secrets, provider/policy-separation, cross-client-isolation, integrate-before-innovate, exception-governance, and production-readiness controls;
-- `docs/governance/README.md` and the Documentation Register now state the resolved authority relationship;
+- `docs/governance/README.md` and the Documentation Register state the resolved authority relationship;
 - MIG-DOC-003 is closed; and
-- documentation CI now fails if the old free-standing Article VII reappears as current governance authority or the J-405/archive reconciliation is lost.
+- documentation CI fails if the old free-standing Article VII reappears as current governance authority or the J-405/archive reconciliation is lost.
 
 The reconciliation preserves institutional memory without creating a second constitutional Article VII or silently deleting the earlier requirements.
 
@@ -119,9 +119,34 @@ The reconciliation preserves institutional memory without creating a second cons
 
 ## Operations/proof classification
 
-`docs/operations/README.md` now defines the operational documentation authority boundary.
+`docs/operations/README.md` defines the operational documentation authority boundary.
 
 Repeatable procedures remain operational; dated point-in-time proof belongs in sessions. The CAP-007 live pilot proof was moved to sessions without altering evidence identity. The IT Glue/Datto live convergence file remains operational because its primary content is a reusable observe-only runbook despite its filename.
+
+MIG-DOC-005 is closed/controlled.
+
+## Current-use path audit
+
+The final current-use path audit is complete.
+
+`tools/validate_documentation_control.py` now scans `tools/`, `.github/workflows/`, and `docs/operations/` for retired numbered documentation roots and the former top-level engineering architecture path. This complements strict MkDocs link/navigation validation.
+
+The audit found and corrected stale current-use references in:
+
+- Autotask live-read and business-context tooling;
+- production-readiness closeout tooling;
+- the CatchMeUp shell entry point;
+- CAP-007 activation documentation;
+- Microsoft deployment documentation;
+- OpenBao bootstrap and deployment documentation;
+- INF-001 execution guidance; and
+- the System Registry production verification runbook.
+
+The obsolete documentation-assembly step in the INF-001 checklist was also replaced by direct documentation-control validation and a strict build from `docs/`.
+
+One exact historical compatibility mapping is intentionally retained in `tools/system_registry_docs.py`. Append-only lifecycle events preserve historical `08-Session-Records/...` repository evidence references; the generator maps that legacy prefix to current `docs/sessions/...` locations without rewriting immutable event history. The validator narrowly permits only that file/prefix pair rather than excluding the file from auditing.
+
+The strengthened documentation-control validation and strict MkDocs build passed after these repairs. MIG-DOC-007 is closed.
 
 ## System Registry continuity rule preserved
 
@@ -146,21 +171,30 @@ The documentation validator inventories README files beneath `implementation/` a
 - MkDocs uses `docs_dir: docs` directly.
 - Historical mixed-source `tools/assemble_docs.py` is retired.
 - `tools/documentation_readiness.py` uses `docs/milestones/`.
-- `tools/catch_me_up.py` uses consolidated CURRENT, roadmap, operations, milestone, and session paths.
-- `tools/system_registry_docs.py` uses the consolidated operational-state output path.
+- `tools/catch_me_up.py` and `tools/catch_me_up.sh` use the consolidated CURRENT, roadmap, operations, milestone, and session paths.
+- `tools/system_registry_docs.py` uses the consolidated operational-state output path while preserving an explicit historical evidence-path translation.
 - documentation-sensitive CI/workflows use consolidated paths.
-- `tools/validate_documentation_control.py` rejects retired roots, validates required control records, ADR reconciliation, MkDocs source, continuity paths, implementation-local README indexing, and the J-405/archived-Article-VII reconciliation.
+- `tools/validate_documentation_control.py` rejects retired roots, validates required control records, ADR reconciliation, MkDocs source, continuity paths, implementation-local README indexing, J-405/archived-Article-VII reconciliation, and current-use retired-path drift.
+
+## Validation status
+
+The strengthened documentation job passed both:
+
+- documentation-control-plane validation; and
+- strict MkDocs build directly from the canonical `docs/` tree.
+
+Broader and targeted PR validation must remain green after this final closeout record before PR #161 changes readiness state.
 
 ## Remaining work
 
 Before PR #161 may leave draft status:
 
-1. complete the final current-use/plain-text path audit tracked by MIG-DOC-007 while preserving intentionally historical path text;
-2. confirm strict MkDocs and broader CI remain green after the J-405 reconciliation;
-3. refetch and reconcile the latest `feature/jason-runtime-service` branch immediately before merge/retargeting; and
-4. perform final PR review and remove draft status only after those checks pass.
+1. allow the final broader and targeted CI runs to finish after these closeout-record updates;
+2. refetch the latest `feature/jason-runtime-service` branch immediately before the readiness decision;
+3. confirm PR #161 remains cleanly mergeable against that base; and
+4. perform final PR review/readiness transition only if those checks remain green.
 
-No unresolved constitutional/governance disposition remains in this documentation workstream.
+No unresolved documentation migration or constitutional/governance disposition remains in this workstream.
 
 ## Production/host boundary
 
