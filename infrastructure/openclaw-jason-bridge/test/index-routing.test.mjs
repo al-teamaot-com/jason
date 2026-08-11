@@ -11,6 +11,14 @@ test("bound Teams conversations have a phrase-agnostic pre-agent compatibility r
   assert.match(source, /forwardGovernedTeamsTurn/);
 });
 
+test("governed Teams turn timeout hierarchy leaves room for bounded Jason stages", () => {
+  assert.match(source, /const DEFAULT_TIMEOUT_MS = 150_000;/);
+  assert.match(source, /const MAX_TIMEOUT_MS = 170_000;/);
+  assert.match(source, /const HOOK_TIMEOUT_MS = 180_000;/);
+  assert.match(source, /requestTimeoutMs > MAX_TIMEOUT_MS/);
+  assert.equal((source.match(/\{ timeoutMs: HOOK_TIMEOUT_MS \}/g) ?? []).length, 2);
+});
+
 test("Teams bridge routing contains no endpoint-specific trigger phrase", () => {
   for (const forbidden of [
     "AOT-50282",
