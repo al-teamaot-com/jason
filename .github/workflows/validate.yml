@@ -134,6 +134,8 @@ jobs:
           python-version: "3.12"
       - name: Install documentation tools
         run: python -m pip install "mkdocs-material>=9.5,<10"
+      - name: Validate documentation control plane
+        run: python3 tools/validate_documentation_control.py
       - name: Assemble documentation
         run: python3 tools/assemble_docs.py
       - name: Build documentation
