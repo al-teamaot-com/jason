@@ -1,6 +1,6 @@
 # J-404 — Documentation Governance and Continuity
 
-**Version:** 0.1  
+**Version:** 0.2  
 **Status:** Proposed — effective when merged into the authoritative development branch  
 **Owner:** Jason Architecture Authority  
 **Applies to:** Project Jason documentation, operational records, architecture records, implementation records, evidence references, generated documentation, and session continuity
@@ -20,6 +20,7 @@ A contributor, operator, auditor, or future AI system beginning with `docs/index
 - why Jason exists;
 - which constitutional and governance rules apply;
 - the current architecture and canonical models;
+- detailed implementation-engineering architecture;
 - component and capability contracts;
 - approved standards and ADRs;
 - current operational topology and verification sources;
@@ -29,7 +30,31 @@ A contributor, operator, auditor, or future AI system beginning with `docs/index
 - milestone and roadmap state; and
 - which records are historical or superseded.
 
-During migration, some canonical source files may remain in legacy numbered repository directories. Those locations are transitional implementation details and must be indexed from `docs/`. New documentation shall be created under `docs/` unless an approved exception applies.
+New governed human-facing documentation shall be created under `docs/` unless an approved implementation-local exception applies.
+
+The canonical structure is:
+
+```text
+docs/
+  index.md
+  control/
+  foundation/
+  governance/
+  architecture/
+  engineering/
+  models/
+  components/
+  standards/
+  decisions/
+  roadmaps/
+  operations/
+  sessions/
+  journal/
+  milestones/
+  archive/
+```
+
+Repository-root `README.md`, `CONTRIBUTING.md`, and `SECURITY.md` may remain conventional entry/control files, but they must direct durable project knowledge into the `docs/` control plane rather than becoming parallel documentation authorities.
 
 ## 2. One fact, one authoritative owner
 
@@ -40,7 +65,8 @@ Other documents may reference or summarize that fact, but they must not create a
 Examples:
 
 - constitutional rules are owned by the Constitution and approved governance records;
-- enduring architectural structure is owned by architecture records and ADRs;
+- enduring platform architecture is owned by canonical architecture records and project ADRs;
+- implementation-engineering architecture is owned by engineering records subordinate to platform architecture;
 - current production topology and lifecycle state are owned by the System Registry and its governed lifecycle history;
 - deployment procedures are owned by operational runbooks;
 - implementation behavior is owned by versioned code, schemas, and tests;
@@ -54,10 +80,10 @@ When a summary would duplicate volatile facts such as container hashes, runtime 
 When documentation appears to conflict, interpret sources in this order unless a more specific governing record explicitly defines otherwise:
 
 1. Jason Constitution and approved constitutional amendments.
-2. Approved governance rules and architecture decision records.
-3. Approved architecture, canonical models, and engineering standards.
+2. Approved governance rules and project architecture decision records.
+3. Approved canonical architecture, canonical models, and engineering standards.
 4. System Registry declared state, append-only lifecycle history, and observed verification evidence for operational topology.
-5. Component, capability, provider, and infrastructure specifications.
+5. Component, capability, provider, infrastructure, and implementation-engineering specifications.
 6. Operational runbooks and deployment records.
 7. Durable proof and session records.
 8. Current-work and handoff records.
@@ -149,21 +175,22 @@ A handoff should distinguish:
 
 Inference must be labeled as inference. Missing evidence must be labeled as missing rather than filled from memory.
 
-## 9. Documentation migration
+## 9. Documentation migration and path changes
 
-The project currently contains historical numbered documentation roots and a newer `docs/` publishing tree. Migration shall consolidate human documentation into `docs/` without destroying history or breaking references silently.
+The numbered historical documentation roots and the former top-level engineering `architecture/` tree have been consolidated beneath `docs/` on the documentation-standardization branch. The authoritative historical mapping is retained in `docs/control/DOCUMENTATION-REGISTER.md`.
 
-Migration rules:
+Future documentation path changes must follow these rules:
 
-1. Move one governed category at a time.
+1. Identify the current authoritative source and all material inbound references.
 2. Preserve Git history where practical.
-3. Update internal links, MkDocs navigation, CI checks, tooling, and release gates in the same migration.
-4. Leave a redirect/stub only when needed for compatibility and give it a retirement criterion.
+3. Update internal links, MkDocs navigation, CI checks, tooling, release gates, and operator-facing path references in the same governed change sequence.
+4. Leave a redirect/stub only when required for compatibility and document its retirement criterion.
 5. Never maintain two editable canonical copies.
 6. Archive superseded records rather than deleting institutional history unless retention is prohibited.
-7. Record migration status in `docs/control/DOCUMENTATION-REGISTER.md`.
+7. Record material path/authority changes in the Documentation Register or a governed decision record.
+8. CI shall reject re-creation of retired human-documentation roots unless an approved decision explicitly reintroduces one.
 
-Until a category is migrated, its existing source remains canonical and `docs/` provides the authoritative index to it.
+Path consolidation does not justify rewriting historical evidence. When an append-only evidence record contains a historical repository path, generated current documentation may resolve that reference to the new canonical location while preserving the original event unchanged.
 
 ## 10. Implementation-local documentation
 
@@ -173,13 +200,15 @@ Such README files are implementation documentation, not the project documentatio
 
 Implementation-local documentation must not quietly introduce architecture, authority, or governance rules that are absent from canonical documentation.
 
+Detailed engineering architecture that is broadly reusable across implementations belongs under `docs/engineering/`, not in a scattered top-level architecture tree.
+
 ## 11. Generated documentation
 
 Generated documentation remains derived and disposable under J-403.
 
-The documentation build may assemble legacy canonical sources during migration, but publication structure must not be mistaken for source authority.
+MkDocs consumes the canonical `docs/` tree directly. Generated `site/`, `.build/`, reports, indexes, diagrams, and similar outputs remain non-authoritative and must not be hand-edited as sources of truth.
 
-Generated files must not be hand-edited.
+If a future publishing system requires staging or transformation, the staging output must remain deterministic, disposable, and subordinate to `docs/`.
 
 ## 12. Staleness and drift
 
@@ -211,8 +240,9 @@ A material change is not documentation-complete until:
 - its operational-state implications are reflected in the System Registry when applicable;
 - its durable proof or decision record exists when needed;
 - `docs/control/CURRENT.md` is updated if the resume point changed;
-- navigation/indexes locate the authoritative material; and
-- superseded or conflicting documentation is retired, redirected, or explicitly marked transitional.
+- navigation/indexes locate the authoritative material;
+- implementation-local documentation is indexed when material; and
+- superseded or conflicting documentation is retired, redirected, or explicitly classified.
 
 ## 15. Governing rule
 
