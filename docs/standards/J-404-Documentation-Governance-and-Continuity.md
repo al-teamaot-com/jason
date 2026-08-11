@@ -1,6 +1,6 @@
 # J-404 — Documentation Governance and Continuity
 
-**Version:** 0.2  
+**Version:** 0.3  
 **Status:** Proposed — effective when merged into the authoritative development branch  
 **Owner:** Jason Architecture Authority  
 **Applies to:** Project Jason documentation, operational records, architecture records, implementation records, evidence references, generated documentation, and session continuity
@@ -27,6 +27,7 @@ A contributor, operator, auditor, or future AI system beginning with `docs/index
 - operating procedures and runbooks;
 - current work and resume instructions;
 - durable session and proof records;
+- material implementation-local documentation through a governed index;
 - milestone and roadmap state; and
 - which records are historical or superseded.
 
@@ -198,7 +199,11 @@ README files that are inseparable from code, schemas, deployment packages, conne
 
 Such README files are implementation documentation, not the project documentation control plane. Material operational or architectural rules discovered there must also be represented by, or linked from, the appropriate governed document under `docs/`.
 
-Implementation-local documentation must not quietly introduce architecture, authority, or governance rules that are absent from canonical documentation.
+Implementation-local documentation must not quietly introduce architecture, authority, security, or governance rules that are absent from canonical documentation.
+
+Every `README.md` beneath `implementation/` or `infrastructure/` shall be represented in `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`. The index shall identify the supporting purpose and governed human-facing owner or related records. CI shall enforce index coverage.
+
+Index inclusion establishes discoverability only. It does not promote the README to a governing source, establish current production state, or prove that the README is current or approved.
 
 Detailed engineering architecture that is broadly reusable across implementations belongs under `docs/engineering/`, not in a scattered top-level architecture tree.
 
