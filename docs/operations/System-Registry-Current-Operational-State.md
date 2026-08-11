@@ -14,10 +14,10 @@
 
 | Registry ID | Type | Verification method | Governed evidence record |
 |---|---|---|---|
-| `component.jason-runtime` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
-| `component.openbao` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
-| `component.openclaw-gateway` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
-| `component.openclaw-jason-bridge` | `component` | `docker-file-sha256-v1` | `08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Verification-2026-08-11.md`<br>`08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md` |
+| `component.jason-runtime` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
+| `component.openbao` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
+| `component.openclaw-gateway` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
+| `component.openclaw-jason-bridge` | `component` | `docker-file-sha256-v1` | `docs/sessions/OpenClaw-Bridge-Governed-Deployment-Verification-2026-08-11.md`<br>`docs/sessions/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md` |
 
 ## Registered but not yet verified
 
@@ -50,6 +50,8 @@ Logical records remain unpromoted until their own registered verification method
 
 The lifecycle event history is append-only operational evidence. Baseline declared state remains separate from the effective lifecycle derived from governed events.
 
+Historical lifecycle-event repository paths are preserved in the append-only event source. This generated view resolves those references to the current `docs/sessions/` location when the migrated evidence record exists.
+
 ## Regeneration
 
-Run `python tools/system_registry_docs.py` after an approved registry or lifecycle-event change. CI runs `python tools/system_registry_docs.py --check` and fails if this generated view is stale.
+Run `python tools/system_registry_docs.py` after an approved registry, lifecycle-event, or documentation-path change. CI runs `python tools/system_registry_docs.py --check` and fails if this generated view is stale.
