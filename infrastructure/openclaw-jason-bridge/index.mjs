@@ -19,7 +19,9 @@ const DEFAULT_RUNTIME_URL = "http://jason-runtime:8080/v1/openclaw/teams/convers
 const DEFAULT_KEY_ID = "openclaw-gateway-2";
 const DEFAULT_PRIVATE_KEY_PATH =
   "/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem";
-const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 150_000;
+const MAX_TIMEOUT_MS = 170_000;
+const HOOK_TIMEOUT_MS = 180_000;
 const BINDING_CONTEXT_TTL_MS = 10 * 60_000;
 const BINDING_APPROVAL_TTL_MS = 5 * 60_000;
 const MAX_BINDING_CONTEXTS = 256;
@@ -46,7 +48,7 @@ function resolveConfig(api) {
     throw new Error("jason-bridge requires a valid microsoftTenantId");
   }
   const requestTimeoutMs = Number(source.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
-  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 40_000) {
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > MAX_TIMEOUT_MS) {
     throw new Error("jason-bridge requestTimeoutMs is invalid");
   }
   return {
@@ -466,7 +468,7 @@ export default definePluginEntry({
           correlationId: event.runId ?? ctx.runId,
         });
       },
-      { timeoutMs: 45_000 },
+      { timeoutMs: HOOK_TIMEOUT_MS },
     );
 
     // OpenClaw's inbound_claim hook only fires when core successfully projects
@@ -524,7 +526,7 @@ export default definePluginEntry({
           correlationId: captured.runId ?? ctx.runId,
         });
       },
-      { timeoutMs: 45_000 },
+      { timeoutMs: HOOK_TIMEOUT_MS },
     );
   },
 });
