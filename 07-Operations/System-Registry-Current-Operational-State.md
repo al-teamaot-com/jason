@@ -8,7 +8,7 @@
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
 - Registered entities: `22`
-- Effective lifecycle counts: `configured=4, registered=14, verified=4`
+- Effective lifecycle counts: `configured=5, registered=14, verified=3`
 
 ## Verified current physical topology
 
@@ -17,7 +17,6 @@
 | `component.jason-runtime` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openbao` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openclaw-gateway` | `component` | `docker-container-inspect-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md` |
-| `component.openclaw-jason-bridge` | `component` | `docker-file-sha256-v1` | `08-Session-Records/System-Registry-Production-Verification-2026-08-11.md`<br>`08-Session-Records/System-Registry-Bridge-Drift-Reconciliation-2026-08-11.md` |
 
 ## Registered but not yet verified
 
@@ -30,6 +29,7 @@
 | `capability.system-registry-search` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
 | `capability.system-registry-trace` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
 | `component.central-orchestrator` | `component` | `registered` | `runtime-composition-source-and-health` |
+| `component.openclaw-jason-bridge` | `component` | `configured` | `docker-file-sha256-v1` |
 | `credential.openbao.aws-ses-sendmail` | `credential_reference` | `registered` | `provider-credential-status` |
 | `credential.openbao.datto-rmm-readonly` | `credential_reference` | `registered` | `provider-credential-status` |
 | `credential.openbao.microsoft-graph-directory-read` | `credential_reference` | `registered` | `provider-credential-status` |
