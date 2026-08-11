@@ -46,12 +46,17 @@ class BoundConversationPrincipal:
     principal_id: str
     organization_id: str
     client_id: str | None = None
+    email_address: str | None = None
 
     def __post_init__(self) -> None:
         if not self.principal_id.strip() or not self.organization_id.strip():
             raise ValueError("bound Jason principal and organization are required")
         if self.client_id is not None and not self.client_id.strip():
             raise ValueError("client_id must be non-empty when supplied")
+        if self.email_address is not None:
+            email = self.email_address.strip()
+            if not email or "@" not in email or email.startswith("@") or email.endswith("@"):
+                raise ValueError("email_address must be valid when supplied")
 
 
 @dataclass(frozen=True, slots=True)
