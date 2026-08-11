@@ -64,14 +64,6 @@ Required work:
 - update old path text when it is intended to direct a current operator;
 - do not recreate retired roots merely to satisfy stale references.
 
-### MIG-DOC-009 — Implementation-local documentation index
-
-**State:** Open — structural consolidation complete.
-
-Implementation-local README files may remain beside code, connectors, deployment packages, and schemas when adjacency is useful. A final index/audit is needed to ensure no material architecture, governance, authority, security, or operating rule exists only in an unindexed implementation README.
-
-The preferred outcome is not copying every README into `docs/`; it is making material implementation documentation discoverable and ensuring governed rules have canonical human-facing owners.
-
 ## Resolved / controlled issues
 
 ### MIG-DOC-001 — Duplicate ADR-004 identifier
@@ -128,6 +120,22 @@ It is historical context, not current runtime authority.
 - documentation CI validates the control plane and builds directly from `docs/`;
 - the validator rejects recreation of retired numbered documentation roots and the former top-level engineering `architecture/` tree;
 - `tools/documentation_readiness.py` uses `docs/milestones/`.
+
+### MIG-DOC-009 — Implementation-local documentation index
+
+**State:** Resolved/controlled.
+
+Implementation-local README files may remain beside code, connectors, deployment packages, and schemas when adjacency is useful, but they are supporting implementation documentation rather than hidden governance or architecture authority.
+
+Resolution:
+
+- `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` is the single discovery/control index for package-adjacent README files;
+- the index names the governed human-facing owner or related records for each implementation-local document;
+- `docs/index.md`, MkDocs navigation, the Documentation Register, and the documentation authoring guide expose the index;
+- `tools/validate_documentation_control.py` inventories every `README.md` beneath `implementation/` and `infrastructure/` and fails if its repository-relative path is missing from the index;
+- index presence proves discoverability only and does not grant governance, architecture, security, or current-state authority to a README.
+
+Future implementation README additions must update the index in the same governed change.
 
 ### MIG-DOC-010 — Historical documentation-layout ADR conflict
 
