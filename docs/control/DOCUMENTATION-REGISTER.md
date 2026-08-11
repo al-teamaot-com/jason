@@ -18,6 +18,8 @@ For consistent authoring, use `docs/control/HOW-TO-DOCUMENT-JASON.md`.
 
 For implementation-local README discovery, use `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`.
 
+For operations/proof classification, use `docs/operations/README.md`.
+
 For remaining authority/reconciliation issues, use `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md`.
 
 ## Current physical rule
@@ -49,8 +51,8 @@ MkDocs consumes `docs/` directly. The former mixed-source `.build/docs` assembly
 | Canonical organizational models | `docs/models/` | Provider-neutral concepts. |
 | Component/capability/provider contracts | `docs/components/` plus versioned implementation contracts/tests | Code/tests prove implementation behavior; documents define governed intended contracts. |
 | Current production topology/state | System Registry structured sources + append-only lifecycle history + verification evidence | Do not recreate current topology manually in narrative documents. |
-| Operating procedure | `docs/operations/` | Procedures must reference current authority and evidence sources. |
-| Historical proof | `docs/sessions/` and bounded evidence references | Proves what occurred at a point in time. |
+| Operating procedure / deployment record / generated operational view | `docs/operations/` classified by `docs/operations/README.md` | Procedures do not self-authorize; deployment records are not substitutes for observed state; generated current-state views are derived from System Registry truth. |
+| Historical proof | `docs/sessions/` and bounded evidence references | Proves what occurred at a point in time; not perpetual current-state authority. |
 | Current work/resume point | `docs/control/CURRENT.md` | References authoritative evidence instead of duplicating volatile state. |
 | Implementation-local README discovery | `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` | Index grants discoverability only; package README files remain supporting implementation documentation. |
 | Architecture observations | `docs/journal/` | Non-governing until promoted through normal governance. |
@@ -113,7 +115,7 @@ docs/
 | `06-Roadmaps/` | `docs/roadmaps/` | Active capability register migrated. |
 | `07-Roadmap/` | `docs/roadmaps/` and `docs/archive/roadmaps/` | Machine-readable roadmap status migrated to `docs/roadmaps/`; historical narrative roadmap preserved as explicitly superseded under `docs/archive/roadmaps/`. |
 | `TODO.md` | `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md` | Governed backlog moved into the documentation control plane; root TODO retired. |
-| `07-Operations/` | `docs/operations/` | Physically migrated. Repeatable-procedure vs historical-proof classification remains an ongoing cleanup requirement for individual records. |
+| `07-Operations/` | `docs/operations/` and `docs/sessions/` where a migrated record is point-in-time evidence | Migrated and semantically classified. `docs/operations/README.md` defines the boundary. Reusable procedures/deployment records/generated operational views remain operational; dated historical proofs belong in sessions. CAP-007 live-pilot proof was reclassified to sessions without altering evidence identity. |
 | `08-Session-Records/` | `docs/sessions/` | Migrated; former `CURRENT.md` preserved as `Legacy-CURRENT-2026-08-11.md`. `docs/control/CURRENT.md` is the only current resume point. |
 | `09-Architecture-Journal/` | `docs/journal/` | Migrated; journal remains explicitly non-governing until promoted. |
 | `10-Milestones/` | `docs/milestones/` | Migrated; documentation-readiness tooling updated. |
@@ -160,7 +162,9 @@ This exception is bounded:
 - `docs/engineering/README.md` — detailed engineering-architecture authority boundary and index.
 - `docs/roadmaps/Jason-Capability-Register.md` — governed capability roadmap.
 - `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md` — governed backlog/future ideas.
+- `docs/operations/README.md` — operations/procedure/deployment/generated-state/historical-proof classification authority map.
 - `docs/operations/System-Registry-Current-Operational-State.md` — generated human-readable operational-state representation where current.
+- `docs/sessions/README.md` — historical session/proof evidence boundary.
 - `implementation/kernel/system_registry/` — structured operational truth.
 
 ## Classification rules
