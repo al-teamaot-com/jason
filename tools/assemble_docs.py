@@ -16,7 +16,6 @@ CANONICAL_DIRECTORIES = (
     "01-Governance",
     "02-Architecture",
     "03-Components",
-    "04-Standards",
     "05-ADR",
     "06-Roadmaps",
     "07-Operations",
