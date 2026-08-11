@@ -13,7 +13,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 # Transitional canonical roots retained while the documentation migration is in progress.
 # The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
-    "01-Foundation",
     "01-Governance",
     "02-Architecture",
     "02-Canonical-Models",
@@ -34,10 +33,11 @@ PUBLISHING_DIRECTORIES = (
     "docs/governance",
 )
 
-# Documentation control-plane material is authored under docs/ and published at the
-# documentation root so docs/index.md can link to it directly.
-CONTROL_DIRECTORIES = (
+# Consolidated documentation sources are authored under docs/ and published at stable
+# documentation-root paths. More categories move here as the migration proceeds.
+CONSOLIDATED_DIRECTORIES = (
     ("docs/control", "control"),
+    ("docs/foundation", "foundation"),
     ("docs/standards", "standards"),
 )
 
@@ -69,7 +69,7 @@ def main() -> int:
         destination = BUILD_ROOT / directory_name
         copy_directory(source, destination)
 
-    for source_name, destination_name in CONTROL_DIRECTORIES:
+    for source_name, destination_name in CONSOLIDATED_DIRECTORIES:
         source = REPOSITORY_ROOT / source_name
         destination = BUILD_ROOT / destination_name
         copy_directory(source, destination)
