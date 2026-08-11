@@ -22,6 +22,10 @@ class OllamaStructuredJsonClient:
     model can otherwise spend most of an ingress budget producing unnecessary tokens
     even when the final contract is tiny. max_output_tokens therefore becomes part of
     the reasoning contract rather than relying on an HTTP timeout as the only bound.
+
+    Thinking is explicitly disabled for this narrow contract. Jason needs the bounded
+    schema result, not a model reasoning trace, and thinking-capable models can consume
+    the entire generation budget before emitting the structured answer.
     """
 
     transport: HttpTransport
@@ -51,6 +55,7 @@ class OllamaStructuredJsonClient:
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
+                "think": False,
                 "stream": False,
                 "format": dict(schema),
                 "options": {
