@@ -14,6 +14,8 @@ Start here when you need to answer any of these questions:
 - Has a documentation category already moved into `docs/`?
 - Which source should win if two documents disagree?
 
+For instructions on how to create, update, hand off, retire, or reconcile Jason documentation consistently, use `docs/control/HOW-TO-DOCUMENT-JASON.md`.
+
 During migration, `docs/` is the single documentation control plane even when the canonical source for a category still physically resides in a legacy numbered directory.
 
 ## Authority model
@@ -42,6 +44,7 @@ docs/
   control/
     CURRENT.md
     DOCUMENTATION-REGISTER.md
+    HOW-TO-DOCUMENT-JASON.md
     HANDOFF-TEMPLATE.md
     DOCUMENT-TEMPLATE.md
   foundation/
@@ -104,9 +107,11 @@ Until migration is complete, the following records are especially important:
 
 - `docs/index.md` — single documentation entry point.
 - `docs/standards/J-404-Documentation-Governance-and-Continuity.md` — documentation governance rules.
+- `docs/control/HOW-TO-DOCUMENT-JASON.md` — repeatable authoring/update procedure for future sessions.
 - `docs/control/CURRENT.md` — canonical resume point.
 - `docs/control/DOCUMENTATION-REGISTER.md` — this source/migration register.
 - `docs/control/HANDOFF-TEMPLATE.md` — required structure for durable workstream handoff.
+- `docs/control/DOCUMENT-TEMPLATE.md` — standard metadata and durable-document skeleton.
 - `02-Architecture/J-103-System-Registry.md` — authoritative System Registry architecture during migration.
 - `07-Operations/System-Registry-Current-Operational-State.md` — generated human-readable operational-state view where current.
 - `implementation/kernel/system_registry/` — structured operational truth.
@@ -147,6 +152,8 @@ This order prevents lower-level content from being reorganized before its author
 New governed human-facing documentation belongs under `docs/`.
 
 If an existing legacy canonical document must be modified before its category is migrated, update that existing source and ensure the change remains discoverable from `docs/`. Do not create a duplicate replacement copy solely to satisfy the new directory convention.
+
+Before adding a new document, future sessions must consult `docs/control/HOW-TO-DOCUMENT-JASON.md` so naming, authority, evidence, status, security, and handoff practices remain consistent.
 
 ## Completion criteria
 
