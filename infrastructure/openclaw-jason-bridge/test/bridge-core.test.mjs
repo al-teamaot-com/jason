@@ -51,6 +51,27 @@ test("builds only the governed Teams transport contract", () => {
   }
 });
 
+test("preserves arbitrary natural-language wording without trigger phrases", () => {
+  const phrasings = [
+    "Who was on AOT-50282 last?",
+    "Can you tell me the most recent person to use AOT-50282?",
+    "What account last signed into AOT-50282?",
+    "Check AOT-50282 and tell me who used it most recently.",
+  ];
+
+  for (const [index, text] of phrasings.entries()) {
+    const value = buildConversationEnvelope({
+      text,
+      microsoftTenantId: tenantId,
+      microsoftObjectId: objectId,
+      conversationId: "conversation-1",
+      messageId: `message-${index + 10}`,
+      keyId: "openclaw-gateway-2",
+    });
+    assert.equal(value.text, text);
+  }
+});
+
 test("signs exactly the canonical payload Jason verifies", () => {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const signed = signConversationEnvelope(envelope(), privateKey);
