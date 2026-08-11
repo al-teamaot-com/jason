@@ -2,7 +2,7 @@
 
 **Status:** Active documentation reconciliation register  
 **Owner:** Jason Architecture Authority  
-**Purpose:** Preserve remaining documentation conflicts, ambiguities, and cleanup work so consolidation does not silently discard institutional history or create competing authority.
+**Purpose:** Preserve documentation conflicts, ambiguities, cleanup work, and their dispositions so consolidation does not silently discard institutional history or create competing authority.
 
 ## Rules
 
@@ -14,25 +14,7 @@
 
 ## Open issues
 
-### MIG-DOC-007 — Inbound-reference and plain-text path audit
-
-**State:** Open — strict MkDocs/CI is green and known current-use path drift is repaired; final consolidated-tree plain-text audit remains.
-
-All historical numbered human-documentation roots and the former top-level engineering `architecture/` tree have now been physically retired. Strict MkDocs validation catches Markdown link breakage, but plain-text references to old paths may remain intentionally or accidentally.
-
-Completed during the current audit:
-
-- strict MkDocs navigation was repaired and `Validate Jason` returned green;
-- current operator references in the reusable IT Glue/Datto convergence runbook now point to `docs/operations/` and `docs/sessions/`;
-- the migrated CAP-007 live-pilot proof now points to the current Teams proof under `docs/sessions/`;
-- the session-record index now points to `docs/control/CURRENT.md` rather than implying a local session `CURRENT.md`.
-
-Remaining work:
-
-- continue auditing current operational/runbook/tooling references to retired paths;
-- preserve old path text when it intentionally describes historical repository state;
-- update old path text when it is intended to direct a current operator;
-- do not recreate retired roots merely to satisfy stale references.
+None currently identified for the documentation-control-plane consolidation. New documentation conflicts or migration defects must be recorded here rather than silently normalized.
 
 ## Resolved / controlled issues
 
@@ -108,6 +90,23 @@ The former session checkpoint is preserved as:
 `docs/sessions/Legacy-CURRENT-2026-08-11.md`
 
 It is historical context, not current runtime authority.
+
+### MIG-DOC-007 — Inbound-reference and plain-text path audit
+
+**State:** Resolved — current-use path audit is enforced and green.
+
+All historical numbered human-documentation roots and the former top-level engineering `architecture/` tree are physically retired. The documentation validator now audits current-use text under `tools/`, `.github/workflows/`, and `docs/operations/` for retired path roots in addition to strict MkDocs link/navigation validation.
+
+Resolution:
+
+- stale operator/tool defaults were moved to the current `docs/operations/` and `docs/control/` paths;
+- operational evidence references were moved to current `docs/sessions/` paths;
+- CAP-007, Microsoft, OpenBao, Autotask, readiness, CatchMeUp, and System Registry runbook references were corrected;
+- obsolete documentation-assembly instruction in the INF-001 checklist was replaced by direct documentation-control validation and strict build from `docs/`;
+- strict MkDocs and the strengthened documentation-control validator passed after the cleanup;
+- the one intentional legacy-path translation in `tools/system_registry_docs.py` remains narrowly allowed because append-only lifecycle events preserve immutable historical `08-Session-Records/...` evidence references and the generator maps those references to current `docs/sessions/...` locations without rewriting event history;
+- the validator allows only that exact file/prefix compatibility case rather than excluding the file from current-use auditing;
+- historical path text outside current-use operational/tooling scope may remain where it accurately documents former repository state.
 
 ### MIG-DOC-008 — Documentation tooling transition
 
