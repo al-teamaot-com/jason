@@ -1,147 +1,142 @@
 # Project Jason Documentation Migration Issues
 
-**Status:** Active migration issue register  
+**Status:** Active documentation reconciliation register  
 **Owner:** Jason Architecture Authority  
-**Purpose:** Preserve known documentation conflicts, ambiguities, and reference risks so migration work does not silently discard institutional history or create duplicate authority.
+**Purpose:** Preserve remaining documentation conflicts, ambiguities, and cleanup work so consolidation does not silently discard institutional history or create competing authority.
 
 ## Rules
 
 - Do not resolve an authority conflict by deleting the inconvenient document.
-- Do not renumber governed identifiers without checking inbound references and history.
-- Do not maintain two editable canonical copies after a migration.
-- Do not treat a publishing document as canonical merely because it already lives under `docs/`.
-- Record a reconciliation decision before retiring conflicting material.
+- Do not renumber governed identifiers without preserving history and rationale.
+- Do not maintain two editable canonical copies.
+- Do not treat a file as authoritative merely because it is under `docs/`.
+- Record material reconciliation before retiring conflicting authority.
 
 ## Open issues
 
-### MIG-DOC-001 — Duplicate ADR-004 identifier
+### MIG-DOC-003 — Historical Platform Integrity “Article VII” conflicts with current Constitution numbering
 
-**State:** Open — migration blocked pending reconciliation.
+**State:** Open — authority conflict contained, formal disposition still required.
 
-`05-ADR/` currently contains both:
+`docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md` labels itself an approved constitutional Article VII, while the current authoritative `docs/foundation/J-002-Constitution.md` defines Article VII as **Knowledge as an Asset**.
 
-- `ADR-004-Datto-RMM-Managed-Device-Authority.md`
-- `ADR-004-Teams-Proactive-Messaging.md`
+The conflict is currently contained by `docs/governance/README.md`:
 
-Both records describe material accepted decisions and must be preserved. They cannot both remain canonical under the same ADR identifier.
+- J-002 is higher authority;
+- the Platform Integrity document must not be treated as current Constitution Article VII;
+- non-conflicting requirements may be used only as supporting governance context;
+- unique durable requirements should be reconciled into the appropriate canonical Constitution, architecture, standard, or governance owner before the historical record is archived or retired.
 
-Required work:
+Remaining work requires deliberate constitutional/governance review rather than an offline path-only cleanup.
 
-1. audit inbound references to both records;
-2. determine which record retains ADR-004 based on historical issuance/accepted references;
-3. assign the other the next appropriate unique ADR identifier without colliding with ADR-005 or ADR-006;
-4. update title, filename, inbound references, navigation, and any durable session/proof references;
-5. record the renumbering as a documentation-governance correction, not an architectural decision change;
-6. migrate the reconciled ADR set to `docs/decisions/`.
+### MIG-DOC-005 — Operations and historical proof classification
 
-No ADR content should be substantively changed merely to solve the numbering collision.
+**State:** Open — physical consolidation complete; semantic classification remains.
 
-### MIG-DOC-002 — Architecture authority overlap
+The former `07-Operations/` tree is now under `docs/operations/`, but it contains a mixture of:
 
-**State:** Open — reconciliation required before moving `02-Architecture/`.
-
-Two architecture locations exist:
-
-- `02-Architecture/` containing J-series canonical architecture records such as J-100 through J-103;
-- `docs/architecture/` containing blueprint/catalog/deployment/core-services/foundation-build documents.
-
-Required work:
-
-- classify each `docs/architecture/` record as canonical, supporting, historical, superseded, or merge candidate;
-- ensure no blueprint document silently overrides approved J-series architecture;
-- preserve useful historical design context;
-- consolidate approved canonical architecture under `docs/architecture/`.
-
-### MIG-DOC-003 — Governance authority overlap
-
-**State:** Open — reconciliation required before moving `01-Governance/`.
-
-Governance-related material exists in:
-
-- `docs/foundation/` after Foundation migration;
-- legacy `01-Governance/`;
-- existing `docs/governance/`.
-
-Required work:
-
-- establish the relationship between constitutional/Foundation authority, decision architecture, and `ARTICLE_VII_PLATFORM_INTEGRITY.md`;
-- prevent duplicated constitutional requirements from becoming competing editable authority;
-- consolidate approved governance material under `docs/governance/` while preserving Foundation as higher authority.
-
-### MIG-DOC-004 — Duplicate roadmap roots
-
-**State:** Open — reconciliation required before roadmap migration.
-
-Both `06-Roadmaps/` and `07-Roadmap/` exist.
-
-Required work:
-
-- inventory both roots;
-- classify current vs historical roadmaps;
-- eliminate duplicate roadmap authority;
-- consolidate active governed future-work records under `docs/roadmaps/`;
-- archive superseded plans rather than deleting history.
-
-### MIG-DOC-005 — Operations and proof-record mixing
-
-**State:** Open.
-
-`07-Operations/` contains operational procedures, deployment records, generated current-state documentation, and bounded proof records.
+- repeatable runbooks/procedures;
+- deployment records;
+- live pilot proof records;
+- generated current-state documentation;
+- bounded operational evidence summaries.
 
 Target classification:
 
-- repeatable runbooks/procedures -> `docs/operations/`;
-- historical live proof/reconciliation evidence -> `docs/sessions/`;
-- generated current operational-state representation -> generated from System Registry and clearly marked derived;
-- durable architecture/decision content discovered in operations -> move or reference the governing architecture/ADR rather than leaving operations as authority.
+- repeatable runbooks/procedures -> remain in `docs/operations/`;
+- bounded historical proof/reconciliation evidence -> `docs/sessions/`;
+- generated current operational-state representation -> remain clearly marked generated/derived from System Registry structured truth;
+- durable architecture/decision content -> reference or update the governing architecture/ADR rather than treating an operations record as higher authority.
+
+This cleanup should preserve historical references and evidence identity; it must not rewrite a proof record into a current runbook.
+
+### MIG-DOC-007 — Inbound-reference and plain-text path audit
+
+**State:** Open until final consolidated-tree CI/path audit is green.
+
+All historical numbered human-documentation roots have now been physically retired. Strict MkDocs validation catches Markdown link breakage, but plain-text references to old paths may remain intentionally or accidentally.
+
+Required work:
+
+- use CI/MkDocs to repair broken Markdown links;
+- audit current operational/runbook/tooling references to retired paths;
+- preserve old path text when it intentionally describes historical repository state;
+- update old path text when it is intended to direct a current operator;
+- do not recreate retired roots merely to satisfy stale references.
+
+### MIG-DOC-009 — Implementation-local documentation index
+
+**State:** Open — structural consolidation complete.
+
+Implementation-local README files may remain beside code, connectors, deployment packages, and schemas when adjacency is useful. A final index/audit is needed to ensure no material architecture, governance, authority, or operating rule exists only in an unindexed implementation README.
+
+The preferred outcome is not copying every README into `docs/`; it is making material implementation documentation discoverable and ensuring governed rules have canonical human-facing owners.
+
+## Resolved / controlled issues
+
+### MIG-DOC-001 — Duplicate ADR-004 identifier
+
+**State:** Resolved structurally.
+
+Historical order established that Datto RMM Managed-Device Authority was accepted first as ADR-004. Teams proactive messaging was created later using the same identifier.
+
+Resolution:
+
+- Datto RMM Managed-Device Authority retains `ADR-004`;
+- Teams proactive messaging is corrected to `ADR-007`;
+- ADR-007 contains an explicit identifier-correction note stating that architectural meaning was not changed;
+- ADR-005 and ADR-006 remain unchanged;
+- all ADRs are consolidated under `docs/decisions/`.
+
+### MIG-DOC-002 — Architecture authority overlap
+
+**State:** Controlled/resolved for migration.
+
+J-100 through J-103 were moved into `docs/architecture/` and `docs/architecture/README.md` now defines their canonical subject ownership.
+
+Earlier blueprint/catalog/core-services/deployment/foundation-build records remain as supporting foundational references and cannot silently override the Constitution, J-series architecture, approved ADRs, component specifications, or System Registry state.
+
+### MIG-DOC-004 — Duplicate roadmap roots
+
+**State:** Resolved.
+
+The active capability register is now `docs/roadmaps/Jason-Capability-Register.md`.
+
+The older `07-Roadmap/Jason-Roadmap.md` was preserved as `docs/archive/roadmaps/Jason-Roadmap-Historical.md` with explicit Historical/Superseded classification.
 
 ### MIG-DOC-006 — Legacy CURRENT checkpoint
 
-**State:** Open — canonical replacement established.
+**State:** Resolved structurally.
 
-`docs/control/CURRENT.md` is now the canonical resume point for documentation/current-work continuity.
+`docs/control/CURRENT.md` is the only canonical current resume point.
 
-Legacy `08-Session-Records/CURRENT.md` contains valuable historical CAP-007/Teams/runtime context but must no longer appear to be the active resume record after session migration.
+The former session checkpoint is preserved as:
 
-Required work:
+`docs/sessions/Legacy-CURRENT-2026-08-11.md`
 
-- preserve it as a historical session/checkpoint record under `docs/sessions/` or `docs/archive/`;
-- mark it Historical/Superseded by `docs/control/CURRENT.md`;
-- update inbound references that intend the current resume point.
-
-### MIG-DOC-007 — Inbound-reference audit for migrated roots
-
-**State:** Open until CI and repository path audit are clean.
-
-The following low-conflict roots have begun moving into the consolidated tree:
-
-- Foundation -> `docs/foundation/`
-- Canonical Models -> `docs/models/`
-- Standards -> `docs/standards/`
-- Architecture Journal -> `docs/journal/`
-- Milestones -> `docs/milestones/`
-
-Required work:
-
-- use CI/MkDocs and repository path auditing to identify stale links/references;
-- update references to canonical new paths;
-- retain old path text only when intentionally describing historical repository state;
-- do not re-create legacy canonical copies just to satisfy stale references.
+It is historical context, not current runtime authority.
 
 ### MIG-DOC-008 — Documentation tooling transition
 
-**State:** In progress.
+**State:** Resolved structurally.
 
-MkDocs currently uses a generated `.build/docs` workspace assembled from both consolidated and transitional legacy roots.
+- all governed human-facing documentation roots are now under `docs/`;
+- MkDocs uses `docs_dir: docs` directly;
+- `tools/assemble_docs.py` has been retired;
+- documentation CI validates the control plane and builds directly from `docs/`;
+- the validator rejects recreation of retired numbered documentation roots;
+- `tools/documentation_readiness.py` uses `docs/milestones/`.
 
-End state:
+### MIG-DOC-010 — Historical documentation-layout ADR conflict
 
-- canonical human documentation lives directly under `docs/`;
-- MkDocs publishes from the consolidated structure without mixed canonical/publishing semantics;
-- `tools/assemble_docs.py` is retired or reduced to a clearly justified generated-artifact role;
-- release/documentation readiness tooling uses consolidated paths;
-- CI prevents future documentation fragmentation.
+**State:** Resolved through explicit supersession.
 
-## Resolved issues
+ADR-002 required the numbered top-level documentation hierarchy to remain canonical. Operational continuity evidence later demonstrated that repository fragmentation itself created reconstruction risk.
 
-None yet. Move an issue here only after the durable reconciliation is committed and references/tooling have been validated.
+ADR-008 — Documentation Control Plane Consolidation — explicitly supersedes ADR-002 while retaining ADR-002's durable invariants:
+
+- one authoritative source per material fact;
+- no duplicate editable canonical copies;
+- generated outputs remain disposable;
+- documentation tools remain replaceable;
+- institutional memory must be preserved during migration.
