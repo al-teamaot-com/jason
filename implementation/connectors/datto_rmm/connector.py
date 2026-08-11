@@ -110,18 +110,17 @@ class DattoRmmConnector(ConnectorBase):
                 "page": int(arguments.get("page", 1)),
                 "max": min(int(arguments.get("max", 1)), 250),
             }
-            # Canonical resource inquiries use provider-neutral selectors. The
-            # connector translates them into Datto's broad account-device search
-            # rather than requiring a workflow-specific script or component.
-            search = str(
-                arguments.get("search")
-                or arguments.get("hostname")
+            # Canonical resource inquiries use provider-neutral selectors. Datto's
+            # account-device endpoint exposes hostname as a documented query filter,
+            # so provider-neutral hostname/name selectors are translated here rather
+            # than introducing a workflow-specific lookup script.
+            hostname = str(
+                arguments.get("hostname")
                 or arguments.get("name")
-                or arguments.get("resource_id")
                 or ""
             ).strip()
-            if search:
-                params["search"] = search
+            if hostname:
+                params["hostname"] = hostname
             return "/api/v2/account/devices", params
         if capability == "datto_rmm.alerts.list":
             return "/api/v2/account/alerts/open", {
