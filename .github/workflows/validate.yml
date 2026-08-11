@@ -82,25 +82,30 @@ jobs:
       - name: Install registry test dependencies
         run: python -m pip install --upgrade pip pytest jsonschema
       - name: Compile System Registry
-        run: python -m compileall -q implementation/kernel/system_registry implementation/kernel/tests/test_system_registry.py implementation/kernel/tests/test_system_registry_production.py tools/system_registry_verify.py
-      - name: Validate System Registry schema and production manifest
+        run: python -m compileall -q implementation/kernel/system_registry implementation/kernel/tests/test_system_registry.py implementation/kernel/tests/test_system_registry_production.py implementation/kernel/tests/test_system_registry_lifecycle_events.py tools/system_registry_verify.py tools/system_registry_docs.py
+      - name: Validate System Registry schemas and production state
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           from jsonschema import Draft202012Validator
 
-          schema_path = Path("implementation/kernel/system_registry/system-registry.schema.json")
-          manifest_path = Path("implementation/kernel/system_registry/production-registry.json")
-          schema = json.loads(schema_path.read_text())
-          manifest = json.loads(manifest_path.read_text())
-          Draft202012Validator.check_schema(schema)
-          Draft202012Validator(schema).validate(manifest)
+          registry_dir = Path("implementation/kernel/system_registry")
+          manifest_schema = json.loads((registry_dir / "system-registry.schema.json").read_text())
+          lifecycle_schema = json.loads((registry_dir / "system-registry-lifecycle-events.schema.json").read_text())
+          manifest = json.loads((registry_dir / "production-registry.json").read_text())
+          lifecycle = json.loads((registry_dir / "production-lifecycle-events.json").read_text())
+          Draft202012Validator.check_schema(manifest_schema)
+          Draft202012Validator.check_schema(lifecycle_schema)
+          Draft202012Validator(manifest_schema).validate(manifest)
+          Draft202012Validator(lifecycle_schema).validate(lifecycle)
           PY
       - name: Validate production topology and bounded observation plan
         run: python tools/system_registry_verify.py --validate-only
+      - name: Verify generated operational-state documentation
+        run: python tools/system_registry_docs.py --check
       - name: Test constitutional System Registry behavior
-        run: python -m pytest implementation/kernel/tests/test_system_registry.py implementation/kernel/tests/test_system_registry_production.py -q
+        run: python -m pytest implementation/kernel/tests/test_system_registry.py implementation/kernel/tests/test_system_registry_production.py implementation/kernel/tests/test_system_registry_lifecycle_events.py -q
 
   runtime-service:
     runs-on: ubuntu-latest
