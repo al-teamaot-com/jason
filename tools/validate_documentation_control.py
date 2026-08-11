@@ -18,6 +18,7 @@ REQUIRED_FILES = (
     "docs/control/DOCUMENT-TEMPLATE.md",
     "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
     "docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
+    "docs/roadmaps/Jason-Roadmap-Status.json",
 )
 
 LEGACY_ROOTS = (
@@ -125,11 +126,11 @@ def main() -> int:
             fail(f"J-404 is missing required governance section: {phrase}")
 
     adr008 = read("docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md")
-    if "Supersedes: ADR-002" not in adr008:
+    if "**Supersedes:** ADR-002" not in adr008:
         fail("ADR-008 must explicitly supersede ADR-002")
 
     adr002 = read("docs/decisions/ADR-002-Canonical-Documentation-Layout.md")
-    if "Status:** Superseded by ADR-008" not in adr002:
+    if "**Status:** Superseded by ADR-008" not in adr002:
         fail("ADR-002 must be explicitly marked superseded by ADR-008")
 
     if not (ROOT / "docs/decisions/ADR-004-Datto-RMM-Managed-Device-Authority.md").is_file():
@@ -152,6 +153,18 @@ def main() -> int:
     ):
         if path not in mkdocs:
             fail(f"MkDocs navigation is missing documentation-control record: {path}")
+
+    catch_me_up = read("tools/catch_me_up.py")
+    required_current_paths = (
+        "docs/control/CURRENT.md",
+        "docs/control/HOW-TO-DOCUMENT-JASON.md",
+        "docs/roadmaps/Jason-Roadmap-Status.json",
+        "docs/operations/System-Registry-Current-Operational-State.md",
+        "docs/sessions",
+    )
+    for path in required_current_paths:
+        if path not in catch_me_up:
+            fail(f"CatchMeUp is missing consolidated documentation path: {path}")
 
     print("Documentation control-plane validation: PASS")
     return 0
