@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,6 +27,10 @@ DEFAULT_MANIFEST = (
     REPO_ROOT
     / "implementation/kernel/system_registry/production-registry.json"
 )
+DEFAULT_LIFECYCLE_EVENTS = (
+    REPO_ROOT
+    / "implementation/kernel/system_registry/production-lifecycle-events.json"
+)
 DEFAULT_PLAN = (
     REPO_ROOT
     / "implementation/kernel/system_registry/production-verification-plan.json"
@@ -40,6 +45,12 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument(
+        "--lifecycle-events",
+        type=Path,
+        default=DEFAULT_LIFECYCLE_EVENTS,
+        help="Governed lifecycle-event history used to compute effective state.",
+    )
     parser.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
@@ -52,8 +63,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    registry = registry_from_manifest(args.manifest)
+    registry = registry_from_manifest(
+        args.manifest,
+        lifecycle_events_path=args.lifecycle_events,
+    )
     plan = load_verification_plan(args.plan, registry=registry)
+    lifecycle_counts = dict(
+        sorted(Counter(entity.lifecycle_status.value for entity in registry.list_all()).items())
+    )
 
     if args.validate_only:
         print(
@@ -62,6 +79,7 @@ def main() -> int:
                     "status": "valid",
                     "registered_entities": len(registry.list_all()),
                     "planned_host_checks": len(plan.checks),
+                    "effective_lifecycle_counts": lifecycle_counts,
                     "declared_state_changed": False,
                     "remediation_attempted": False,
                 },
@@ -118,8 +136,10 @@ def main() -> int:
         "schema_version": "1.0",
         "generated_at": observed_at.isoformat(),
         "manifest": str(args.manifest),
+        "lifecycle_events": str(args.lifecycle_events),
         "verification_plan": str(args.plan),
         "observation_source": plan.source,
+        "effective_lifecycle_counts": lifecycle_counts,
         "summary": {
             "registered_entities": len(registry.list_all()),
             "planned_host_checks": total,
