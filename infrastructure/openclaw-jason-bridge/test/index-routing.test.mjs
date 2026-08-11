@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const source = readFileSync(new URL("../index.mjs", import.meta.url), "utf8");
+const manifest = JSON.parse(
+  readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
+);
 
 test("bound Teams conversations have a phrase-agnostic pre-agent compatibility route", () => {
   assert.match(source, /"before_agent_reply"/);
@@ -17,6 +20,14 @@ test("governed Teams turn timeout hierarchy leaves room for bounded Jason stages
   assert.match(source, /const HOOK_TIMEOUT_MS = 180_000;/);
   assert.match(source, /requestTimeoutMs > MAX_TIMEOUT_MS/);
   assert.equal((source.match(/\{ timeoutMs: HOOK_TIMEOUT_MS \}/g) ?? []).length, 2);
+
+  const timeoutSchema = manifest.configSchema.properties.requestTimeoutMs;
+  assert.equal(timeoutSchema.default, 150000);
+  assert.equal(timeoutSchema.maximum, 170000);
+  assert.match(
+    manifest.uiHints.requestTimeoutMs.help,
+    /separate from the short signed-envelope freshness window/i,
+  );
 });
 
 test("Teams bridge routing contains no endpoint-specific trigger phrase", () => {
