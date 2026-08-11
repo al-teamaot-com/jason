@@ -72,7 +72,7 @@ Implementation-local README files may remain beside code where adjacency is oper
 
 | Current source | Target location | Current authority | Migration status | Retirement condition |
 |---|---|---|---|---|
-| `01-Foundation/` | `docs/foundation/` | Legacy source | Planned | Links, MkDocs, CI, release tooling, and references updated; no second editable copy remains. |
+| `01-Foundation/` | `docs/foundation/` | `docs/foundation/` | **Migrated** | Complete on this migration branch: Foundation files moved, legacy root removed, assembly/navigation updated. Remaining inbound-reference issues, if discovered by validation, must be corrected before merge. |
 | `01-Governance/` | `docs/governance/` | Legacy source plus existing `docs/governance/` material | Planned/reconciliation required | Duplicate governance authority reconciled and canonical paths established. |
 | `02-Architecture/` | `docs/architecture/` | Legacy source plus existing `docs/architecture/` material | Planned/reconciliation required | Blueprint-style docs and J-series architecture records reconciled without losing history. |
 | `02-Canonical-Models/` | `docs/models/` | Legacy source | Planned | All model references/navigation/tooling migrated. |
@@ -112,6 +112,7 @@ Until migration is complete, the following records are especially important:
 - `docs/control/DOCUMENTATION-REGISTER.md` — this source/migration register.
 - `docs/control/HANDOFF-TEMPLATE.md` — required structure for durable workstream handoff.
 - `docs/control/DOCUMENT-TEMPLATE.md` — standard metadata and durable-document skeleton.
+- `docs/foundation/J-002-Constitution.md` — constitutional authority.
 - `02-Architecture/J-103-System-Registry.md` — authoritative System Registry architecture during migration.
 - `07-Operations/System-Registry-Current-Operational-State.md` — generated human-readable operational-state view where current.
 - `implementation/kernel/system_registry/` — structured operational truth.
