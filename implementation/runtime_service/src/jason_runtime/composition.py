@@ -67,7 +67,7 @@ from orchestrator.teams_identity_binding_sqlite import (
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
-from .cap007 import Cap007OpenBaoSecretBroker
+from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
 from .http import RuntimeHttpApplication
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
@@ -287,7 +287,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             allow_bcc=False,
             max_recipients=25,
         ),
-        audit=orchestration_events,
+        audit=Cap007EventAudit(orchestration_events),
     )
 
     invokers = CapabilityInvokerRegistry()
