@@ -68,7 +68,7 @@ Stop immediately if this stage fails.
 
 ### Stage 2: Verify deployment readiness
 
-Review `07-Operations/Jason-Secret-Provider-Deployment-Record.md` and run the readiness gate.
+Review `docs/operations/Jason-Secret-Provider-Deployment-Record.md` and run the readiness gate.
 
 The Autotask stage remains denied unless the record is ready and contains verified or explicitly approved values for backup, restore, operational ownership, escalation, and the canonical `autotask.readonly` mapping.
 
@@ -120,8 +120,8 @@ After a governed live read or architectural change:
 3. Run the release test suite.
 4. Run the Kernel test suite.
 5. Run complete release validation.
-6. Assemble documentation.
-7. Build documentation in strict mode.
+6. Run `python3 tools/validate_documentation_control.py`.
+7. Build documentation in strict mode directly from `docs/`.
 8. Run the whitespace check.
 9. Confirm the branch is clean.
 10. Review retained non-secret evidence.
