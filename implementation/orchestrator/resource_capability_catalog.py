@@ -33,9 +33,10 @@ DATTO_RMM_PROVIDER = "datto_rmm"
 def endpoint_device_search(now: datetime) -> CapabilityDefinition:
     """Broad provider-neutral endpoint discovery/read capability.
 
-    This is intentionally not a field-specific operation. A caller supplies a resource
-    selector and requested facts; the selected provider may return a richer device
-    record from which governed reasoning can answer the question.
+    A caller supplies a human-grounded selector and requested facts. The selected
+    provider must preserve ambiguity. If exactly one authorized candidate remains and
+    exposes a durable identity, the provider may perform an exact read of that resolved
+    resource to satisfy the requested facts. A selector itself never becomes identity.
     """
 
     return CapabilityDefinition(
@@ -44,8 +45,9 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
         display_name="Search Managed Endpoints",
         lifecycle_status=CapabilityLifecycle.ACTIVE,
         business_purpose=(
-            "Locate managed endpoints by provider-neutral selectors and retrieve "
-            "read-only device records for governed resource inquiries."
+            "Locate managed endpoints by provider-neutral selectors, preserve ambiguity, "
+            "and retrieve an exact read-only device record only after one authorized "
+            "candidate is resolved to durable identity."
         ),
         owner_service="Jason Resource Intelligence",
         architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
@@ -63,12 +65,15 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
                 "resource selector remains in authorized scope",
                 "ambiguous selectors never auto-select a resource",
                 "a unique discovery candidate exposes a durable resource identifier",
+                "requested facts come from the exact resolved resource read when available",
             ),
         ),
         dependencies=frozenset(),
         idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
         idempotency_key_required=False,
-        timeout_seconds=30,
+        # A provider implementation may perform bounded discovery followed by one
+        # exact resource read. Each provider call remains independently bounded.
+        timeout_seconds=60,
         maximum_attempts=2,
         failure_behavior="Fail closed without shell, node, agent, or first-match fallback.",
         tenant_isolation_required=True,
@@ -101,7 +106,9 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
                 "Human-readable names, hostnames, aliases, labels, serial-like tokens, and "
                 "site labels are discovery selectors, not durable identity. Discovery must "
                 "observe ambiguity and may proceed only after one authorized candidate is "
-                "resolved to a durable resource_id. Never select the first provider result."
+                "resolved to a durable resource_id. Requested facts should then come from "
+                "an exact read of that resolved resource when the provider supports it. "
+                "Never select the first provider result."
             ),
             "planning_guidance": (
                 "Prefer this capability when the human names an endpoint but does not "
@@ -188,7 +195,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
         limits=ProviderLimits(
             maximum_concurrent_executions=10,
             maximum_requests_per_minute=120,
-            maximum_execution_seconds=30,
+            maximum_execution_seconds=60,
         ),
         features=ProviderFeatures(structured_output=True),
         pricing_profile_id="zero-cost-foundation",
