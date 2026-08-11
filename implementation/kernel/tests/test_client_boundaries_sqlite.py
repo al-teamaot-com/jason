@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -105,14 +106,7 @@ def test_revoked_boundary_allows_replacement_active_mapping(tmp_path):
     repository = SQLiteClientBoundaryRepository(store)
     first = boundary()
     repository.add(first)
-    repository.replace(
-        ClientBoundary(
-            **{
-                **first.__dict__,
-                "status": BoundaryStatus.REVOKED,
-            }
-        )
-    )
+    repository.replace(replace(first, status=BoundaryStatus.REVOKED))
     second = boundary(boundary_id="boundary-2")
     repository.add(second)
     assert repository.find_active_for_client(
