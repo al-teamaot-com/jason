@@ -24,11 +24,17 @@ class Reasoner:
         return self.proposals
 
 
-def result(*, data=None, provider="datto_rmm", status=OrchestrationStatus.SUCCEEDED):
+def result(
+    *,
+    data=None,
+    provider="datto_rmm",
+    status=OrchestrationStatus.SUCCEEDED,
+    capability_name="endpoint.device.search",
+):
     return OrchestrationResult(
         execution_id="exec-1",
         correlation_id="corr-1",
-        capability_name="endpoint.device.search",
+        capability_name=capability_name,
         status=status,
         stage=(ExecutionStage.COMPLETED if status is OrchestrationStatus.SUCCEEDED else ExecutionStage.FAILED),
         reason_codes=("capability_completed" if status is OrchestrationStatus.SUCCEEDED else "failed",),
@@ -84,6 +90,18 @@ def intent(*facts, hostname="AOT-50282", site=None):
     )
 
 
+def registry_intent(*facts, name="Jason Runtime Service"):
+    return ConversationIntent(
+        capability_name="system.registry.search",
+        arguments={
+            "name": name,
+            "requested_facts": facts or ("resource_id",),
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+
 def test_reasoner_identifies_path_but_actual_provider_value_becomes_the_assertion():
     reasoner = Reasoner(
         [
@@ -132,6 +150,67 @@ def test_renderer_returns_only_verified_requested_fact_after_unique_identity_res
         "AOT-50282 — last logged in user: AOT\\example.user. Source: datto_rmm."
     )
     assert reasoner.calls
+
+
+def test_unique_system_registry_resource_id_is_rendered_without_language_reasoning():
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "resource_id",
+                "json_pointer": "/evidence/resource_matches/0/resource_id",
+            }
+        ]
+    )
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+    data = {
+        "match_count": 1,
+        "resource_matches": [
+            {
+                "resource_id": "component.jason-runtime",
+                "registry_id": "component.jason-runtime",
+                "display_name": "Jason Runtime Service",
+                "lifecycle_status": "verified",
+            }
+        ],
+    }
+
+    text = renderer.render(
+        result(
+            data=data,
+            provider="system_registry",
+            capability_name="system.registry.search",
+        ),
+        registry_intent("resource_id"),
+    )
+
+    assert text == (
+        "Jason Runtime Service — resource_id: component.jason-runtime. "
+        "Source: system_registry."
+    )
+    assert reasoner.calls == []
+
+
+def test_direct_fact_name_normalization_accepts_human_spacing_without_inference():
+    reasoner = Reasoner([])
+    interpreter = GovernedResourceEvidenceInterpreter(reasoner)
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "component.jason-runtime",
+            }
+        ]
+    }
+
+    facts = interpreter.interpret(
+        result=result(data=data, provider="system_registry"),
+        requested_facts=("resource id",),
+    )
+
+    assert facts[0].value == "component.jason-runtime"
+    assert facts[0].json_pointer == "/resource_matches/0/resource_id"
+    assert reasoner.calls == []
 
 
 def test_ambiguous_endpoint_name_never_selects_first_result_or_exposes_candidate_details():
