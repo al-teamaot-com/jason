@@ -70,6 +70,24 @@ jobs:
           set -euo pipefail
           test -z "$(find . -type f \( -iname 'send_ticket_email.py' -o -iname 'send_invoice_email.py' -o -iname 'send_alert_email.py' -o -iname 'send_client_update.py' -o -iname '*ses*provision*.py' -o -iname '*sendmail*provision*.py' \))"
 
+  runtime-service:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Compile runtime composition
+        run: python -m compileall -q implementation/runtime_service/src implementation/runtime_service/tests
+      - name: Test governed runtime composition
+        run: python -m pytest implementation/runtime_service/tests -q
+
   documentation:
     runs-on: ubuntu-latest
     steps:
