@@ -55,8 +55,8 @@ def request(capability_name: str, arguments, *, permission_mode: str = "observe"
 
 
 def test_foundation_registers_generic_search_read_trace_and_internal_provider():
-    capabilities = CapabilityRegistryService(InMemoryCapabilityRegistry())
-    providers = ExecutionProviderRegistryService(InMemoryExecutionProviderRegistry())
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
 
     register_system_registry_resource_foundation(
         capabilities=capabilities,
