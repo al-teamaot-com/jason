@@ -16,6 +16,10 @@ from .contracts import OrchestrationRequest, OrchestrationResult
 from .service import CentralOrchestrator
 
 
+class ConversationIntentUnresolvedError(LookupError):
+    """The human turn could not be mapped to a governed Jason capability intent."""
+
+
 @dataclass(frozen=True, slots=True)
 class TeamsConversationPrincipalEvidence:
     """Authenticated transport identity evidence supplied by the Teams boundary."""
@@ -171,7 +175,9 @@ class TeamsConversationFlow:
 
         intent = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
         if intent is None:
-            raise LookupError("no governed Jason capability intent could be resolved")
+            raise ConversationIntentUnresolvedError(
+                "no governed Jason capability intent could be resolved"
+            )
 
         orchestration_request = self.request_factory.build(
             principal=principal,
