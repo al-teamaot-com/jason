@@ -19,6 +19,8 @@ REQUIRED_FILES = (
     "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
     "docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
     "docs/roadmaps/Jason-Roadmap-Status.json",
+    "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
+    "docs/engineering/README.md",
 )
 
 LEGACY_ROOTS = (
@@ -35,6 +37,7 @@ LEGACY_ROOTS = (
     "08-Session-Records",
     "09-Architecture-Journal",
     "10-Milestones",
+    "architecture",
 )
 
 REQUIRED_DOC_DIRECTORIES = (
@@ -42,6 +45,7 @@ REQUIRED_DOC_DIRECTORIES = (
     "docs/foundation",
     "docs/governance",
     "docs/architecture",
+    "docs/engineering",
     "docs/models",
     "docs/components",
     "docs/standards",
@@ -81,11 +85,17 @@ def main() -> int:
                 + root
             )
 
+    if (ROOT / "TODO.md").exists():
+        fail("Governed backlog must remain under docs/roadmaps, not repository-root TODO.md")
+
     index = read("docs/index.md")
     for path in REQUIRED_FILES[1:8]:
         relative = path.removeprefix("docs/")
         if relative not in index:
             fail(f"docs/index.md does not link to required control record: {relative}")
+    for path in ("engineering/", "roadmaps/"):
+        if path not in index:
+            fail(f"docs/index.md does not expose consolidated documentation area: {path}")
 
     repository_readme = read("README.md")
     if "docs/index.md" not in repository_readme:
@@ -121,9 +131,10 @@ def main() -> int:
         "Current-work continuity",
         "Documentation migration",
         "Definition of documentation complete",
+        "docs/engineering/",
     ):
         if phrase not in standard:
-            fail(f"J-404 is missing required governance section: {phrase}")
+            fail(f"J-404 is missing required governance section or path: {phrase}")
 
     adr008 = read("docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md")
     if "**Supersedes:** ADR-002" not in adr008:
@@ -150,6 +161,8 @@ def main() -> int:
         "control/HOW-TO-DOCUMENT-JASON.md",
         "standards/J-404-Documentation-Governance-and-Continuity.md",
         "decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
+        "engineering/README.md",
+        "roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
     ):
         if path not in mkdocs:
             fail(f"MkDocs navigation is missing documentation-control record: {path}")
