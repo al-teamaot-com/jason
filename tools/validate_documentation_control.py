@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 
 
@@ -43,6 +44,35 @@ LEGACY_ROOTS = (
     "architecture",
 )
 
+LEGACY_CURRENT_USE_PATTERNS = (
+    re.compile(r"01-Foundation/"),
+    re.compile(r"01-Governance/"),
+    re.compile(r"02-Architecture/"),
+    re.compile(r"02-Canonical-Models/"),
+    re.compile(r"03-Components/"),
+    re.compile(r"04-Standards/"),
+    re.compile(r"05-ADR/"),
+    re.compile(r"06-Roadmaps/"),
+    re.compile(r"07-Operations/"),
+    re.compile(r"07-Roadmap/"),
+    re.compile(r"08-Session-Records/"),
+    re.compile(r"09-Architecture-Journal/"),
+    re.compile(r"10-Milestones/"),
+    re.compile(r"(?<!docs/)architecture/"),
+)
+
+CURRENT_USE_AUDIT_ROOTS = (
+    "tools",
+    ".github/workflows",
+    "docs/operations",
+)
+
+CURRENT_USE_AUDIT_EXCLUSIONS = {
+    "tools/validate_documentation_control.py",
+}
+
+CURRENT_USE_AUDIT_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".json", ".txt"}
+
 REQUIRED_DOC_DIRECTORIES = (
     "docs/control",
     "docs/foundation",
@@ -78,6 +108,40 @@ def read(path: str) -> str:
     return file_path.read_text(encoding="utf-8")
 
 
+def audit_current_use_paths() -> None:
+    findings: list[str] = []
+    for root_name in CURRENT_USE_AUDIT_ROOTS:
+        audit_root = ROOT / root_name
+        if not audit_root.exists():
+            continue
+        for file_path in sorted(path for path in audit_root.rglob("*") if path.is_file()):
+            relative = file_path.relative_to(ROOT).as_posix()
+            if relative in CURRENT_USE_AUDIT_EXCLUSIONS:
+                continue
+            if file_path.suffix.lower() not in CURRENT_USE_AUDIT_SUFFIXES:
+                continue
+            try:
+                text = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                for pattern in LEGACY_CURRENT_USE_PATTERNS:
+                    match = pattern.search(line)
+                    if match is not None:
+                        findings.append(
+                            f"{relative}:{line_number}: {match.group(0)}"
+                        )
+    if findings:
+        preview = "\n".join(findings[:25])
+        remainder = len(findings) - min(len(findings), 25)
+        suffix = f"\n... and {remainder} more" if remainder else ""
+        fail(
+            "Current-use tooling/operations still references retired documentation paths:\n"
+            + preview
+            + suffix
+        )
+
+
 def main() -> int:
     for path in REQUIRED_FILES:
         read(path)
@@ -101,6 +165,8 @@ def main() -> int:
             "Historical Platform Integrity Article VII must remain archived rather than "
             "reappearing as current governance authority"
         )
+
+    audit_current_use_paths()
 
     index = read("docs/index.md")
     for path in REQUIRED_FILES[1:9]:
