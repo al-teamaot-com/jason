@@ -11,6 +11,7 @@ nav:
   - Documentation Control:
       - Current Resume Point: control/CURRENT.md
       - Documentation Register: control/DOCUMENTATION-REGISTER.md
+      - Documentation Migration Issues: control/DOCUMENTATION-MIGRATION-ISSUES.md
       - How to Document Jason: control/HOW-TO-DOCUMENT-JASON.md
       - Handoff Template: control/HANDOFF-TEMPLATE.md
       - Document Template: control/DOCUMENT-TEMPLATE.md
@@ -86,7 +87,7 @@ nav:
   - Decisions:
       - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
   - Roadmap:
-      - Capability Register: 06-Roadmaps/Jason-Capability-Register.md
+      - Capability Register: roadmaps/Jason-Capability-Register.md
 plugins:
   - search
 markdown_extensions:
