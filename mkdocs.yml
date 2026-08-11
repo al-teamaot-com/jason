@@ -21,11 +21,11 @@ nav:
       - Professional Operating Principles: foundation/J-003-Professional-Operating-Principles.md
       - Architectural Review and Decision Framework: foundation/J-006-Architectural-Review-and-Decision-Framework.md
   - Canonical Models:
-      - J-116 State Model: 02-Canonical-Models/J-116-State-Model.md
-      - J-117 Object Model: 02-Canonical-Models/J-117-Object-Model.md
-      - J-118 Relationship Model: 02-Canonical-Models/J-118-Relationship-Model.md
-      - J-119 Event Model: 02-Canonical-Models/J-119-Event-Model.md
-      - J-120 Organizational Model: 02-Canonical-Models/J-120-Organizational-Model.md
+      - J-116 State Model: models/J-116-State-Model.md
+      - J-117 Object Model: models/J-117-Object-Model.md
+      - J-118 Relationship Model: models/J-118-Relationship-Model.md
+      - J-119 Event Model: models/J-119-Event-Model.md
+      - J-120 Organizational Model: models/J-120-Organizational-Model.md
   - Milestones:
       - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
       - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
