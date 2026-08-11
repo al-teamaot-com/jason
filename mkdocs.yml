@@ -99,6 +99,7 @@ nav:
       - Definition of Done: standards/J-402-Capability-Definition-of-Done.md
       - Canonical Sources and Generated Artifacts: standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
       - Documentation Governance and Continuity: standards/J-404-Documentation-Governance-and-Continuity.md
+      - Platform Integrity and Boundary Enforcement: standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md
   - Decisions:
       - ADR-001 Vertical Slice First: decisions/ADR-001-Vertical-Slice-First.md
       - ADR-002 Documentation Layout (Superseded): decisions/ADR-002-Canonical-Documentation-Layout.md
