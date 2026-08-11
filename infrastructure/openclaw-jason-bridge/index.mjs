@@ -78,6 +78,10 @@ function commandChannel(ctx) {
   return nonBlank(ctx.channelId ?? ctx.channel)?.toLowerCase();
 }
 
+function agentChannel(ctx) {
+  return nonBlank(ctx.channel ?? ctx.messageProvider)?.toLowerCase();
+}
+
 function resolvePluginRoot(api) {
   const declared = nonBlank(api.rootDir);
   if (declared) {
@@ -94,10 +98,12 @@ function resolvePluginRoot(api) {
   }
 }
 
-function bindingContextKeys({ sessionKey, senderId }) {
+function bindingContextKeys({ runId, sessionKey, senderId }) {
   const keys = [];
+  const run = nonBlank(runId);
   const session = nonBlank(sessionKey);
   const sender = nonBlank(senderId);
+  if (run) keys.push(`run:${run}`);
   if (session && sender) keys.push(`session:${session}|sender:${sender}`);
   if (session) keys.push(`session:${session}`);
   if (sender) keys.push(`sender:${sender}`);
@@ -128,6 +134,7 @@ function createTeamsBindingCompatibility(api) {
     if (!conversationId) return;
     const senderId = nonBlank(event.senderId ?? ctx.senderId);
     const sessionKey = nonBlank(event.sessionKey ?? ctx.sessionKey);
+    const runId = nonBlank(event.runId ?? ctx.runId);
     const accountId = nonBlank(ctx.accountId) ?? "default";
     const conversation = {
       channel: "msteams",
@@ -137,19 +144,32 @@ function createTeamsBindingCompatibility(api) {
         ? { threadId: event.threadId }
         : {}),
     };
-    const captured = { conversation, capturedAt: Date.now() };
-    for (const key of bindingContextKeys({ sessionKey, senderId })) contexts.set(key, captured);
+    const captured = {
+      conversation,
+      messageId: nonBlank(event.messageId ?? ctx.messageId),
+      senderId,
+      sessionKey,
+      runId,
+      capturedAt: Date.now(),
+    };
+    for (const key of bindingContextKeys({ runId, sessionKey, senderId })) contexts.set(key, captured);
     prune();
   };
 
-  const lookup = (ctx) => {
+  const lookupCaptured = (ctx) => {
     prune();
-    for (const key of bindingContextKeys({ sessionKey: ctx.sessionKey, senderId: ctx.senderId })) {
+    for (const key of bindingContextKeys({
+      runId: ctx.runId,
+      sessionKey: ctx.sessionKey,
+      senderId: ctx.senderId,
+    })) {
       const found = contexts.get(key);
-      if (found) return found.conversation;
+      if (found) return found;
     }
     return undefined;
   };
+
+  const lookup = (ctx) => lookupCaptured(ctx)?.conversation;
 
   const lookupWithBriefRetry = async (ctx) => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -160,8 +180,21 @@ function createTeamsBindingCompatibility(api) {
     return undefined;
   };
 
+  const lookupCapturedWithBriefRetry = async (ctx) => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const found = lookupCaptured(ctx);
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return undefined;
+  };
+
   const approvalKey = (ctx) =>
-    bindingContextKeys({ sessionKey: ctx.sessionKey, senderId: ctx.senderId })[0];
+    bindingContextKeys({
+      runId: ctx.runId,
+      sessionKey: ctx.sessionKey,
+      senderId: ctx.senderId,
+    })[0];
 
   const rememberApproval = (ctx, approvalId) => {
     const key = approvalKey(ctx);
@@ -190,10 +223,80 @@ function createTeamsBindingCompatibility(api) {
     capture,
     pluginRoot,
     lookupWithBriefRetry,
+    lookupCapturedWithBriefRetry,
     rememberApproval,
     takeApproval,
     peekApproval,
   };
+}
+
+async function forwardGovernedTeamsTurn({
+  api,
+  text,
+  microsoftObjectId,
+  conversationId,
+  messageId,
+  correlationId,
+}) {
+  let config;
+  try {
+    config = resolveConfig(api);
+  } catch {
+    api.logger.error?.("jason-bridge: invalid bridge configuration; Teams turn denied closed");
+    return safeReply("Jason is not available because its governed transport configuration is invalid.");
+  }
+
+  const channelTenant = configuredTeamsTenant(config.current);
+  if (channelTenant && channelTenant.toLowerCase() !== config.microsoftTenantId.toLowerCase()) {
+    api.logger.error?.("jason-bridge: configured Teams tenant does not match Jason transport tenant");
+    return safeReply("Jason rejected this request because the Microsoft tenant binding could not be validated.");
+  }
+
+  const cleanText = nonBlank(text);
+  if (!cleanText) {
+    return safeReply("Jason currently requires a text request for this governed conversation path.");
+  }
+
+  const cleanMicrosoftObjectId = nonBlank(microsoftObjectId);
+  if (!cleanMicrosoftObjectId || !isUuid(cleanMicrosoftObjectId)) {
+    api.logger.warn?.("jason-bridge: Teams turn lacks an AAD object id; denied closed");
+    return safeReply("Jason could not validate your Microsoft identity for this request.");
+  }
+
+  const cleanConversationId = nonBlank(conversationId);
+  const cleanMessageId = nonBlank(messageId);
+  if (!cleanConversationId || !cleanMessageId) {
+    api.logger.warn?.("jason-bridge: Teams turn lacks required conversation correlation; denied closed");
+    return safeReply("Jason could not validate the conversation context for this request.");
+  }
+
+  try {
+    const envelope = buildConversationEnvelope({
+      text: cleanText,
+      microsoftTenantId: config.microsoftTenantId,
+      microsoftObjectId: cleanMicrosoftObjectId,
+      conversationId: cleanConversationId,
+      messageId: cleanMessageId,
+      keyId: config.keyId,
+      correlationId: nonBlank(correlationId) ?? undefined,
+    });
+    const signed = loadAndSignConversationEnvelope(envelope, config.privateKeyPath);
+    const result = await postConversationEnvelope({
+      runtimeUrl: config.runtimeUrl,
+      envelope: signed,
+      timeoutMs: config.requestTimeoutMs,
+    });
+
+    if (result.payload?.status !== "completed") {
+      api.logger.warn?.(
+        `jason-bridge: governed runtime returned ${String(result.payload?.status ?? "unknown")} (${result.httpStatus})`,
+      );
+    }
+    return safeReply(replyForRuntimeResult(result));
+  } catch {
+    api.logger.error?.("jason-bridge: governed runtime request failed; no OpenClaw fallback permitted");
+    return safeReply("Jason could not safely process that request. No action was taken.");
+  }
 }
 
 async function handleJasonCommand(ctx, compatibility) {
@@ -316,9 +419,9 @@ export default definePluginEntry({
 
     // OpenClaw 2026.7.1 does not expose a command conversation-binding resolver
     // for Microsoft Teams. Observe the canonical inbound hook context and keep a
-    // short-lived, sender/session-scoped correlation so the authenticated
-    // /jason command can use OpenClaw's native binding APIs without patching
-    // OpenClaw core or writing directly to its SQLite state.
+    // short-lived correlation keyed by run/session/sender so command handling and
+    // the compatibility forwarding path can reuse authenticated transport facts
+    // without patching OpenClaw core or writing directly to its SQLite state.
     api.on("message_received", (event, ctx) => {
       compatibility.capture(event, ctx);
     });
@@ -338,6 +441,7 @@ export default definePluginEntry({
           return undefined;
         }
 
+        const text = nonBlank(event.content);
         let config;
         try {
           config = resolveConfig(api);
@@ -345,14 +449,6 @@ export default definePluginEntry({
           api.logger.error?.("jason-bridge: invalid bridge configuration; Teams turn denied closed");
           return safeReply("Jason is not available because its governed transport configuration is invalid.");
         }
-
-        const channelTenant = configuredTeamsTenant(config.current);
-        if (channelTenant && channelTenant.toLowerCase() !== config.microsoftTenantId.toLowerCase()) {
-          api.logger.error?.("jason-bridge: configured Teams tenant does not match Jason transport tenant");
-          return safeReply("Jason rejected this request because the Microsoft tenant binding could not be validated.");
-        }
-
-        const text = nonBlank(event.content);
         if (
           config.passthroughAuthorizedCommands &&
           event.commandAuthorized === true &&
@@ -360,53 +456,73 @@ export default definePluginEntry({
         ) {
           return undefined;
         }
-        if (!text) {
-          return safeReply("Jason currently requires a text request for this governed conversation path.");
+
+        return forwardGovernedTeamsTurn({
+          api,
+          text,
+          microsoftObjectId: event.senderId ?? ctx.senderId,
+          conversationId: event.conversationId ?? ctx.conversationId ?? event.sessionKey ?? ctx.sessionKey,
+          messageId: event.messageId ?? ctx.messageId,
+          correlationId: event.runId ?? ctx.runId,
+        });
+      },
+      { timeoutMs: 45_000 },
+    );
+
+    // OpenClaw's inbound_claim hook only fires when core successfully projects
+    // a conversation binding onto the inbound turn. Microsoft Teams 2026.7.1
+    // can retain a binding that /jason status can resolve while still allowing
+    // a plain message to continue into the normal agent path. This gate closes
+    // that compatibility gap: every ordinary message in a Jason-bound Teams
+    // conversation is forwarded verbatim to Jason before OpenClaw's model runs.
+    // No trigger phrase, capability keyword, or provider name is used here.
+    api.on(
+      "before_agent_reply",
+      async (event, ctx) => {
+        if (agentChannel(ctx) !== "msteams") {
+          return undefined;
+        }
+        const text = nonBlank(event.cleanedBody);
+        if (!text || text.startsWith("/")) {
+          return undefined;
+        }
+        if (!compatibility.pluginRoot) {
+          return undefined;
         }
 
-        // OpenClaw's Microsoft Teams adapter uses activity.from.aadObjectId as
-        // senderId when available. Reject the Bot Framework fallback id instead
-        // of presenting it to Jason as Microsoft object identity evidence.
-        const microsoftObjectId = nonBlank(event.senderId ?? ctx.senderId);
-        if (!microsoftObjectId || !isUuid(microsoftObjectId)) {
-          api.logger.warn?.("jason-bridge: Teams turn lacks an AAD object id; denied closed");
-          return safeReply("Jason could not validate your Microsoft identity for this request.");
+        const captured = await compatibility.lookupCapturedWithBriefRetry(ctx);
+        if (!captured) {
+          api.logger.warn?.(
+            "jason-bridge: Teams agent turn lacks captured transport evidence; unbound routing left unchanged",
+          );
+          return undefined;
         }
 
-        const conversationId = nonBlank(event.conversationId ?? ctx.conversationId ?? event.sessionKey ?? ctx.sessionKey);
-        const messageId = nonBlank(event.messageId ?? ctx.messageId);
-        if (!conversationId || !messageId) {
-          api.logger.warn?.("jason-bridge: Teams turn lacks required conversation correlation; denied closed");
-          return safeReply("Jason could not validate the conversation context for this request.");
-        }
-
+        let current;
         try {
-          const envelope = buildConversationEnvelope({
-            text,
-            microsoftTenantId: config.microsoftTenantId,
-            microsoftObjectId,
-            conversationId,
-            messageId,
-            keyId: config.keyId,
-            correlationId: nonBlank(event.runId ?? ctx.runId) ?? undefined,
+          current = await getCurrentPluginConversationBinding({
+            pluginRoot: compatibility.pluginRoot,
+            conversation: captured.conversation,
           });
-          const signed = loadAndSignConversationEnvelope(envelope, config.privateKeyPath);
-          const result = await postConversationEnvelope({
-            runtimeUrl: config.runtimeUrl,
-            envelope: signed,
-            timeoutMs: config.requestTimeoutMs,
-          });
-
-          if (result.payload?.status !== "completed") {
-            api.logger.warn?.(
-              `jason-bridge: governed runtime returned ${String(result.payload?.status ?? "unknown")} (${result.httpStatus})`,
-            );
-          }
-          return safeReply(replyForRuntimeResult(result));
         } catch {
-          api.logger.error?.("jason-bridge: governed runtime request failed; no OpenClaw fallback permitted");
-          return safeReply("Jason could not safely process that request. No action was taken.");
+          api.logger.error?.("jason-bridge: governed conversation binding lookup failed; denied closed");
+          return safeReply("Jason could not validate the governed conversation binding. No action was taken.");
         }
+        if (current?.pluginId !== "jason-bridge") {
+          return undefined;
+        }
+
+        api.logger.info?.(
+          "jason-bridge: forwarding Jason-bound Teams turn through compatibility pre-agent path",
+        );
+        return forwardGovernedTeamsTurn({
+          api,
+          text,
+          microsoftObjectId: captured.senderId ?? ctx.senderId,
+          conversationId: captured.conversation.conversationId,
+          messageId: captured.messageId,
+          correlationId: captured.runId ?? ctx.runId,
+        });
       },
       { timeoutMs: 45_000 },
     );
