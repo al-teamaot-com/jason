@@ -15,7 +15,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 CANONICAL_DIRECTORIES = (
     "05-ADR",
     "07-Operations",
-    "08-Session-Records",
 )
 
 # Consolidated documentation sources are authored under docs/ and published at stable
@@ -29,6 +28,7 @@ CONSOLIDATED_DIRECTORIES = (
     ("docs/components", "components"),
     ("docs/standards", "standards"),
     ("docs/roadmaps", "roadmaps"),
+    ("docs/sessions", "sessions"),
     ("docs/journal", "journal"),
     ("docs/milestones", "milestones"),
     ("docs/archive", "archive"),
