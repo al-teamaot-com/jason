@@ -27,9 +27,9 @@ nav:
       - J-119 Event Model: models/J-119-Event-Model.md
       - J-120 Organizational Model: models/J-120-Organizational-Model.md
   - Milestones:
-      - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
-      - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
-      - M-003 Release Governance Hardening: 10-Milestones/M-003-Release-Governance-Hardening.md
+      - M-001 Kernel Foundation: milestones/M-001-Kernel-Foundation.md
+      - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
+      - M-003 Release Governance Hardening: milestones/M-003-Release-Governance-Hardening.md
   - Kernel:
       - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
       - Identity and Authority Runtime Foundation: 03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
