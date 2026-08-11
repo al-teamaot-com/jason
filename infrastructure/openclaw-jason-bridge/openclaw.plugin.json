@@ -29,8 +29,8 @@
       "requestTimeoutMs": {
         "type": "number",
         "minimum": 1000,
-        "maximum": 40000,
-        "default": 30000
+        "maximum": 170000,
+        "default": 150000
       },
       "passthroughAuthorizedCommands": {
         "type": "boolean",
@@ -55,7 +55,8 @@
       "help": "Path inside the OpenClaw secret boundary. The key itself is never sent as configuration or payload."
     },
     "requestTimeoutMs": {
-      "label": "Jason Request Timeout",
+      "label": "Jason Whole-Turn Wait Budget",
+      "help": "Maximum time OpenClaw waits for the governed Jason turn to finish. This is separate from the short signed-envelope freshness window and from capability-specific or local-model execution limits.",
       "advanced": true
     },
     "passthroughAuthorizedCommands": {
