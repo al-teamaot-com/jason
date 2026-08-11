@@ -52,6 +52,12 @@ No production component, capability, provider, dependency, identity binding, or 
 
 The System Registry describes and verifies operational topology; the Central Orchestrator remains the sole coordination authority for governed changes and remediation.
 
+Human-readable names, hostnames, labels, aliases, prefixes, site names, and similar values are resource selectors, not durable resource identity. Jason must never promote a selector to identity because it resembles an internal naming convention or because a provider returned a first result.
+
+Resource discovery must preserve enough candidate results to detect ambiguity. A selector may resolve automatically only when governance and authoritative provider evidence leave exactly one authorized candidate and that candidate exposes a durable resource identifier. If multiple authorized candidates remain, Jason must fail closed and request disambiguation rather than guessing, choosing the first result, or leaking candidate details outside the requester's authority scope.
+
+Once a durable resource identifier has been resolved, subsequent operations should use that identifier whenever the provider supports it. Provider-specific identifiers remain behind the Connector Framework and are carried through governed capability contracts rather than embedded in conversational assumptions or workflow-specific scripts.
+
 ## Definition of Completion
 
 This document is complete when every future architectural element can be placed within one or more of these components without changing their fundamental responsibilities.
