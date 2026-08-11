@@ -1,0 +1,51 @@
+diff --git a/src/auto-reply/reply/get-reply.before-agent-reply.test.ts b/src/auto-reply/reply/get-reply.before-agent-reply.test.ts
+index d88884afbd7..8c457e4dd7e 100644
+--- a/src/auto-reply/reply/get-reply.before-agent-reply.test.ts
++++ b/src/auto-reply/reply/get-reply.before-agent-reply.test.ts
+@@ -1,6 +1,7 @@
+ // Tests before-agent-reply hooks in the get-reply pipeline.
+ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+ import type { HookRunner } from "../../plugins/hooks.js";
++import { getReplyPayloadMetadata } from "../reply-payload.js";
+ import { SILENT_REPLY_TOKEN } from "../tokens.js";
+ import {
+   buildGetReplyGroupCtx,
+@@ -98,6 +99,11 @@ describe("getReplyFromConfig before_agent_reply wiring", () => {
+     );
+ 
+     expect(result).toEqual({ text: "plugin reply" });
++    expect(
++      result && !Array.isArray(result)
++        ? getReplyPayloadMetadata(result)?.deliverDespiteSourceReplySuppression
++        : undefined,
++    ).toBe(true);
+     expect(mocks.runBeforeAgentReply).toHaveBeenCalledTimes(1);
+     const [[body, hookCtx]] = mocks.runBeforeAgentReply.mock.calls as unknown as Array<
+       [
+diff --git a/src/auto-reply/reply/get-reply.ts b/src/auto-reply/reply/get-reply.ts
+index 846c135ff0e..18a9fb27f87 100644
+--- a/src/auto-reply/reply/get-reply.ts
++++ b/src/auto-reply/reply/get-reply.ts
+@@ -32,7 +32,10 @@ import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+ import { resolveCommandTurnTargetSessionKey } from "../command-turn-context.js";
+ import type { GetReplyOptions } from "../get-reply-options.types.js";
+ import { DEFAULT_HEARTBEAT_ACK_MAX_CHARS, stripHeartbeatToken } from "../heartbeat.js";
+-import type { ReplyPayload } from "../reply-payload.js";
++import {
++  markReplyPayloadForSourceSuppressionDelivery,
++  type ReplyPayload,
++} from "../reply-payload.js";
+ import type { MsgContext } from "../templating.js";
+ import { normalizeThinkLevel, normalizeVerboseLevel } from "../thinking.js";
+ import { SILENT_REPLY_TOKEN } from "../tokens.js";
+@@ -1020,7 +1023,9 @@ export async function getReplyFromConfig(
+       );
+       if (hookResult?.handled) {
+         logResolverTiming("completed", "before_agent_reply_hook");
+-        return hookResult.reply ?? { text: SILENT_REPLY_TOKEN };
++        return markReplyPayloadForSourceSuppressionDelivery(
++          hookResult.reply ?? { text: SILENT_REPLY_TOKEN },
++        );
+       }
+     }
+   }
