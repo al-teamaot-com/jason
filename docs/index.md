@@ -9,10 +9,11 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 1. **Current resume point:** [`control/CURRENT.md`](control/CURRENT.md).
 2. **Where authoritative knowledge lives:** [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md).
 3. **How to write or update Jason documentation:** [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md).
-4. **Known reconciliation issues:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
-5. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
-6. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
-7. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
+4. **Implementation-local documentation index:** [`control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`](control/IMPLEMENTATION-DOCUMENTATION-INDEX.md).
+5. **Known reconciliation issues:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
+6. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
+7. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
+8. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
 ## Documentation authority
 
@@ -24,6 +25,8 @@ Jason documentation follows a governing hierarchy. The Constitution and approved
 - [`components/`](components/) contains Kernel, capability, infrastructure, and component contracts.
 
 For **current production topology and lifecycle**, the authoritative source is the governed System Registry and its append-only lifecycle/verification evidence under `implementation/kernel/system_registry/`. Human-readable operational documents explain or render that truth; they do not replace it.
+
+For package-adjacent README files that legitimately remain outside `docs/`, use the Implementation Documentation Index. Those files are supporting implementation material only and cannot become hidden architecture, governance, authority, security, or current-state sources.
 
 For the detailed authority and historical path map, use the Documentation Register.
 
@@ -74,6 +77,7 @@ Read the durable current-work/handoff records, inspect current Git state, and us
 Documentation structure and consistency are controlled by:
 
 - [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md)
+- [`control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`](control/IMPLEMENTATION-DOCUMENTATION-INDEX.md)
 - [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md)
 - [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md)
 - [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md)
