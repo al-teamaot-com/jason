@@ -78,6 +78,8 @@ class OllamaStructuredJsonClient:
 @dataclass(frozen=True, slots=True)
 class OllamaResourceInquiryReasoner:
     client: OllamaStructuredJsonClient
+    resource_types: tuple[str, ...] = ()
+    selector_keys: tuple[str, ...] = ()
 
     def propose(
         self,
@@ -86,13 +88,26 @@ class OllamaResourceInquiryReasoner:
         organization_id: str,
         client_id: str | None,
     ) -> Mapping[str, Any] | None:
+        resource_type_schema: dict[str, Any] = {"type": "string"}
+        if self.resource_types:
+            resource_type_schema["enum"] = list(self.resource_types)
+
+        resource_selector_schema: dict[str, Any] = {"type": "object"}
+        if self.selector_keys:
+            resource_selector_schema.update(
+                {
+                    "additionalProperties": False,
+                    "properties": {key: {} for key in self.selector_keys},
+                }
+            )
+
         schema = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "resolved": {"type": "boolean"},
-                "resource_type": {"type": "string"},
-                "resource_selector": {"type": "object"},
+                "resource_type": resource_type_schema,
+                "resource_selector": resource_selector_schema,
                 "requested_facts": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -116,14 +131,19 @@ class OllamaResourceInquiryReasoner:
                 "Do not name or select providers, connectors, capabilities, tools, agents, "
                 "shell commands, URLs, credentials, or authority. This stage describes only "
                 "what resource is referenced, how it is identified, and what facts are asked. "
-                "Use execution_mode deterministic and permission_mode observe. If the request "
-                "cannot be represented safely as a read-only resource inquiry, resolved=false."
+                "When allowed resource types or selector keys are supplied, normalize ordinary "
+                "human wording into that closed governed vocabulary rather than inventing new "
+                "resource names or selector fields. Use execution_mode deterministic and "
+                "permission_mode observe. If the request cannot be represented safely as a "
+                "read-only resource inquiry, resolved=false."
             ),
             user=json.dumps(
                 {
                     "text": text,
                     "organization_scope": organization_id,
                     "client_scope_present": client_id is not None,
+                    "allowed_resource_types": list(self.resource_types),
+                    "allowed_selector_keys": list(self.selector_keys),
                 },
                 sort_keys=True,
             ),
