@@ -14,21 +14,6 @@
 
 ## Open issues
 
-### MIG-DOC-003 — Historical Platform Integrity “Article VII” conflicts with current Constitution numbering
-
-**State:** Open — authority conflict contained, formal disposition still required.
-
-`docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md` labels itself an approved constitutional Article VII, while the current authoritative `docs/foundation/J-002-Constitution.md` defines Article VII as **Knowledge as an Asset**.
-
-The conflict is currently contained by `docs/governance/README.md`:
-
-- J-002 is higher authority;
-- the Platform Integrity document must not be treated as current Constitution Article VII;
-- non-conflicting requirements may be used only as supporting governance context;
-- unique durable requirements should be reconciled into the appropriate canonical Constitution, architecture, standard, or governance owner before the historical record is archived or retired.
-
-Remaining work requires deliberate constitutional/governance review rather than an offline path-only cleanup.
-
 ### MIG-DOC-007 — Inbound-reference and plain-text path audit
 
 **State:** Open — strict MkDocs/CI is green and known current-use path drift is repaired; final consolidated-tree plain-text audit remains.
@@ -72,6 +57,21 @@ Resolution:
 J-100 through J-103 were moved into `docs/architecture/` and `docs/architecture/README.md` now defines their canonical subject ownership.
 
 Earlier blueprint/catalog/core-services/deployment/foundation-build records remain as supporting foundational references and cannot silently override the Constitution, J-series architecture, approved ADRs, component specifications, or System Registry state.
+
+### MIG-DOC-003 — Historical Platform Integrity “Article VII” conflict
+
+**State:** Resolved through deliberate governance disposition on 2026-08-11.
+
+The historical `ARTICLE_VII_PLATFORM_INTEGRITY.md` labeled itself an approved constitutional Article VII, while the authoritative `docs/foundation/J-002-Constitution.md` defines Article VII as **Knowledge as an Asset**.
+
+Resolution:
+
+- the current J-002 Constitution and its Article VII remain unchanged;
+- the historical Platform Integrity record was preserved as `docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md` with its original text retained as institutional evidence;
+- its former constitutional label is explicitly historical and has no current constitutional authority;
+- durable platform-integrity and boundary-enforcement requirements were extracted into `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` beneath the Constitution;
+- J-405 preserves central orchestration, approved platform-contract, secrets, policy-separation, provider-boundary, client-isolation, integrate-before-innovate, exception, and production-readiness requirements at the correct standards layer;
+- the reconciliation does not renumber, amend, or create a second Article VII.
 
 ### MIG-DOC-004 — Duplicate roadmap roots
 
