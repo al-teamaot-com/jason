@@ -1,44 +1,51 @@
 # Project Jason Documentation Register
 
-**Status:** Active migration control record  
+**Status:** Active documentation control record  
 **Owner:** Jason Architecture Authority  
-**Purpose:** Single register for where Project Jason knowledge lives, which source is authoritative, and how legacy documentation is being consolidated into `docs/`.
+**Purpose:** Single register for where Project Jason knowledge lives, which source is authoritative, and how historical documentation locations were consolidated into `docs/`.
 
 ## How to use this register
 
 Start here when you need to answer any of these questions:
 
 - Where is the authoritative document for this topic?
-- Is a document current, transitional, generated, or historical?
+- Is a document current, supporting, generated, or historical?
 - Where should a new document be created?
-- Has a documentation category already moved into `docs/`?
 - Which source should win if two documents disagree?
+- Which historical repository path did a document come from?
 
-For instructions on how to create, update, hand off, retire, or reconcile Jason documentation consistently, use `docs/control/HOW-TO-DOCUMENT-JASON.md`.
+For consistent authoring, use `docs/control/HOW-TO-DOCUMENT-JASON.md`.
 
-For known conflicts and migration blockers, use `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md`.
+For remaining authority/reconciliation issues, use `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md`.
 
-During migration, `docs/` is the single documentation control plane even when the canonical source for a category still physically resides in a legacy numbered directory.
+## Current physical rule
+
+All governed human-facing Project Jason documentation is now physically consolidated under `docs/`, except implementation-local documentation that has a justified need to remain beside code, schemas, deployment packages, or tests.
+
+The historical numbered documentation roots are retired. CI rejects their re-creation.
+
+MkDocs consumes `docs/` directly. The former mixed-source `.build/docs` assembly step is retired.
 
 ## Authority model
 
 | Knowledge type | Authoritative owner | Notes |
 |---|---|---|
-| Mission and constitutional rules | Jason Constitution / Foundation | Conversation memory cannot override these records. |
-| Governance rules | Approved governance records | Must remain consistent with Constitution. |
-| Architecture | Approved architecture records and ADRs | Enduring structure and boundaries. |
-| Canonical organizational models | Approved canonical models | Provider-neutral concepts. |
-| Component/capability/provider contracts | Governed component specifications and implementation contracts | Code/tests prove implementation behavior; specifications define intended contract. |
-| Current production topology/state | System Registry + append-only lifecycle history + verification evidence | Do not manually recreate current topology in narrative documents. |
-| Operating procedure | Approved runbook | Procedure must reference current authority and evidence sources. |
-| Historical proof | Durable session/proof/evidence record | Proves what occurred at a point in time. |
-| Current work/resume point | `docs/control/CURRENT.md` | Must point to authoritative evidence rather than duplicate volatile state. |
+| Mission and constitutional rules | `docs/foundation/` | Conversation memory cannot override these records. |
+| Governance rules | `docs/governance/` subject to the Constitution | Must remain consistent with Foundation authority. |
+| Architecture | Canonical J-series records under `docs/architecture/` plus approved ADRs | `docs/architecture/README.md` classifies supporting foundation records. |
+| Canonical organizational models | `docs/models/` | Provider-neutral concepts. |
+| Component/capability/provider contracts | `docs/components/` plus versioned implementation contracts/tests | Code/tests prove implementation behavior; documents define governed intended contracts. |
+| Current production topology/state | System Registry structured sources + append-only lifecycle history + verification evidence | Do not recreate current topology manually in narrative documents. |
+| Operating procedure | `docs/operations/` | Procedures must reference current authority and evidence sources. |
+| Historical proof | `docs/sessions/` and bounded evidence references | Proves what occurred at a point in time. |
+| Current work/resume point | `docs/control/CURRENT.md` | References authoritative evidence instead of duplicating volatile state. |
+| Architecture observations | `docs/journal/` | Non-governing until promoted through normal governance. |
+| Active governed roadmap | `docs/roadmaps/` | Historical roadmaps belong in `docs/archive/`. |
+| Milestone declarations | `docs/milestones/` | Release/documentation readiness tooling consumes this location. |
 | Published website/search index | Generated output | Never authoritative. |
-| Chat/session memory | Non-authoritative context | Must be converted to durable records when it matters. |
+| Chat/session memory | Non-authoritative context | Convert material durable knowledge into governed records. |
 
-## Target documentation structure
-
-All new human-facing governed documentation should use this structure unless an approved exception applies:
+## Canonical documentation structure
 
 ```text
 docs/
@@ -69,61 +76,53 @@ docs/
   archive/
 ```
 
-Implementation-local README files may remain beside code where adjacency is operationally useful. They must be discoverable from the documentation control plane when they contain material operating information.
+## Historical migration register
 
-## Migration register
-
-| Current source | Target location | Current authority | Migration status | Retirement condition |
-|---|---|---|---|---|
-| `01-Foundation/` | `docs/foundation/` | `docs/foundation/` | **Migrated** | Files moved, legacy root removed, assembly/navigation updated; stale inbound references must remain clean before merge. |
-| `01-Governance/` | `docs/governance/` | Legacy source plus existing `docs/governance/` material | Reconciliation required | Duplicate governance authority reconciled and canonical paths established. |
-| `02-Architecture/` | `docs/architecture/` | Legacy source plus existing `docs/architecture/` material | Reconciliation required | Blueprint-style docs and J-series architecture records reconciled without losing history. |
-| `02-Canonical-Models/` | `docs/models/` | `docs/models/` | **Migrated** | Files moved, legacy root removed, assembly/navigation updated; stale inbound references must remain clean before merge. |
-| `03-Components/` | `docs/components/` | Legacy source | Planned | Component/capability/infrastructure/operations documents moved with references intact. |
-| `04-Standards/` | `docs/standards/` | `docs/standards/` | **Migrated** | J-401 through J-403 moved beside J-404, legacy root removed, assembly/navigation updated; stale inbound references must remain clean before merge. |
-| `05-ADR/` | `docs/decisions/` | Legacy source | **Blocked by identifier conflict** | Resolve duplicate ADR-004 without changing architectural meaning, then migrate all ADRs and update references. |
-| `06-Roadmaps/` | `docs/roadmaps/` | Legacy source | Reconciliation required | Reconcile with `07-Roadmap/`, migrate active governed roadmap records, archive superseded plans. |
-| `07-Roadmap/` | `docs/roadmaps/` | Legacy duplicate category | Reconciliation required | Reconcile with `06-Roadmaps/`; obsolete duplicate root retired. |
-| `07-Operations/` | `docs/operations/` and `docs/sessions/` | Legacy source | Classification/reconciliation required | Separate repeatable runbooks from historical proof and System Registry-generated state. |
-| `08-Session-Records/` | `docs/sessions/` | Legacy source except canonical current-work record | In progress | Preserve legacy CURRENT as historical/superseded; migrate/index proof records and retire legacy root. |
-| `09-Architecture-Journal/` | `docs/journal/` | `docs/journal/` | **Migrated** | Files moved and legacy root removed; journal remains explicitly non-governing until promoted through normal governance. |
-| `10-Milestones/` | `docs/milestones/` | `docs/milestones/` | **Migrated** | Files moved, legacy root removed, MkDocs and documentation-readiness tooling updated; stale inbound references must remain clean before merge. |
-| `99-Archive/` if present | `docs/archive/` | Legacy archive | Planned | Historical retention paths updated. |
-| `docs/architecture/` | `docs/architecture/` | Existing publishing/source material | Reconciliation required | Each document classified as canonical, superseded, historical, or merged with J-series architecture. |
-| `docs/governance/` | `docs/governance/` | Existing publishing/source material | Reconciliation required | Constitutional/governance status and relationship to Foundation records made explicit. |
-| Implementation README files | Remain adjacent when justified; indexed from `docs/` | Implementation source | Ongoing exception | No architectural/governance rule exists only in an unindexed implementation README. |
+| Historical source | Canonical target | State / reconciliation note |
+|---|---|---|
+| `01-Foundation/` | `docs/foundation/` | Migrated; legacy root retired. |
+| `01-Governance/` | `docs/governance/` | Migrated; J-003 consolidated. The conflicting historical `ARTICLE_VII_PLATFORM_INTEGRITY.md` remains explicitly subordinate to the current Constitution pending formal disposition. |
+| `02-Architecture/` | `docs/architecture/` | Migrated; J-100 through J-103 are canonical for their named subjects. Existing blueprint/catalog/specification records are classified by `docs/architecture/README.md` as supporting foundational references. |
+| `02-Canonical-Models/` | `docs/models/` | Migrated; legacy root retired. |
+| `03-Components/` | `docs/components/` | Migrated; Kernel, capability, infrastructure, and component-operations records consolidated. |
+| `04-Standards/` | `docs/standards/` | Migrated; J-401 through J-404 now share one standards location. |
+| `05-ADR/` | `docs/decisions/` | Migrated after resolving duplicate ADR-004 identity. Datto RMM retains ADR-004; Teams proactive messaging was corrected to ADR-007. ADR-008 supersedes ADR-002 and governs the consolidated documentation control plane. |
+| `06-Roadmaps/` | `docs/roadmaps/` | Active capability register migrated. |
+| `07-Roadmap/` | `docs/archive/roadmaps/` | Historical roadmap preserved as explicitly superseded instead of competing with the active roadmap. |
+| `07-Operations/` | `docs/operations/` | Physically migrated. Repeatable-procedure vs historical-proof classification remains an ongoing cleanup requirement for individual records. |
+| `08-Session-Records/` | `docs/sessions/` | Migrated; former `CURRENT.md` preserved as `Legacy-CURRENT-2026-08-11.md`. `docs/control/CURRENT.md` is the only current resume point. |
+| `09-Architecture-Journal/` | `docs/journal/` | Migrated; journal remains explicitly non-governing until promoted. |
+| `10-Milestones/` | `docs/milestones/` | Migrated; documentation-readiness tooling updated. |
+| `99-Archive/` if historically used | `docs/archive/` | Archive authority is historical by definition; new superseded records are retained under `docs/archive/`. |
 
 ## Machine-readable operational sources
 
-These files are deliberately not moved into narrative documentation because they are executable/structured operational truth:
+These sources deliberately remain outside narrative documentation because they are executable/structured operational truth:
 
 - `implementation/kernel/system_registry/production-registry.json`
 - `implementation/kernel/system_registry/production-lifecycle-events.json`
 - `implementation/kernel/system_registry/production-verification-plan.json`
-- System Registry schemas and verifier implementation under `implementation/kernel/system_registry/`
+- System Registry schemas, repository logic, probes, verifier, and related tests under `implementation/kernel/system_registry/`
 
-Human documentation must reference these sources rather than creating a second operational inventory.
+Human documentation references these sources rather than creating a second operational inventory.
 
 ## High-value continuity records
 
-Until migration is complete, the following records are especially important:
-
-- `docs/index.md` — single documentation entry point.
-- `docs/standards/J-404-Documentation-Governance-and-Continuity.md` — documentation governance rules.
-- `docs/control/HOW-TO-DOCUMENT-JASON.md` — repeatable authoring/update procedure for future sessions.
+- `docs/index.md` — documentation entry point.
 - `docs/control/CURRENT.md` — canonical resume point.
-- `docs/control/DOCUMENTATION-REGISTER.md` — this source/migration register.
-- `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` — known conflicts/blockers and reconciliation requirements.
-- `docs/control/HANDOFF-TEMPLATE.md` — required structure for durable workstream handoff.
-- `docs/control/DOCUMENT-TEMPLATE.md` — standard metadata and durable-document skeleton.
+- `docs/control/HOW-TO-DOCUMENT-JASON.md` — repeatable authoring/update procedure for future sessions.
+- `docs/control/DOCUMENTATION-REGISTER.md` — this authority/source map.
+- `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` — remaining reconciliation issues.
+- `docs/standards/J-404-Documentation-Governance-and-Continuity.md` — documentation governance.
+- `docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md` — decision superseding the old numbered-root layout.
 - `docs/foundation/J-002-Constitution.md` — constitutional authority.
-- `02-Architecture/J-103-System-Registry.md` — authoritative System Registry architecture until Architecture reconciliation completes.
-- `07-Operations/System-Registry-Current-Operational-State.md` — generated human-readable operational-state view where current.
+- `docs/architecture/J-103-System-Registry.md` — System Registry architecture.
+- `docs/operations/System-Registry-Current-Operational-State.md` — generated human-readable operational-state representation where current.
 - `implementation/kernel/system_registry/` — structured operational truth.
 
-## Classification rules during migration
+## Classification rules
 
-A document encountered during migration must be classified as one of:
+Every durable human-facing record should be classifiable as one of:
 
 - **Canonical:** authoritative source for its subject.
 - **Supporting:** useful detail that references a canonical source.
@@ -132,44 +131,26 @@ A document encountered during migration must be classified as one of:
 - **Superseded:** replaced by a newer canonical record but retained for history.
 - **Historical:** accurate for a past state but not current authority.
 - **Draft/Proposed:** not yet governing authority.
-- **Duplicate/Conflict:** requires reconciliation before either copy may be treated as authoritative.
+- **Conflict:** requires reconciliation before competing claims can be treated as authoritative.
 
-Do not delete a conflicting record merely to make the repository look cleaner. Reconcile the authority and preserve material history.
-
-## Migration sequencing
-
-The recommended order is:
-
-1. Documentation control plane and standards.
-2. Foundation/governance authority.
-3. Architecture and canonical models.
-4. Standards and ADRs.
-5. Component/capability/infrastructure specifications.
-6. Operations/runbooks and current operational documentation.
-7. Session/proof records.
-8. Roadmaps, journal, milestones, and archive.
-9. CI/tooling cleanup and retirement of compatibility roots.
-
-This order prevents lower-level content from being reorganized before its authority framework is stable.
+Do not delete a conflicting record merely to make the repository cleaner. Reconcile authority and preserve material history.
 
 ## Rule for new work
 
 New governed human-facing documentation belongs under `docs/`.
 
-If an existing legacy canonical document must be modified before its category is migrated, update that existing source and ensure the change remains discoverable from `docs/`. Do not create a duplicate replacement copy solely to satisfy the new directory convention.
+Before adding a document, future sessions must consult `docs/control/HOW-TO-DOCUMENT-JASON.md` and search the Documentation Register/current documentation tree to avoid duplicate authority.
 
-Before adding a new document, future sessions must consult `docs/control/HOW-TO-DOCUMENT-JASON.md` so naming, authority, evidence, status, security, and handoff practices remain consistent.
+Implementation-local README files may remain beside code only when adjacency is operationally useful. They must not quietly become the sole owner of a material architecture, governance, authority, or operating rule.
 
-## Completion criteria
+## Documentation-complete condition
 
-Documentation consolidation is complete only when:
+Documentation consolidation is structurally complete when CI confirms:
 
-- all governed human-facing documentation is discoverable and physically organized under `docs/`, except approved implementation-local exceptions;
-- each material topic has one authoritative source;
-- legacy numbered roots are retired or contain only explicit compatibility stubs;
-- MkDocs publishes directly from the consolidated source structure;
-- CI validates documentation structure and stale/duplicate authority rules;
-- release/documentation tooling uses the consolidated paths;
-- current operational state is derived from structured truth;
-- current work can be resumed from `docs/control/CURRENT.md`; and
-- a future contributor can reconstruct how Jason is governed, built, operated, and verified without access to chat history.
+- no retired numbered documentation roots exist;
+- MkDocs builds directly from `docs/` with strict validation;
+- required control records exist and are linked;
+- release/documentation tooling uses consolidated paths; and
+- no known broken links remain.
+
+Documentation governance remains an ongoing responsibility after structural migration. Authority conflicts, stale records, and classification cleanup must continue to be resolved under J-404 rather than allowing the repository to fragment again.
