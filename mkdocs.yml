@@ -8,6 +8,13 @@ theme:
   name: material
 nav:
   - Home: index.md
+  - Documentation Control:
+      - Current Resume Point: control/CURRENT.md
+      - Documentation Register: control/DOCUMENTATION-REGISTER.md
+      - How to Document Jason: control/HOW-TO-DOCUMENT-JASON.md
+      - Handoff Template: control/HANDOFF-TEMPLATE.md
+      - Document Template: control/DOCUMENT-TEMPLATE.md
+      - Documentation Governance Standard: standards/J-404-Documentation-Governance-and-Continuity.md
   - Foundation:
       - Manifesto: 01-Foundation/J-001-Manifesto.md
       - Constitution: 01-Foundation/J-002-Constitution.md
@@ -74,6 +81,7 @@ nav:
       - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
       - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
       - Canonical Sources and Generated Artifacts: 04-Standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
+      - Documentation Governance and Continuity: standards/J-404-Documentation-Governance-and-Continuity.md
   - Decisions:
       - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
   - Roadmap:
