@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
 
 from orchestrator.teams_conversation_flow import (
+    ConversationIntentUnresolvedError,
     TeamsConversationFlowResult,
     TeamsConversationPrincipalEvidence,
     TeamsConversationRequest,
@@ -252,7 +253,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 machine_identity=machine_identity,
                 reason="conversation_denied",
             )
-        except LookupError:
+        except ConversationIntentUnresolvedError:
             return self._reject(
                 request_id=parsed.request_id,
                 correlation_id=parsed.correlation_id,
