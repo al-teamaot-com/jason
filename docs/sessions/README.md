@@ -12,7 +12,7 @@ When a session produces an approved decision, the authoritative result must also
 
 ## Canonical resume point
 
-`CURRENT.md` is the human-readable resume checkpoint for the next Jason work session. Read it together with current GitHub state, the applicable ADRs/runbooks, and a fresh `tools/catch_me_up.py` host snapshot.
+`docs/control/CURRENT.md` is the human-readable resume checkpoint for the next Jason work session. Read it together with current GitHub state, the applicable ADRs/runbooks, and a fresh `tools/catch_me_up.py` host snapshot.
 
 ## Practice
 
@@ -40,8 +40,9 @@ Each record should include:
 - `OpenClaw-Ed25519-Key-Rotation-Host-Proof-2026-08-09.md` — overlap-first OpenClaw signing-key rotation proof.
 - `Datto-RMM-First-Live-Read-Host-Proof-2026-08-09.md` — first governed Datto RMM live-read proof.
 - `IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md` — physical Jason-host validation of canonical OpenBao provider AppRole runtime, IT Glue/Datto bounded live reads and discovery, Datto managed-device authority, documentation reconciliation behavior, and the regression-baseline defects discovered before the Teams approval round-trip.
+- `CAP-007-Live-Pilot-Proof-2026-08-11.md` — first successful end-to-end governed CAP-007 AWS SES pilot and subsequent authenticated Teams conversational integration evidence for the approved pilot scope.
 
-The 2026-08-10 proof is intentionally linked from the bootstrap/secrets runbook, secret-provider deployment record, convergence checklist, live convergence runbook, ADR-004, and `CURRENT.md` so the operational facts do not depend on chat history.
+The 2026-08-10 proof is intentionally linked from the bootstrap/secrets runbook, secret-provider deployment record, convergence checklist, live convergence runbook, ADR-004, and `docs/control/CURRENT.md` so the operational facts do not depend on chat history.
 
 ## Source-of-Truth Rule
 
