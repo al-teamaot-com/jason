@@ -12,6 +12,9 @@ dependencies = [
   "jason-openclaw-connector==0.1.0",
 ]
 
+[project.scripts]
+jason-runtime = "jason_runtime.main:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<10"]
 
