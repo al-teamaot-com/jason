@@ -9,7 +9,7 @@ on:
       - "implementation/orchestrator/tests/test_gates.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/openclaw_synthetic_e2e.py"
-      - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
+      - "docs/components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
   pull_request:
     paths:
@@ -19,7 +19,7 @@ on:
       - "implementation/orchestrator/tests/test_gates.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/openclaw_synthetic_e2e.py"
-      - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
+      - "docs/components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
 
 permissions:
