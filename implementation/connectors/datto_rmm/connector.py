@@ -29,7 +29,14 @@ class DattoRmmConnector(ConnectorBase):
         require_durable_credentials(credentials)
         token = acquire_access_token(credentials=credentials)
         try:
-            if request.context.capability == "datto_rmm.device.resolve":
+            should_resolve_device = (
+                request.context.capability == "datto_rmm.device.resolve"
+                or (
+                    request.context.capability == "datto_rmm.device.search"
+                    and self._requested_facts_present(request.arguments)
+                )
+            )
+            if should_resolve_device:
                 data = self._execute_device_resolve(
                     request=request,
                     credentials=credentials,
@@ -55,6 +62,13 @@ class DattoRmmConnector(ConnectorBase):
             capability=request.context.capability,
             provider=self.provider_name,
             data=data,
+        )
+
+    @staticmethod
+    def _requested_facts_present(arguments: Mapping[str, Any]) -> bool:
+        requested = arguments.get("requested_facts")
+        return isinstance(requested, (list, tuple)) and any(
+            str(item).strip() for item in requested
         )
 
     def prepare_request(
@@ -142,12 +156,12 @@ class DattoRmmConnector(ConnectorBase):
     ) -> Any:
         """Resolve a human selector without promoting it to identity.
 
-        The canonical endpoint search capability may be implemented by more than one
-        provider. Datto's implementation first performs bounded discovery. Zero or
-        multiple matches are returned as discovery evidence only. Exactly one match
-        may proceed to an exact GET, and only after Datto supplied a durable device UID.
-        This keeps provider affinity inside the connector boundary and prevents a
-        human-friendly hostname from being treated as durable identity.
+        A fact-bearing endpoint search is a provider-neutral request for information,
+        not permission to treat a hostname as identity. Datto first performs bounded
+        discovery. Zero or multiple matches are returned as discovery evidence only.
+        Exactly one match may proceed to an exact GET, and only after Datto supplied a
+        durable device UID. Pure discovery calls without requested_facts remain search
+        operations and do not trigger the exact read.
         """
 
         search_request = self._prepare_provider_request(
