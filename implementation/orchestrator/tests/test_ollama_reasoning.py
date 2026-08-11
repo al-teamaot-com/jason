@@ -155,8 +155,12 @@ def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
     assert prompt["allowed_resource_types"] == ["endpoint"]
     assert prompt["allowed_selector_keys"] == ["hostname", "name", "resource_id"]
     assert prompt["fact_hints"] == ["hostname last user logged in user operating system"]
-    assert "authorization context only" in request["messages"][0]["content"]
-    assert "requested_facts must describe what the human wants to know" in request["messages"][0]["content"]
+    assert "organization_scope" not in prompt
+    assert "client_scope_present" not in prompt
+    system_prompt = request["messages"][0]["content"]
+    assert "Never infer ownership, tenant, client, site" in system_prompt
+    assert "Authorization scope is not supplied to this language reasoner" in system_prompt
+    assert "requested_facts must describe what the human wants to know" in system_prompt
 
 
 def test_capability_reasoner_selects_only_candidate_and_builds_arguments_deterministically():
