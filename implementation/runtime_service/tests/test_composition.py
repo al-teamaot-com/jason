@@ -81,6 +81,15 @@ def test_production_conversation_planning_is_resource_first_and_metadata_driven(
     assert len(resolvers) == 2
     assert isinstance(resolvers[0], GovernedResourceConversationIntentResolver)
     assert isinstance(resolvers[0].planner.reasoner, MetadataResourceCapabilityReasoner)
+    language_reasoner = resolvers[0].interpreter.reasoner
+    assert language_reasoner.resource_types == ("endpoint",)
+    assert language_reasoner.selector_keys == (
+        "hostname",
+        "name",
+        "resource_id",
+        "serial_number",
+        "site",
+    )
     assert isinstance(resolvers[1], GovernedActionConversationIntentResolver)
 
 
