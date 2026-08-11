@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip pytest "PyJWT[crypto]>=2.9,<3"
       - name: Compile management boundary
         run: python -m compileall -q implementation/management_api implementation/orchestrator/event_store.py
       - name: Test management boundary
