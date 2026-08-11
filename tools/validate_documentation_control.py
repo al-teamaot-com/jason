@@ -71,6 +71,13 @@ CURRENT_USE_AUDIT_EXCLUSIONS = {
     "tools/validate_documentation_control.py",
 }
 
+# Append-only System Registry lifecycle events retain their historical repository
+# evidence references. The generator deliberately translates that exact legacy
+# prefix to the current docs/sessions path without rewriting immutable history.
+CURRENT_USE_AUDIT_ALLOWED = {
+    ("tools/system_registry_docs.py", "08-Session-Records/"),
+}
+
 CURRENT_USE_AUDIT_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".json", ".txt"}
 
 REQUIRED_DOC_DIRECTORIES = (
@@ -128,8 +135,11 @@ def audit_current_use_paths() -> None:
                 for pattern in LEGACY_CURRENT_USE_PATTERNS:
                     match = pattern.search(line)
                     if match is not None:
+                        matched_text = match.group(0)
+                        if (relative, matched_text) in CURRENT_USE_AUDIT_ALLOWED:
+                            continue
                         findings.append(
-                            f"{relative}:{line_number}: {match.group(0)}"
+                            f"{relative}:{line_number}: {matched_text}"
                         )
     if findings:
         preview = "\n".join(findings[:25])
