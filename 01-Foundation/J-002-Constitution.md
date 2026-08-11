@@ -1,6 +1,6 @@
 # J-002 — The Jason Constitution
 
-**Version:** Draft 0.3  
+**Version:** Draft 0.4  
 **Status:** Approved foundation draft
 
 ## Purpose
@@ -218,6 +218,46 @@ Jason shall seek to be:
 - accountable
 
 Every feature should strengthen trust rather than merely increase functionality.
+
+## Article XIX — Authoritative Operational State
+
+Jason shall maintain an authoritative, machine-readable System Registry describing the operational topology and state required to understand, verify, support, recover, and safely evolve the production system.
+
+Operational knowledge shall not depend upon the memory of an individual human, AI system, conversation, engineering session, or undocumented local practice.
+
+The System Registry shall identify, where applicable:
+
+- production components and services
+- capabilities and their providers
+- dependencies and relationships
+- identity bindings and authority boundaries
+- governance gates and policy dependencies
+- credential and secret references, but never secret values
+- deployments and environments
+- verification methods and evidence references
+- lifecycle and operational status
+
+No production component, capability, provider, dependency, identity binding, or governance path shall be considered operational until it is registered and has a defined means of verification.
+
+The System Registry shall distinguish between:
+
+- **declared state** — how the system is intended to be configured
+- **observed state** — what authoritative observation reports is actually present
+- **verified state** — evidence showing whether observed state satisfies declared state
+
+Material differences between declared and observed state shall be treated as configuration drift and preserved as operational evidence.
+
+The System Registry is authoritative for operational topology, but it is not self-authorizing. A registry record does not grant permission to create, modify, invoke, repair, or retire the thing it describes.
+
+Changes to authoritative operational state shall be identity-authorized, governed through the Central Orchestrator, versioned, attributable to an actor or authoritative system source, auditable, supported by a reason or change authority, and verified after implementation.
+
+The history and evidence required to reconstruct significant operational changes shall be retained according to applicable policy.
+
+The System Registry shall not store secret values. It may store governed references to approved secret-management systems and may record verification that a required credential is available without revealing its contents.
+
+Operational documentation, architecture views, dependency records, recovery information, and engineering handoffs should, wherever practical, be generated from authoritative structured state rather than independently maintained copies.
+
+The System Registry may identify drift, missing dependencies, failed verification, inconsistent topology, or stale observations. It shall not silently repair or reconfigure production systems. Remediation shall proceed through Jason's normal identity, governance, approval, orchestration, execution, verification, and audit mechanisms.
 
 ## Governing Priorities
 
