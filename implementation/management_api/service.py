@@ -71,12 +71,14 @@ class ManagementApiService:
         self._require(context, "capabilities")
         result: list[dict[str, object]] = []
         for item in self._capabilities.list_all():
+            execution_modes = sorted(item.permitted_execution_modes)
             result.append(
                 {
                     "name": item.capability_name,
                     "display_name": item.display_name,
                     "version": item.version,
-                    "mode": sorted(item.permitted_execution_modes),
+                    "mode": ",".join(execution_modes),
+                    "execution_modes": execution_modes,
                     "status": item.lifecycle_status.value,
                     "risk_level": item.risk_level.value,
                     "approval_required": item.approval.required,
@@ -122,8 +124,7 @@ class ManagementApiService:
         elif correlation_id:
             events = self._events.list_by_correlation(correlation_id)
         else:
-            list_recent = getattr(self._events, "list_recent", None)
-            events = () if list_recent is None else list_recent(limit=100)
+            events = self._events.list_recent(limit=100)
 
         visible = []
         for event in events:
