@@ -1,3 +1,12 @@
+# Jason Roadmap — Historical Snapshot
+
+**Status:** Historical / Superseded as current-work guidance  
+**Historical source:** `07-Roadmap/Jason-Roadmap.md`  
+**Superseded for current-work sequencing by:** `docs/control/CURRENT.md` and the governed capability/roadmap records under `docs/roadmaps/`  
+**Preservation note:** The content below is retained as institutional history. Its “Current Primary Workstream” section describes an earlier project state and must not be interpreted as current operational or development status.
+
+---
+
 # Jason Roadmap
 
 ## Foundation Phase
