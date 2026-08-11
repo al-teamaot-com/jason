@@ -2,39 +2,45 @@
 
 Project Jason is TeamAOT's governed operational platform and professional decision-support architecture.
 
-This `docs/` tree is the single human-facing documentation control plane for Jason. A future human or AI session should begin here rather than relying on conversation history, remembered deployment details, or scattered repository files.
+This `docs/` tree is the single human-facing documentation control plane for Jason. A future human or AI session should begin here rather than relying on conversation history, remembered deployment details, or historical repository layout.
 
 ## Start here
 
 1. **Current resume point:** [`control/CURRENT.md`](control/CURRENT.md).
 2. **Where authoritative knowledge lives:** [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md).
 3. **How to write or update Jason documentation:** [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md).
-4. **Known migration conflicts/blockers:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
+4. **Known reconciliation issues:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
 5. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
 6. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
 7. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
 ## Documentation authority
 
-Jason documentation follows a governing hierarchy. The Constitution and approved governance remain highest authority. Architecture, canonical models, standards, ADRs, component/capability specifications, operational runbooks, proof records, current-work records, and generated outputs each have distinct roles.
+Jason documentation follows a governing hierarchy. The Constitution and approved governance remain highest authority. Canonical architecture, project decisions, engineering architecture, canonical models, component/capability specifications, standards, operational runbooks, proof records, current-work records, and generated outputs each have distinct roles.
+
+- [`architecture/`](architecture/) owns canonical platform-level architecture for its named subjects.
+- [`engineering/`](engineering/) contains detailed implementation-engineering architecture subordinate to the Constitution, project ADRs, and canonical platform architecture.
+- [`decisions/`](decisions/) contains project-level governed ADRs.
+- [`components/`](components/) contains Kernel, capability, infrastructure, and component contracts.
 
 For **current production topology and lifecycle**, the authoritative source is the governed System Registry and its append-only lifecycle/verification evidence under `implementation/kernel/system_registry/`. Human-readable operational documents explain or render that truth; they do not replace it.
 
-For the detailed authority and migration map, use the Documentation Register.
+For the detailed authority and historical path map, use the Documentation Register.
 
-## Target documentation structure
+## Canonical documentation structure
 
 ```text
 docs/
   index.md
-  control/          Documentation process, current-work control, templates, migration register
+  control/          Documentation process, current-work control, templates, registers
   foundation/       Mission, Constitution, enduring principles
   governance/       Governance authority and decision architecture
-  architecture/     Reference architecture and enduring system boundaries
+  architecture/     Canonical platform architecture and supporting architecture references
+  engineering/      Detailed implementation-engineering architecture and JIS guidance
   models/           Provider-neutral canonical models
   components/       Kernel, capabilities, infrastructure, operational components
   standards/        Engineering, architecture, documentation, and operating standards
-  decisions/        Architecture Decision Records
+  decisions/        Project-level Architecture Decision Records
   roadmaps/         Governed future work and capability roadmaps
   operations/       Runbooks, deployment, recovery, and verification procedures
   sessions/         Durable session, reconciliation, and proof records
@@ -43,7 +49,7 @@ docs/
   archive/          Superseded and historical records
 ```
 
-The repository is currently migrating older numbered documentation roots into this structure. During migration, the Documentation Register identifies which physical source remains canonical. Do not create duplicate editable copies simply to satisfy the target directory layout.
+Historical numbered documentation roots and the former top-level engineering `architecture/` tree have been consolidated into this structure on the documentation-standardization branch. Do not recreate parallel editable documentation roots.
 
 ## Core architectural rules that documentation must preserve
 
@@ -63,12 +69,14 @@ Do not assume a prior branch, container, provider, hash, lifecycle state, or dep
 
 Read the durable current-work/handoff records, inspect current Git state, and use the System Registry plus fresh host verification when production state matters. If a chat summary conflicts with governed documentation or observed evidence, the governed durable source wins.
 
-## During the documentation migration
+## Documentation governance
 
-The migration is controlled by:
+Documentation structure and consistency are controlled by:
 
 - [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md)
 - [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md)
+- [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md)
 - [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md)
+- [`decisions/ADR-008-Documentation-Control-Plane-Consolidation.md`](decisions/ADR-008-Documentation-Control-Plane-Consolidation.md)
 
-The objective is not cosmetic reorganization. It is to ensure every material fact has one authoritative owner, all human-facing knowledge is discoverable from one place, and future work can be resumed without reconstructing institutional memory from chats.
+The objective is not cosmetic organization. It is to ensure every material fact has one authoritative owner, all human-facing knowledge is discoverable from one place, and future work can be resumed without reconstructing institutional memory from chats.
