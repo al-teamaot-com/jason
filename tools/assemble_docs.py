@@ -14,7 +14,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 # The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
     "05-ADR",
-    "07-Operations",
 )
 
 # Consolidated documentation sources are authored under docs/ and published at stable
@@ -28,6 +27,7 @@ CONSOLIDATED_DIRECTORIES = (
     ("docs/components", "components"),
     ("docs/standards", "standards"),
     ("docs/roadmaps", "roadmaps"),
+    ("docs/operations", "operations"),
     ("docs/sessions", "sessions"),
     ("docs/journal", "journal"),
     ("docs/milestones", "milestones"),
