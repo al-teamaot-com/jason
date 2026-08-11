@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "events": [
+    {
+      "event_id": "lifecycle.2026-08-11t154530z.component.openbao.verified",
+      "registry_id": "component.openbao",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-11T15:45:30.973669+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Current production-pilot host observation satisfied the registered OpenBao declared state without remediation.",
+      "evidence_references": [
+        "file:///home/al/Jason-Evidence/System-Registry/system-registry-verification-20260811T154530Z.json",
+        "08-Session-Records/System-Registry-Production-Verification-2026-08-11.md"
+      ],
+      "verification_method": "docker-container-inspect-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-11t154530z.component.jason-runtime.verified",
+      "registry_id": "component.jason-runtime",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-11T15:45:30.973669+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Current production-pilot host observation satisfied the registered Jason Runtime declared state without remediation.",
+      "evidence_references": [
+        "file:///home/al/Jason-Evidence/System-Registry/system-registry-verification-20260811T154530Z.json",
+        "08-Session-Records/System-Registry-Production-Verification-2026-08-11.md"
+      ],
+      "verification_method": "docker-container-inspect-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-11t154530z.component.openclaw-gateway.verified",
+      "registry_id": "component.openclaw-gateway",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-11T15:45:30.973669+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Current production-pilot host observation satisfied the registered OpenClaw gateway declared state without remediation.",
+      "evidence_references": [
+        "file:///home/al/Jason-Evidence/System-Registry/system-registry-verification-20260811T154530Z.json",
+        "08-Session-Records/System-Registry-Production-Verification-2026-08-11.md"
+      ],
+      "verification_method": "docker-container-inspect-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-11t154530z.component.openclaw-jason-bridge.verified",
+      "registry_id": "component.openclaw-jason-bridge",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-11T15:45:30.973669+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Post-reconciliation production-pilot host observation satisfied the corrected OpenClaw Jason bridge digest without remediation.",
+      "evidence_references": [
+        "file:///home/al/Jason-Evidence/System-Registry/system-registry-verification-20260811T154530Z.json",
+        "08-Session-Records/System-Registry-Production-Verification-2026-08-11.md",
+        "08-Session-Records/System-Registry-Bridge-Drift-Reconciliation-2026-08-11.md"
+      ],
+      "verification_method": "docker-file-sha256-v1",
+      "verification_outcome": "verified"
+    }
+  ]
+}
