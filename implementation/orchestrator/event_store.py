@@ -90,6 +90,8 @@ class OrchestrationEventStore(Protocol):
 
     def list_by_correlation(self, correlation_id: str) -> tuple[OrchestrationEvent, ...]: ...
 
+    def list_recent(self, *, limit: int = 100) -> tuple[OrchestrationEvent, ...]: ...
+
 
 class SQLiteOrchestrationEventStore:
     """Append-only durable orchestration event store for the local pilot."""
@@ -176,6 +178,19 @@ class SQLiteOrchestrationEventStore:
             ORDER BY occurred_at, event_id
             """,
             (correlation_id,),
+        ).fetchall()
+        return tuple(self._from_row(row) for row in rows)
+
+    def list_recent(self, *, limit: int = 100) -> tuple[OrchestrationEvent, ...]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        rows = self._connection.execute(
+            """
+            SELECT * FROM orchestration_events
+            ORDER BY occurred_at DESC, event_id DESC
+            LIMIT ?
+            """,
+            (limit,),
         ).fetchall()
         return tuple(self._from_row(row) for row in rows)
 
