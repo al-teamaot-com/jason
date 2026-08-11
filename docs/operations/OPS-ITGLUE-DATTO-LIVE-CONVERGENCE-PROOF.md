@@ -53,7 +53,7 @@ python3 -m venv .venv
 
 Reusing an existing `.venv` is permitted when it was built from the current checkout and remains healthy.
 
-The full host bootstrap and secret-runtime distinction are maintained in `07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md` and `07-Operations/Jason-Secret-Provider-Deployment-Record.md`.
+The full host bootstrap and secret-runtime distinction are maintained in `docs/operations/Jason-Bootstrap-and-Secrets-Runbook.md` and `docs/operations/Jason-Secret-Provider-Deployment-Record.md`.
 
 ## Canonical provider secret runtime
 
@@ -191,7 +191,7 @@ An `unresolved` documentation relationship is an acceptable and expected outcome
 
 The first physical-host proof completed successfully and is recorded at:
 
-`08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+`docs/sessions/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
 
 The proof established:
 
