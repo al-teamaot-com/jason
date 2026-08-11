@@ -18,6 +18,8 @@ REQUIRED_FILES = (
     "docs/control/HANDOFF-TEMPLATE.md",
     "docs/control/DOCUMENT-TEMPLATE.md",
     "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
+    "docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md",
+    "docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md",
     "docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
     "docs/roadmaps/Jason-Roadmap-Status.json",
     "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
@@ -94,6 +96,12 @@ def main() -> int:
     if (ROOT / "TODO.md").exists():
         fail("Governed backlog must remain under docs/roadmaps, not repository-root TODO.md")
 
+    if (ROOT / "docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md").exists():
+        fail(
+            "Historical Platform Integrity Article VII must remain archived rather than "
+            "reappearing as current governance authority"
+        )
+
     index = read("docs/index.md")
     for path in REQUIRED_FILES[1:9]:
         relative = path.removeprefix("docs/")
@@ -142,6 +150,33 @@ def main() -> int:
         if phrase not in standard:
             fail(f"J-404 is missing required governance section or path: {phrase}")
 
+    platform_integrity = read(
+        "docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md"
+    )
+    for phrase in (
+        "Prohibited bypasses",
+        "Central orchestration",
+        "Policy and business authority separation",
+        "Integrate before innovate",
+        "Exception governance",
+        "Production-readiness enforcement",
+        "ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md",
+    ):
+        if phrase not in platform_integrity:
+            fail(f"J-405 is missing required platform-integrity control: {phrase}")
+
+    historical_platform_integrity = read(
+        "docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md"
+    )
+    if "Historical / Superseded as governing authority" not in historical_platform_integrity:
+        fail("Archived Platform Integrity record must be explicitly historical/superseded")
+    if "# Article VII - Platform Integrity" not in historical_platform_integrity:
+        fail("Archived Platform Integrity record must preserve the historical source text")
+
+    migration_issues = read("docs/control/DOCUMENTATION-MIGRATION-ISSUES.md")
+    if "MIG-DOC-003" not in migration_issues or "Resolved through deliberate governance disposition" not in migration_issues:
+        fail("MIG-DOC-003 Platform Integrity conflict must remain recorded as resolved")
+
     adr008 = read("docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md")
     if "**Supersedes:** ADR-002" not in adr008:
         fail("ADR-008 must explicitly supersede ADR-002")
@@ -180,6 +215,7 @@ def main() -> int:
         "control/HOW-TO-DOCUMENT-JASON.md",
         "control/IMPLEMENTATION-DOCUMENTATION-INDEX.md",
         "standards/J-404-Documentation-Governance-and-Continuity.md",
+        "standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md",
         "decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
         "engineering/README.md",
         "roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
