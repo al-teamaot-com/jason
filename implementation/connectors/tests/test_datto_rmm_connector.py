@@ -170,6 +170,21 @@ def test_device_search_normalization_fails_closed_without_device_collection() ->
         )
 
 
+def test_hostname_reference_matches_only_delimited_identifier_segment() -> None:
+    assert DattoRmmConnector._hostname_reference_matches(
+        reference="50282",
+        hostname="AOT-50282",
+    )
+    assert DattoRmmConnector._hostname_reference_matches(
+        reference="50282",
+        hostname="CUSTOMER-50282-SRV",
+    )
+    assert not DattoRmmConnector._hostname_reference_matches(
+        reference="50282",
+        hostname="AOT-150282",
+    )
+
+
 def test_pure_device_discovery_does_not_issue_exact_read(monkeypatch) -> None:
     monkeypatch.setattr(
         "connectors.datto_rmm.connector.acquire_access_token",
@@ -252,6 +267,93 @@ def test_fact_bearing_search_resolves_unique_match_to_exact_device_read(monkeypa
         "connector.requested",
         "connector.completed",
     ]
+
+
+def test_fact_bearing_fragment_search_falls_back_without_inventing_hostname(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    exact_search_payload = {"devices": []}
+    account_discovery_payload = {
+        "devices": [
+            {
+                "uid": "device-uid-50282",
+                "hostname": "AOT-50282",
+                "siteName": "Customer-A",
+            },
+            {
+                "uid": "device-uid-other",
+                "hostname": "OTHER-10001",
+                "siteName": "Customer-B",
+            },
+        ]
+    }
+    exact_payload = {
+        "uid": "device-uid-50282",
+        "hostname": "AOT-50282",
+        "siteName": "Customer-A",
+        "lastUser": "CUSTOMERA\\verified.user",
+    }
+    transport = Transport([exact_search_payload, account_discovery_payload, exact_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "50282",
+                "requested_facts": ("last user",),
+            }
+        )
+    )
+
+    assert len(transport.calls) == 3
+    assert transport.calls[0]["params"]["hostname"] == "50282"
+    assert "hostname" not in transport.calls[1]["params"]
+    assert transport.calls[1]["params"] == {"page": 1, "max": 250}
+    assert transport.calls[2]["url"].endswith("/api/v2/device/device-uid-50282")
+    assert result.data["resolved_resource_id"] == "device-uid-50282"
+    assert result.data["resource_matches"] == [
+        {
+            "resource_id": "device-uid-50282",
+            "hostname": "AOT-50282",
+            "site": "Customer-A",
+        }
+    ]
+    assert result.data["provider_data"] == exact_payload
+
+
+def test_fact_bearing_fragment_search_preserves_ambiguity_across_sites(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    exact_search_payload = {"devices": []}
+    account_discovery_payload = {
+        "devices": [
+            {"uid": "device-uid-a", "hostname": "AOT-50282", "siteName": "Customer-A"},
+            {"uid": "device-uid-b", "hostname": "LAB-50282", "siteName": "Customer-B"},
+        ]
+    }
+    transport = Transport([exact_search_payload, account_discovery_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "50282",
+                "requested_facts": ("last user",),
+            }
+        )
+    )
+
+    assert len(transport.calls) == 2
+    assert [match["resource_id"] for match in result.data["resource_matches"]] == [
+        "device-uid-a",
+        "device-uid-b",
+    ]
+    assert result.data["discovery_complete"] is True
+    assert "resolved_resource_id" not in result.data
 
 
 def test_fact_bearing_search_stops_on_ambiguous_candidates(monkeypatch) -> None:
