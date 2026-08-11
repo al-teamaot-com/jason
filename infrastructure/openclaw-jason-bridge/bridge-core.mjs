@@ -1,4 +1,4 @@
-import { createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
+import { randomBytes, randomUUID, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -77,9 +77,11 @@ export function buildConversationEnvelope({
   };
 }
 
-export function signConversationEnvelope(envelope, privateKeyPem) {
-  const key = createPrivateKey(privateKeyPem);
-  const signature = sign(null, canonicalSignedPayload(envelope), key).toString("base64");
+export function signConversationEnvelope(envelope, privateKey) {
+  // node:crypto.sign accepts either PEM/DER key material or an existing
+  // KeyObject. Keeping that boundary flexible lets production load the PEM
+  // from OpenClaw's secret mount while tests can use ephemeral KeyObjects.
+  const signature = sign(null, canonicalSignedPayload(envelope), privateKey).toString("base64");
   return { ...envelope, signature };
 }
 
