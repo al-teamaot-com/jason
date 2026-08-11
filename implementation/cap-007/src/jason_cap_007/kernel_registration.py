@@ -99,6 +99,7 @@ def email_send_capability() -> CapabilityDefinition:
             "conversation_self_target_field": "to",
             "conversation_default_subject": "Message from Jason",
             "conversation_default_text_body": "You asked Jason to send you an email.",
+            "conversation_authenticated_imperative_is_approval": "true",
         },
     )
 
