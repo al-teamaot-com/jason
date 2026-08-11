@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from connectors.core.connector_base import ConnectorBase, PreparedRequest
 from connectors.core.contracts import ConnectorRequest, ConnectorResult, require_capability
@@ -10,6 +10,7 @@ from connectors.datto_rmm.auth import acquire_access_token, require_durable_cred
 class DattoRmmConnector(ConnectorBase):
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
+    default_device_search_max = 25
 
     capabilities = frozenset(
         {
@@ -57,7 +58,7 @@ class DattoRmmConnector(ConnectorBase):
         return ConnectorResult(
             capability=request.context.capability,
             provider=self.provider_name,
-            data=payload,
+            data=self._normalize_result(request.context.capability, payload),
         )
 
     def prepare_request(
@@ -93,8 +94,66 @@ class DattoRmmConnector(ConnectorBase):
             audit_operation=path,
         )
 
+    @classmethod
+    def _normalize_result(cls, capability: str, payload: Any) -> Any:
+        """Preserve provider evidence while exposing canonical discovery candidates.
+
+        Human-friendly endpoint names and hostnames are discovery selectors, not durable
+        identities. Search responses therefore carry a provider-neutral resource_matches
+        collection so orchestration can deterministically detect zero, one, or multiple
+        candidates before any evidence reasoner is allowed to interpret device facts.
+        """
+
+        if capability != "datto_rmm.device.search":
+            return payload
+        records = cls._device_records(payload)
+        return {
+            "resource_matches": [cls._canonical_device_match(record) for record in records],
+            "provider_data": payload,
+        }
+
     @staticmethod
+    def _device_records(payload: Any) -> Sequence[Mapping[str, Any]]:
+        if isinstance(payload, (list, tuple)):
+            records = payload
+        elif isinstance(payload, Mapping):
+            records = payload.get("devices")
+        else:
+            records = None
+        if not isinstance(records, (list, tuple)):
+            raise ValueError("Datto device search response does not expose a devices collection")
+        if not all(isinstance(item, Mapping) for item in records):
+            raise ValueError("Datto device search returned a non-object device record")
+        return tuple(records)
+
+    @classmethod
+    def _canonical_device_match(cls, record: Mapping[str, Any]) -> Mapping[str, str]:
+        match: dict[str, str] = {}
+        resource_id = cls._first_scalar(record, "uid", "deviceUid", "device_uid")
+        hostname = cls._first_scalar(record, "hostname", "name")
+        site = cls._first_scalar(record, "siteName", "site_name")
+        site_uid = cls._first_scalar(record, "siteUid", "site_uid")
+        if resource_id:
+            match["resource_id"] = resource_id
+        if hostname:
+            match["hostname"] = hostname
+        if site:
+            match["site"] = site
+        if site_uid:
+            match["site_id"] = site_uid
+        return match
+
+    @staticmethod
+    def _first_scalar(record: Mapping[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = record.get(key)
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    @classmethod
     def _resolve_operation(
+        cls,
         capability: str,
         arguments: Mapping[str, Any],
     ) -> tuple[str, Mapping[str, Any] | None]:
@@ -106,21 +165,28 @@ class DattoRmmConnector(ConnectorBase):
                 raise ValueError("device_uid or resource_id is required")
             return f"/api/v2/device/{device_uid}", None
         if capability == "datto_rmm.device.search":
+            requested_max = int(arguments.get("max", cls.default_device_search_max))
             params: dict[str, Any] = {
-                "page": int(arguments.get("page", 1)),
-                "max": min(int(arguments.get("max", 1)), 250),
+                "page": max(int(arguments.get("page", 1)), 1),
+                # Discovery must be able to observe ambiguity. Never let a caller
+                # collapse a name/hostname search to a single provider result.
+                "max": max(2, min(requested_max, 250)),
             }
             # Canonical resource inquiries use provider-neutral selectors. Datto's
-            # account-device endpoint exposes hostname as a documented query filter,
-            # so provider-neutral hostname/name selectors are translated here rather
-            # than introducing a workflow-specific lookup script.
+            # account-device endpoint exposes hostname and siteName query filters,
+            # so those selectors are translated here rather than introducing a
+            # workflow-specific lookup script. Both are discovery filters only;
+            # neither becomes durable resource identity.
             hostname = str(
                 arguments.get("hostname")
                 or arguments.get("name")
                 or ""
             ).strip()
+            site = str(arguments.get("site") or "").strip()
             if hostname:
                 params["hostname"] = hostname
+            if site:
+                params["siteName"] = site
             return "/api/v2/account/devices", params
         if capability == "datto_rmm.alerts.list":
             return "/api/v2/account/alerts/open", {
