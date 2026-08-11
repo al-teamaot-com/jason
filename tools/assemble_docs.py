@@ -10,6 +10,8 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 
+# Transitional canonical roots retained while the documentation migration is in progress.
+# The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
     "01-Foundation",
     "01-Governance",
@@ -26,9 +28,17 @@ CANONICAL_DIRECTORIES = (
     "10-Milestones",
 )
 
+# Existing publishing-only material retained at its historical assembled path during migration.
 PUBLISHING_DIRECTORIES = (
     "docs/architecture",
     "docs/governance",
+)
+
+# Documentation control-plane material is authored under docs/ and published at the
+# documentation root so docs/index.md can link to it directly.
+CONTROL_DIRECTORIES = (
+    ("docs/control", "control"),
+    ("docs/standards", "standards"),
 )
 
 
@@ -57,6 +67,11 @@ def main() -> int:
     for directory_name in PUBLISHING_DIRECTORIES:
         source = REPOSITORY_ROOT / directory_name
         destination = BUILD_ROOT / directory_name
+        copy_directory(source, destination)
+
+    for source_name, destination_name in CONTROL_DIRECTORIES:
+        source = REPOSITORY_ROOT / source_name
+        destination = BUILD_ROOT / destination_name
         copy_directory(source, destination)
 
     index_source = REPOSITORY_ROOT / "docs" / "index.md"
