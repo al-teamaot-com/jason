@@ -141,10 +141,11 @@ class OllamaResourceInquiryReasoner:
                 "Use selector fields only to identify the resource. Selector values must be "
                 "plain scalar strings copied or normalized from identifiers actually supplied "
                 "by the human; never put operators, nested objects, requested facts, or inferred "
-                "scope into selector values. Organization and client scope are authorization "
-                "context only and must never be copied into a resource selector unless the human "
-                "explicitly stated that selector value. requested_facts must describe what the "
-                "human wants to know about the resource; do not substitute selector fields or "
+                "scope into selector values. Never infer ownership, tenant, client, site, "
+                "organization, or authorization scope from an identifier prefix, suffix, naming "
+                "convention, or resemblance. Authorization scope is not supplied to this language "
+                "reasoner and is enforced separately by Jason. requested_facts must describe what "
+                "the human wants to know about the resource; do not substitute selector fields or "
                 "inventory identifiers unless the human actually asked for them. Fact hints are "
                 "examples of information governed resources may expose, not a closed vocabulary. "
                 "If the human supplies an identifier-like token without naming a selector field, "
@@ -160,8 +161,6 @@ class OllamaResourceInquiryReasoner:
             user=json.dumps(
                 {
                     "text": text,
-                    "organization_scope": organization_id,
-                    "client_scope_present": client_id is not None,
                     "allowed_resource_types": list(self.resource_types),
                     "allowed_selector_keys": list(self.selector_keys),
                     "fact_hints": list(self.fact_hints),
