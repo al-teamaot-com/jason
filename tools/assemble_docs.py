@@ -14,7 +14,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 # The Documentation Register defines authority and retirement criteria for each root.
 CANONICAL_DIRECTORIES = (
     "01-Governance",
-    "02-Architecture",
     "03-Components",
     "05-ADR",
     "07-Operations",
@@ -23,7 +22,6 @@ CANONICAL_DIRECTORIES = (
 
 # Existing publishing-only material retained at its historical assembled path during migration.
 PUBLISHING_DIRECTORIES = (
-    "docs/architecture",
     "docs/governance",
 )
 
@@ -32,6 +30,8 @@ PUBLISHING_DIRECTORIES = (
 CONSOLIDATED_DIRECTORIES = (
     ("docs/control", "control"),
     ("docs/foundation", "foundation"),
+    ("docs/governance", "governance"),
+    ("docs/architecture", "architecture"),
     ("docs/models", "models"),
     ("docs/standards", "standards"),
     ("docs/roadmaps", "roadmaps"),
