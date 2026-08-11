@@ -48,7 +48,6 @@ from orchestrator.event_store import SQLiteOrchestrationEventStore
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.ollama_action_reasoning import OllamaActionIntentReasoner
 from orchestrator.ollama_reasoning import (
-    OllamaResourceCapabilityReasoner,
     OllamaResourceEvidenceReasoner,
     OllamaResourceInquiryReasoner,
     OllamaStructuredJsonClient,
@@ -64,6 +63,7 @@ from orchestrator.resource_evidence import (
     GovernedTeamsResourceResponseRenderer,
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
+from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.teams_conversation_flow import TeamsConversationFlow
 from orchestrator.teams_identity_binding import JasonTeamsIdentityBinder
@@ -301,11 +301,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,
-            reasoner=OllamaResourceCapabilityReasoner(ollama_client),
+            reasoner=MetadataResourceCapabilityReasoner(),
         ),
     )
+    # Prefer read-only resource interpretation before action interpretation. This
+    # removes an unnecessary action-model pass from ordinary questions while
+    # remaining fail-safe: any resource result is still forced to permission_mode
+    # observe and is revalidated against provider-neutral read-only capabilities.
+    # If the message is not a resource inquiry, the action resolver gets the same
+    # untouched human text and applies its normal governed action contract.
     intent_resolver = ChainedConversationIntentResolver(
-        resolvers=(action_intent_resolver, resource_intent_resolver)
+        resolvers=(resource_intent_resolver, action_intent_resolver)
     )
 
     orchestration_events = SQLiteOrchestrationEventStore(settings.orchestration_events_db)
