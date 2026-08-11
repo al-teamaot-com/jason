@@ -143,9 +143,9 @@ Existing protected/non-secret evidence references include:
 - Bootstrap retirement evidence: `/home/al/Jason-Evidence/Secret-Provider/openbao-bootstrap-retirement-20260806T120329Z.json`
 - Verified Raft backup and SHA-256 sidecar under `/opt/jason/backups/openbao/`
 - Governed isolated restore evidence: `/home/al/Jason-Evidence/OpenBao/openbao-raft-restore-test-20260806T150504Z.json`
-- Repository host-proof record: `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
-- CAP-007 live pilot proof: `07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md`
-- Teams-to-CAP-007 live proof: `08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
+- Repository host-proof record: `docs/sessions/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+- CAP-007 live pilot proof: `docs/sessions/CAP-007-Live-Pilot-Proof-2026-08-11.md`
+- Teams-to-CAP-007 live proof: `docs/sessions/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
 
 The evidence must never contain tokens, passwords, unseal shares, recovery keys, API credentials, RoleIDs, SecretIDs, OAuth bearer tokens, Microsoft access tokens, private keys, or secret values.
 
