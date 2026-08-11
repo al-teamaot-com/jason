@@ -16,9 +16,10 @@ nav:
       - Document Template: control/DOCUMENT-TEMPLATE.md
       - Documentation Governance Standard: standards/J-404-Documentation-Governance-and-Continuity.md
   - Foundation:
-      - Manifesto: 01-Foundation/J-001-Manifesto.md
-      - Constitution: 01-Foundation/J-002-Constitution.md
-      - Professional Operating Principles: 01-Foundation/J-003-Professional-Operating-Principles.md
+      - Manifesto: foundation/J-001-Manifesto.md
+      - Constitution: foundation/J-002-Constitution.md
+      - Professional Operating Principles: foundation/J-003-Professional-Operating-Principles.md
+      - Architectural Review and Decision Framework: foundation/J-006-Architectural-Review-and-Decision-Framework.md
   - Canonical Models:
       - J-116 State Model: 02-Canonical-Models/J-116-State-Model.md
       - J-117 Object Model: 02-Canonical-Models/J-117-Object-Model.md
