@@ -12,7 +12,7 @@ Architecture and bootstrap intentions are not sufficient operational documentati
 
 Every deployed Jason environment must maintain a concrete, verified secret-provider deployment record at:
 
-`07-Operations/Jason-Secret-Provider-Deployment-Record.md`
+`docs/operations/Jason-Secret-Provider-Deployment-Record.md`
 
 That record is the source of truth for the actual runtime type, service or container name, listener, TLS mode, executable and wrapper paths, configuration, storage, authentication, logical-name mappings, audit status, backup and restore status, ownership, and health commands.
 
@@ -198,7 +198,7 @@ These are now documented as explicit contracts rather than tribal knowledge. Fut
 
 The durable proof is recorded in:
 
-`08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
+`docs/sessions/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`
 
 The same session exposed unrelated repository-wide connector regression-baseline defects, tracked in issue #137. Those defects do not alter the OpenBao/AppRole readiness result, but they must be repaired before the first live Teams approval round-trip.
 
