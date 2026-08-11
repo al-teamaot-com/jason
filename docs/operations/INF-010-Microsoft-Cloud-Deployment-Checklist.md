@@ -180,7 +180,7 @@ resolved `me` to the authenticated user and then continued through the Central O
 
 Full proof:
 
-`08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
+`docs/sessions/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
 
 ## Stop conditions
 
