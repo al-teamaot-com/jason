@@ -17,9 +17,7 @@ CANONICAL_DIRECTORIES = (
     "02-Architecture",
     "03-Components",
     "05-ADR",
-    "06-Roadmaps",
     "07-Operations",
-    "07-Roadmap",
     "08-Session-Records",
 )
 
@@ -36,8 +34,10 @@ CONSOLIDATED_DIRECTORIES = (
     ("docs/foundation", "foundation"),
     ("docs/models", "models"),
     ("docs/standards", "standards"),
+    ("docs/roadmaps", "roadmaps"),
     ("docs/journal", "journal"),
     ("docs/milestones", "milestones"),
+    ("docs/archive", "archive"),
 )
 
 
