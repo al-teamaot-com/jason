@@ -17,6 +17,11 @@ class OllamaStructuredJsonClient:
     This client has no authority, connector handles, provider credentials, or tool
     execution surface. Callers provide an explicit JSON schema and deterministically
     validate/use the returned structure downstream.
+
+    Structured reasoning must also be time-bounded *and* generation-bounded. A local
+    model can otherwise spend most of an ingress budget producing unnecessary tokens
+    even when the final contract is tiny. max_output_tokens therefore becomes part of
+    the reasoning contract rather than relying on an HTTP timeout as the only bound.
     """
 
     transport: HttpTransport
@@ -30,9 +35,12 @@ class OllamaStructuredJsonClient:
         system: str,
         user: str,
         schema: Mapping[str, Any],
+        max_output_tokens: int = 160,
     ) -> Mapping[str, Any]:
         if not self.model.strip():
             raise ValueError("Ollama model is required")
+        if max_output_tokens < 16 or max_output_tokens > 1024:
+            raise ValueError("Ollama structured reasoning output budget is invalid")
         response = self.transport.request(
             method="POST",
             url=f"{self.base_url.rstrip('/')}/api/chat",
@@ -45,7 +53,10 @@ class OllamaStructuredJsonClient:
                 ],
                 "stream": False,
                 "format": dict(schema),
-                "options": {"temperature": 0},
+                "options": {
+                    "temperature": 0,
+                    "num_predict": max_output_tokens,
+                },
             },
             timeout_seconds=self.timeout_seconds,
         )
@@ -117,6 +128,7 @@ class OllamaResourceInquiryReasoner:
                 sort_keys=True,
             ),
             schema=schema,
+            max_output_tokens=160,
         )
         if result.get("resolved") is not True:
             return None
@@ -184,6 +196,7 @@ class OllamaResourceCapabilityReasoner:
                 sort_keys=True,
             ),
             schema=schema,
+            max_output_tokens=64,
         )
         selected = result.get("capability_names")
         if not isinstance(selected, list):
@@ -253,6 +266,7 @@ class OllamaResourceEvidenceReasoner:
                 sort_keys=True,
             ),
             schema=schema,
+            max_output_tokens=96,
         )
         locations = result.get("locations")
         if not isinstance(locations, list):
