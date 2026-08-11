@@ -11,6 +11,11 @@ from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from orchestrator.conversation_action_intent import GovernedActionConversationIntentResolver
 from orchestrator.conversation_resource_intent import GovernedResourceConversationIntentResolver
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+from orchestrator.system_registry_resource import (
+    SYSTEM_REGISTRY_READ,
+    SYSTEM_REGISTRY_SEARCH,
+    SYSTEM_REGISTRY_TRACE,
+)
 
 
 def _trusted_registry(root: Path) -> Path:
@@ -82,14 +87,25 @@ def test_production_conversation_planning_is_resource_first_and_metadata_driven(
     assert isinstance(resolvers[0], GovernedResourceConversationIntentResolver)
     assert isinstance(resolvers[0].planner.reasoner, MetadataResourceCapabilityReasoner)
     language_reasoner = resolvers[0].interpreter.reasoner
-    assert language_reasoner.resource_types == ("endpoint",)
+    assert language_reasoner.resource_types == ("endpoint", "system_registry")
     assert language_reasoner.selector_keys == (
+        "entity_type",
+        "environment",
+        "from",
         "hostname",
+        "lifecycle",
         "name",
+        "query",
+        "registry_id",
         "resource_id",
         "serial_number",
         "site",
+        "to",
     )
+    invokers = governed_ingress.flow.orchestrator._invoker.registered_capabilities()
+    assert SYSTEM_REGISTRY_SEARCH in invokers
+    assert SYSTEM_REGISTRY_READ in invokers
+    assert SYSTEM_REGISTRY_TRACE in invokers
     assert isinstance(resolvers[1], GovernedActionConversationIntentResolver)
 
 
