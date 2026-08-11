@@ -46,6 +46,7 @@ MkDocs consumes `docs/` directly. The former mixed-source `.build/docs` assembly
 |---|---|---|
 | Mission and constitutional rules | `docs/foundation/` | Conversation memory cannot override these records. |
 | Governance rules | `docs/governance/` subject to the Constitution | Must remain consistent with Foundation authority. |
+| Platform integrity and boundary enforcement | `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` subject to the Constitution | Governs prohibited bypasses, approved platform boundaries, provider/policy separation, exception handling, and production-readiness enforcement. |
 | Platform architecture | Canonical J-series records under `docs/architecture/` plus approved project ADRs | `docs/architecture/README.md` classifies supporting foundational architecture records. |
 | Detailed implementation-engineering architecture | `docs/engineering/` | Subordinate to the Constitution, project ADRs, and canonical platform architecture. Historical engineering `ADR-000x` records are a separate engineering namespace from project ADRs under `docs/decisions/`. |
 | Canonical organizational models | `docs/models/` | Provider-neutral concepts. |
@@ -105,12 +106,12 @@ docs/
 | Historical source | Canonical target | State / reconciliation note |
 |---|---|---|
 | `01-Foundation/` | `docs/foundation/` | Migrated; legacy root retired. |
-| `01-Governance/` | `docs/governance/` | Migrated; J-003 consolidated. The conflicting historical `ARTICLE_VII_PLATFORM_INTEGRITY.md` remains explicitly subordinate to the current Constitution pending formal disposition. |
+| `01-Governance/` | `docs/governance/` plus `docs/archive/governance/` for superseded historical authority | Migrated; J-003 consolidated. The former Platform Integrity “Article VII” conflict is resolved: the current Constitution's Article VII remains Knowledge as an Asset; the historical Platform Integrity record is archived and its durable requirements are governed by J-405. |
 | `02-Architecture/` | `docs/architecture/` | Migrated; J-100 through J-103 are canonical for their named subjects. Existing blueprint/catalog/specification records are classified by `docs/architecture/README.md` as supporting foundational references. |
 | `architecture/` | `docs/engineering/` | Migrated; historical JIS/provider/capability/execution-policy/resolution engineering architecture is now explicitly subordinate to canonical platform architecture. The historical engineering `ADR-000x` namespace remains distinct from project ADRs. |
 | `02-Canonical-Models/` | `docs/models/` | Migrated; legacy root retired. |
 | `03-Components/` | `docs/components/` | Migrated; Kernel, capability, infrastructure, and component-operations records consolidated. |
-| `04-Standards/` | `docs/standards/` | Migrated; J-401 through J-404 now share one standards location. |
+| `04-Standards/` | `docs/standards/` | Migrated; J-401 through J-405 now share one standards location. J-405 was created during governance reconciliation of the historical Platform Integrity record. |
 | `05-ADR/` | `docs/decisions/` | Migrated after resolving duplicate ADR-004 identity. Datto RMM retains ADR-004; Teams proactive messaging was corrected to ADR-007. ADR-008 supersedes ADR-002 and governs the consolidated documentation control plane. |
 | `06-Roadmaps/` | `docs/roadmaps/` | Active capability register migrated. |
 | `07-Roadmap/` | `docs/roadmaps/` and `docs/archive/roadmaps/` | Machine-readable roadmap status migrated to `docs/roadmaps/`; historical narrative roadmap preserved as explicitly superseded under `docs/archive/roadmaps/`. |
@@ -120,6 +121,22 @@ docs/
 | `09-Architecture-Journal/` | `docs/journal/` | Migrated; journal remains explicitly non-governing until promoted. |
 | `10-Milestones/` | `docs/milestones/` | Migrated; documentation-readiness tooling updated. |
 | `99-Archive/` if historically used | `docs/archive/` | Archive authority is historical by definition; new superseded records are retained under `docs/archive/`. |
+
+## Platform Integrity reconciliation
+
+The current Constitution's Article VII remains **Knowledge as an Asset**.
+
+The former free-standing Platform Integrity “Article VII” is preserved at:
+
+`docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md`
+
+It is historical evidence, not current constitutional authority.
+
+The durable requirements previously contained there are governed at the correct standards layer by:
+
+`docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md`
+
+This disposition preserves institutional memory without maintaining two constitutional Article VII records or discarding the earlier platform-integrity intent.
 
 ## Machine-readable operational sources
 
@@ -156,6 +173,8 @@ This exception is bounded:
 - `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` — discovery/control boundary for package-adjacent documentation.
 - `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` — remaining reconciliation issues.
 - `docs/standards/J-404-Documentation-Governance-and-Continuity.md` — documentation governance.
+- `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` — canonical platform-integrity and boundary-enforcement standard beneath the Constitution.
+- `docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md` — preserved historical source for the superseded Platform Integrity constitutional labeling.
 - `docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md` — decision superseding the old numbered-root layout.
 - `docs/foundation/J-002-Constitution.md` — constitutional authority.
 - `docs/architecture/J-103-System-Registry.md` — System Registry architecture.
