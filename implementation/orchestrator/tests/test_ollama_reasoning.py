@@ -113,6 +113,41 @@ def test_resource_inquiry_reasoner_returns_only_provider_neutral_structure():
     assert request["format"]["additionalProperties"] is False
 
 
+def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
+    llm, transport = client(
+        {
+            "resolved": True,
+            "resource_type": "endpoint",
+            "resource_selector": {"hostname": "50282"},
+            "requested_facts": ["most recent user"],
+            "execution_mode": "deterministic",
+            "permission_mode": "observe",
+        }
+    )
+    reasoner = OllamaResourceInquiryReasoner(
+        llm,
+        resource_types=("endpoint",),
+        selector_keys=("hostname", "name", "resource_id"),
+    )
+
+    result = reasoner.propose(
+        text="who was on 50282 last?",
+        organization_id="aot",
+        client_id=None,
+    )
+
+    assert result["resource_type"] == "endpoint"
+    request = transport.calls[0]["json"]
+    resource_type_schema = request["format"]["properties"]["resource_type"]
+    selector_schema = request["format"]["properties"]["resource_selector"]
+    assert resource_type_schema["enum"] == ["endpoint"]
+    assert selector_schema["additionalProperties"] is False
+    assert tuple(selector_schema["properties"]) == ("hostname", "name", "resource_id")
+    prompt = json.loads(request["messages"][1]["content"])
+    assert prompt["allowed_resource_types"] == ["endpoint"]
+    assert prompt["allowed_selector_keys"] == ["hostname", "name", "resource_id"]
+
+
 def test_capability_reasoner_selects_only_candidate_and_builds_arguments_deterministically():
     llm, transport = client({"capability_names": ["endpoint.device.search"]})
     inquiry = ResourceInquiry(
