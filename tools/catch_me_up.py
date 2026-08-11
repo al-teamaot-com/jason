@@ -21,13 +21,13 @@ SECRET_PATTERNS = (
 
 CANONICAL_DOCS = (
     "README.md",
-    "TODO.md",
     "docs/index.md",
     "docs/control/CURRENT.md",
     "docs/control/DOCUMENTATION-REGISTER.md",
     "docs/control/HOW-TO-DOCUMENT-JASON.md",
     "docs/roadmaps/Jason-Capability-Register.md",
     "docs/roadmaps/Jason-Roadmap-Status.json",
+    "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
     "docs/architecture/J-103-System-Registry.md",
     "docs/operations/Jason-Secret-Provider-Deployment-Record.md",
     "docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md",
