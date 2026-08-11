@@ -6,12 +6,13 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 
 ## Start here
 
-1. **Current resume point:** [`control/CURRENT.md`](control/CURRENT.md) once the migration checkpoint is activated.
+1. **Current resume point:** [`control/CURRENT.md`](control/CURRENT.md).
 2. **Where authoritative knowledge lives:** [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md).
 3. **How to write or update Jason documentation:** [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md).
-4. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
-5. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
-6. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
+4. **Known migration conflicts/blockers:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
+5. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
+6. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
+7. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
 ## Documentation authority
 
@@ -67,6 +68,7 @@ Read the durable current-work/handoff records, inspect current Git state, and us
 The migration is controlled by:
 
 - [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md)
+- [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md)
 - [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md)
 
 The objective is not cosmetic reorganization. It is to ensure every material fact has one authoritative owner, all human-facing knowledge is discoverable from one place, and future work can be resumed without reconstructing institutional memory from chats.
