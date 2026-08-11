@@ -25,6 +25,7 @@ where = ["src"]
 pythonpath = [
   "src",
   "../",
+  "../cap-007/src",
   "../connectors/openclaw/src",
 ]
 testpaths = ["tests"]
