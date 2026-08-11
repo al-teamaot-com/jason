@@ -15,7 +15,6 @@ from kernel.capabilities import (
 from kernel.execution_providers import (
     ExecutionProvider,
     ExecutionProviderRegistryService,
-    InMemoryExecutionProviderRegistry,
     ProviderApproval,
     ProviderFeatures,
     ProviderHealth,
