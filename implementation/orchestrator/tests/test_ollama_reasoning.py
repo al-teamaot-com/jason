@@ -247,5 +247,11 @@ def test_evidence_reasoner_returns_locations_not_values():
             "value": "model-asserted-value-must-be-ignored",
         },
     )
-    assert transport.calls[0]["json"]["think"] is False
-    assert transport.calls[0]["json"]["options"]["num_predict"] == 96
+    request = transport.calls[0]["json"]
+    assert request["think"] is False
+    assert request["options"]["num_predict"] == 96
+    prompt = json.loads(request["messages"][1]["content"])
+    assert prompt["evidence"] == {"devices": [{"lastUser": "AOT\\real.user"}]}
+    system_prompt = request["messages"][0]["content"]
+    assert "never prefix a pointer with /evidence" in system_prompt
+    assert "/resource_matches/0/resource_id" in system_prompt
