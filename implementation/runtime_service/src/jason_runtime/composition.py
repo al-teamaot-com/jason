@@ -75,6 +75,7 @@ from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequest
 
 from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
 from .http import RuntimeHttpApplication
+from .microsoft_directory import build_microsoft_directory_runtime
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
 
@@ -92,6 +93,13 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    microsoft_boundary_db: Path | None = None
+    microsoft_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-graph/role_id"
+    )
+    microsoft_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-graph/secret_id"
+    )
     ses_openbao_role_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/role_id")
     ses_openbao_secret_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/secret_id")
     ses_region: str = "us-east-1"
@@ -146,6 +154,24 @@ class RuntimeSettings:
             ollama_url=os.getenv("JASON_OLLAMA_URL", "http://jason-ollama:11434").strip(),
             ollama_model=os.getenv("JASON_OLLAMA_MODEL", "").strip(),
             allowed_machine_identities=allowed,
+            microsoft_boundary_db=Path(
+                os.getenv(
+                    "JASON_MICROSOFT_BOUNDARY_DB",
+                    "/var/lib/jason/authority/client-boundaries.sqlite3",
+                )
+            ),
+            microsoft_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-graph/role_id",
+                )
+            ),
+            microsoft_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-graph/secret_id",
+                )
+            ),
             ses_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_SES_OPENBAO_ROLE_ID_PATH",
@@ -230,10 +256,25 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     context_validator = ExecutionContextValidator(contexts=authority_store)
 
+    http_transport = UrlLibJsonHttpTransport()
+
+    microsoft_boundary_db = (
+        settings.microsoft_boundary_db
+        or settings.authority_db.with_name("client-boundaries.sqlite3")
+    )
+    microsoft_directory = build_microsoft_directory_runtime(
+        boundary_db=microsoft_boundary_db,
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.microsoft_openbao_role_id_path,
+        secret_id_path=settings.microsoft_openbao_secret_id_path,
+        transport=http_transport,
+    )
+
     bindings = SQLiteMicrosoftIdentityBindingStore(settings.bindings_db)
     identity_binder = JasonTeamsIdentityBinder(
         bindings=bindings,
         identities=AuthorityIdentityRecordReader(authority_store),
+        directory=microsoft_directory.directory,
     )
 
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
@@ -245,7 +286,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
-    http_transport = UrlLibJsonHttpTransport()
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
         model=settings.ollama_model,
