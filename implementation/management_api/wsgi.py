@@ -4,11 +4,11 @@ import json
 from collections.abc import Callable, Iterable
 from urllib.parse import parse_qs
 
-from management_api.service import (
-    ManagementApiService,
-    ManagementReadContext,
-    ManagementReadDenied,
+from management_api.auth import (
+    ManagementAuthenticationFailed,
+    ManagementContextResolver,
 )
+from management_api.service import ManagementApiService, ManagementReadDenied
 
 StartResponse = Callable[[str, list[tuple[str, str]]], None]
 
@@ -16,13 +16,19 @@ StartResponse = Callable[[str, list[tuple[str, str]]], None]
 class ManagementWsgiApp:
     """Small dependency-free HTTP boundary for the read-only Management API.
 
-    Identity headers are accepted only as resolved upstream context. Production
-    deployment must place this app behind the approved Jason authentication and
-    identity propagation boundary; Grafana must never invent these values.
+    The application does not trust browser-supplied principal or organization
+    headers. Identity must be resolved by an injected authenticated context
+    resolver before any management service method is called.
     """
 
-    def __init__(self, service: ManagementApiService) -> None:
+    def __init__(
+        self,
+        service: ManagementApiService,
+        *,
+        context_resolver: ManagementContextResolver,
+    ) -> None:
         self._service = service
+        self._context_resolver = context_resolver
 
     def __call__(
         self,
@@ -31,9 +37,13 @@ class ManagementWsgiApp:
     ) -> Iterable[bytes]:
         try:
             if str(environ.get("REQUEST_METHOD", "GET")) != "GET":
-                return self._json(start_response, "405 Method Not Allowed", {"error": "read_only_api"})
+                return self._json(
+                    start_response,
+                    "405 Method Not Allowed",
+                    {"error": "read_only_api"},
+                )
 
-            context = self._context(environ)
+            context = self._context_resolver.resolve(environ)
             path = str(environ.get("PATH_INFO", ""))
             query = parse_qs(str(environ.get("QUERY_STRING", "")))
 
@@ -52,22 +62,25 @@ class ManagementWsgiApp:
                     correlation_id=self._first(query, "correlation_id"),
                 )
             else:
-                return self._json(start_response, "404 Not Found", {"error": "not_found"})
+                return self._json(
+                    start_response,
+                    "404 Not Found",
+                    {"error": "not_found"},
+                )
 
             return self._json(start_response, "200 OK", payload)
-        except (KeyError, ValueError):
-            return self._json(start_response, "401 Unauthorized", {"error": "identity_context_required"})
+        except (ManagementAuthenticationFailed, KeyError, ValueError):
+            return self._json(
+                start_response,
+                "401 Unauthorized",
+                {"error": "authenticated_identity_required"},
+            )
         except ManagementReadDenied:
-            return self._json(start_response, "403 Forbidden", {"error": "management_read_denied"})
-
-    @staticmethod
-    def _context(environ: dict[str, object]) -> ManagementReadContext:
-        principal = str(environ["HTTP_X_JASON_PRINCIPAL_ID"])
-        organization = str(environ["HTTP_X_JASON_ORGANIZATION_ID"])
-        return ManagementReadContext(
-            principal_id=principal,
-            organization_id=organization,
-        )
+            return self._json(
+                start_response,
+                "403 Forbidden",
+                {"error": "management_read_denied"},
+            )
 
     @staticmethod
     def _first(query: dict[str, list[str]], key: str) -> str | None:
@@ -80,7 +93,11 @@ class ManagementWsgiApp:
         status: str,
         payload: object,
     ) -> Iterable[bytes]:
-        body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        body = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
         start_response(
             status,
             [
