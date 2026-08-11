@@ -1,7 +1,8 @@
-# ADR-004 - Microsoft Teams as a Governed Jason Interaction Channel
+# ADR-007 — Microsoft Teams as a Governed Jason Interaction Channel
 
 **Status:** Accepted / proven in production-like testing  
-**Date:** 2026-08-10
+**Date:** 2026-08-10  
+**Identifier correction:** Originally created as `ADR-004` on 2026-08-10. Renumbered to `ADR-007` during documentation-governance consolidation because the earlier accepted Datto RMM Managed-Device Authority record already occupied ADR-004. This correction changes only the document identifier; the architectural decision is unchanged.
 
 ## Decision
 

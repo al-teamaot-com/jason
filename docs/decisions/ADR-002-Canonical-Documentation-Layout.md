@@ -1,8 +1,17 @@
 # ADR-002 — Preserve the Canonical Documentation Hierarchy
 
-**Status:** Accepted  
+**Status:** Superseded by ADR-008  
 **Date:** 2026-07-31  
-**Decision owner:** Jason Architecture Authority
+**Decision owner:** Jason Architecture Authority  
+**Superseded:** 2026-08-11
+
+## Supersession note
+
+This decision correctly rejected duplicate canonical documents and documentation-tool-driven restructuring. It was superseded by ADR-008 after operational experience demonstrated a different architectural problem: human-facing project knowledge had become fragmented across many repository roots, publishing directories, session records, and implementation-local documentation, making safe reconstruction and future-session continuity unnecessarily dependent on knowing historical repository layout.
+
+ADR-008 preserves this ADR's core invariants — one authoritative source, no duplicate editable canonical copies, deterministic publishing, and tool independence — while consolidating governed human-facing documentation under `docs/` as Jason's documentation control plane for institutional-memory and continuity reasons rather than to satisfy MkDocs.
+
+The historical decision is retained below unchanged in substance.
 
 ## Context
 
