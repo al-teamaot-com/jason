@@ -30,6 +30,14 @@ nav:
       - J-101 Capability Registry: architecture/J-101-Capability-Registry.md
       - J-102 Governed Approval Architecture: architecture/J-102-Governed-Approval-Architecture.md
       - J-103 System Registry: architecture/J-103-System-Registry.md
+  - Engineering Architecture:
+      - Engineering Authority Map: engineering/README.md
+      - JIS Engineering Guide: engineering/jis/README.md
+      - Engineering ADR Index: engineering/adr/README.md
+      - Provider Engineering: engineering/providers/README.md
+      - Capability Engineering: engineering/capabilities/CAPABILITY_REGISTRY_SPEC.md
+      - Execution Policy: engineering/execution-policy/EXECUTION_POLICY_ENGINE.md
+      - Governed Resolution: engineering/resolution/GOVERNED_RESOLUTION_ENGINE.md
   - Canonical Models:
       - J-116 State Model: models/J-116-State-Model.md
       - J-117 Object Model: models/J-117-Object-Model.md
@@ -100,6 +108,7 @@ nav:
       - ADR-008 Documentation Control Plane Consolidation: decisions/ADR-008-Documentation-Control-Plane-Consolidation.md
   - Roadmap:
       - Capability Register: roadmaps/Jason-Capability-Register.md
+      - Governed TODO and Future Ideas: roadmaps/Project-Jason-TODO-and-Future-Ideas.md
   - Milestones:
       - M-001 Kernel Foundation: milestones/M-001-Kernel-Foundation.md
       - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
