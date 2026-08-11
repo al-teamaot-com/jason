@@ -14,9 +14,10 @@ Do not use chat history as the final record. Do not copy volatile runtime facts 
 Before writing, consult:
 
 1. `docs/index.md` — documentation entry point.
-2. `docs/control/DOCUMENTATION-REGISTER.md` — source/authority map and migration status.
-3. This guide — how to classify and write the change.
-4. The governing architecture, standard, ADR, runbook, or System Registry record for the subject.
+2. `docs/control/DOCUMENTATION-REGISTER.md` — source/authority map and historical migration record.
+3. `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` — package-adjacent README discovery and authority boundary when implementation-local documentation is relevant.
+4. This guide — how to classify and write the change.
+5. The governing architecture, standard, ADR, runbook, or System Registry record for the subject.
 
 ## 1. Decide whether documentation is required
 
@@ -59,9 +60,9 @@ Ask: **What kind of truth is this?**
 | Current resume point | `docs/control/CURRENT.md` |
 | Documentation map/process | `docs/control/` |
 | Current production topology/lifecycle | System Registry structured sources under `implementation/kernel/system_registry/` |
-| Code-specific setup tightly coupled to a package | README beside the implementation, linked from `docs/` when material |
+| Code-specific setup tightly coupled to a package | README beside the implementation, indexed by `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` |
 
-During migration, the Documentation Register may say that the current canonical file still lives in a numbered legacy directory. If so, update that canonical source instead of creating a second editable copy.
+The Documentation Register retains historical path mappings for reconstruction. Retired numbered roots are history, not current authoring locations; do not recreate them to satisfy an old reference.
 
 ## 3. Search before creating
 
@@ -69,7 +70,7 @@ Before creating a new durable document:
 
 1. Search the Documentation Register.
 2. Search `docs/` for the subject, identifier, capability name, provider name, and related terms.
-3. Search legacy numbered documentation roots while migration is in progress.
+3. Search the Implementation Documentation Index when package-adjacent guidance may already exist.
 4. Check ADRs and architecture records for an existing governing decision.
 5. Check the System Registry when the question is operational topology or lifecycle.
 
@@ -399,7 +400,8 @@ Before completing a material workstream, answer:
 - [ ] Was something materially proven or reconciled? Add/update proof/session record.
 - [ ] Did the safe resume point change? Update `docs/control/CURRENT.md`.
 - [ ] Is there now more than one editable source for the same fact? Reconcile it.
-- [ ] Are new documents indexed from `docs/`?
+- [ ] Are new governed documents indexed from `docs/`?
+- [ ] Is every implementation-local README under `implementation/` or `infrastructure/` represented in `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`?
 - [ ] Are statuses supported by evidence/approval?
 - [ ] Are links valid?
 - [ ] Are secrets absent?
@@ -411,10 +413,11 @@ A future Jason work session should begin documentation context in this order:
 
 1. Read `docs/index.md`.
 2. Read `docs/control/CURRENT.md`.
-3. Read `docs/control/DOCUMENTATION-REGISTER.md` if locating authority or migrating docs.
+3. Read `docs/control/DOCUMENTATION-REGISTER.md` if locating authority or migration history.
 4. Read this guide before adding or reorganizing documentation.
-5. Read the governing architecture/ADR/runbook/component records for the workstream.
-6. Inspect current Git and System Registry/host evidence before making claims about current runtime state.
+5. Read `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` when implementation-local README guidance is relevant.
+6. Read the governing architecture/ADR/runbook/component records for the workstream.
+7. Inspect current Git and System Registry/host evidence before making claims about current runtime state.
 
 If conversation memory conflicts with durable documentation or observed evidence, durable governed sources win.
 
