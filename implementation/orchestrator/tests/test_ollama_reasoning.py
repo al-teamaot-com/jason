@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import pytest
+
 from orchestrator.ollama_reasoning import (
     OllamaResourceCapabilityReasoner,
     OllamaResourceEvidenceReasoner,
@@ -50,6 +52,36 @@ def client(structured):
     return OllamaStructuredJsonClient(transport=transport, model="local-test"), transport
 
 
+def test_structured_client_enforces_explicit_generation_budget():
+    llm, transport = client({"resolved": False})
+
+    assert llm.complete(
+        system="Return a decision.",
+        user="hello",
+        schema={"type": "object"},
+        max_output_tokens=64,
+    ) == {"resolved": False}
+
+    request = transport.calls[0]
+    assert request["json"]["options"] == {
+        "temperature": 0,
+        "num_predict": 64,
+    }
+    assert request["timeout_seconds"] == 45.0
+
+
+def test_structured_client_rejects_unbounded_generation_budget():
+    llm, _ = client({})
+
+    with pytest.raises(ValueError, match="output budget"):
+        llm.complete(
+            system="x",
+            user="y",
+            schema={"type": "object"},
+            max_output_tokens=4096,
+        )
+
+
 def test_resource_inquiry_reasoner_returns_only_provider_neutral_structure():
     llm, transport = client(
         {
@@ -77,12 +109,12 @@ def test_resource_inquiry_reasoner_returns_only_provider_neutral_structure():
     }
     request = transport.calls[0]["json"]
     assert request["stream"] is False
-    assert request["options"]["temperature"] == 0
+    assert request["options"] == {"temperature": 0, "num_predict": 160}
     assert request["format"]["additionalProperties"] is False
 
 
 def test_capability_reasoner_selects_only_candidate_and_builds_arguments_deterministically():
-    llm, _ = client({"capability_names": ["endpoint.device.search"]})
+    llm, transport = client({"capability_names": ["endpoint.device.search"]})
     inquiry = ResourceInquiry(
         resource_type="endpoint",
         resource_selector={"hostname": "AOT-50282"},
@@ -99,6 +131,7 @@ def test_capability_reasoner_selects_only_candidate_and_builds_arguments_determi
         "hostname": "AOT-50282",
         "requested_facts": ["last logged in user"],
     }
+    assert transport.calls[0]["json"]["options"]["num_predict"] == 64
 
 
 def test_capability_reasoner_accepts_real_governed_capability_contract():
@@ -141,7 +174,7 @@ def test_capability_reasoner_rejects_name_outside_candidate_set_even_if_model_re
 
 
 def test_evidence_reasoner_returns_locations_not_values():
-    llm, _ = client(
+    llm, transport = client(
         {
             "locations": [
                 {
@@ -163,3 +196,4 @@ def test_evidence_reasoner_returns_locations_not_values():
             "value": "model-asserted-value-must-be-ignored",
         },
     )
+    assert transport.calls[0]["json"]["options"]["num_predict"] == 96
