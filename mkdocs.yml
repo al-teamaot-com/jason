@@ -41,40 +41,40 @@ nav:
       - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
       - M-003 Release Governance Hardening: milestones/M-003-Release-Governance-Hardening.md
   - Kernel:
-      - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
-      - Identity and Authority Runtime Foundation: 03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
-      - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
-      - Secrets Broker: 03-Components/Kernel/JKD-003-Secrets-Broker.md
-      - Execution Policy Engine: 03-Components/Kernel/JKD-004-Execution-Policy-Engine.md
-      - Execution Provider Registry: 03-Components/Kernel/JKD-005-Execution-Provider-Registry.md
-      - Capability Registry: 03-Components/Kernel/JKD-006-Capability-Registry.md
-      - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
+      - Identity and Authority: components/kernel/JKD-001-Identity-and-Authority-Service.md
+      - Identity and Authority Runtime Foundation: components/kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
+      - Evidence and Memory: components/kernel/JKD-002-Evidence-and-Memory-Service.md
+      - Secrets Broker: components/kernel/JKD-003-Secrets-Broker.md
+      - Execution Policy Engine: components/kernel/JKD-004-Execution-Policy-Engine.md
+      - Execution Provider Registry: components/kernel/JKD-005-Execution-Provider-Registry.md
+      - Capability Registry: components/kernel/JKD-006-Capability-Registry.md
+      - Governed Capability Resolution: components/kernel/JKD-007-Governed-Capability-Resolution-Engine.md
   - Infrastructure:
-      - INF-001 Secret Provider Foundation: 03-Components/Infrastructure/INF-001-Secret-Provider-Foundation.md
-      - INF-001 OpenBao Deployment Verification: 03-Components/Infrastructure/INF-001-OpenBao-Deployment-Verification.md
-      - INF-001 OpenBao Recovery Evidence Fingerprint: 03-Components/Infrastructure/INF-001-OpenBao-Recovery-Evidence-Fingerprint.md
-      - INF-001 Jason Secret Wrapper: 03-Components/Infrastructure/INF-001-Jason-Secret-Wrapper.md
-      - INF-001 Jason Secret Host Installation: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Installation.md
-      - INF-001 Jason Secret Host Deployment: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Deployment.md
-      - INF-001 OpenBao Authenticated Contract Test: 03-Components/Infrastructure/INF-001-OpenBao-Authenticated-Contract-Test.md
-      - INF-001 Production Readiness Closeout: 03-Components/Infrastructure/INF-001-Production-Readiness-Closeout.md
-      - INF-002 OpenBao Bootstrap Credential Retirement: 03-Components/Infrastructure/INF-002-OpenBao-Bootstrap-Credential-Retirement.md
-      - INF-002 Production Readiness Bootstrap Gate: 03-Components/Infrastructure/INF-002-Production-Readiness-Bootstrap-Gate.md
-      - INF-003 Governed OpenBao Raft Restore Test: 03-Components/Infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
-      - INF-010 Microsoft Cloud Platform Foundation: 03-Components/Infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
-      - INF-011 Kaseya Resource Platform Foundation: 03-Components/Infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
-      - INF-012 Cross-Provider Relationship Foundation: 03-Components/Infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
-      - INF-013 Artifact Evidence Storage Foundation: 03-Components/Infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
-      - INF-014 OpenClaw Production Ingress and Governance Gates: 03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md
-      - INF-015 AWS Provider Platform Foundation: 03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md
+      - INF-001 Secret Provider Foundation: components/infrastructure/INF-001-Secret-Provider-Foundation.md
+      - INF-001 OpenBao Deployment Verification: components/infrastructure/INF-001-OpenBao-Deployment-Verification.md
+      - INF-001 OpenBao Recovery Evidence Fingerprint: components/infrastructure/INF-001-OpenBao-Recovery-Evidence-Fingerprint.md
+      - INF-001 Jason Secret Wrapper: components/infrastructure/INF-001-Jason-Secret-Wrapper.md
+      - INF-001 Jason Secret Host Installation: components/infrastructure/INF-001-Jason-Secret-Host-Installation.md
+      - INF-001 Jason Secret Host Deployment: components/infrastructure/INF-001-Jason-Secret-Host-Deployment.md
+      - INF-001 OpenBao Authenticated Contract Test: components/infrastructure/INF-001-OpenBao-Authenticated-Contract-Test.md
+      - INF-001 Production Readiness Closeout: components/infrastructure/INF-001-Production-Readiness-Closeout.md
+      - INF-002 OpenBao Bootstrap Credential Retirement: components/infrastructure/INF-002-OpenBao-Bootstrap-Credential-Retirement.md
+      - INF-002 Production Readiness Bootstrap Gate: components/infrastructure/INF-002-Production-Readiness-Bootstrap-Gate.md
+      - INF-003 Governed OpenBao Raft Restore Test: components/infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
+      - INF-010 Microsoft Cloud Platform Foundation: components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
+      - INF-011 Kaseya Resource Platform Foundation: components/infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
+      - INF-012 Cross-Provider Relationship Foundation: components/infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
+      - INF-013 Artifact Evidence Storage Foundation: components/infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
+      - INF-014 OpenClaw Production Ingress and Governance Gates: components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md
+      - INF-015 AWS Provider Platform Foundation: components/infrastructure/INF-015-AWS-Provider-Platform-Foundation.md
   - Capabilities:
-      - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
-      - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
-      - CAP-001 Autotask Read Adapter: 03-Components/Capabilities/CAP-001-Autotask-Read-Adapter.md
-      - CAP-001 Autotask HTTP Transport: 03-Components/Capabilities/CAP-001-Autotask-HTTP-Transport.md
-      - CAP-001 Autotask Production Transport: 03-Components/Capabilities/CAP-001-Autotask-Production-Transport.md
-      - CAP-001 Autotask Live-Read Validation: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Validation.md
-      - CAP-001 Autotask Live-Read Command: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Command.md
+      - Professional Ticket Investigation: components/capabilities/CAP-001-Professional-Ticket-Investigation.md
+      - CAP-001 Provider Pilot Foundation: components/capabilities/CAP-001-Provider-Pilot-Foundation.md
+      - CAP-001 Autotask Read Adapter: components/capabilities/CAP-001-Autotask-Read-Adapter.md
+      - CAP-001 Autotask HTTP Transport: components/capabilities/CAP-001-Autotask-HTTP-Transport.md
+      - CAP-001 Autotask Production Transport: components/capabilities/CAP-001-Autotask-Production-Transport.md
+      - CAP-001 Autotask Live-Read Validation: components/capabilities/CAP-001-Autotask-Live-Read-Validation.md
+      - CAP-001 Autotask Live-Read Command: components/capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
       - Bootstrap and Secrets Management: 07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
@@ -86,8 +86,8 @@ nav:
       - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
       - INF-010 Microsoft Cloud Deployment Checklist: 07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
       - INF-015 AWS Provider Deployment Checklist: 07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md
-      - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
-      - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
+      - Release and Recovery Pipeline: components/operations/J-900-Release-and-Recovery-Pipeline.md
+      - Release Governance Hardening: components/operations/J-901-Release-Governance-Hardening.md
   - Standards:
       - Adaptive Build Method: standards/J-401-Adaptive-Build-Method.md
       - Definition of Done: standards/J-402-Capability-Definition-of-Done.md
