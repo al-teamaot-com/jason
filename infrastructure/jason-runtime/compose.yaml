@@ -27,6 +27,10 @@ services:
       JASON_OPENBAO_URL: http://openbao:8200
       JASON_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/role_id
       JASON_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/secret_id
+      JASON_SES_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/aws-ses/role_id
+      JASON_SES_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/aws-ses/secret_id
+      JASON_SES_REGION: us-east-1
+      JASON_SES_DEFAULT_SENDER: jason@teamaot.com
       JASON_OLLAMA_URL: http://jason-ollama:11434
       JASON_OLLAMA_MODEL: ${JASON_OLLAMA_MODEL:?JASON_OLLAMA_MODEL must name an installed local model}
     volumes:
@@ -35,6 +39,8 @@ services:
       - /var/lib/jason/openclaw/trusted-keys:/var/lib/jason/openclaw/trusted-keys:ro
       - ${JASON_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/role_id:ro
       - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro
+      - ${JASON_SES_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_SES_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/role_id:ro
+      - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
     networks:
       - openclaw
       - core
