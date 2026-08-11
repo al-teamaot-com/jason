@@ -29,37 +29,22 @@ The conflict is currently contained by `docs/governance/README.md`:
 
 Remaining work requires deliberate constitutional/governance review rather than an offline path-only cleanup.
 
-### MIG-DOC-005 — Operations and historical proof classification
-
-**State:** Open — physical consolidation complete; semantic classification remains.
-
-The former `07-Operations/` tree is now under `docs/operations/`, but it contains a mixture of:
-
-- repeatable runbooks/procedures;
-- deployment records;
-- live pilot proof records;
-- generated current-state documentation;
-- bounded operational evidence summaries.
-
-Target classification:
-
-- repeatable runbooks/procedures -> remain in `docs/operations/`;
-- bounded historical proof/reconciliation evidence -> `docs/sessions/`;
-- generated current operational-state representation -> remain clearly marked generated/derived from System Registry structured truth;
-- durable architecture/decision content -> reference or update the governing architecture/ADR rather than treating an operations record as higher authority.
-
-This cleanup should preserve historical references and evidence identity; it must not rewrite a proof record into a current runbook.
-
 ### MIG-DOC-007 — Inbound-reference and plain-text path audit
 
-**State:** Open until final consolidated-tree CI/path audit is green.
+**State:** Open — strict MkDocs/CI is green and known current-use path drift is repaired; final consolidated-tree plain-text audit remains.
 
 All historical numbered human-documentation roots and the former top-level engineering `architecture/` tree have now been physically retired. Strict MkDocs validation catches Markdown link breakage, but plain-text references to old paths may remain intentionally or accidentally.
 
-Required work:
+Completed during the current audit:
 
-- use CI/MkDocs to repair broken Markdown links;
-- audit current operational/runbook/tooling references to retired paths;
+- strict MkDocs navigation was repaired and `Validate Jason` returned green;
+- current operator references in the reusable IT Glue/Datto convergence runbook now point to `docs/operations/` and `docs/sessions/`;
+- the migrated CAP-007 live-pilot proof now points to the current Teams proof under `docs/sessions/`;
+- the session-record index now points to `docs/control/CURRENT.md` rather than implying a local session `CURRENT.md`.
+
+Remaining work:
+
+- continue auditing current operational/runbook/tooling references to retired paths;
 - preserve old path text when it intentionally describes historical repository state;
 - update old path text when it is intended to direct a current operator;
 - do not recreate retired roots merely to satisfy stale references.
@@ -97,6 +82,20 @@ The active capability register is now `docs/roadmaps/Jason-Capability-Register.m
 Machine-readable roadmap status is now `docs/roadmaps/Jason-Roadmap-Status.json`.
 
 The older narrative `07-Roadmap/Jason-Roadmap.md` was preserved as `docs/archive/roadmaps/Jason-Roadmap-Historical.md` with explicit Historical/Superseded classification.
+
+### MIG-DOC-005 — Operations and historical proof classification
+
+**State:** Resolved/controlled — semantic classification completed.
+
+Resolution:
+
+- `docs/operations/README.md` now defines the authority and classification boundary for operational documentation;
+- repeatable runbooks, checklists, deployment/recovery procedures, deployment records, and the generated System Registry human view remain under `docs/operations/` with explicit authority boundaries;
+- `OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md` remains in operations because its primary content is a reusable observe-only proof/runbook with prerequisites, bounded discovery, positive and negative cases, evidence handling, and success criteria despite its historical filename;
+- `CAP-007-Live-Pilot-Proof-2026-08-11.md` moved to `docs/sessions/` because its primary purpose is preserving point-in-time pilot and Teams integration evidence;
+- the CAP-007 move preserved the proof's date, evidence identifiers, hashes, conclusions, and governance limitation while correcting only the current repository path to its related Teams proof;
+- future point-in-time host proofs, pilot evidence, and reconciliation records belong in `docs/sessions/`; reusable procedures remain in `docs/operations/`;
+- no documentation-classification change alters the authority or factual meaning of historical evidence.
 
 ### MIG-DOC-006 — Legacy CURRENT checkpoint
 
