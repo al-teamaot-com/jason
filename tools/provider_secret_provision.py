@@ -465,3 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "[WARN] Temporary administrative token could not be revoked explicitly.",
                     file=os.sys.stderr,
                 )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
