@@ -15,6 +15,11 @@ from kernel.client_boundaries.repositories import (
 from kernel.client_boundaries.service import (
     ClientBoundaryService,
 )
+from kernel.client_boundaries.sqlite import (
+    SQLiteClientBoundaryRepository,
+    SQLiteClientBoundaryStore,
+    SQLiteOnboardingTransactionRepository,
+)
 from kernel.client_boundaries.state import (
     OnboardingStateError,
     OnboardingStateService,
@@ -32,6 +37,9 @@ __all__ = [
     "OnboardingStateService",
     "OnboardingTransaction",
     "RecordNotFoundError",
+    "SQLiteClientBoundaryRepository",
+    "SQLiteClientBoundaryStore",
+    "SQLiteOnboardingTransactionRepository",
     "SignedOnboardingState",
     "TransactionStatus",
 ]

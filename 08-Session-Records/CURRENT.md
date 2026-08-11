@@ -1,208 +1,284 @@
 # Project Jason — Current Session Checkpoint
 
-**Updated:** 2026-08-10  
+**Updated:** 2026-08-11  
 **Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py` and the applicable host-proof records.
 
 ## Resume Here
 
-Project Jason has completed the 2026-08-10 physical-host validation of the canonical OpenBao provider AppRole runtime, governed IT Glue and Datto RMM live reads, bounded provider discovery, and the Datto managed-device authority model. PR #136 was governance-reviewed and merged to `main` as `ac5344a`.
+Project Jason has now completed the first live end-to-end conversational consequential action through the governed architecture:
 
-The repository-wide connector regression baseline discovered during that host validation was repaired through PR #138 and merged to `main` as `35de7c1`. The full connector suite now collects and passes on the physical Jason host.
+```text
+Authenticated Microsoft Teams user
+-> OpenClaw transport / signed Jason bridge
+-> Jason trusted ingress
+-> Microsoft tenant/object identity binding
+-> validated Microsoft client boundary
+-> JKD-003/OpenBao Microsoft certificate credential
+-> MSAL application token
+-> Microsoft Graph exact-user lookup
+-> governed conversation action intent
+-> JKD-001 authority and pilot per-request approval evidence
+-> Central Orchestrator
+-> CAP-007 communication.email.send
+-> JKD-003/OpenBao AWS SES credential
+-> AWS SES
+-> deterministic Teams success response
+```
 
-The active branch is `feature/microsoft-teams-certificate-authorization`. The current workstream is the first live Teams approval round-trip. During pre-deployment inspection, Jason correctly stopped before provisioning Microsoft credentials because the existing Graph channel-post path relied on an application credential model that is not appropriate for normal Teams channel posting. Issue #139 records the correction.
+The live Teams command was:
 
-The preferred architecture is now to reuse the already-installed OpenClaw Microsoft Teams channel strictly as transport/ingress while Jason retains all identity, approval, policy, authority, orchestration, replay, recovery, and audit decisions.
+```text
+send me an email
+```
+
+Jason resolved the logged-in user to `al@teamaot.com`, completed the governed CAP-007 send, and the operator supplied mailbox evidence showing receipt with subject `Test email from Jason`.
+
+Mailbox evidence digest:
+
+```text
+SHA-256: be2b2239dd5449f0ee085fb007bf3fb921f885e46a9b51b7a416b7ad9cef9c53
+Size: 113664 bytes
+```
+
+The binary `.msg` evidence is not stored in Git. The digest is retained for integrity comparison.
+
+## Active Branch
+
+```text
+feature/jason-runtime-service
+```
+
+The branch contains the runtime/service, governed Teams conversational action path, Microsoft Graph identity enrichment, CAP-007 runtime integration, provider-specific OpenBao secret lifecycle changes, deployment composition, and constitutional proof documentation.
+
+`main` remains the authoritative branch until this feature branch completes validation, governance review, and merge.
 
 ## What Is Proven On The Jason Host
 
-### OpenClaw / authority foundation
+### Central orchestration and authority
 
-- OpenClaw runs in Docker and remains ingress/transport only; the Central Orchestrator is the sole execution coordinator.
-- OpenClaw machine trust uses Ed25519 application-layer signatures with private keys retained only inside the OpenClaw secret boundary.
-- JKD-001 provides scoped identity/authority, approvals, short-lived contexts, revocation, durable delegation, and authority audit.
-- Direct machine-service and delegated-human paths completed through governance/orchestration and fail closed after revocation/replay.
-- Production OpenClaw operations timers and sanitized operational health are deployed.
+- Central Orchestrator is the sole execution coordinator.
+- OpenClaw transports conversation evidence but does not decide Jason execution authority.
+- JKD-001 provides scoped identity/authority, approvals, short-lived contexts, revocation, and durable authority evidence.
+- Conversation reasoning may propose intent but may not invoke providers, invent credentials, or claim provider success.
+- Deterministic response rendering reports consequential success only after orchestrator completion.
+- Agents do not invoke or communicate with other agents directly.
 
-### OpenBao / provider secret runtime
+### OpenClaw / Teams boundary
 
-- OpenBao runs in Docker and is exposed only on host loopback `127.0.0.1:8200` for the pilot.
-- OpenBao version observed during the 2026-08-10 preflight: 2.6.1.
-- OpenBao was initialized, unsealed, and active/non-standby.
-- Production provider secrets use provider-specific OpenBao AppRoles through JKD-003.
-- Provider runtime AppRole tokens are short-lived, may read only the provider-specific secret plus self-revoke, and are not persisted.
+- OpenClaw runs in Docker and remains ingress/transport only.
+- Jason ingress uses application-layer Ed25519 machine trust and replay/security controls.
+- The active `jason-bridge` extension was hash-compared against the repository implementation before the live send.
+- A stale active bridge was detected, backed up, replaced from the repository, and the gateway restarted.
+- Post-restart active bridge SHA-256 matched the repository:
+
+```text
+a9438c939d76a79c5f0113d654e1c5a47ae1e845ac1f0113ad7a2a56eb39f211
+```
+
+- OpenClaw gateway was healthy before the live test.
+
+### OpenBao / JKD-003 provider secret runtime
+
+- OpenBao runs in Docker for the single-host pilot.
+- Provider secrets use dedicated AppRoles through JKD-003.
+- Runtime AppRole service tokens are short-lived, restricted to the provider-specific KV read plus self-revoke, and are not persisted.
 - Shared persistent provider runtime tokens are prohibited.
-- `/usr/local/bin/jason-secret` remains a historical commissioning/general wrapper and is **not** the canonical production-provider readiness path.
-- `jason-secret --health` / `--contract-test` may return `DENIED: OpenBao token file is not configured` while provider-specific AppRole runtime is healthy. Operators must not create a persistent provider token merely to satisfy that historical wrapper path.
-- Host-side Python validation uses `~/projects/jason/.venv` built from `implementation[dev]`; system Python cannot be assumed to contain pytest.
-- Direct `OpenBaoSecretResolver.resolve()` validation requires the logical secret plus a governed `ConnectorContext` with a non-empty correlation ID.
+- The historical `/usr/local/bin/jason-secret` wrapper is not the canonical production-provider readiness path.
+- Evidence must never contain RoleIDs, SecretIDs, OpenBao tokens, provider credentials, private keys, or bearer tokens.
 
-### IT Glue
+Current governed logical secrets include:
 
-- `it_glue.readonly` resolves through the canonical provider-specific AppRole lifecycle.
-- Required durable field: `api_key`.
-- Live AppRole resolution succeeded with secret values suppressed and temporary token self-revocation.
-- A bounded governed IT Glue live read succeeded with maximum one returned record.
-- Connector audit emitted `connector.requested` and `connector.completed`.
-- Raw provider payloads and credentials were not printed or persisted.
-- `tools/it_glue_configuration_discovery.py` provides a bounded, sanitized operator path for selecting a controlled configuration without source introspection or raw provider dumps.
+```text
+autotask.readonly
+it_glue.readonly
+datto_rmm.readonly
+microsoft_graph.directory_read
+aws_ses.sendmail
+```
 
-### Datto RMM
+### Microsoft Graph identity enrichment
 
-- `datto_rmm.readonly` resolves through the canonical provider-specific AppRole lifecycle.
-- Durable fields: `api_url`, `api_key`, `api_secret`.
-- Datto OAuth bearer tokens are acquired at runtime and are not persisted.
-- A bounded governed `datto_rmm.device.search` live read succeeded with maximum one returned device.
-- Connector audit emitted `connector.requested` and `connector.completed`.
-- Raw provider payloads, API credentials, and OAuth tokens were not printed or persisted.
-- `tools/datto_rmm_device_discovery.py` provides bounded sanitized operator discovery.
+The approved pilot Microsoft identity metadata is:
 
-## ADR-004 — Managed Device Authority
+```text
+Tenant ID: f7054323-d52b-4863-8c2f-1898f0b6077c
+Application ID: c94301b7-7194-46ab-aab7-94f9366f51a9
+Service principal ID: f784d32d-1d6f-4080-97d4-5efa194a14ed
+Authenticated user object ID: bee80bdc-ffb0-4c50-b453-c09d4d411f5f
+Resolved mailbox: al@teamaot.com
+```
 
-ADR-004 is accepted and implemented.
+The exact-user lookup uses application permission:
 
-For the **RMM-managed device domain**:
+```text
+User.Read.All
+```
 
-- Datto RMM is the authoritative external provider for managed-device existence, stable Datto external UID, and governed operational identity/state.
-- IT Glue is a documentation observation and cannot independently establish or override managed-device operational identity.
-- Jason remains authoritative for provider-independent canonical Asset/Device identity, tenant/organization binding, cross-provider mappings, verification state, promotion decisions, policy, approvals, and execution authority.
+The runtime profile is currently named `directory-read`; the name does not imply use of broader `Directory.Read.All`.
 
-Provider authority is separate from relationship direction. J-118 canonical semantics remain:
+The durable client boundary is:
 
-`IT Glue configuration -> represents -> Datto managed-device observation`
+```text
+Internal client ID: client-aot-internal
+Provider: microsoft_graph
+Primary domain: teamaot.com
+Profile: directory-read
+Status: validated
+```
 
-No new inverse canonical relationship `represented_by` was admitted.
+The runtime obtains the Microsoft certificate credential only through OpenBao. The historical Teams certificate files are not a runtime fallback.
 
-## 2026-08-10 Live Managed-Device Authority Proof
+A live no-send test inside the running `jason-runtime` container proved:
 
-The live proof passed:
+```text
+validated boundary -> OpenBao -> MSAL -> Graph -> al@teamaot.com
+```
 
-- exactly one bounded Datto device observation was accepted;
-- source authority was `datto_rmm:managed-device-authority`;
-- the stable external Datto device identifier was present;
-- approved operational identity metadata was present;
-- both Datto and IT Glue connector audit boundaries fired;
-- no canonical Jason object was created;
-- no canonical relationship was promoted;
-- no provider mutation occurred;
-- no raw provider payload or secret material was printed or persisted.
+No access token was printed or persisted, and no email was sent during this identity proof.
 
-The selected IT Glue documentation relationship remained `unresolved` because the requested serial-number attribute was absent or inconsistent across the governed observations. This is expected fail-closed behavior: Datto managed-device authority remains valid while documentation reconciliation remains unresolved.
+### CAP-007 governed email
 
-Host proof: `08-Session-Records/IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md`.
+Canonical capability:
 
-## Regression Baseline — Resolved
+```text
+communication.email.send
+```
 
-Issue #137 was opened when the broad connector suite exposed stale test/package assumptions unrelated to PR #136. The fixes were isolated to the regression baseline, validated on the physical Jason host, and merged through PR #138 as `35de7c1`.
+Current provider:
 
-Host result after the fix:
+```text
+aws-ses
+```
 
-- full connector test collection succeeded;
-- the complete `implementation/connectors/tests` suite passed 100%;
-- the working tree remained clean.
+Current approved sender:
 
-This cleared the test-baseline blocker for the Teams approval workstream.
+```text
+jason@teamaot.com
+```
 
-## ADR-005 — OpenClaw Teams Transport Boundary
+CAP-007 characteristics for the pilot:
 
-ADR-005 records the Teams transport convergence decision.
+- explicit authority required;
+- per-request approval evidence required;
+- idempotency key required;
+- non-idempotent consequential action;
+- exactly one provider attempt;
+- no blind automatic retry;
+- no SMTP/Graph/local-sendmail fallback;
+- provider credential only through `aws_ses.sendmail` / JKD-003/OpenBao;
+- durable safe audit excludes recipient, clear subject, body, and credential-bearing fields.
 
-### Decision
+The earlier manual CAP-007 pilot succeeded and is preserved in:
 
-- OpenClaw is the supported Microsoft Teams transport/ingress provider for Jason approval interactions.
-- Jason does not import OpenClaw TypeScript internals by filesystem path.
-- Jason integrates through a supported OpenClaw external capability boundary.
-- OpenClaw does not decide whether a Teams response is a valid Jason approval.
-- Microsoft authentication is identity evidence, not execution authority.
-- Jason binds Microsoft tenant/object identity to the governed Jason organization/identity before producing a provider-neutral approval response.
-- Approval policy, immutable approval records, fresh authority contexts, replay protection, recovery authorization, and continuation remain Jason responsibilities.
-- Central Orchestrator alone resumes or retries execution.
+`07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md`.
 
-This was reviewed against the Jason Constitution/Canon and found consistent with human governance, evidence-before-assertion, separation of responsibilities, vendor independence, and institutional-memory requirements.
+The later Teams conversational end-to-end proof is preserved in:
 
-### OpenClaw capability evidence observed on host
+`08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`.
 
-The installed OpenClaw Teams channel provides:
+### Pilot approval limitation
 
-- proactive message delivery using stored conversation references;
-- direct Adaptive Card delivery through `sendAdaptiveCardMSTeams`;
-- organization/team/channel scoping through OpenClaw configuration;
-- allowlist checks for card-action invokes;
-- authenticated `adaptiveCard/action` handling after Bot Framework JWT validation;
-- a supported Gateway `send` boundary with idempotency/deduplication and delivery receipt identifiers;
-- a deliberately restricted admin HTTP RPC allowlist that does not expose normal message/session sends.
+The current pilot policy may materialize an authenticated Teams imperative as explicit per-request JKD-001 approval evidence for that same authenticated principal. This is formal self-approval evidence for the approved pilot, not an independent approver class and not a generalized authorization model for higher-risk actions.
 
-Jason therefore uses the supported Gateway send path rather than weakening the admin RPC allowlist or duplicating a Teams bot stack.
+Any broader use of self-approval, especially for higher-risk capabilities, requires governance review.
 
-## Teams Transport Adapter — Host Validation
+## Runtime Deployment State
 
-Branch: `feature/microsoft-teams-certificate-authorization`.
+`jason-runtime` is deployed as a hardened container with:
 
-The branch now contains:
+- non-root UID/GID `1000:1000`;
+- read-only root filesystem;
+- dropped Linux capabilities;
+- `no-new-privileges`;
+- bounded tmpfs;
+- durable authority, identity-binding, replay, security-audit, orchestration-event, and Microsoft client-boundary stores;
+- provider-specific read-only AppRole mounts;
+- local Ollama model `qwen3:1.7b` for bounded conversational reasoning.
 
-- `05-ADR/ADR-005-OpenClaw-Teams-Transport-Boundary.md`;
-- updated `07-Operations/Teams-Approval-Deployment-and-Recovery.md`;
-- `08-Session-Records/Teams-Approval-Transport-Decision-2026-08-10.md`;
-- `implementation/connectors/microsoft_graph/openclaw_teams_approval_transport.py`;
-- `implementation/connectors/microsoft_graph/openclaw_teams_approval_runtime.py`;
-- `implementation/connectors/tests/test_openclaw_teams_approval_transport.py`.
+The Microsoft Graph AppRole host directory is root-owned and mode `0750`; its AppRole files are root-owned, runtime-group-readable only, and mode `0640`.
 
-Physical-host validation at branch revision `1adbf26` passed:
+This permission change was necessary because the first live container lookup correctly failed closed when the runtime UID could not read root-only mode-`0600` AppRole files. No fallback credential source was used.
 
-- 15 focused OpenClaw Teams transport / approval delivery / approval ingress tests passed;
-- the full connector regression suite passed 100%;
-- all required ADR/runbook/session records were present;
-- the working tree remained clean.
+## Test Evidence
 
-The branch is ahead of `main` only by the Teams transport convergence changes and documentation.
+During the Microsoft/Teams/CAP-007 workstream:
 
-## Documentation Reconciled On 2026-08-10
+```text
+61 focused governed bridge tests passed
+66 expanded Microsoft identity/runtime/deployment tests passed
+```
 
-The morning physical-host session and subsequent Teams workstream exposed several operational/documentation gaps. They are now explicitly recorded rather than left as tribal knowledge:
+The live runtime self-resolution then passed before any Teams send was attempted.
 
-1. historical `jason-secret` token-file health behavior versus canonical provider AppRole runtime;
-2. project-local `.venv` bootstrap and pytest requirement;
-3. required `ConnectorContext` for direct OpenBao resolver validation;
-4. verified implementation/tool names rather than guessed class names;
-5. supported bounded/sanitized provider object discovery;
-6. Datto RMM managed-device authority and IT Glue documentation role;
-7. J-118 canonical `represents` relationship direction;
-8. acceptable unresolved documentation relationship behavior;
-9. repository-wide connector regression-baseline defects and their resolution through PR #138;
-10. Teams live credential/configuration state was absent when inspected, so no secret was provisioned prematurely;
-11. the original Graph app-only channel-post design was stopped before live provisioning because its permission model was inappropriate for normal approval delivery;
-12. OpenClaw Teams was verified as the preferred reusable transport/ingress boundary;
-13. the OpenClaw transport design was checked against the Constitution/Canon before implementation;
-14. the supported Gateway `send` boundary is preferred over OpenClaw implementation-file imports or broadening admin HTTP RPC;
-15. host validation of the thin Teams transport adapter and full connector regression suite passed.
+Final release-wide validation and CI review are still required before merging the feature branch to `main`.
+
+## Previous Proven Foundations
+
+The following previously accepted work remains in force:
+
+- canonical OpenBao provider AppRole runtime;
+- governed IT Glue and Datto RMM bounded reads;
+- ADR-004 Datto RMM managed-device authority model;
+- IT Glue documentation-observation role;
+- provider-neutral canonical identity and cross-provider mapping authority retained by Jason;
+- repository-wide connector regression baseline repaired and merged;
+- ADR-005 OpenClaw Teams transport boundary accepted;
+- OpenClaw is transport/ingress, not policy/authority/orchestration.
+
+## Constitutional Reconciliation — 2026-08-11
+
+The Teams-to-CAP-007 implementation was reviewed against `J-002 — The Jason Constitution`.
+
+Key conclusions:
+
+- **Human Governance:** action originates from an authenticated human; Microsoft authentication is identity evidence, not execution authority.
+- **Architecture Before Implementation:** Teams, Graph, OpenBao, and SES are implementations behind defined boundaries.
+- **Independence and Capability Abstraction:** conversation requests `communication.email.send`; it does not define the capability as SES.
+- **Integration Before Innovation:** existing OpenClaw Teams, Microsoft application infrastructure, OpenBao, Central Orchestrator, and CAP-007 were reused; no bespoke Teams-to-SES script was introduced.
+- **Separation of Responsibilities:** transport, identity enrichment, authority, orchestration, secret resolution, provider execution, and response rendering remain distinct.
+- **Explainability/Auditability:** named stages, durable state, safe event evidence, and mailbox digest permit independent review.
+- **Institutional Memory/Living Documentation:** runbooks, deployment records, proof records, and this checkpoint were updated as part of the implementation work.
+- **Trust:** multiple fail-closed conditions were observed and corrected without weakening the architecture.
+
+## Current Documentation Set For This Capability
+
+- `01-Foundation/J-002-Constitution.md`
+- `07-Operations/CAP-007-AWS-SES-Activation-Runbook.md`
+- `07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md`
+- `07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md`
+- `07-Operations/Jason-Secret-Provider-Deployment-Record.md`
+- `08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
+- `08-Session-Records/CURRENT.md`
 
 ## Current Primary Workstream
 
-### Complete Teams transport governance and perform first live approval round-trip
+### Release validation and merge of the governed runtime service workstream
 
 Immediate next steps:
 
-1. validate the exact installed OpenClaw Gateway `send` request mapping used by the Jason adapter;
-2. run release validation for the feature branch;
-3. open PR for issue #139, perform governance review, and merge only after green validation;
-4. deploy only the non-secret target/identity bindings and whatever existing OpenClaw Teams configuration is required by the approved runbook;
-5. perform one harmless/no-side-effect approval request through the live Teams delivery path;
-6. submit one authenticated Teams approval/deny action;
-7. verify Jason tenant/identity binding, approval authorization, immutable audit, fresh JKD-001 authority context, replay protection, and Central Orchestrator continuation;
-8. preserve sanitized evidence and update this checkpoint after the live round-trip.
+1. synchronize the physical host to the latest feature-branch documentation commits;
+2. run the broad repository validation/CI-representative test set;
+3. inspect Git diff/branch divergence and ensure the worktree is clean;
+4. open or update the feature PR to `main` with explicit constitutional review and evidence references;
+5. review CI results and governance-sensitive diffs;
+6. merge only after green validation;
+7. update this checkpoint with authoritative `main` commit/PR metadata after merge.
 
-A successful Teams button click alone is not proof. The full authority and evidence chain must be observed.
+Do not perform another live consequential send merely to prove the same path. Additional live sends require a new operational purpose and fresh governed execution.
 
 ## Provider Authority Rule
 
 Authority is assigned by **resource domain and attribute**, not by one globally authoritative provider.
 
-The accepted device rule is the first formal example. Future assignments for users, tickets, agreements, cloud identity, security state, knowledge, and other resources require explicit policy/architecture decisions rather than assumption.
+For Microsoft identity enrichment, Microsoft Graph is authoritative only for the approved external directory attributes returned from the authenticated tenant/object lookup. Jason remains authoritative for internal identity binding, client boundary, policy, approval, capability resolution, and execution authority.
+
+For RMM-managed devices, Datto RMM remains the authoritative external provider for managed-device existence and operational identity while IT Glue remains a documentation observation.
 
 ## Interaction Rules For Future Sessions
 
 - Continue Jason in larger workstreams/batches; do not default to one-command-at-a-time guidance unless a host-sensitive step requires it.
-- Treat this checkpoint, current GitHub state, applicable ADRs/runbooks, and a fresh CatchMeUp host snapshot together as authoritative resume context.
+- Treat this checkpoint, current GitHub state, applicable ADRs/runbooks, and a fresh host snapshot together as authoritative resume context.
 - Reconcile conflicts between checkpoint/GitHub/host state before destructive or security-sensitive changes.
 - Agents never invoke or communicate with other agents directly; all coordination goes through the Central Orchestrator.
 - Preserve identity-first authorization, policy-as-data, versioned workflows/prompts/policies, provider-neutral capability boundaries, centralized evidence by reference, event-based auditability, and integrate-before-innovate.
-- Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, RoleIDs, SecretIDs, OAuth bearer tokens, private signing keys, or secret values in chat, repository content, logs, or evidence.
+- Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, RoleIDs, SecretIDs, OAuth bearer tokens, Microsoft access tokens, private signing keys, private certificate keys, or secret values in chat, repository content, logs, or evidence.

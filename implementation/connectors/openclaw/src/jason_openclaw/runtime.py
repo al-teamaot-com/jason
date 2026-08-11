@@ -29,7 +29,7 @@ class JasonAuthorityEvaluator:
 
     def evaluate(self, request: CapabilityRequest) -> str:
         try:
-            requested_mode = PermissionMode(request.requested_mode)
+            requested_mode = PermissionMode(request.permission_mode)
         except ValueError:
             return "denied"
         decision = self.service.evaluate(
@@ -71,7 +71,7 @@ class GateChainPolicyEvaluator:
                 organization_id=request.principal.organization_id,
                 client_id=request.principal.client_id,
                 capability=request.capability,
-                requested_mode=request.requested_mode,
+                requested_mode=request.permission_mode,
                 arguments=dict(request.arguments),
             )
         )
@@ -111,7 +111,8 @@ class OpenClawOrchestratorDispatcher:
                 client_id=request.principal.client_id,
                 capability_name=request.capability,
                 capability_version=version,
-                requested_mode=request.requested_mode,
+                requested_mode=request.execution_mode,
+                permission_mode=request.permission_mode,
                 orchestration_mode=OrchestrationMode.EXECUTE,
                 authority_allowed=True,
                 approval_present=False,

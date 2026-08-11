@@ -29,6 +29,13 @@ from .reconstruction import (
     OrchestrationEventReader,
     ReconstructedExecution,
 )
+from .resource_inquiry import (
+    GovernedResourceInquiryPlanner,
+    ResourceCapabilityReasoner,
+    ResourceInquiry,
+    ResourceInquiryPlan,
+    ResourcePlanStep,
+)
 from .service import (
     CapabilityInvoker,
     CentralOrchestrator,
@@ -50,6 +57,7 @@ __all__ = [
     "ExecutionReconstructor",
     "ExecutionStage",
     "ExecutionTimelineEntry",
+    "GovernedResourceInquiryPlanner",
     "InterruptedExecutionAssessor",
     "InvocationResult",
     "OrchestrationAuditSink",
@@ -61,5 +69,9 @@ __all__ = [
     "OrchestrationResult",
     "OrchestrationStatus",
     "ReconstructedExecution",
+    "ResourceCapabilityReasoner",
+    "ResourceInquiry",
+    "ResourceInquiryPlan",
+    "ResourcePlanStep",
     "SQLiteOrchestrationEventStore",
 ]

@@ -68,9 +68,11 @@ class OrchestrationRequest:
     policy_ids: tuple[str, ...] = ()
     artifact_references: tuple[ArtifactReference, ...] = ()
     requester_kind: str = "human"
+    permission_mode: str = "observe"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
     authority_context_id: str | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -82,6 +84,7 @@ class OrchestrationRequest:
             "requested_mode": self.requested_mode,
             "risk": self.risk,
             "requester_kind": self.requester_kind,
+            "permission_mode": self.permission_mode,
         }
         missing = sorted(name for name, value in required.items() if not value.strip())
         if missing:
@@ -90,8 +93,18 @@ class OrchestrationRequest:
             raise ValueError("capability_version must be non-empty when provided.")
         if self.authority_context_id is not None and not self.authority_context_id.strip():
             raise ValueError("authority_context_id must be non-empty when provided.")
+        if self.idempotency_key is not None and not self.idempotency_key.strip():
+            raise ValueError("idempotency_key must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
+        if self.permission_mode not in {
+            "observe",
+            "recommend",
+            "request_approval",
+            "execute",
+            "administer",
+        }:
+            raise ValueError("permission_mode is not a recognized authority mode.")
         forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:

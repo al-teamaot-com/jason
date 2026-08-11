@@ -9,6 +9,24 @@ from .service import EmailCapabilityError, EmailMessage, ProviderSendResult, SES
 class SesTransportError(EmailCapabilityError):
     error_code = "EMAIL_SES_SEND_FAILED"
 
+    def __init__(self, message: str, *, error_code: str | None = None) -> None:
+        super().__init__(message)
+        if error_code is not None:
+            self.error_code = error_code
+
+
+_SAFE_AWS_ERROR_CODES: Mapping[str, str] = {
+    "AccessDenied": "EMAIL_SES_ACCESS_DENIED",
+    "AccessDeniedException": "EMAIL_SES_ACCESS_DENIED",
+    "AccountSuspendedException": "EMAIL_SES_ACCOUNT_SUSPENDED",
+    "BadRequestException": "EMAIL_SES_BAD_REQUEST",
+    "MailFromDomainNotVerifiedException": "EMAIL_SES_MAIL_FROM_DOMAIN_NOT_VERIFIED",
+    "MessageRejected": "EMAIL_SES_MESSAGE_REJECTED",
+    "NotFoundException": "EMAIL_SES_NOT_FOUND",
+    "SendingPausedException": "EMAIL_SES_SENDING_PAUSED",
+    "TooManyRequestsException": "EMAIL_SES_THROTTLED",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class AwsSesConfig:
@@ -45,7 +63,24 @@ class AwsSesTransport:
         except SesTransportError:
             raise
         except Exception as exc:
-            raise SesTransportError("AWS SES send failed.") from exc
+            raise SesTransportError(
+                "AWS SES send failed.",
+                error_code=self._safe_error_code(exc),
+            ) from exc
+
+    @staticmethod
+    def _safe_error_code(exc: Exception) -> str:
+        """Return a bounded provider error code without retaining provider messages."""
+        response = getattr(exc, "response", None)
+        if not isinstance(response, Mapping):
+            return "EMAIL_SES_SEND_FAILED"
+        error = response.get("Error")
+        if not isinstance(error, Mapping):
+            return "EMAIL_SES_SEND_FAILED"
+        provider_code = error.get("Code")
+        if not isinstance(provider_code, str):
+            return "EMAIL_SES_SEND_FAILED"
+        return _SAFE_AWS_ERROR_CODES.get(provider_code, "EMAIL_SES_SEND_FAILED")
 
     @staticmethod
     def _request(message: EmailMessage) -> dict[str, Any]:
