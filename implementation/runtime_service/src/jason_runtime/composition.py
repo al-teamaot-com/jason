@@ -35,12 +35,18 @@ from kernel.identity_authority import (
 from kernel.resolution import GovernedCapabilityResolutionEngine
 from orchestrator.authority import JKD001OrchestrationContextEnforcer
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.conversation_action_intent import (
+    ChainedConversationIntentResolver,
+    GovernedActionConversationIntentResolver,
+)
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
     ReasonedResourceInquiryInterpreter,
 )
+from orchestrator.conversation_response import GovernedTeamsConversationResponseRenderer
 from orchestrator.event_store import SQLiteOrchestrationEventStore
 from orchestrator.invokers import CapabilityInvokerRegistry
+from orchestrator.ollama_action_reasoning import OllamaActionIntentReasoner
 from orchestrator.ollama_reasoning import (
     OllamaResourceCapabilityReasoner,
     OllamaResourceEvidenceReasoner,
@@ -214,10 +220,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
+    approval_repository = SQLiteApprovalRepository(authority_store)
     identity_authority = IdentityAuthorityService(
         identities=SQLiteIdentityRepository(authority_store),
         grants=SQLiteAuthorityGrantRepository(authority_store),
-        approvals=SQLiteApprovalRepository(authority_store),
+        approvals=approval_repository,
         contexts=authority_store,
         audit=authority_store,
     )
@@ -244,7 +251,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         model=settings.ollama_model,
         base_url=settings.ollama_url,
     )
-    intent_resolver = GovernedResourceConversationIntentResolver(
+    action_intent_resolver = GovernedActionConversationIntentResolver(
+        registry=capabilities,
+        reasoner=OllamaActionIntentReasoner(ollama_client),
+    )
+    resource_intent_resolver = GovernedResourceConversationIntentResolver(
         interpreter=ReasonedResourceInquiryInterpreter(
             reasoner=OllamaResourceInquiryReasoner(ollama_client)
         ),
@@ -252,6 +263,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             registry=capabilities,
             reasoner=OllamaResourceCapabilityReasoner(ollama_client),
         ),
+    )
+    intent_resolver = ChainedConversationIntentResolver(
+        resolvers=(action_intent_resolver, resource_intent_resolver)
     )
 
     orchestration_events = SQLiteOrchestrationEventStore(settings.orchestration_events_db)
@@ -309,16 +323,23 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         require_authority_context=True,
     )
 
-    response_renderer = GovernedTeamsResourceResponseRenderer(
+    resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
             reasoner=OllamaResourceEvidenceReasoner(ollama_client)
         )
+    )
+    response_renderer = GovernedTeamsConversationResponseRenderer(
+        resource_renderer=resource_response_renderer
     )
     return_transport = OpenClawReturnPathTransport()
     flow = TeamsConversationFlow(
         identity_binder=identity_binder,
         intent_resolver=intent_resolver,
-        request_factory=GovernedTeamsOrchestrationRequestFactory(authority=identity_authority),
+        request_factory=GovernedTeamsOrchestrationRequestFactory(
+            authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+        ),
         orchestrator=orchestrator,
         response_renderer=response_renderer,
         transport=return_transport,
