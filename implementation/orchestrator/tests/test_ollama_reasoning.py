@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from orchestrator.ollama_reasoning import (
     OllamaResourceCapabilityReasoner,
@@ -9,6 +10,7 @@ from orchestrator.ollama_reasoning import (
     OllamaResourceInquiryReasoner,
     OllamaStructuredJsonClient,
 )
+from orchestrator.resource_capability_catalog import endpoint_device_search
 from orchestrator.resource_inquiry import ResourceInquiry
 
 
@@ -97,6 +99,27 @@ def test_capability_reasoner_selects_only_candidate_and_builds_arguments_determi
         "hostname": "AOT-50282",
         "requested_facts": ["last logged in user"],
     }
+
+
+def test_capability_reasoner_accepts_real_governed_capability_contract():
+    llm, transport = client({"capability_names": ["endpoint.device.search"]})
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("last logged in user",),
+    )
+
+    steps = OllamaResourceCapabilityReasoner(llm).select(
+        inquiry=inquiry,
+        candidates=[endpoint_device_search(datetime.now(timezone.utc))],
+    )
+
+    assert steps[0].capability_name == "endpoint.device.search"
+    prompt = json.loads(transport.calls[0]["json"]["messages"][1]["content"])
+    candidate = prompt["candidates"][0]
+    assert candidate["display_name"] == "Search Managed Endpoints"
+    assert candidate["business_purpose"]
+    assert "description" not in candidate
 
 
 def test_capability_reasoner_rejects_name_outside_candidate_set_even_if_model_returns_it():
