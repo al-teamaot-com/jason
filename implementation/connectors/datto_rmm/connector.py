@@ -16,6 +16,7 @@ class DattoRmmConnector(ConnectorBase):
         {
             "datto_rmm.device.get",
             "datto_rmm.device.search",
+            "datto_rmm.device.resolve",
             "datto_rmm.alerts.list",
             "datto_rmm.patch_status.get",
             "datto_rmm.component_results.list",
@@ -27,38 +28,33 @@ class DattoRmmConnector(ConnectorBase):
         credentials = self._secrets.resolve(self.logical_secret, request.context)
         require_durable_credentials(credentials)
         token = acquire_access_token(credentials=credentials)
-        prepared = self._prepare_api_request(
-            request=request,
-            credentials=credentials,
-            access_token=token.access_token,
-            token_type=token.token_type,
-        )
-        operation = prepared.audit_operation or prepared.url
-        self._audit.record(
-            "connector.requested",
-            request.context,
-            {"provider": self.provider_name, "operation": operation},
-        )
         try:
-            payload = self._transport.request(
-                method=prepared.method,
-                url=prepared.url,
-                headers=prepared.headers,
-                params=prepared.params,
-                json=prepared.json,
-                timeout_seconds=prepared.timeout_seconds,
-            )
+            if request.context.capability == "datto_rmm.device.resolve":
+                data = self._execute_device_resolve(
+                    request=request,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
+            else:
+                prepared = self._prepare_api_request(
+                    request=request,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
+                payload = self._execute_prepared_request(
+                    request=request,
+                    prepared=prepared,
+                )
+                data = self._normalize_result(request.context.capability, payload)
         finally:
             token = None
-        self._audit.record(
-            "connector.completed",
-            request.context,
-            {"provider": self.provider_name},
-        )
+
         return ConnectorResult(
             capability=request.context.capability,
             provider=self.provider_name,
-            data=self._normalize_result(request.context.capability, payload),
+            data=data,
         )
 
     def prepare_request(
@@ -79,10 +75,25 @@ class DattoRmmConnector(ConnectorBase):
         access_token: str,
         token_type: str,
     ) -> PreparedRequest:
-        path, params = self._resolve_operation(
-            request.context.capability,
-            request.arguments,
+        return self._prepare_provider_request(
+            capability=request.context.capability,
+            arguments=request.arguments,
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
         )
+
+    @classmethod
+    def _prepare_provider_request(
+        cls,
+        *,
+        capability: str,
+        arguments: Mapping[str, Any],
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> PreparedRequest:
+        path, params = cls._resolve_operation(capability, arguments)
         return PreparedRequest(
             method="GET",
             url=f"{credentials['api_url'].rstrip('/')}{path}",
@@ -93,6 +104,94 @@ class DattoRmmConnector(ConnectorBase):
             params=params,
             audit_operation=path,
         )
+
+    def _execute_prepared_request(
+        self,
+        *,
+        request: ConnectorRequest,
+        prepared: PreparedRequest,
+    ) -> Any:
+        operation = prepared.audit_operation or prepared.url
+        self._audit.record(
+            "connector.requested",
+            request.context,
+            {"provider": self.provider_name, "operation": operation},
+        )
+        payload = self._transport.request(
+            method=prepared.method,
+            url=prepared.url,
+            headers=prepared.headers,
+            params=prepared.params,
+            json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        self._audit.record(
+            "connector.completed",
+            request.context,
+            {"provider": self.provider_name, "operation": operation},
+        )
+        return payload
+
+    def _execute_device_resolve(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> Any:
+        """Resolve a human selector without promoting it to identity.
+
+        The canonical endpoint search capability may be implemented by more than one
+        provider. Datto's implementation first performs bounded discovery. Zero or
+        multiple matches are returned as discovery evidence only. Exactly one match
+        may proceed to an exact GET, and only after Datto supplied a durable device UID.
+        This keeps provider affinity inside the connector boundary and prevents a
+        human-friendly hostname from being treated as durable identity.
+        """
+
+        search_request = self._prepare_provider_request(
+            capability="datto_rmm.device.search",
+            arguments=request.arguments,
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
+        )
+        search_payload = self._execute_prepared_request(
+            request=request,
+            prepared=search_request,
+        )
+        discovery = self._normalize_result("datto_rmm.device.search", search_payload)
+        matches = discovery["resource_matches"]
+
+        if len(matches) != 1:
+            return discovery
+
+        resource_id = str(matches[0].get("resource_id", "")).strip()
+        if not resource_id:
+            # Preserve the unique candidate as evidence, but do not issue a second
+            # provider request without a durable provider identity. The response layer
+            # will fail closed if exact resource facts were requested.
+            return discovery
+
+        read_request = self._prepare_provider_request(
+            capability="datto_rmm.device.get",
+            arguments={"resource_id": resource_id},
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
+        )
+        read_payload = self._execute_prepared_request(
+            request=request,
+            prepared=read_request,
+        )
+        return {
+            "resource_matches": matches,
+            "resolved_resource_id": resource_id,
+            # Requested facts must be located in the exact device read, never in a
+            # summary record returned by the discovery request.
+            "provider_data": read_payload,
+        }
 
     @classmethod
     def _normalize_result(cls, capability: str, payload: Any) -> Any:
