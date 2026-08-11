@@ -59,6 +59,7 @@ If a package README contains a material architecture, authority, security, or op
 | `implementation/cli/README.md` | CLI implementation/developer guidance | Governing capability/authority/component documentation for commands exposed by the CLI |
 | `implementation/resource_convergence/README.md` | Provider/resource convergence implementation guidance | `docs/engineering/`, canonical models, and infrastructure/component specifications |
 | `implementation/client_bootstrap/README.md` | Client bootstrap implementation mechanics | Canonical organizational/client models, identity/authority, and applicable operational runbooks |
+| `implementation/autonomous_remediation/README.md` | Governed autonomous-remediation implementation framework, execution stages, and promotion safeguards | `docs/governance/`; `docs/architecture/`; `docs/components/`; `docs/operations/`; identity-first authorization and Central Orchestrator governance |
 
 ## Connector implementation documentation
 
