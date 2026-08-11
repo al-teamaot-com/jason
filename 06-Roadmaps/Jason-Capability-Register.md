@@ -14,7 +14,7 @@ Capabilities are expressed independently of the provider currently implementing 
 
 ## Current milestone status
 
-[M-001 — Kernel Foundation](../10-Milestones/M-001-Kernel-Foundation.md) is complete.
+[M-001 — Kernel Foundation](../milestones/M-001-Kernel-Foundation.md) is complete.
 
 The stable Kernel now governs capability identity, provider eligibility, execution policy, and capability resolution. CAP-001 has proven the first real capability path through those services before evidence collection begins.
 
