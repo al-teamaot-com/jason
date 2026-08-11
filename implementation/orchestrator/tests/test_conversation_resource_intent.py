@@ -137,6 +137,22 @@ def test_language_reasoner_cannot_smuggle_provider_through_selector():
         )
 
 
+def test_language_reasoner_cannot_smuggle_nested_selector_operators():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {"hostname": {"exact": "AOT-50282"}},
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="scalar strings"):
+        intent_resolver.resolve(
+            text="Who is logged into AOT-50282?",
+            principal=principal(),
+        )
+
+
 def test_language_reasoner_cannot_turn_read_question_into_execute_authority():
     intent_resolver, _ = resolver(
         {
