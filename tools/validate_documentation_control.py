@@ -12,26 +12,45 @@ REQUIRED_FILES = (
     "docs/index.md",
     "docs/control/CURRENT.md",
     "docs/control/DOCUMENTATION-REGISTER.md",
+    "docs/control/DOCUMENTATION-MIGRATION-ISSUES.md",
     "docs/control/HOW-TO-DOCUMENT-JASON.md",
     "docs/control/HANDOFF-TEMPLATE.md",
     "docs/control/DOCUMENT-TEMPLATE.md",
     "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
+    "docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
 )
 
 LEGACY_ROOTS = (
-    "01-Foundation/",
-    "01-Governance/",
-    "02-Architecture/",
-    "02-Canonical-Models/",
-    "03-Components/",
-    "04-Standards/",
-    "05-ADR/",
-    "06-Roadmaps/",
-    "07-Operations/",
-    "07-Roadmap/",
-    "08-Session-Records/",
-    "09-Architecture-Journal/",
-    "10-Milestones/",
+    "01-Foundation",
+    "01-Governance",
+    "02-Architecture",
+    "02-Canonical-Models",
+    "03-Components",
+    "04-Standards",
+    "05-ADR",
+    "06-Roadmaps",
+    "07-Operations",
+    "07-Roadmap",
+    "08-Session-Records",
+    "09-Architecture-Journal",
+    "10-Milestones",
+)
+
+REQUIRED_DOC_DIRECTORIES = (
+    "docs/control",
+    "docs/foundation",
+    "docs/governance",
+    "docs/architecture",
+    "docs/models",
+    "docs/components",
+    "docs/standards",
+    "docs/decisions",
+    "docs/roadmaps",
+    "docs/operations",
+    "docs/sessions",
+    "docs/journal",
+    "docs/milestones",
+    "docs/archive",
 )
 
 
@@ -50,8 +69,19 @@ def main() -> int:
     for path in REQUIRED_FILES:
         read(path)
 
+    for path in REQUIRED_DOC_DIRECTORIES:
+        if not (ROOT / path).is_dir():
+            fail(f"Required consolidated documentation directory is missing: {path}")
+
+    for root in LEGACY_ROOTS:
+        if (ROOT / root).exists():
+            fail(
+                "Legacy human-documentation root must not be recreated after consolidation: "
+                + root
+            )
+
     index = read("docs/index.md")
-    for path in REQUIRED_FILES[1:]:
+    for path in REQUIRED_FILES[1:8]:
         relative = path.removeprefix("docs/")
         if relative not in index:
             fail(f"docs/index.md does not link to required control record: {relative}")
@@ -66,8 +96,8 @@ def main() -> int:
 
     register = read("docs/control/DOCUMENTATION-REGISTER.md")
     for root in LEGACY_ROOTS:
-        if root not in register:
-            fail(f"Documentation Register is missing legacy-root migration coverage: {root}")
+        if f"`{root}/`" not in register and f"`{root}`" not in register:
+            fail(f"Documentation Register is missing migration history for: {root}")
 
     how_to = read("docs/control/HOW-TO-DOCUMENT-JASON.md")
     required_practices = (
@@ -94,17 +124,31 @@ def main() -> int:
         if phrase not in standard:
             fail(f"J-404 is missing required governance section: {phrase}")
 
-    assembly = read("tools/assemble_docs.py")
-    for source in ("docs/control", "docs/standards"):
-        if source not in assembly:
-            fail(f"Documentation assembly does not publish control-plane source: {source}")
+    adr008 = read("docs/decisions/ADR-008-Documentation-Control-Plane-Consolidation.md")
+    if "Supersedes: ADR-002" not in adr008:
+        fail("ADR-008 must explicitly supersede ADR-002")
+
+    adr002 = read("docs/decisions/ADR-002-Canonical-Documentation-Layout.md")
+    if "Status:** Superseded by ADR-008" not in adr002:
+        fail("ADR-002 must be explicitly marked superseded by ADR-008")
+
+    if not (ROOT / "docs/decisions/ADR-004-Datto-RMM-Managed-Device-Authority.md").is_file():
+        fail("Canonical ADR-004 Datto authority record is missing")
+    if not (ROOT / "docs/decisions/ADR-007-Teams-Proactive-Messaging.md").is_file():
+        fail("Corrected ADR-007 Teams proactive messaging record is missing")
 
     mkdocs = read("mkdocs.yml")
+    if "docs_dir: docs" not in mkdocs:
+        fail("MkDocs must publish directly from the canonical docs tree")
+    if ".build/docs" in mkdocs:
+        fail("MkDocs must not depend on the retired mixed-source documentation assembly tree")
+
     for path in (
         "control/CURRENT.md",
         "control/DOCUMENTATION-REGISTER.md",
         "control/HOW-TO-DOCUMENT-JASON.md",
         "standards/J-404-Documentation-Governance-and-Continuity.md",
+        "decisions/ADR-008-Documentation-Control-Plane-Consolidation.md",
     ):
         if path not in mkdocs:
             fail(f"MkDocs navigation is missing documentation-control record: {path}")
