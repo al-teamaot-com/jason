@@ -22,10 +22,6 @@ class OllamaStructuredJsonClient:
     model can otherwise spend most of an ingress budget producing unnecessary tokens
     even when the final contract is tiny. max_output_tokens therefore becomes part of
     the reasoning contract rather than relying on an HTTP timeout as the only bound.
-
-    Thinking is explicitly disabled for this narrow contract. Jason needs the bounded
-    schema result, not a model reasoning trace, and thinking-capable models can consume
-    the entire generation budget before emitting the structured answer.
     """
 
     transport: HttpTransport
@@ -85,6 +81,7 @@ class OllamaResourceInquiryReasoner:
     client: OllamaStructuredJsonClient
     resource_types: tuple[str, ...] = ()
     selector_keys: tuple[str, ...] = ()
+    fact_hints: tuple[str, ...] = ()
 
     def propose(
         self,
@@ -97,12 +94,18 @@ class OllamaResourceInquiryReasoner:
         if self.resource_types:
             resource_type_schema["enum"] = list(self.resource_types)
 
-        resource_selector_schema: dict[str, Any] = {"type": "object"}
+        scalar_selector = {"type": "string", "minLength": 1}
+        resource_selector_schema: dict[str, Any] = {
+            "type": "object",
+            "additionalProperties": scalar_selector,
+        }
         if self.selector_keys:
             resource_selector_schema.update(
                 {
                     "additionalProperties": False,
-                    "properties": {key: {} for key in self.selector_keys},
+                    "properties": {
+                        key: dict(scalar_selector) for key in self.selector_keys
+                    },
                 }
             )
 
@@ -115,7 +118,7 @@ class OllamaResourceInquiryReasoner:
                 "resource_selector": resource_selector_schema,
                 "requested_facts": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "items": {"type": "string", "minLength": 1},
                 },
                 "execution_mode": {"type": "string", "enum": ["deterministic"]},
                 "permission_mode": {"type": "string", "enum": ["observe"]},
@@ -135,12 +138,24 @@ class OllamaResourceInquiryReasoner:
                 "Do not name or select providers, connectors, capabilities, tools, agents, "
                 "shell commands, URLs, credentials, or authority. This stage describes only "
                 "what resource is referenced, how it is identified, and what facts are asked. "
-                "When allowed resource types or selector keys are supplied, normalize ordinary "
-                "human wording into that closed governed vocabulary rather than inventing new "
-                "resource names or selector fields. Use execution_mode deterministic and "
-                "permission_mode observe. If the request cannot be represented safely as a "
-                "read-only resource inquiry, set resolved=false, resource_selector={}, and "
-                "requested_facts=[] so Jason can evaluate the next governed intent class."
+                "Use selector fields only to identify the resource. Selector values must be "
+                "plain scalar strings copied or normalized from identifiers actually supplied "
+                "by the human; never put operators, nested objects, requested facts, or inferred "
+                "scope into selector values. Organization and client scope are authorization "
+                "context only and must never be copied into a resource selector unless the human "
+                "explicitly stated that selector value. requested_facts must describe what the "
+                "human wants to know about the resource; do not substitute selector fields or "
+                "inventory identifiers unless the human actually asked for them. Fact hints are "
+                "examples of information governed resources may expose, not a closed vocabulary. "
+                "If the human supplies an identifier-like token without naming a selector field, "
+                "map that token to the most plausible allowed selector key and preserve the token "
+                "itself rather than encoding the question inside the selector. When allowed "
+                "resource types or selector keys are supplied, normalize ordinary human wording "
+                "into that closed governed vocabulary rather than inventing new resource names or "
+                "selector fields. Use execution_mode deterministic and permission_mode observe. "
+                "If the request cannot be represented safely as a read-only resource inquiry, set "
+                "resolved=false, resource_selector={}, and requested_facts=[] so Jason can evaluate "
+                "the next governed intent class."
             ),
             user=json.dumps(
                 {
@@ -149,6 +164,7 @@ class OllamaResourceInquiryReasoner:
                     "client_scope_present": client_id is not None,
                     "allowed_resource_types": list(self.resource_types),
                     "allowed_selector_keys": list(self.selector_keys),
+                    "fact_hints": list(self.fact_hints),
                 },
                 sort_keys=True,
             ),
