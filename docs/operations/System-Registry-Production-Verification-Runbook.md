@@ -35,10 +35,10 @@ The initial inventory is grounded in durable repository evidence rather than con
 - `implementation/runtime_service/src/jason_runtime/http.py`
 - `implementation/orchestrator/resource_capability_catalog.py`
 - `implementation/cap-007/src/jason_cap_007/kernel_registration.py`
-- `07-Operations/Jason-Secret-Provider-Deployment-Record.md`
-- `07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md`
-- `07-Operations/CAP-007-AWS-SES-Activation-Runbook.md`
-- `08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
+- `docs/operations/Jason-Secret-Provider-Deployment-Record.md`
+- `docs/operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md`
+- `docs/operations/CAP-007-AWS-SES-Activation-Runbook.md`
+- `docs/sessions/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
 
 Historical evidence is sufficient to establish a declared configuration baseline, but it is not automatically treated as a current System Registry observation.
 
