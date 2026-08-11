@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_RUNTIME_REQUEST_TIMEOUT_MS = 150_000;
 
 export function canonicalize(value) {
   if (Array.isArray(value)) {
@@ -90,7 +91,12 @@ export function loadAndSignConversationEnvelope(envelope, privateKeyPath) {
   return signConversationEnvelope(envelope, pem);
 }
 
-export async function postConversationEnvelope({ runtimeUrl, envelope, timeoutMs = 30_000, fetchImpl = fetch }) {
+export async function postConversationEnvelope({
+  runtimeUrl,
+  envelope,
+  timeoutMs = DEFAULT_RUNTIME_REQUEST_TIMEOUT_MS,
+  fetchImpl = fetch,
+}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
