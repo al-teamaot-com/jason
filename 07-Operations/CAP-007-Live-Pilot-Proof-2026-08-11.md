@@ -159,8 +159,47 @@ CAP-007 Version 0.1 successfully completed the controlled end-to-end live pilot 
 
 CAP-007 is therefore operational for its approved pilot scope.
 
-## Known remaining integration gap
+## Teams conversational integration — closed 2026-08-11
 
-The Teams conversational interface is not yet connected to CAP-007. Asking Jason in Teams to send email does not currently result in a governed `communication.email.send` orchestration request.
+The previously recorded integration gap is now closed for the approved pilot scope.
 
-This is the next workstream. The implementation must route Teams intent through the Central Orchestrator and existing CAP-007 capability. It must not create a direct Teams-to-SES path or a workflow-specific sendmail script.
+Jason's Teams conversational path now routes authenticated user requests through the governed architecture rather than directly to SES:
+
+```text
+Teams -> OpenClaw transport -> Jason ingress -> Microsoft identity binding
+-> validated Microsoft client boundary -> JKD-003/OpenBao -> MSAL -> Graph exact-user lookup
+-> governed conversation action intent -> JKD-001 authority/approval evidence
+-> Central Orchestrator -> CAP-007 -> JKD-003/OpenBao -> AWS SES
+-> deterministic Teams response
+```
+
+The implementation does not create a Teams-to-SES shortcut or a workflow-specific sendmail script.
+
+Before the live send, a no-send proof inside the running `jason-runtime` container resolved the authenticated Teams Microsoft object to `al@teamaot.com` through the durable client boundary, OpenBao certificate credential, MSAL, and Microsoft Graph. No email was sent during that proof.
+
+The operator then sent the authenticated Teams command:
+
+```text
+send me an email
+```
+
+Jason reported a successful governed send to `al@teamaot.com` with subject `Test email from Jason`, and the operator supplied the received Outlook message as mailbox evidence.
+
+Mailbox evidence:
+
+```text
+Test email from Jason.msg
+SHA-256: be2b2239dd5449f0ee085fb007bf3fb921f885e46a9b51b7a416b7ad9cef9c53
+Size: 113664 bytes
+Observed receipt: approximately 08:31 America/New_York on 2026-08-11
+```
+
+The binary message is not stored in Git. The digest permits later integrity verification against operator-retained evidence.
+
+The complete Teams-to-CAP-007 proof and constitutional review are preserved in:
+
+`08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`.
+
+### Pilot governance limitation
+
+The pilot may materialize an authenticated Teams imperative as explicit per-request JKD-001 approval evidence for the same authenticated principal. This is formal self-approval evidence for the approved pilot, not an independent approver class and not a generalized rule for higher-risk actions. Any change to this approval model requires normal governance review.
