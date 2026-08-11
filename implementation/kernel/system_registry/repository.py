@@ -114,6 +114,15 @@ class InMemorySystemRegistry:
             return None
         return max(observations, key=lambda item: item.observed_at)
 
+    def record_verification(self, record: VerificationRecord) -> None:
+        entity = self.get(record.registry_id)
+        if record.method not in entity.verification_methods:
+            raise ValueError(
+                f"Verification method is not registered for {record.registry_id}: "
+                f"{record.method}"
+            )
+        self._verifications.setdefault(record.registry_id, []).append(record)
+
     def verify_from_latest_observation(
         self,
         *,
@@ -136,7 +145,7 @@ class InMemorySystemRegistry:
                 verified_at=verified_at,
                 detail="No observation is available.",
             )
-            self._verifications.setdefault(registry_id, []).append(record)
+            self.record_verification(record)
             return record
 
         missing_keys = sorted(
@@ -176,7 +185,7 @@ class InMemorySystemRegistry:
             evidence_references=observation.evidence_references,
             detail=detail,
         )
-        self._verifications.setdefault(registry_id, []).append(record)
+        self.record_verification(record)
         return record
 
     def latest_verification(
