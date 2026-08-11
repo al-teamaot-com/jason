@@ -23,9 +23,7 @@ from kernel.resolution.contracts import (
     CapabilityResolutionStatus,
     ResolutionOutcome,
 )
-from kernel.resolution.translators import (
-    ProviderCandidateTranslator,
-)
+from kernel.resolution.translators import ProviderCandidateTranslator
 
 
 class GovernedCapabilityResolutionEngine:
@@ -42,14 +40,9 @@ class GovernedCapabilityResolutionEngine:
         self._capabilities = capabilities
         self._providers = providers
         self._policy = policy
-        self._translator = (
-            translator or ProviderCandidateTranslator()
-        )
+        self._translator = translator or ProviderCandidateTranslator()
 
-    def resolve(
-        self,
-        request: CapabilityResolutionRequest,
-    ) -> CapabilityResolutionResult:
+    def resolve(self, request: CapabilityResolutionRequest) -> CapabilityResolutionResult:
         capability, status = self._resolve_capability(request)
 
         if capability is None:
@@ -64,7 +57,6 @@ class GovernedCapabilityResolutionEngine:
             capability=capability,
             status=status,
         )
-
         if validation_result is not None:
             return validation_result
 
@@ -73,14 +65,18 @@ class GovernedCapabilityResolutionEngine:
             capability=capability,
             status=status,
         )
-
         if context_result is not None:
             return context_result
 
-        if (
-            capability.approval.required
-            and not request.approval_present
-        ):
+        if capability.idempotency_key_required and request.idempotency_key is None:
+            return self._unresolved(
+                request=request,
+                capability=capability,
+                status=CapabilityResolutionStatus.IDEMPOTENCY_KEY_MISSING,
+                reason_codes=("idempotency_key_required",),
+            )
+
+        if capability.approval.required and not request.approval_present:
             return CapabilityResolutionResult(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
@@ -92,10 +88,7 @@ class GovernedCapabilityResolutionEngine:
                 audit_required=True,
             )
 
-        providers = self._find_candidate_providers(
-            request=request,
-            capability=capability,
-        )
+        providers = self._find_candidate_providers(request=request, capability=capability)
 
         if not providers:
             return self._unresolved(
@@ -141,34 +134,22 @@ class GovernedCapabilityResolutionEngine:
     def _resolve_capability(
         self,
         request: CapabilityResolutionRequest,
-    ) -> tuple[
-        CapabilityDefinition | None,
-        CapabilityResolutionStatus,
-    ]:
+    ) -> tuple[CapabilityDefinition | None, CapabilityResolutionStatus]:
         try:
             if request.capability_version is not None:
                 capability = self._capabilities.get(
                     capability_name=request.capability_name,
                     version=request.capability_version,
                 )
-                return (
-                    capability,
-                    CapabilityResolutionStatus.RESOLVED_EXACT,
-                )
+                return capability, CapabilityResolutionStatus.RESOLVED_EXACT
 
             capability = self._capabilities.get_current(
                 capability_name=request.capability_name,
                 allow_pilot=request.allow_pilot_capability,
             )
-            return (
-                capability,
-                CapabilityResolutionStatus.RESOLVED_CURRENT,
-            )
+            return capability, CapabilityResolutionStatus.RESOLVED_CURRENT
         except CapabilityNotFoundError:
-            return (
-                None,
-                CapabilityResolutionStatus.NOT_FOUND,
-            )
+            return None, CapabilityResolutionStatus.NOT_FOUND
 
     def _validate_capability(
         self,
@@ -177,10 +158,7 @@ class GovernedCapabilityResolutionEngine:
         capability: CapabilityDefinition,
         status: CapabilityResolutionStatus,
     ) -> CapabilityResolutionResult | None:
-        eligible_lifecycles = {
-            CapabilityLifecycle.ACTIVE,
-        }
-
+        eligible_lifecycles = {CapabilityLifecycle.ACTIVE}
         if request.allow_pilot_capability:
             eligible_lifecycles.add(CapabilityLifecycle.PILOT)
 
@@ -188,24 +166,15 @@ class GovernedCapabilityResolutionEngine:
             return self._unresolved(
                 request=request,
                 capability=capability,
-                status=(
-                    CapabilityResolutionStatus
-                    .INELIGIBLE_LIFECYCLE
-                ),
+                status=CapabilityResolutionStatus.INELIGIBLE_LIFECYCLE,
                 reason_codes=("capability_lifecycle_ineligible",),
             )
 
-        if (
-            request.requested_mode
-            not in capability.permitted_execution_modes
-        ):
+        if request.requested_mode not in capability.permitted_execution_modes:
             return self._unresolved(
                 request=request,
                 capability=capability,
-                status=(
-                    CapabilityResolutionStatus
-                    .EXECUTION_MODE_PROHIBITED
-                ),
+                status=CapabilityResolutionStatus.EXECUTION_MODE_PROHIBITED,
                 reason_codes=("execution_mode_prohibited",),
             )
 
@@ -218,34 +187,21 @@ class GovernedCapabilityResolutionEngine:
         capability: CapabilityDefinition,
         status: CapabilityResolutionStatus,
     ) -> CapabilityResolutionResult | None:
-        if (
-            capability.tenant_isolation_required
-            and not request.tenant_id.strip()
-        ):
+        if capability.tenant_isolation_required and not request.tenant_id.strip():
             return self._unresolved(
                 request=request,
                 capability=capability,
-                status=(
-                    CapabilityResolutionStatus
-                    .ISOLATION_CONTEXT_MISSING
-                ),
+                status=CapabilityResolutionStatus.ISOLATION_CONTEXT_MISSING,
                 reason_codes=("tenant_context_required",),
             )
 
-        if (
-            capability.client_isolation_required
-            and (
-                request.client_id is None
-                or not request.client_id.strip()
-            )
+        if capability.client_isolation_required and (
+            request.client_id is None or not request.client_id.strip()
         ):
             return self._unresolved(
                 request=request,
                 capability=capability,
-                status=(
-                    CapabilityResolutionStatus
-                    .ISOLATION_CONTEXT_MISSING
-                ),
+                status=CapabilityResolutionStatus.ISOLATION_CONTEXT_MISSING,
                 reason_codes=("client_context_required",),
             )
 
@@ -261,9 +217,7 @@ class GovernedCapabilityResolutionEngine:
             ProviderCandidateQuery(
                 capability=capability.capability_name,
                 execution_mode=request.requested_mode,
-                classification=(
-                    request.data_handling.classification
-                ),
+                classification=request.data_handling.classification,
                 region=request.region,
                 allow_pilot=request.allow_pilot_provider,
             )
@@ -280,11 +234,7 @@ class GovernedCapabilityResolutionEngine:
     ) -> CapabilityResolutionResult:
         outcome = self._resolution_outcome(decision.outcome)
         plan = decision.plan
-        selected_provider_id = (
-            plan.provider_id
-            if plan is not None
-            else None
-        )
+        selected_provider_id = plan.provider_id if plan is not None else None
 
         return CapabilityResolutionResult(
             execution_id=request.execution_id,
@@ -294,10 +244,7 @@ class GovernedCapabilityResolutionEngine:
             outcome=outcome,
             capability_status=status,
             reason_codes=decision.reason_codes,
-            eligible_provider_ids=tuple(
-                provider.provider_id
-                for provider in providers
-            ),
+            eligible_provider_ids=tuple(provider.provider_id for provider in providers),
             selected_provider_id=selected_provider_id,
             execution_decision=decision,
             execution_plan=plan,
@@ -305,21 +252,13 @@ class GovernedCapabilityResolutionEngine:
         )
 
     @staticmethod
-    def _resolution_outcome(
-        outcome: DecisionOutcome,
-    ) -> ResolutionOutcome:
-        if outcome in {
-            DecisionOutcome.ALLOWED,
-            DecisionOutcome.ALLOWED_LIMITED,
-        }:
+    def _resolution_outcome(outcome: DecisionOutcome) -> ResolutionOutcome:
+        if outcome in {DecisionOutcome.ALLOWED, DecisionOutcome.ALLOWED_LIMITED}:
             return ResolutionOutcome.RESOLVED
-
         if outcome is DecisionOutcome.APPROVAL_REQUIRED:
             return ResolutionOutcome.APPROVAL_REQUIRED
-
         if outcome is DecisionOutcome.HUMAN_REQUIRED:
             return ResolutionOutcome.HUMAN_REQUIRED
-
         return ResolutionOutcome.DENIED
 
     @staticmethod
@@ -335,9 +274,7 @@ class GovernedCapabilityResolutionEngine:
             correlation_id=request.correlation_id,
             capability_name=request.capability_name,
             capability_version=(
-                capability.version
-                if capability is not None
-                else request.capability_version
+                capability.version if capability is not None else request.capability_version
             ),
             outcome=ResolutionOutcome.UNRESOLVED,
             capability_status=status,
