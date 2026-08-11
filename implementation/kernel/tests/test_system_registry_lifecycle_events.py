@@ -14,14 +14,11 @@ MANIFEST = REGISTRY_DIR / "production-registry.json"
 LIFECYCLE_EVENTS = REGISTRY_DIR / "production-lifecycle-events.json"
 
 
-CURRENTLY_VERIFIED_PHYSICAL_COMPONENTS = {
-    "component.openbao",
-    "component.jason-runtime",
-    "component.openclaw-gateway",
-}
-
-PENDING_REVERIFICATION_COMPONENTS = {
-    "component.openclaw-jason-bridge",
+CURRENT_VERIFICATION_EVIDENCE = {
+    "component.openbao": "system-registry-verification-20260811T154530Z.json",
+    "component.jason-runtime": "system-registry-verification-20260811T154530Z.json",
+    "component.openclaw-gateway": "system-registry-verification-20260811T154530Z.json",
+    "component.openclaw-jason-bridge": "post-openclaw-bridge-20260811T171348Z.json",
 }
 
 INITIAL_VERIFICATION_EVENT_IDS = {
@@ -38,27 +35,14 @@ def test_governed_lifecycle_events_preserve_current_verification_state() -> None
         lifecycle_events_path=LIFECYCLE_EVENTS,
     )
 
-    for registry_id in CURRENTLY_VERIFIED_PHYSICAL_COMPONENTS:
+    for registry_id, evidence_fragment in CURRENT_VERIFICATION_EVIDENCE.items():
         entity = registry.get(registry_id)
         assert entity.lifecycle_status is EntityLifecycle.VERIFIED
         verification = registry.latest_verification(registry_id)
         assert verification is not None
         assert verification.outcome is VerificationOutcome.VERIFIED
         assert any(
-            "system-registry-verification-20260811T154530Z.json" in reference
-            for reference in verification.evidence_references
-        )
-
-    for registry_id in PENDING_REVERIFICATION_COMPONENTS:
-        entity = registry.get(registry_id)
-        assert entity.lifecycle_status is EntityLifecycle.CONFIGURED
-        # Historical verification evidence is preserved append-only, but it does not
-        # make the changed declaration currently verified.
-        verification = registry.latest_verification(registry_id)
-        assert verification is not None
-        assert verification.outcome is VerificationOutcome.VERIFIED
-        assert any(
-            "system-registry-verification-20260811T154530Z.json" in reference
+            evidence_fragment in reference
             for reference in verification.evidence_references
         )
 
@@ -95,6 +79,7 @@ def test_lifecycle_event_history_is_append_only_in_effect() -> None:
     assert {
         "lifecycle.2026-08-11t165900z.component.openclaw-jason-bridge.suspended",
         "lifecycle.2026-08-11t165901z.component.openclaw-jason-bridge.configured",
+        "lifecycle.2026-08-11t171400z.component.openclaw-jason-bridge.verified",
     }.issubset(set(event_ids))
     assert all(event["principal_id"] == "person-al" for event in events)
 
@@ -112,6 +97,16 @@ def test_lifecycle_event_history_is_append_only_in_effect() -> None:
         (event["from_lifecycle"], event["to_lifecycle"])
         for event in bridge_events
     ]
-    assert ("configured", "verified") in transitions
+    assert transitions.count(("configured", "verified")) >= 2
     assert ("verified", "suspended") in transitions
     assert ("suspended", "configured") in transitions
+
+    latest_bridge_event = max(
+        bridge_events,
+        key=lambda event: (event["effective_at"], event["event_id"]),
+    )
+    assert latest_bridge_event["to_lifecycle"] == "verified"
+    assert any(
+        "post-openclaw-bridge-20260811T171348Z.json" in reference
+        for reference in latest_bridge_event["evidence_references"]
+    )
