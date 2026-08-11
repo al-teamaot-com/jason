@@ -64,6 +64,34 @@ Grafana
 - provider selection and invocation;
 - evidence and permanent audit records.
 
+## Identity exchange boundary
+
+Grafana must never create Jason principal or organization identifiers from browser input, dashboard variables, or arbitrary headers. The production path must validate an external identity through an approved adapter, resolve that identity against a governed Jason binding, and mint a short-lived Jason management token. The caller cannot choose its Jason principal or organization scope.
+
+```text
+TeamAOT identity provider
+        |
+        v
+approved external-token validator
+        |
+        v
+verified external identity
+        |
+        v
+governed external-identity binding
+        |
+        v
+short-lived signed Jason management token
+        |
+        v
+Grafana server-side request
+        |
+        v
+Jason Management API authorization
+```
+
+The exchange contract is provider-neutral. Microsoft Entra ID can be the first external identity provider without making Entra-specific claims or APIs constitutional. Signing-key material belongs behind Jason's secret/key-management boundary and is never stored in Grafana dashboard JSON or repository configuration.
+
 ## Initial scope
 
 The first slice is read-only and operationally safe:
@@ -93,6 +121,8 @@ Configuration changes are added only after corresponding governed management cap
 8. The interface discovers capabilities and configuration schemas from Jason rather than hard-coding vendor-specific workflows where practical.
 9. Read-only visibility arrives before write controls.
 10. Grafana dashboards and provisioning should be stored as version-controlled artifacts where practical.
+11. External identity is mapped to Jason identity through governed bindings; callers cannot self-assert principal or organization scope.
+12. Management identity tokens are short-lived and signed; token issuance is separate from Grafana presentation logic.
 
 ## Planned Grafana navigation
 
@@ -122,5 +152,6 @@ Standard Grafana dashboards should be used where visualization is sufficient. A 
 - `../../deploy/grafana/compose.yaml` — local Grafana deployment baseline.
 - `../../deploy/grafana/.env.example` — non-secret environment template.
 - `../../deploy/grafana/README.md` — bootstrap, security boundary, and production prerequisites.
+- `../management_api/identity_exchange.py` — provider-neutral governed external-identity binding and short-lived management-token exchange contract.
 
 The earlier standalone HTML/CSS/JavaScript prototype was intentionally retired before merge. Grafana now provides the UI foundation rather than Jason maintaining a second general-purpose dashboard framework.
