@@ -53,47 +53,57 @@ class GovernedResourceEvidenceInterpreter:
             raise RuntimeError("resource result does not contain provider data")
         data = result.output["data"]
 
-        proposals = tuple(
-            self.reasoner.locate(
-                requested_facts=requested_facts,
+        verified_by_fact = {
+            fact.requested_fact: fact
+            for fact in _deterministic_direct_facts(
                 data=data,
+                requested_facts=requested_facts,
             )
+        }
+        unresolved = tuple(
+            fact for fact in requested_facts if fact not in verified_by_fact
         )
-        if not proposals:
-            raise LookupError("requested facts were not located in governed provider evidence")
 
-        allowed_facts = set(requested_facts)
-        verified: list[VerifiedResourceFact] = []
-        seen: set[str] = set()
-        for proposal in proposals:
-            if not isinstance(proposal, Mapping):
-                raise ValueError("resource evidence proposal must be an object")
-            requested_fact = str(proposal.get("requested_fact", "")).strip()
-            pointer = str(proposal.get("json_pointer", "")).strip()
-            if requested_fact not in allowed_facts:
-                raise PermissionError("evidence reasoner attempted to assert an unrequested fact")
-            if requested_fact in seen:
-                raise ValueError("evidence reasoner returned duplicate requested facts")
-            if not pointer.startswith("/"):
-                raise ValueError("resource evidence must use an absolute JSON Pointer")
+        if unresolved:
+            proposals = tuple(
+                self.reasoner.locate(
+                    requested_facts=unresolved,
+                    data=data,
+                )
+            )
+            if not proposals:
+                raise LookupError("requested facts were not located in governed provider evidence")
 
-            actual = _resolve_json_pointer(data, pointer)
-            verified.append(
-                VerifiedResourceFact(
+            allowed_facts = set(unresolved)
+            seen: set[str] = set()
+            for proposal in proposals:
+                if not isinstance(proposal, Mapping):
+                    raise ValueError("resource evidence proposal must be an object")
+                requested_fact = str(proposal.get("requested_fact", "")).strip()
+                pointer = str(proposal.get("json_pointer", "")).strip()
+                if requested_fact not in allowed_facts:
+                    raise PermissionError("evidence reasoner attempted to assert an unrequested fact")
+                if requested_fact in seen:
+                    raise ValueError("evidence reasoner returned duplicate requested facts")
+                if not pointer.startswith("/"):
+                    raise ValueError("resource evidence must use an absolute JSON Pointer")
+
+                actual = _resolve_json_pointer(data, pointer)
+                verified_by_fact[requested_fact] = VerifiedResourceFact(
                     requested_fact=requested_fact,
                     value=actual,
                     json_pointer=pointer,
                 )
-            )
-            seen.add(requested_fact)
+                seen.add(requested_fact)
 
-        missing = tuple(fact for fact in requested_facts if fact not in seen)
-        if missing:
-            raise LookupError(
-                "governed provider evidence did not support all requested facts: "
-                + ", ".join(missing)
-            )
-        return tuple(verified)
+            missing = tuple(fact for fact in unresolved if fact not in seen)
+            if missing:
+                raise LookupError(
+                    "governed provider evidence did not support all requested facts: "
+                    + ", ".join(missing)
+                )
+
+        return tuple(verified_by_fact[fact] for fact in requested_facts)
 
 
 def _resolve_json_pointer(document: Any, pointer: str) -> Any:
@@ -118,6 +128,64 @@ def _resolve_json_pointer(document: Any, pointer: str) -> Any:
             continue
         raise LookupError(f"resource evidence pointer traverses a scalar value: {pointer}")
     return current
+
+
+def _deterministic_direct_facts(
+    *,
+    data: Any,
+    requested_facts: tuple[str, ...],
+) -> tuple[VerifiedResourceFact, ...]:
+    """Resolve canonical direct fields without using language reasoning.
+
+    This deliberately considers only structurally authoritative locations: the provider
+    data object itself and, for discovery results, a single canonical resource match.
+    It does not recursively search arbitrary provider payloads or infer aliases. A fact
+    is resolved here only when its normalized label maps to exactly one direct field.
+    Semantic or provider-specific facts continue through the bounded evidence reasoner.
+    """
+
+    locations: list[tuple[str, Mapping[str, Any]]] = []
+    if isinstance(data, Mapping):
+        locations.append(("", data))
+        raw_matches = data.get("resource_matches")
+        if (
+            isinstance(raw_matches, (list, tuple))
+            and len(raw_matches) == 1
+            and isinstance(raw_matches[0], Mapping)
+        ):
+            locations.append(("/resource_matches/0", raw_matches[0]))
+
+    verified: list[VerifiedResourceFact] = []
+    for requested_fact in requested_facts:
+        wanted = _normalized_field_name(requested_fact)
+        candidates: list[tuple[str, Any]] = []
+        for prefix, mapping in locations:
+            for raw_key, value in mapping.items():
+                key = str(raw_key)
+                if _normalized_field_name(key) != wanted:
+                    continue
+                pointer = f"{prefix}/{_escape_json_pointer_segment(key)}"
+                candidates.append((pointer, value))
+
+        if len(candidates) != 1:
+            continue
+        pointer, value = candidates[0]
+        verified.append(
+            VerifiedResourceFact(
+                requested_fact=requested_fact,
+                value=value,
+                json_pointer=pointer,
+            )
+        )
+    return tuple(verified)
+
+
+def _normalized_field_name(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _escape_json_pointer_segment(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
 
 
 @dataclass(frozen=True, slots=True)
