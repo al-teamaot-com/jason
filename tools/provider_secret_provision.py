@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
+import ssl
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -43,6 +45,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "connector_identity": "itglue-read",
         "credential_dir": Path(
             "/opt/jason/bootstrap/secrets/openbao/itglue-read-approle"
+        ),
+    },
+    "microsoft_graph": {
+        "logical_name": "microsoft_graph.directory_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/directory-read",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-directory-read",
+        "role_name": "jason-microsoft-graph-directory-read",
+        "connector_identity": "microsoft-graph-directory-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-directory-read-approle"
         ),
     },
 }
@@ -119,7 +137,38 @@ def provider_policy_text(provider: str) -> str:
     )
 
 
+def _collect_microsoft_graph_values() -> dict[str, str]:
+    key_path = Path(
+        input("microsoft_graph private key PEM path: ").strip()
+    )
+    certificate_path = Path(
+        input("microsoft_graph certificate PEM path: ").strip()
+    )
+    try:
+        private_key_pem = key_path.read_text(encoding="utf-8").strip()
+        certificate_pem = certificate_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ProvisionError("Microsoft certificate source file is unavailable.") from exc
+    if "PRIVATE KEY" not in private_key_pem:
+        raise ProvisionError("Microsoft private key PEM is invalid.")
+    if "BEGIN CERTIFICATE" not in certificate_pem:
+        raise ProvisionError("Microsoft certificate PEM is invalid.")
+    try:
+        der = ssl.PEM_cert_to_DER_cert(certificate_pem)
+    except ValueError as exc:
+        raise ProvisionError("Microsoft certificate PEM could not be parsed.") from exc
+    thumbprint = hashlib.sha1(der).hexdigest().upper()
+    return {
+        "private_key_pem": private_key_pem,
+        "certificate_pem": certificate_pem,
+        "certificate_thumbprint": thumbprint,
+        "generation": f"sha1:{thumbprint}",
+    }
+
+
 def collect_values(provider: str) -> dict[str, str]:
+    if provider == "microsoft_graph":
+        return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
     required_fields = set(spec.get("required_fields", spec["fields"]))
@@ -416,7 +465,3 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "[WARN] Temporary administrative token could not be revoked explicitly.",
                     file=os.sys.stderr,
                 )
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
