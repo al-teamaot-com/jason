@@ -10,6 +10,10 @@ from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_rmm.connector import DattoRmmConnector
+from jason_cap_007.kernel_registration import register_email_send
+from jason_cap_007.service import CAPABILITY_NAME as EMAIL_CAPABILITY_NAME
+from jason_cap_007.service import EmailSendPolicy, GovernedEmailSendInvoker
+from jason_cap_007.ses import AwsSesConfig, AwsSesTransport
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from jason_openclaw.key_registry import FileBackedTrustedKeyRegistry
 from jason_openclaw.runtime import SQLiteReplayStore
@@ -36,6 +40,7 @@ from orchestrator.conversation_resource_intent import (
     ReasonedResourceInquiryInterpreter,
 )
 from orchestrator.event_store import SQLiteOrchestrationEventStore
+from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.ollama_reasoning import (
     OllamaResourceCapabilityReasoner,
     OllamaResourceEvidenceReasoner,
@@ -62,6 +67,7 @@ from orchestrator.teams_identity_binding_sqlite import (
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
+from .cap007 import Cap007OpenBaoSecretBroker
 from .http import RuntimeHttpApplication
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
@@ -80,6 +86,10 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    ses_openbao_role_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/role_id")
+    ses_openbao_secret_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/secret_id")
+    ses_region: str = "us-east-1"
+    ses_default_sender: str = "jason@teamaot.com"
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -130,6 +140,22 @@ class RuntimeSettings:
             ollama_url=os.getenv("JASON_OLLAMA_URL", "http://jason-ollama:11434").strip(),
             ollama_model=os.getenv("JASON_OLLAMA_MODEL", "").strip(),
             allowed_machine_identities=allowed,
+            ses_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_SES_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/aws-ses/role_id",
+                )
+            ),
+            ses_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_SES_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/aws-ses/secret_id",
+                )
+            ),
+            ses_region=os.getenv("JASON_SES_REGION", "us-east-1").strip(),
+            ses_default_sender=os.getenv(
+                "JASON_SES_DEFAULT_SENDER", "jason@teamaot.com"
+            ).strip(),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -143,6 +169,10 @@ class RuntimeSettings:
             raise ValueError("runtime provider service URLs must be non-empty")
         if not self.allowed_machine_identities:
             raise ValueError("at least one allowed OpenClaw machine identity is required")
+        if not self.ses_region:
+            raise ValueError("JASON_SES_REGION is required")
+        if not self.ses_default_sender:
+            raise ValueError("JASON_SES_DEFAULT_SENDER is required")
         if not self.host:
             raise ValueError("runtime host is required")
         if not (0 < self.port < 65536):
@@ -206,6 +236,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=datetime.now(timezone.utc),
     )
+    register_email_send(capabilities=capabilities, providers=providers)
 
     http_transport = UrlLibJsonHttpTransport()
     ollama_client = OllamaStructuredJsonClient(
@@ -234,13 +265,36 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
-    invoker = GovernedConnectorCapabilityInvoker(
+    datto_invoker = GovernedConnectorCapabilityInvoker(
         connectors={DATTO_RMM_PROVIDER: datto},
         provider_capability_map={
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_SEARCH): "datto_rmm.device.search",
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_READ): "datto_rmm.device.get",
         },
     )
+
+    email_secret_broker = Cap007OpenBaoSecretBroker.build(
+        base_url=settings.openbao_url,
+        role_id_path=settings.ses_openbao_role_id_path,
+        secret_id_path=settings.ses_openbao_secret_id_path,
+    )
+    email_invoker = GovernedEmailSendInvoker(
+        secrets=email_secret_broker,
+        transport=AwsSesTransport(config=AwsSesConfig(region_name=settings.ses_region)),
+        policy=EmailSendPolicy(
+            default_sender=settings.ses_default_sender,
+            allowed_senders=(settings.ses_default_sender,),
+            allow_bcc=False,
+            max_recipients=25,
+        ),
+        audit=orchestration_events,
+    )
+
+    invokers = CapabilityInvokerRegistry()
+    invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
+    invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
+
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
     resolution = GovernedCapabilityResolutionEngine(
         capabilities=capabilities,
@@ -249,7 +303,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     orchestrator = CentralOrchestrator(
         resolution=resolution,
-        invoker=invoker,
+        invoker=invokers,
         audit=orchestration_events,
         authority_context=JKD001OrchestrationContextEnforcer(context_validator),
         require_authority_context=True,
