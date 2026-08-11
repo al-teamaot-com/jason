@@ -111,7 +111,6 @@ class OllamaResourceInquiryReasoner:
                 "requested_facts": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "minItems": 1,
                 },
                 "execution_mode": {"type": "string", "enum": ["deterministic"]},
                 "permission_mode": {"type": "string", "enum": ["observe"]},
@@ -135,7 +134,8 @@ class OllamaResourceInquiryReasoner:
                 "human wording into that closed governed vocabulary rather than inventing new "
                 "resource names or selector fields. Use execution_mode deterministic and "
                 "permission_mode observe. If the request cannot be represented safely as a "
-                "read-only resource inquiry, resolved=false."
+                "read-only resource inquiry, set resolved=false, resource_selector={}, and "
+                "requested_facts=[] so Jason can evaluate the next governed intent class."
             ),
             user=json.dumps(
                 {
