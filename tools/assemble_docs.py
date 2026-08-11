@@ -21,7 +21,6 @@ CANONICAL_DIRECTORIES = (
     "07-Operations",
     "07-Roadmap",
     "08-Session-Records",
-    "10-Milestones",
 )
 
 # Existing publishing-only material retained at its historical assembled path during migration.
@@ -38,6 +37,7 @@ CONSOLIDATED_DIRECTORIES = (
     ("docs/models", "models"),
     ("docs/standards", "standards"),
     ("docs/journal", "journal"),
+    ("docs/milestones", "milestones"),
 )
 
 
