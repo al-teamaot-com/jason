@@ -1,3 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  detachPluginConversationBinding,
+  getCurrentPluginConversationBinding,
+  requestPluginConversationBinding,
+  resolvePluginConversationBindingApproval,
+} from "openclaw/plugin-sdk/conversation-runtime";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
   buildConversationEnvelope,
@@ -12,6 +20,9 @@ const DEFAULT_KEY_ID = "openclaw-gateway-2";
 const DEFAULT_PRIVATE_KEY_PATH =
   "/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const BINDING_CONTEXT_TTL_MS = 10 * 60_000;
+const BINDING_APPROVAL_TTL_MS = 5 * 60_000;
+const MAX_BINDING_CONTEXTS = 256;
 
 function asObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -67,43 +78,209 @@ function commandChannel(ctx) {
   return nonBlank(ctx.channelId ?? ctx.channel)?.toLowerCase();
 }
 
-async function handleJasonCommand(ctx) {
+function resolvePluginRoot(api) {
+  const declared = nonBlank(api.rootDir);
+  if (declared) {
+    return declared;
+  }
+  const source = nonBlank(api.source);
+  if (!source) {
+    return undefined;
+  }
+  try {
+    return path.dirname(source.startsWith("file:") ? fileURLToPath(source) : source);
+  } catch {
+    return undefined;
+  }
+}
+
+function bindingContextKeys({ sessionKey, senderId }) {
+  const keys = [];
+  const session = nonBlank(sessionKey);
+  const sender = nonBlank(senderId);
+  if (session && sender) keys.push(`session:${session}|sender:${sender}`);
+  if (session) keys.push(`session:${session}`);
+  if (sender) keys.push(`sender:${sender}`);
+  return keys;
+}
+
+function createTeamsBindingCompatibility(api) {
+  const contexts = new Map();
+  const pendingApprovals = new Map();
+  const pluginRoot = resolvePluginRoot(api);
+
+  const prune = () => {
+    const now = Date.now();
+    for (const [key, value] of contexts) {
+      if (now - value.capturedAt > BINDING_CONTEXT_TTL_MS) contexts.delete(key);
+    }
+    for (const [key, value] of pendingApprovals) {
+      if (now - value.createdAt > BINDING_APPROVAL_TTL_MS) pendingApprovals.delete(key);
+    }
+    while (contexts.size > MAX_BINDING_CONTEXTS) {
+      contexts.delete(contexts.keys().next().value);
+    }
+  };
+
+  const capture = (event, ctx) => {
+    if (ctx.channelId !== "msteams") return;
+    const conversationId = nonBlank(ctx.conversationId);
+    if (!conversationId) return;
+    const senderId = nonBlank(event.senderId ?? ctx.senderId);
+    const sessionKey = nonBlank(event.sessionKey ?? ctx.sessionKey);
+    const accountId = nonBlank(ctx.accountId) ?? "default";
+    const conversation = {
+      channel: "msteams",
+      accountId,
+      conversationId,
+      ...(event.threadId !== undefined && event.threadId !== null
+        ? { threadId: event.threadId }
+        : {}),
+    };
+    const captured = { conversation, capturedAt: Date.now() };
+    for (const key of bindingContextKeys({ sessionKey, senderId })) contexts.set(key, captured);
+    prune();
+  };
+
+  const lookup = (ctx) => {
+    prune();
+    for (const key of bindingContextKeys({ sessionKey: ctx.sessionKey, senderId: ctx.senderId })) {
+      const found = contexts.get(key);
+      if (found) return found.conversation;
+    }
+    return undefined;
+  };
+
+  const lookupWithBriefRetry = async (ctx) => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const found = lookup(ctx);
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return undefined;
+  };
+
+  const approvalKey = (ctx) =>
+    bindingContextKeys({ sessionKey: ctx.sessionKey, senderId: ctx.senderId })[0];
+
+  const rememberApproval = (ctx, approvalId) => {
+    const key = approvalKey(ctx);
+    if (!key) return false;
+    pendingApprovals.set(key, { approvalId, createdAt: Date.now() });
+    prune();
+    return true;
+  };
+
+  const takeApproval = (ctx) => {
+    prune();
+    const key = approvalKey(ctx);
+    if (!key) return undefined;
+    const pending = pendingApprovals.get(key);
+    if (pending) pendingApprovals.delete(key);
+    return pending?.approvalId;
+  };
+
+  const peekApproval = (ctx) => {
+    prune();
+    const key = approvalKey(ctx);
+    return key ? pendingApprovals.get(key)?.approvalId : undefined;
+  };
+
+  return {
+    capture,
+    pluginRoot,
+    lookupWithBriefRetry,
+    rememberApproval,
+    takeApproval,
+    peekApproval,
+  };
+}
+
+async function handleJasonCommand(ctx, compatibility) {
   if (commandChannel(ctx) !== "msteams") {
     return commandReply("Jason conversation binding is currently available only in Microsoft Teams.");
   }
+  if (!compatibility.pluginRoot) {
+    return commandReply("Jason cannot safely manage the Teams binding because its OpenClaw plugin identity is unavailable.");
+  }
 
   const action = (nonBlank(ctx.args) ?? "status").toLowerCase();
+  const conversation = await compatibility.lookupWithBriefRetry(ctx);
+  if (!conversation) {
+    return commandReply(
+      "Jason could not resolve this Teams conversation yet. Send /jason status once, then retry the command.",
+    );
+  }
+
   if (action === "bind") {
-    const current = await ctx.getCurrentConversationBinding();
+    const current = await getCurrentPluginConversationBinding({
+      pluginRoot: compatibility.pluginRoot,
+      conversation,
+    });
     if (current?.pluginId === "jason-bridge") {
       return commandReply("This Microsoft Teams conversation is already bound to Jason's governed orchestration.");
     }
-    const result = await ctx.requestConversationBinding({
-      summary:
-        "Route future plain Microsoft Teams messages in this conversation through Project Jason's governed orchestration.",
-      detachHint: "/jason unbind",
-      data: { mode: "governed-jason" },
-    });
-    if (result.status === "pending") {
-      return result.reply;
+    if (compatibility.peekApproval(ctx)) {
+      return commandReply("A Jason binding approval is already pending. Send /jason approve or /jason deny.");
     }
+    const result = await requestPluginConversationBinding({
+      pluginId: "jason-bridge",
+      pluginName: "Jason Bridge",
+      pluginRoot: compatibility.pluginRoot,
+      requestedBySenderId: nonBlank(ctx.senderId),
+      conversation,
+      binding: {
+        summary:
+          "Route future plain Microsoft Teams messages in this conversation through Project Jason's governed orchestration.",
+        detachHint: "/jason unbind",
+        data: { mode: "governed-jason" },
+      },
+    });
     if (result.status === "bound") {
       return commandReply("This Microsoft Teams conversation is now bound to Jason's governed orchestration.");
+    }
+    if (result.status === "pending") {
+      if (!compatibility.rememberApproval(ctx, result.approvalId)) {
+        return commandReply("Jason created a binding request but could not safely correlate its approval. No binding was created.");
+      }
+      return commandReply(
+        "Jason is ready to bind this Teams conversation. Send /jason approve to confirm, or /jason deny to cancel.",
+      );
     }
     return commandReply(`Jason could not request this conversation binding: ${result.message}`);
   }
 
+  if (action === "approve" || action === "deny") {
+    const approvalId = compatibility.takeApproval(ctx);
+    if (!approvalId) {
+      return commandReply("There is no pending Jason binding approval for this Teams conversation. Send /jason bind first.");
+    }
+    const result = await resolvePluginConversationBindingApproval({
+      approvalId,
+      decision: action === "approve" ? "allow-once" : "deny",
+      senderId: nonBlank(ctx.senderId),
+    });
+    if (result.status === "approved") {
+      return commandReply("This Microsoft Teams conversation is now bound to Jason's governed orchestration.");
+    }
+    if (result.status === "denied") {
+      return commandReply("Jason conversation binding was denied. Plain messages remain on normal OpenClaw routing.");
+    }
+    return commandReply("The Jason binding approval expired. Send /jason bind to create a new request.");
+  }
+
   if (action === "unbind") {
-    const current = await ctx.getCurrentConversationBinding();
+    const current = await getCurrentPluginConversationBinding({
+      pluginRoot: compatibility.pluginRoot,
+      conversation,
+    });
     if (!current) {
       return commandReply("This Microsoft Teams conversation is not currently bound to Jason.");
     }
-    if (current.pluginId !== "jason-bridge") {
-      return commandReply(
-        `This conversation is bound to ${current.pluginName ?? current.pluginId}; Jason will not detach another plugin's binding.`,
-      );
-    }
-    const result = await ctx.detachConversationBinding();
+    const result = await detachPluginConversationBinding({
+      pluginRoot: compatibility.pluginRoot,
+      conversation,
+    });
     return commandReply(
       result.removed
         ? "Jason's governed conversation binding was removed. Plain messages will return to normal OpenClaw routing."
@@ -112,7 +289,10 @@ async function handleJasonCommand(ctx) {
   }
 
   if (action === "status") {
-    const current = await ctx.getCurrentConversationBinding();
+    const current = await getCurrentPluginConversationBinding({
+      pluginRoot: compatibility.pluginRoot,
+      conversation,
+    });
     if (!current) {
       return commandReply(
         "This Microsoft Teams conversation is not bound to Jason. Use /jason bind to request a governed binding.",
@@ -124,7 +304,7 @@ async function handleJasonCommand(ctx) {
     return commandReply(`This conversation is currently bound to ${current.pluginName ?? current.pluginId}.`);
   }
 
-  return commandReply("Usage: /jason bind | /jason status | /jason unbind");
+  return commandReply("Usage: /jason bind | /jason approve | /jason deny | /jason status | /jason unbind");
 }
 
 export default definePluginEntry({
@@ -132,12 +312,23 @@ export default definePluginEntry({
   name: "Jason Bridge",
   description: "Governed Microsoft Teams transport bridge to Project Jason",
   register(api) {
+    const compatibility = createTeamsBindingCompatibility(api);
+
+    // OpenClaw 2026.7.1 does not expose a command conversation-binding resolver
+    // for Microsoft Teams. Observe the canonical inbound hook context and keep a
+    // short-lived, sender/session-scoped correlation so the authenticated
+    // /jason command can use OpenClaw's native binding APIs without patching
+    // OpenClaw core or writing directly to its SQLite state.
+    api.on("message_received", (event, ctx) => {
+      compatibility.capture(event, ctx);
+    });
+
     api.registerCommand({
       name: "jason",
       description: "Manage the governed Project Jason conversation binding.",
       acceptsArgs: true,
       requireAuth: true,
-      handler: handleJasonCommand,
+      handler: (ctx) => handleJasonCommand(ctx, compatibility),
     });
 
     api.on(
