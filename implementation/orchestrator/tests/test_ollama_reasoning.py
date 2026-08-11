@@ -130,6 +130,7 @@ def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
         llm,
         resource_types=("endpoint",),
         selector_keys=("hostname", "name", "resource_id"),
+        fact_hints=("hostname last user logged in user operating system",),
     )
 
     result = reasoner.propose(
@@ -146,9 +147,16 @@ def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
     assert resource_type_schema["enum"] == ["endpoint"]
     assert selector_schema["additionalProperties"] is False
     assert tuple(selector_schema["properties"]) == ("hostname", "name", "resource_id")
+    assert selector_schema["properties"]["hostname"] == {
+        "type": "string",
+        "minLength": 1,
+    }
     prompt = json.loads(request["messages"][1]["content"])
     assert prompt["allowed_resource_types"] == ["endpoint"]
     assert prompt["allowed_selector_keys"] == ["hostname", "name", "resource_id"]
+    assert prompt["fact_hints"] == ["hostname last user logged in user operating system"]
+    assert "authorization context only" in request["messages"][0]["content"]
+    assert "requested_facts must describe what the human wants to know" in request["messages"][0]["content"]
 
 
 def test_capability_reasoner_selects_only_candidate_and_builds_arguments_deterministically():
