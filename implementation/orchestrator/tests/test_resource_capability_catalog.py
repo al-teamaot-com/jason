@@ -96,7 +96,8 @@ def test_datto_connector_translates_provider_neutral_hostname_selector_to_search
 
     assert path == "/api/v2/account/devices"
     assert params is not None
-    assert params["search"] == "AOT-50282"
+    assert params["hostname"] == "AOT-50282"
+    assert "search" not in params
 
 
 def test_datto_connector_translates_provider_neutral_resource_id_to_get():
