@@ -59,11 +59,87 @@ function safeReply(text) {
   return { handled: true, reply: { text } };
 }
 
+function commandReply(text) {
+  return { text };
+}
+
+function commandChannel(ctx) {
+  return nonBlank(ctx.channelId ?? ctx.channel)?.toLowerCase();
+}
+
+async function handleJasonCommand(ctx) {
+  if (commandChannel(ctx) !== "msteams") {
+    return commandReply("Jason conversation binding is currently available only in Microsoft Teams.");
+  }
+
+  const action = (nonBlank(ctx.args) ?? "status").toLowerCase();
+  if (action === "bind") {
+    const current = await ctx.getCurrentConversationBinding();
+    if (current?.pluginId === "jason-bridge") {
+      return commandReply("This Microsoft Teams conversation is already bound to Jason's governed orchestration.");
+    }
+    const result = await ctx.requestConversationBinding({
+      summary:
+        "Route future plain Microsoft Teams messages in this conversation through Project Jason's governed orchestration.",
+      detachHint: "/jason unbind",
+      data: { mode: "governed-jason" },
+    });
+    if (result.status === "pending") {
+      return result.reply;
+    }
+    if (result.status === "bound") {
+      return commandReply("This Microsoft Teams conversation is now bound to Jason's governed orchestration.");
+    }
+    return commandReply(`Jason could not request this conversation binding: ${result.message}`);
+  }
+
+  if (action === "unbind") {
+    const current = await ctx.getCurrentConversationBinding();
+    if (!current) {
+      return commandReply("This Microsoft Teams conversation is not currently bound to Jason.");
+    }
+    if (current.pluginId !== "jason-bridge") {
+      return commandReply(
+        `This conversation is bound to ${current.pluginName ?? current.pluginId}; Jason will not detach another plugin's binding.`,
+      );
+    }
+    const result = await ctx.detachConversationBinding();
+    return commandReply(
+      result.removed
+        ? "Jason's governed conversation binding was removed. Plain messages will return to normal OpenClaw routing."
+        : "Jason could not remove the conversation binding.",
+    );
+  }
+
+  if (action === "status") {
+    const current = await ctx.getCurrentConversationBinding();
+    if (!current) {
+      return commandReply(
+        "This Microsoft Teams conversation is not bound to Jason. Use /jason bind to request a governed binding.",
+      );
+    }
+    if (current.pluginId === "jason-bridge") {
+      return commandReply("This Microsoft Teams conversation is bound to Jason's governed orchestration.");
+    }
+    return commandReply(`This conversation is currently bound to ${current.pluginName ?? current.pluginId}.`);
+  }
+
+  return commandReply("Usage: /jason bind | /jason status | /jason unbind");
+}
+
 export default definePluginEntry({
   id: "jason-bridge",
   name: "Jason Bridge",
   description: "Governed Microsoft Teams transport bridge to Project Jason",
   register(api) {
+    api.registerCommand({
+      name: "jason",
+      description: "Manage the governed Project Jason conversation binding.",
+      acceptsArgs: true,
+      requireAuth: true,
+      handler: handleJasonCommand,
+    });
+
     api.on(
       "inbound_claim",
       async (event, ctx) => {
