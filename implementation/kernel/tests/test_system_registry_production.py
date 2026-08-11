@@ -20,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = REPO_ROOT / "implementation/kernel/system_registry/production-registry.json"
 PLAN = REPO_ROOT / "implementation/kernel/system_registry/production-verification-plan.json"
 NOW = datetime(2026, 8, 11, 15, 30, tzinfo=timezone.utc)
+HOST_VERIFICATION_METHODS = {
+    "docker-container-inspect-v1",
+    "docker-file-sha256-v1",
+}
 
 
 def test_production_manifest_loads_with_resolved_dependencies() -> None:
@@ -33,9 +37,13 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     assert "capability.endpoint-device-search" in ids
     assert "capability.endpoint-device-read" in ids
     assert "capability.communication-email-send" in ids
+    assert "capability.system-registry-search" in ids
+    assert "capability.system-registry-read" in ids
+    assert "capability.system-registry-trace" in ids
     assert "provider.datto-rmm" in ids
     assert "provider.microsoft-graph" in ids
     assert "provider.aws-ses" in ids
+    assert "provider.system-registry" in ids
     assert "identity-binding.aot-microsoft-al" in ids
     assert "deployment.jason-single-host-pilot" in ids
 
@@ -45,12 +53,30 @@ def test_physical_configured_entities_have_bounded_host_checks() -> None:
     plan = load_verification_plan(PLAN, registry=registry)
     planned_ids = {check.registry_id for check in plan.checks}
 
-    configured = {
+    configured_physical = {
         entity.registry_id
         for entity in registry.list_all()
         if entity.lifecycle_status.value == "configured"
+        and HOST_VERIFICATION_METHODS.intersection(entity.verification_methods)
     }
-    assert configured == planned_ids
+    assert configured_physical == planned_ids
+
+
+def test_non_host_configured_entities_require_separate_governed_verification() -> None:
+    registry = registry_from_manifest(MANIFEST)
+    configured_non_host = {
+        entity.registry_id
+        for entity in registry.list_all()
+        if entity.lifecycle_status.value == "configured"
+        and not HOST_VERIFICATION_METHODS.intersection(entity.verification_methods)
+    }
+
+    assert configured_non_host == {
+        "provider.system-registry",
+        "capability.system-registry-search",
+        "capability.system-registry-read",
+        "capability.system-registry-trace",
+    }
 
 
 def test_docker_container_probe_can_verify_runtime_security_state() -> None:
