@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 from connectors.core.contracts import ConnectorContext
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from jason_cap_007.service import SecretLease
+from orchestrator.event_store import SQLiteOrchestrationEventStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,3 +67,30 @@ class Cap007OpenBaoSecretBroker:
         # before returning the secret values. Clear semantics are intentionally
         # explicit: there is no retained runtime token to revoke here.
         del lease
+
+
+@dataclass(frozen=True, slots=True)
+class Cap007EventAudit:
+    """Translate CAP-007 safe audit metadata into ORCH-001 event-store records."""
+
+    events: SQLiteOrchestrationEventStore
+
+    def append(self, event_type: str, payload: Mapping[str, Any]) -> None:
+        stage = {
+            "email.send.attempted": "invoking",
+            "email.send.completed": "completed",
+            "email.send.failed": "failed",
+        }.get(event_type, "completed")
+
+        self.events.append(
+            event_type,
+            {
+                "execution_id": str(payload["execution_id"]),
+                "correlation_id": str(payload["correlation_id"]),
+                "organization_id": str(payload["organization_id"]),
+                "principal_id": str(payload["principal_id"]),
+                "capability_name": str(payload["capability"]),
+                "stage": stage,
+                **dict(payload),
+            },
+        )
