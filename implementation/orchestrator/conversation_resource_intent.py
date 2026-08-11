@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -54,6 +55,7 @@ class ReasonedResourceInquiryInterpreter:
             "target_agent",
         }
     )
+    _IDENTIFIER_CHAR_CLASS = r"A-Za-z0-9._:/\\-"
 
     def interpret(
         self,
@@ -105,6 +107,10 @@ class ReasonedResourceInquiryInterpreter:
             value = raw_value.strip()
             if not value:
                 raise ValueError("resource selector values must be non-empty")
+            if not self._selector_value_is_grounded(text=text, value=value):
+                raise ValueError(
+                    "resource selector values must be grounded in identifiers explicitly supplied by the human"
+                )
             normalized_selector[key] = value
 
         return ResourceInquiry(
@@ -114,6 +120,19 @@ class ReasonedResourceInquiryInterpreter:
             execution_mode=str(proposed.get("execution_mode", "deterministic")).strip(),
             permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
         )
+
+    @classmethod
+    def _selector_value_is_grounded(cls, *, text: str, value: str) -> bool:
+        """Require selector values to come from the human text, not authority context.
+
+        Identifier punctuation such as hyphens is treated as part of the same token.
+        Therefore an authority value like ``AOT`` does not count as grounded merely
+        because the human supplied a hostname such as ``AOT-50282``.
+        """
+
+        boundary = cls._IDENTIFIER_CHAR_CLASS
+        pattern = rf"(?<![{boundary}]){re.escape(value)}(?![{boundary}])"
+        return re.search(pattern, text, flags=re.IGNORECASE) is not None
 
 
 class ResourceInquiryInterpreter(Protocol):
