@@ -153,6 +153,46 @@ def test_language_reasoner_cannot_smuggle_nested_selector_operators():
         )
 
 
+def test_identifier_prefix_cannot_be_inferred_as_site_or_tenant_scope():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {
+                "hostname": "AOT-50282",
+                "site": "aot",
+            },
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="grounded in identifiers explicitly supplied"):
+        intent_resolver.resolve(
+            text="Who is logged into AOT-50282?",
+            principal=principal(),
+        )
+
+
+def test_explicit_site_selector_is_allowed_when_human_supplies_it():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {
+                "hostname": "AOT-50282",
+                "site": "Customer-B",
+            },
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    intent = intent_resolver.resolve(
+        text="Who is logged into AOT-50282 at site Customer-B?",
+        principal=principal(),
+    )
+
+    assert intent is not None
+    assert intent.arguments["site"] == "Customer-B"
+
+
 def test_language_reasoner_cannot_turn_read_question_into_execute_authority():
     intent_resolver, _ = resolver(
         {
