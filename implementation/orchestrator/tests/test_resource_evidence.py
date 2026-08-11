@@ -52,13 +52,33 @@ def result(*, data=None, provider="datto_rmm", status=OrchestrationStatus.SUCCEE
     )
 
 
-def intent(*facts):
+def canonical_search_data(*matches, provider_data=None):
+    return {
+        "resource_matches": list(matches),
+        "provider_data": provider_data
+        if provider_data is not None
+        else {
+            "devices": [
+                {
+                    "uid": "device-uid-1",
+                    "hostname": "AOT-50282",
+                    "lastUser": "AOT\\example.user",
+                }
+            ]
+        },
+    }
+
+
+def intent(*facts, hostname="AOT-50282", site=None):
+    arguments = {
+        "hostname": hostname,
+        "requested_facts": facts or ("last logged in user",),
+    }
+    if site is not None:
+        arguments["site"] = site
     return ConversationIntent(
         capability_name="endpoint.device.search",
-        arguments={
-            "hostname": "AOT-50282",
-            "requested_facts": facts or ("last logged in user",),
-        },
+        arguments=arguments,
         execution_mode="deterministic",
         permission_mode="observe",
     )
@@ -86,25 +106,99 @@ def test_reasoner_identifies_path_but_actual_provider_value_becomes_the_assertio
     assert facts[0].json_pointer == "/devices/0/lastUser"
 
 
-def test_renderer_returns_only_verified_requested_fact_with_source():
+def test_renderer_returns_only_verified_requested_fact_after_unique_identity_resolution():
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "last logged in user",
+                "json_pointer": "/provider_data/devices/0/lastUser",
+            }
+        ]
+    )
     renderer = GovernedTeamsResourceResponseRenderer(
-        GovernedResourceEvidenceInterpreter(
-            Reasoner(
-                [
-                    {
-                        "requested_fact": "last logged in user",
-                        "json_pointer": "/devices/0/lastUser",
-                    }
-                ]
-            )
-        )
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+    data = canonical_search_data(
+        {
+            "resource_id": "device-uid-1",
+            "hostname": "AOT-50282",
+            "site": "Customer-A",
+        }
     )
 
-    text = renderer.render(result(), intent("last logged in user"))
+    text = renderer.render(result(data=data), intent("last logged in user"))
 
     assert text == (
         "AOT-50282 — last logged in user: AOT\\example.user. Source: datto_rmm."
     )
+    assert reasoner.calls
+
+
+def test_ambiguous_endpoint_name_never_selects_first_result_or_exposes_candidate_details():
+    reasoner = Reasoner([])
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+    data = canonical_search_data(
+        {
+            "resource_id": "device-uid-a",
+            "hostname": "SERVER",
+            "site": "Customer-A",
+        },
+        {
+            "resource_id": "device-uid-b",
+            "hostname": "SERVER",
+            "site": "Customer-B",
+        },
+    )
+
+    text = renderer.render(result(data=data), intent(hostname="SERVER"))
+
+    assert text == (
+        "SERVER is ambiguous: 2 managed endpoints matched. "
+        "Please specify the site/client or a durable resource identifier. "
+        "No device was selected. Source: datto_rmm."
+    )
+    assert "Customer-A" not in text
+    assert "Customer-B" not in text
+    assert "device-uid" not in text
+    assert reasoner.calls == []
+
+
+def test_no_endpoint_match_returns_deterministic_no_match_without_reasoner():
+    reasoner = Reasoner([])
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    text = renderer.render(
+        result(data=canonical_search_data()),
+        intent(hostname="MISSING-SERVER"),
+    )
+
+    assert text == (
+        "MISSING-SERVER — no matching managed endpoint was found. Source: datto_rmm."
+    )
+    assert reasoner.calls == []
+
+
+def test_unique_endpoint_match_requires_durable_resource_identity():
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(Reasoner([]))
+    )
+    data = canonical_search_data({"hostname": "SERVER", "site": "Customer-A"})
+
+    with pytest.raises(LookupError, match="durable resource identity"):
+        renderer.render(result(data=data), intent(hostname="SERVER"))
+
+
+def test_search_result_missing_canonical_matches_fails_closed():
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(Reasoner([]))
+    )
+
+    with pytest.raises(RuntimeError, match="canonical resource_matches"):
+        renderer.render(result(), intent())
 
 
 def test_evidence_reasoner_cannot_assert_an_unrequested_provider_field():
