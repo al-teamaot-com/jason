@@ -4,7 +4,10 @@ from datetime import datetime, timedelta, timezone
 
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
-from orchestrator.teams_conversation_flow import TeamsConversationFlowResult
+from orchestrator.teams_conversation_flow import (
+    ConversationIntentUnresolvedError,
+    TeamsConversationFlowResult,
+)
 
 
 class Authenticator:
@@ -239,3 +242,41 @@ def test_flow_identity_or_authority_denial_is_sanitized():
         "status": "denied",
         "error_code": "conversation_denied",
     }
+
+
+def test_only_explicit_intent_resolution_failure_is_reported_as_unresolved():
+    audit = Audit()
+    flow = Flow(
+        error=ConversationIntentUnresolvedError(
+            "no governed Jason capability intent could be resolved"
+        )
+    )
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-unresolved")
+    )
+
+    assert result == {
+        "request_id": "req-unresolved",
+        "correlation_id": "corr-conversation-1",
+        "status": "rejected",
+        "error_code": "conversation_unresolved",
+    }
+    assert audit.events[-1][0] == "openclaw.teams_conversation_rejected"
+
+
+def test_downstream_lookup_failure_is_reported_as_failed_not_unresolved():
+    audit = Audit()
+    flow = Flow(error=LookupError("provider evidence pointer does not exist"))
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-evidence-failed")
+    )
+
+    assert result == {
+        "request_id": "req-evidence-failed",
+        "correlation_id": "corr-conversation-1",
+        "status": "failed",
+        "error_code": "conversation_failed",
+    }
+    assert audit.events[-1][0] == "openclaw.teams_conversation_failed"
