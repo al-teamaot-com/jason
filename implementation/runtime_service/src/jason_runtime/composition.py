@@ -240,6 +240,32 @@ class ConnectorEventAudit:
         )
 
 
+def _resource_language_contract(
+    capabilities: CapabilityRegistryService,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Derive language-normalization vocabulary from governed capability metadata."""
+
+    resource_types: set[str] = set()
+    selector_keys: set[str] = set()
+    for capability in capabilities.list_all():
+        metadata = capability.metadata
+        if metadata.get("provider_neutral", "false").lower() != "true":
+            continue
+        if metadata.get("read_only", "false").lower() != "true":
+            continue
+        resource_types.update(
+            item.strip()
+            for item in metadata.get("resource_types", "").split(",")
+            if item.strip()
+        )
+        selector_keys.update(
+            item.strip()
+            for item in metadata.get("selector_keys", "").split(",")
+            if item.strip()
+        )
+    return tuple(sorted(resource_types)), tuple(sorted(selector_keys))
+
+
 def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
     """Compose the production conversational runtime from governed Jason primitives."""
 
@@ -286,6 +312,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
+    resource_types, selector_keys = _resource_language_contract(capabilities)
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
         model=settings.ollama_model,
@@ -297,7 +324,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     resource_intent_resolver = GovernedResourceConversationIntentResolver(
         interpreter=ReasonedResourceInquiryInterpreter(
-            reasoner=OllamaResourceInquiryReasoner(ollama_client)
+            reasoner=OllamaResourceInquiryReasoner(
+                ollama_client,
+                resource_types=resource_types,
+                selector_keys=selector_keys,
+            )
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,
