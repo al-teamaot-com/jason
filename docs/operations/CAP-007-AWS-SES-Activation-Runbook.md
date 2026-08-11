@@ -293,8 +293,8 @@ The binary `.msg` is not stored in Git.
 
 **Evidence records:**
 
-- `07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md`
-- `08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
+- `docs/sessions/CAP-007-Live-Pilot-Proof-2026-08-11.md`
+- `docs/sessions/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`
 
 Production scope must remain no broader than the approved policy.
 
@@ -320,4 +320,4 @@ This runbook preserves the Jason Constitution by maintaining human governance, p
 
 The full constitutional review for the live conversational proof is recorded in:
 
-`08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`.
+`docs/sessions/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md`.
