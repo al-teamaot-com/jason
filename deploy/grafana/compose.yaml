@@ -1,0 +1,39 @@
+services:
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:13.1.1}
+    container_name: jason-grafana
+    hostname: jason-grafana
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in deploy/grafana/.env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SERVER_DOMAIN: ${GRAFANA_SERVER_DOMAIN:-localhost}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../implementation/management_console/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../implementation/management_console/grafana/dashboards:/var/lib/grafana/dashboards/jason:ro
+
+    networks:
+      - jason-core
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  grafana-data:
+
+networks:
+  jason-core:
+    external: true
+    name: jason-core

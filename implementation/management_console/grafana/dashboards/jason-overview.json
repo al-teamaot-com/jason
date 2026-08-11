@@ -1,0 +1,91 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "type": "text",
+      "title": "Jason Management Console",
+      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 0},
+      "options": {
+        "mode": "markdown",
+        "content": "# Jason Operations Overview\n\nGrafana provides Jason's operational presentation layer. Jason remains authoritative for identity, policy, approvals, capability resolution, execution, configuration, secrets, and audit.\n\n**Current phase:** read-only foundation. No provider writes are exposed from this dashboard."
+      }
+    },
+    {
+      "type": "text",
+      "title": "System Health",
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 5},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/system/health`\n\nKernel, orchestrator, and subsystem health."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Capabilities",
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 5},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/capabilities`\n\nRegistered capabilities, versions, modes, risk, and approval requirements."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Providers / Connectors",
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 5},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/providers`\n\nProvider readiness and health without credential exposure."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Approvals",
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 5},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/approvals`\n\nPending human actions visible to the authenticated principal."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Audit",
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 11},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/audit/events`\n\nExecutions, policy outcomes, principals, correlation IDs, and evidence references."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Configuration",
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 11},
+      "options": {
+        "mode": "markdown",
+        "content": "### Planned live source\n`GET /api/management/v0.1/configuration`\n\nRead-only governed configuration inventory. Future changes must use governed capabilities."
+      }
+    },
+    {
+      "type": "text",
+      "title": "Secrets & Stewardship",
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 11},
+      "options": {
+        "mode": "markdown",
+        "content": "### Secret metadata\n`GET /api/management/v0.1/secrets`\n\nNever display raw secret values.\n\n### Platform Stewardship\nDependency health, API changes, deprecations, and retirement candidates will be added as governed sources mature."
+      }
+    }
+  ],
+  "schemaVersion": 41,
+  "tags": ["jason", "operations", "governed"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Jason Operations Overview",
+  "uid": "jason-operations-overview",
+  "version": 1
+}

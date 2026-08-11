@@ -1,0 +1,236 @@
+openapi: 3.1.0
+info:
+  title: Jason Management API
+  version: 0.1.0
+  description: >-
+    Initial read-only contract for the Jason Management Console. This API exposes
+    governed operational state and configuration metadata. It does not permit the
+    console to bypass orchestration, authorization, policy, approval, or audit controls.
+servers:
+  - url: /api/management/v0.1
+paths:
+  /overview:
+    get:
+      operationId: getManagementOverview
+      summary: Return management dashboard summary
+      responses:
+        '200':
+          description: Governed management overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagementOverview'
+  /capabilities:
+    get:
+      operationId: listCapabilities
+      summary: List capability registry entries visible to the principal
+      responses:
+        '200':
+          description: Capability inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CapabilitySummary'
+  /providers:
+    get:
+      operationId: listProviders
+      summary: List execution providers and connector readiness metadata
+      responses:
+        '200':
+          description: Provider inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderSummary'
+  /policies:
+    get:
+      operationId: listPolicySummaries
+      summary: List governing policy summaries and versions
+      responses:
+        '200':
+          description: Policy inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PolicySummary'
+  /approvals:
+    get:
+      operationId: listPendingApprovals
+      summary: List pending approvals visible to the principal
+      responses:
+        '200':
+          description: Approval queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalSummary'
+  /audit/events:
+    get:
+      operationId: searchAuditEvents
+      summary: Search auditable Jason events
+      parameters:
+        - in: query
+          name: correlation_id
+          schema: { type: string }
+        - in: query
+          name: execution_id
+          schema: { type: string }
+        - in: query
+          name: principal_id
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuditEventSummary'
+  /configuration:
+    get:
+      operationId: listConfiguration
+      summary: List governed configuration metadata visible to the principal
+      responses:
+        '200':
+          description: Configuration inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ConfigurationItem'
+  /secrets:
+    get:
+      operationId: listSecretMetadata
+      summary: List secret metadata without returning secret values
+      responses:
+        '200':
+          description: Secret metadata inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SecretMetadata'
+  /system/health:
+    get:
+      operationId: getSystemHealth
+      summary: Return Kernel, orchestrator, and subsystem health
+      responses:
+        '200':
+          description: System health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealth'
+components:
+  schemas:
+    ManagementOverview:
+      type: object
+      required: [kernel_status, capability_count, pending_approval_count, audit_status]
+      properties:
+        kernel_status: { type: string }
+        kernel_version: { type: string }
+        capability_count: { type: integer, minimum: 0 }
+        pending_approval_count: { type: integer, minimum: 0 }
+        audit_status: { type: string }
+    CapabilitySummary:
+      type: object
+      required: [name, version, mode, status]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        mode: { type: string }
+        status: { type: string }
+        provider_count: { type: integer, minimum: 0 }
+        risk_level: { type: string }
+        approval_required: { type: boolean }
+    ProviderSummary:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string }
+        provider_type: { type: string }
+        status: { type: string }
+        health: { type: string }
+        last_checked_at: { type: string, format: date-time }
+        credential_reference_present: { type: boolean }
+    PolicySummary:
+      type: object
+      required: [policy_id, version, status]
+      properties:
+        policy_id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        status: { type: string }
+        owner: { type: string }
+    ApprovalSummary:
+      type: object
+      required: [approval_id, status, requested_at]
+      properties:
+        approval_id: { type: string }
+        execution_id: { type: string }
+        requested_by: { type: string }
+        action: { type: string }
+        risk_level: { type: string }
+        status: { type: string }
+        requested_at: { type: string, format: date-time }
+    AuditEventSummary:
+      type: object
+      required: [event_id, event_type, occurred_at]
+      properties:
+        event_id: { type: string }
+        event_type: { type: string }
+        execution_id: { type: string }
+        correlation_id: { type: string }
+        principal_id: { type: string }
+        organization_id: { type: string }
+        outcome: { type: string }
+        evidence_reference: { type: string }
+        occurred_at: { type: string, format: date-time }
+    ConfigurationItem:
+      type: object
+      required: [key, scope, source, mutable]
+      properties:
+        key: { type: string }
+        scope: { type: string }
+        source: { type: string }
+        value_type: { type: string }
+        display_value: { type: string }
+        mutable: { type: boolean }
+        change_capability: { type: string }
+        approval_required: { type: boolean }
+    SecretMetadata:
+      type: object
+      required: [secret_id, status]
+      properties:
+        secret_id: { type: string }
+        purpose: { type: string }
+        owner: { type: string }
+        status: { type: string }
+        expires_at: { type: string, format: date-time }
+        last_rotated_at: { type: string, format: date-time }
+    SystemHealth:
+      type: object
+      required: [status, components]
+      properties:
+        status: { type: string }
+        version: { type: string }
+        components:
+          type: array
+          items:
+            type: object
+            required: [name, status]
+            properties:
+              name: { type: string }
+              status: { type: string }
+              version: { type: string }

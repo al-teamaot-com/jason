@@ -19,7 +19,7 @@ dev = ["pytest>=8.3,<10"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["connectors*", "kernel*"]
+include = ["connectors*", "kernel*", "management_api*"]
 
 [tool.pytest.ini_options]
 pythonpath = [".", "connectors", "connectors/src"]
