@@ -1,8 +1,60 @@
 from __future__ import annotations
 
+from connectors.core.contracts import ConnectorContext, ConnectorRequest
+from connectors.datto_rmm.auth import DattoRmmAccessToken
+from connectors.datto_rmm.connector import DattoRmmConnector
 import pytest
 
-from connectors.datto_rmm.connector import DattoRmmConnector
+
+class Secrets:
+    def resolve(self, logical_secret, context):
+        assert logical_secret == "datto_rmm.readonly"
+        return {
+            "api_url": "https://example.invalid",
+            "api_key": "durable-key",
+            "api_secret": "durable-secret",
+        }
+
+
+class Audit:
+    def __init__(self):
+        self.events = []
+
+    def record(self, event_type, context, details):
+        self.events.append((event_type, dict(details)))
+
+
+class Transport:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+        self.calls.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": dict(headers),
+                "params": dict(params or {}),
+                "json": json,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return self.responses.pop(0)
+
+
+def connector_request(*, arguments, capability="datto_rmm.device.search"):
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-1",
+            principal_id="person-1",
+            organization_id="aot",
+            client_id=None,
+            capability=capability,
+            mode="observe",
+        ),
+        arguments=arguments,
+    )
 
 
 def test_device_search_translates_hostname_without_collapsing_ambiguity() -> None:
@@ -116,6 +168,119 @@ def test_device_search_normalization_fails_closed_without_device_collection() ->
             "datto_rmm.device.search",
             {"unexpected": []},
         )
+
+
+def test_pure_device_discovery_does_not_issue_exact_read(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    search_payload = {
+        "devices": [
+            {
+                "uid": "device-uid-1",
+                "hostname": "SERVER",
+                "siteName": "Customer-A",
+            }
+        ]
+    }
+    transport = Transport([search_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+
+    result = connector.execute(
+        connector_request(arguments={"hostname": "SERVER"})
+    )
+
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["url"].endswith("/api/v2/account/devices")
+    assert result.data["provider_data"] == search_payload
+    assert result.data["resource_matches"][0]["resource_id"] == "device-uid-1"
+
+
+def test_fact_bearing_search_resolves_unique_match_to_exact_device_read(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    search_payload = {
+        "devices": [
+            {
+                "uid": "device-uid-1",
+                "hostname": "SERVER",
+                "siteName": "Customer-A",
+                "lastUser": "SUMMARY\\must-not-be-used",
+            }
+        ]
+    }
+    exact_payload = {
+        "uid": "device-uid-1",
+        "hostname": "SERVER",
+        "siteName": "Customer-A",
+        "lastUser": "CUSTOMERA\\exact.user",
+    }
+    audit = Audit()
+    transport = Transport([search_payload, exact_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=audit)
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "SERVER",
+                "requested_facts": ("last user",),
+            }
+        )
+    )
+
+    assert len(transport.calls) == 2
+    assert transport.calls[0]["url"].endswith("/api/v2/account/devices")
+    assert transport.calls[1]["url"].endswith("/api/v2/device/device-uid-1")
+    assert result.capability == "datto_rmm.device.search"
+    assert result.data == {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "SERVER",
+                "site": "Customer-A",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": exact_payload,
+    }
+    assert [event[0] for event in audit.events] == [
+        "connector.requested",
+        "connector.completed",
+        "connector.requested",
+        "connector.completed",
+    ]
+
+
+def test_fact_bearing_search_stops_on_ambiguous_candidates(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    search_payload = {
+        "devices": [
+            {"uid": "device-uid-1", "hostname": "SERVER", "siteName": "Customer-A"},
+            {"uid": "device-uid-2", "hostname": "SERVER", "siteName": "Customer-B"},
+        ]
+    }
+    transport = Transport([search_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "SERVER",
+                "requested_facts": ("last user",),
+            }
+        )
+    )
+
+    assert len(transport.calls) == 1
+    assert len(result.data["resource_matches"]) == 2
+    assert result.data["provider_data"] == search_payload
+    assert "resolved_resource_id" not in result.data
 
 
 def test_device_read_uses_resource_id_as_durable_device_uid() -> None:
