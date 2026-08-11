@@ -6,6 +6,7 @@ on:
       - 'implementation/connectors/datto_rmm/**'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_datto_rmm_auth.py'
+      - 'implementation/connectors/tests/test_datto_rmm_connector.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
@@ -14,6 +15,7 @@ on:
       - 'implementation/connectors/datto_rmm/**'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_datto_rmm_auth.py'
+      - 'implementation/connectors/tests/test_datto_rmm_connector.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
@@ -37,6 +39,7 @@ jobs:
           PYTHONPATH: implementation
         run: |
           python -m pytest implementation/connectors/tests/test_datto_rmm_auth.py -q
+          python -m pytest implementation/connectors/tests/test_datto_rmm_connector.py -q
           python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
       - name: Verify credential-safe live-read preflight
         run: |
