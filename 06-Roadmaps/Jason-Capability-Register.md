@@ -96,6 +96,34 @@ CAP-001 now:
 6. fails closed when authority or resolution is denied;
 7. remains read-only and recommendation-only.
 
+## Capability #007
+
+### CAP-007 — Governed Email Send
+
+| Field | Definition |
+|---|---|
+| Capability ID | `CAP-007` |
+| Canonical capability name | `communication.email.send` |
+| Name | Governed Email Send |
+| Purpose | Send authorized operational email through a replaceable provider with explicit authority, secret isolation, auditability, and fail-closed behavior. |
+| Business justification | Many Jason workflows require outbound communication; one reusable governed primitive avoids workflow-specific send scripts and provider lock-in. |
+| Competencies | Authorize, communicate, validate audience/sender scope, execute, audit, preserve evidence. |
+| Inputs | Recipient set, subject, text/HTML body, optional reply-to/CC/BCC, requester and organization/client execution context. |
+| Outputs | Provider acceptance state, provider message ID, recipient count, subject digest, audit-safe execution metadata. |
+| Required evidence | Authenticated requester context, approved sender policy, recipient scope, governed provider resolution, approval record, provider result, audit trail. |
+| Applicable policies | Authority before execution, provider-neutral capability resolution, JKD-003 secret isolation, least privilege, no automatic fallback, audit redaction. |
+| Authority | Version 0.1 pilot requires explicit approval for every send and explicit pilot authority. |
+| Technical execution modes | `deterministic` transport execution through a governed external connector provider. |
+| Risk level | High during pilot because the capability creates external communication. |
+| Current maturity stage | Execute with approval |
+| Success metrics | Authorized-send success rate, unauthorized-send denial rate, secret/body leakage rate, audit completeness, duplicate-send rate, provider error containment. |
+| Failure behavior | Fail closed; one attempt; no automatic retry; no silent provider fallback; never expose secret/provider exception content. |
+| Steward | Jason Architecture Authority; operational ownership by TeamAOT Operations. |
+| Review interval | Quarterly and before production mail-policy changes. |
+| Retirement criteria | Replace or simplify when an approved provider-neutral platform capability provides equivalent outcomes with lower maintenance/risk, or when no real workflow requires outbound email. |
+| Provider implementations | Initial pilot provider is AWS SES (`aws-ses`); provider replacement must not change the canonical capability contract. |
+| Status | Pilot foundation — Kernel registration and no-network controls implemented; live credentials and controlled send remain gated. |
+
 ## Planned vertical slices
 
 The order below is provisional and should be changed when implementation evidence supports a better sequence.
@@ -108,6 +136,7 @@ The order below is provisional and should be changed when implementation evidenc
 | CAP-004 | Backup Failure Investigation | Recommend | Exercise time-sensitive operational evidence and escalation |
 | CAP-005 | Client Communication Drafting | Recommend | Apply audience-aware progressive disclosure |
 | CAP-006 | Knowledge Candidate Capture | Observe | Preserve reusable lessons from completed work |
+| CAP-007 | Governed Email Send | Execute with approval | Provide one reusable governed outbound-email primitive with AWS SES as a replaceable pilot provider |
 
 ## Admission test
 

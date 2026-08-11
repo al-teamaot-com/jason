@@ -68,9 +68,13 @@ def write_provider_secret_cas(
 ) -> int:
     spec = base.PROVIDERS[provider]
     expected = tuple(spec["fields"])
-    missing = [field for field in expected if not values.get(field)]
+    required = tuple(spec.get("required_fields", expected))
+    missing = [field for field in required if not values.get(field)]
+    unexpected = sorted(set(values) - set(expected))
     if missing:
         raise base.ProvisionError("Missing provider fields: " + ", ".join(missing))
+    if unexpected:
+        raise base.ProvisionError("Unexpected provider fields: " + ", ".join(unexpected))
 
     secret_path = str(spec["secret_path"])
     version = current_version(address, secret_path, admin_token)
@@ -81,7 +85,7 @@ def write_provider_secret_cas(
         token=admin_token,
         payload={
             "options": {"cas": version},
-            "data": {field: values[field] for field in expected},
+            "data": {field: values[field] for field in expected if field in values},
         },
         allow_empty=True,
     )
@@ -101,6 +105,7 @@ def main() -> int:
                     "logical_name": spec["logical_name"],
                     "secret_path": spec["secret_path"],
                     "fields": list(spec["fields"]),
+                    "required_fields": list(spec.get("required_fields", spec["fields"])),
                     "write_semantics": "kv_v2_compare_and_set",
                     "network_contacted": False,
                     "secret_entered": False,

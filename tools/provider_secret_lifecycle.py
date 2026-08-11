@@ -156,7 +156,6 @@ def rotate_identity(*, address: str, admin_token: str, provider: str) -> dict[st
         raise LifecycleError("Current AppRole SecretID accessor is unavailable.")
 
     spec = base.PROVIDERS[provider]
-    # Re-assert the canonical policy/role configuration before issuing a new identity.
     base.configure_read_approle(
         address=address,
         admin_token=admin_token,
@@ -201,7 +200,6 @@ def deactivate(*, address: str, admin_token: str, provider: str) -> dict[str, An
                 accessor=accessor,
             )
         except base.ProvisionError:
-            # Deleting the role below is the authoritative fail-closed action.
             pass
 
     base.api_request(
@@ -283,9 +281,13 @@ def verify(provider: str) -> dict[str, Any]:
     )
     values = dict(resolver.resolve(str(spec["logical_name"]), context))
     try:
-        expected = set(spec["fields"])
-        if set(values) != expected:
+        allowed = set(spec["fields"])
+        required = set(spec.get("required_fields", spec["fields"]))
+        present = set(values)
+        if not required.issubset(present) or not present.issubset(allowed):
             raise LifecycleError("Provider secret field contract mismatch.")
+        if any(not str(values[field]).strip() for field in required):
+            raise LifecycleError("Provider secret required field is empty.")
         return {
             "provider": provider,
             "action": "verify",

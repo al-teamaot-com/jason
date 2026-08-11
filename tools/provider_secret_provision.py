@@ -11,6 +11,18 @@ from urllib import error, parse, request
 
 
 PROVIDERS: dict[str, dict[str, object]] = {
+    "aws_ses": {
+        "logical_name": "aws_ses.sendmail",
+        "secret_path": "secret/data/connectors/aws-ses/production/sendmail",
+        "fields": ("access_key_id", "secret_access_key", "session_token"),
+        "required_fields": ("access_key_id", "secret_access_key"),
+        "policy_name": "jason-aws-ses-sendmail-read",
+        "role_name": "jason-aws-ses-sendmail-read",
+        "connector_identity": "aws-ses-sendmail",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/aws-ses-sendmail-approle"
+        ),
+    },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
         "secret_path": "secret/data/connectors/datto-rmm/production/read-only",
@@ -109,14 +121,17 @@ def provider_policy_text(provider: str) -> str:
 
 def collect_values(provider: str) -> dict[str, str]:
     values: dict[str, str] = {}
-    for field in tuple(PROVIDERS[provider]["fields"]):
+    spec = PROVIDERS[provider]
+    required_fields = set(spec.get("required_fields", spec["fields"]))
+    for field in tuple(spec["fields"]):
         if field.endswith("url"):
             value = input(f"{provider} {field}: ").strip()
         else:
             value = getpass.getpass(f"{provider} {field}: ").strip()
-        if not value:
+        if not value and field in required_fields:
             raise ProvisionError(f"Required provider field is empty: {field}")
-        values[field] = value
+        if value:
+            values[field] = value
     return values
 
 
@@ -275,15 +290,19 @@ def write_provider_secret(
 ) -> None:
     spec = PROVIDERS[provider]
     expected = tuple(spec["fields"])
-    missing = [field for field in expected if not values.get(field)]
+    required = tuple(spec.get("required_fields", expected))
+    missing = [field for field in required if not values.get(field)]
+    unexpected = sorted(set(values) - set(expected))
     if missing:
         raise ProvisionError("Missing provider fields: " + ", ".join(missing))
+    if unexpected:
+        raise ProvisionError("Unexpected provider fields: " + ", ".join(unexpected))
     api_request(
         address,
         str(spec["secret_path"]),
         method="POST",
         token=admin_token,
-        payload={"data": {field: values[field] for field in expected}},
+        payload={"data": {field: values[field] for field in expected if field in values}},
         allow_empty=True,
     )
 
@@ -324,6 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "logical_name": spec["logical_name"],
                     "secret_path": spec["secret_path"],
                     "fields": list(spec["fields"]),
+                    "required_fields": list(spec.get("required_fields", spec["fields"])),
                     "policy_name": spec["policy_name"],
                     "role_name": spec["role_name"],
                     "credential_dir": str(spec["credential_dir"]),
