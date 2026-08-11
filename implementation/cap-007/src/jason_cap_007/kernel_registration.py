@@ -94,6 +94,11 @@ def email_send_capability() -> CapabilityDefinition:
             "initial_provider": SES_PROVIDER_ID,
             "secret_name": "aws_ses.sendmail",
             "pilot_scope": "explicit-approval-only",
+            "conversation_action_enabled": "true",
+            "conversation_argument_keys": "to,subject,text_body,html_body,cc,bcc,reply_to,from_address",
+            "conversation_self_target_field": "to",
+            "conversation_default_subject": "Message from Jason",
+            "conversation_default_text_body": "You asked Jason to send you an email.",
         },
     )
 
