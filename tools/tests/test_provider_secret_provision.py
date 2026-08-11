@@ -114,7 +114,7 @@ def test_live_provisioning_uses_hidden_admin_and_secret_prompts() -> None:
 
 
 def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
-    text = Path("07-Operations/Provider-Secret-Provisioning.md").read_text(
+    text = Path("docs/operations/Provider-Secret-Provisioning.md").read_text(
         encoding="utf-8"
     )
     assert "canonical production lifecycle" in text
@@ -130,7 +130,7 @@ def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
 
 
 def test_jkd003_contains_production_identity_and_lifecycle_invariant() -> None:
-    text = Path("03-Components/Kernel/JKD-003-Secrets-Broker.md").read_text(
+    text = Path("docs/components/kernel/JKD-003-Secrets-Broker.md").read_text(
         encoding="utf-8"
     )
     assert "**Version:** 0.4" in text
