@@ -15,7 +15,6 @@ BUILD_ROOT = REPOSITORY_ROOT / ".build" / "docs"
 CANONICAL_DIRECTORIES = (
     "01-Governance",
     "02-Architecture",
-    "02-Canonical-Models",
     "03-Components",
     "04-Standards",
     "05-ADR",
@@ -38,6 +37,7 @@ PUBLISHING_DIRECTORIES = (
 CONSOLIDATED_DIRECTORIES = (
     ("docs/control", "control"),
     ("docs/foundation", "foundation"),
+    ("docs/models", "models"),
     ("docs/standards", "standards"),
 )
 
