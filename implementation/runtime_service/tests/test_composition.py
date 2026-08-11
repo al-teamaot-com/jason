@@ -8,6 +8,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from orchestrator.conversation_action_intent import GovernedActionConversationIntentResolver
+from orchestrator.conversation_resource_intent import GovernedResourceConversationIntentResolver
+from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 
 
 def _trusted_registry(root: Path) -> Path:
@@ -37,8 +40,8 @@ def _trusted_registry(root: Path) -> Path:
     return registry
 
 
-def test_production_composition_builds_and_serves_internal_health(tmp_path):
-    settings = RuntimeSettings(
+def _settings(tmp_path: Path, *, ollama_model: str = "local-test") -> RuntimeSettings:
+    return RuntimeSettings(
         authority_db=tmp_path / "authority.sqlite3",
         bindings_db=tmp_path / "bindings.sqlite3",
         replay_db=tmp_path / "replay.sqlite3",
@@ -49,9 +52,13 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
         openbao_role_id_path=tmp_path / "role_id",
         openbao_secret_id_path=tmp_path / "secret_id",
         ollama_url="http://jason-ollama:11434",
-        ollama_model="local-test",
+        ollama_model=ollama_model,
         allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
     )
+
+
+def test_production_composition_builds_and_serves_internal_health(tmp_path):
+    settings = _settings(tmp_path)
 
     application = build_runtime_application(settings)
     response = application.dispatch(method="GET", path="/healthz", headers={}, body=b"")
@@ -63,6 +70,18 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "replay.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "security.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
+
+
+def test_production_conversation_planning_is_resource_first_and_metadata_driven(tmp_path):
+    application = build_runtime_application(_settings(tmp_path))
+
+    governed_ingress = application.ingress.ingress
+    resolvers = governed_ingress.flow.intent_resolver.resolvers
+
+    assert len(resolvers) == 2
+    assert isinstance(resolvers[0], GovernedResourceConversationIntentResolver)
+    assert isinstance(resolvers[0].planner.reasoner, MetadataResourceCapabilityReasoner)
+    assert isinstance(resolvers[1], GovernedActionConversationIntentResolver)
 
 
 def test_runtime_settings_fail_closed_without_local_reasoning_model(tmp_path):
