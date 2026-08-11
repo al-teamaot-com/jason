@@ -54,7 +54,7 @@ This cleanup should preserve historical references and evidence identity; it mus
 
 **State:** Open until final consolidated-tree CI/path audit is green.
 
-All historical numbered human-documentation roots have now been physically retired. Strict MkDocs validation catches Markdown link breakage, but plain-text references to old paths may remain intentionally or accidentally.
+All historical numbered human-documentation roots and the former top-level engineering `architecture/` tree have now been physically retired. Strict MkDocs validation catches Markdown link breakage, but plain-text references to old paths may remain intentionally or accidentally.
 
 Required work:
 
@@ -68,7 +68,7 @@ Required work:
 
 **State:** Open — structural consolidation complete.
 
-Implementation-local README files may remain beside code, connectors, deployment packages, and schemas when adjacency is useful. A final index/audit is needed to ensure no material architecture, governance, authority, or operating rule exists only in an unindexed implementation README.
+Implementation-local README files may remain beside code, connectors, deployment packages, and schemas when adjacency is useful. A final index/audit is needed to ensure no material architecture, governance, authority, security, or operating rule exists only in an unindexed implementation README.
 
 The preferred outcome is not copying every README into `docs/`; it is making material implementation documentation discoverable and ensuring governed rules have canonical human-facing owners.
 
@@ -86,7 +86,7 @@ Resolution:
 - Teams proactive messaging is corrected to `ADR-007`;
 - ADR-007 contains an explicit identifier-correction note stating that architectural meaning was not changed;
 - ADR-005 and ADR-006 remain unchanged;
-- all ADRs are consolidated under `docs/decisions/`.
+- all project ADRs are consolidated under `docs/decisions/`.
 
 ### MIG-DOC-002 — Architecture authority overlap
 
@@ -102,7 +102,9 @@ Earlier blueprint/catalog/core-services/deployment/foundation-build records rema
 
 The active capability register is now `docs/roadmaps/Jason-Capability-Register.md`.
 
-The older `07-Roadmap/Jason-Roadmap.md` was preserved as `docs/archive/roadmaps/Jason-Roadmap-Historical.md` with explicit Historical/Superseded classification.
+Machine-readable roadmap status is now `docs/roadmaps/Jason-Roadmap-Status.json`.
+
+The older narrative `07-Roadmap/Jason-Roadmap.md` was preserved as `docs/archive/roadmaps/Jason-Roadmap-Historical.md` with explicit Historical/Superseded classification.
 
 ### MIG-DOC-006 — Legacy CURRENT checkpoint
 
@@ -124,7 +126,7 @@ It is historical context, not current runtime authority.
 - MkDocs uses `docs_dir: docs` directly;
 - `tools/assemble_docs.py` has been retired;
 - documentation CI validates the control plane and builds directly from `docs/`;
-- the validator rejects recreation of retired numbered documentation roots;
+- the validator rejects recreation of retired numbered documentation roots and the former top-level engineering `architecture/` tree;
 - `tools/documentation_readiness.py` uses `docs/milestones/`.
 
 ### MIG-DOC-010 — Historical documentation-layout ADR conflict
@@ -140,3 +142,41 @@ ADR-008 — Documentation Control Plane Consolidation — explicitly supersedes 
 - generated outputs remain disposable;
 - documentation tools remain replaceable;
 - institutional memory must be preserved during migration.
+
+### MIG-DOC-011 — Separate top-level engineering architecture tree
+
+**State:** Resolved structurally and by authority classification.
+
+The historical repository-root `architecture/` tree contained JIS engineering guidance, provider engineering references, detailed capability/execution-policy/resolution design, and an engineering `ADR-000x` namespace.
+
+Resolution:
+
+- the complete engineering tree moved to `docs/engineering/`;
+- `docs/engineering/README.md` defines it as detailed implementation-engineering architecture subordinate to the Constitution, project ADRs, and canonical J-series platform architecture;
+- the historical engineering `ADR-000x` namespace is explicitly distinct from project ADRs under `docs/decisions/`;
+- the old top-level `architecture/` tree is retired and CI rejects its re-creation.
+
+### MIG-DOC-012 — Root governed TODO/backlog
+
+**State:** Resolved structurally.
+
+The repository-root `TODO.md` contained governed future work and therefore belonged in the documentation control plane rather than at repository root.
+
+Resolution:
+
+- moved to `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md`;
+- root `TODO.md` retired;
+- documentation CI rejects re-creation of root `TODO.md`;
+- MkDocs/navigation exposes the governed backlog from the roadmap section.
+
+### MIG-DOC-013 — Conventional root README/CONTRIBUTING/SECURITY boundary
+
+**State:** Controlled.
+
+`README.md`, `CONTRIBUTING.md`, and `SECURITY.md` remain at repository root because they are conventional repository entry/control files used by GitHub and contributors.
+
+They are not parallel durable documentation authorities:
+
+- README directs readers to `docs/index.md`;
+- CONTRIBUTING requires the governed documentation process and `HOW-TO-DOCUMENT-JASON.md`;
+- SECURITY handles reporting/security invariants while directing durable architecture/current-state questions to governed documentation and System Registry evidence.
