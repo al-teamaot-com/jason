@@ -42,9 +42,12 @@ def test_bootstrap_registers_broad_provider_neutral_endpoint_reads():
     assert search.metadata["provider_neutral"] == "true"
     assert search.metadata["read_only"] == "true"
     assert search.permitted_execution_modes == frozenset({"deterministic"})
+    assert search.timeout_seconds == 60
+    assert "exact read" in search.metadata["identity_semantics"]
     assert read.metadata["operation"] == "read"
     assert datto.capabilities == frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ})
     assert datto.execution_modes == frozenset({"deterministic"})
+    assert datto.limits.maximum_execution_seconds == 60
 
 
 def test_reasoner_selects_search_for_hostname_without_field_specific_script():
