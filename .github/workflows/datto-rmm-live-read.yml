@@ -51,6 +51,7 @@ jobs:
           assert result['status'] == 'credential_safe_preflight'
           assert result['network_contacted'] is False
           assert result['provider_credentials_used'] is False
-          assert result['maximum_records'] == 1
+          assert result['maximum_records'] == 2
+          assert result['ambiguity_detection_enabled'] is True
           assert result['capability'] == 'datto_rmm.device.search'
           PY
