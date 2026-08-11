@@ -95,9 +95,21 @@ class ReasonedResourceInquiryInterpreter:
                 + ", ".join(selector_forbidden)
             )
 
+        normalized_selector: dict[str, str] = {}
+        for raw_key, raw_value in selector.items():
+            key = str(raw_key).strip()
+            if not key:
+                raise ValueError("resource selector keys must be non-empty")
+            if not isinstance(raw_value, str):
+                raise ValueError("resource selector values must be scalar strings")
+            value = raw_value.strip()
+            if not value:
+                raise ValueError("resource selector values must be non-empty")
+            normalized_selector[key] = value
+
         return ResourceInquiry(
             resource_type=resource_type,
-            resource_selector=dict(selector),
+            resource_selector=normalized_selector,
             requested_facts=tuple(str(item).strip() for item in requested_facts),
             execution_mode=str(proposed.get("execution_mode", "deterministic")).strip(),
             permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
