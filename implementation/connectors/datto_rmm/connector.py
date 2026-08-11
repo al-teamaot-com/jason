@@ -16,7 +16,6 @@ class DattoRmmConnector(ConnectorBase):
         {
             "datto_rmm.device.get",
             "datto_rmm.device.search",
-            "datto_rmm.device.resolve",
             "datto_rmm.alerts.list",
             "datto_rmm.patch_status.get",
             "datto_rmm.component_results.list",
@@ -30,11 +29,8 @@ class DattoRmmConnector(ConnectorBase):
         token = acquire_access_token(credentials=credentials)
         try:
             should_resolve_device = (
-                request.context.capability == "datto_rmm.device.resolve"
-                or (
-                    request.context.capability == "datto_rmm.device.search"
-                    and self._requested_facts_present(request.arguments)
-                )
+                request.context.capability == "datto_rmm.device.search"
+                and self._requested_facts_present(request.arguments)
             )
             if should_resolve_device:
                 data = self._execute_device_resolve(
