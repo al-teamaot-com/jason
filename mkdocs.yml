@@ -79,9 +79,9 @@ nav:
       - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
   - Standards:
-      - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
-      - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
-      - Canonical Sources and Generated Artifacts: 04-Standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
+      - Adaptive Build Method: standards/J-401-Adaptive-Build-Method.md
+      - Definition of Done: standards/J-402-Capability-Definition-of-Done.md
+      - Canonical Sources and Generated Artifacts: standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
       - Documentation Governance and Continuity: standards/J-404-Documentation-Governance-and-Continuity.md
   - Decisions:
       - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
