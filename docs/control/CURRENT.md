@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-08-11  
-**Status:** Documentation consolidation structurally complete; implementation-index, path audit, semantic classification, and CI validation in progress  
+**Status:** Documentation consolidation structurally complete; implementation-local indexing complete; path audit, semantic classification, and CI validation in progress  
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -12,9 +12,10 @@ A future session resuming Project Jason should read, in order:
 2. this file
 3. `docs/control/DOCUMENTATION-REGISTER.md`
 4. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-5. `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` when documentation authority or historical paths matter
-6. the governing architecture/ADR/runbook/component/engineering records for the intended workstream
-7. current GitHub state and System Registry/host evidence before asserting live production state
+5. `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` when implementation-local guidance is relevant
+6. `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` when documentation authority or historical paths matter
+7. the governing architecture/ADR/runbook/component/engineering records for the intended workstream
+8. current GitHub state and System Registry/host evidence before asserting live production state
 
 ## Current documentation workstream
 
@@ -35,6 +36,8 @@ The structural consolidation is now substantially complete:
 - `docs/` is the single human-facing documentation control plane;
 - `docs/control/HOW-TO-DOCUMENT-JASON.md` defines the repeatable documentation method future human and AI sessions must use;
 - `docs/control/DOCUMENTATION-REGISTER.md` defines authoritative ownership and historical migration paths;
+- `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` is the governed discovery/control index for README files that legitimately remain beside implementation or deployment packages;
+- documentation CI inventories `README.md` files beneath `implementation/` and `infrastructure/` and requires each path to be represented in the implementation-documentation index;
 - `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` preserves unresolved authority/classification issues;
 - `docs/control/CURRENT.md` is the only canonical current resume point;
 - Foundation is under `docs/foundation/`;
@@ -53,7 +56,7 @@ The structural consolidation is now substantially complete:
 - architecture journal records are under `docs/journal/`;
 - milestones are under `docs/milestones/`;
 - the former numbered documentation roots and top-level engineering `architecture/` root are retired;
-- MkDocs now uses `docs_dir: docs` directly;
+- MkDocs now uses `docs_dir: docs` directly and exposes the implementation-documentation index;
 - the mixed-source `tools/assemble_docs.py` staging mechanism is retired;
 - CI validation rejects recreation of retired human-documentation roots and root `TODO.md`.
 
@@ -92,6 +95,10 @@ Historical order showed Datto RMM Managed-Device Authority occupied ADR-004 firs
 
 The former `08-Session-Records/CURRENT.md` is preserved as `docs/sessions/Legacy-CURRENT-2026-08-11.md`. It is historical context, not current runtime authority.
 
+### Implementation-local documentation
+
+Package-adjacent README files are retained only where adjacency is useful and are explicitly classified as supporting implementation documentation. `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` makes them discoverable from the human-facing control plane and maps them to governed owners or related records. CI now fails if a README beneath `implementation/` or `infrastructure/` is not represented in that index.
+
 ### System Registry generated documentation
 
 `tools/system_registry_docs.py` now generates/checks `docs/operations/System-Registry-Current-Operational-State.md`.
@@ -110,16 +117,16 @@ Documentation-sensitive tests/workflows are being updated to use consolidated pa
 - documentation readiness milestone paths;
 - CatchMeUp continuity paths.
 
+The earlier CatchMeUp documentation-control failure was a validator false positive: CatchMeUp already collected `docs/sessions` through path composition rather than a literal `docs/sessions` string. The validator now checks the actual `collect_session_records` continuity signal instead of requiring a brittle literal.
+
 ## Remaining offline documentation work
 
-1. Build `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` after auditing code/deployment-adjacent README files so material implementation guidance is discoverable without copying every README into `docs/`.
-2. Update the documentation index, J-404/HOW-TO/Register/MkDocs/validator to require and expose that implementation-documentation index.
-3. Complete strict MkDocs/CI validation and repair broken Markdown links caused by moved paths.
-4. Audit remaining workflows/tools/scripts and plain-text operator instructions for current-use references to retired paths; preserve references that intentionally describe historical repository state.
-5. Classify records currently in `docs/operations/` into repeatable procedure vs historical proof and move historical proof to `docs/sessions/` where doing so will not damage evidence identity.
-6. Perform deliberate governance review of `docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md`, whose historical Article VII label conflicts with the current Constitution's Article VII. The conflict is contained but not silently rewritten.
-7. Reconcile draft PR #161 with the latest `feature/jason-runtime-service` state before any merge.
-8. Keep the PR draft until documentation CI, broader CI, and authority-sensitive reconciliation are green.
+1. Complete strict MkDocs/CI validation and repair broken Markdown links caused by moved paths.
+2. Audit remaining workflows/tools/scripts and plain-text operator instructions for current-use references to retired paths; preserve references that intentionally describe historical repository state.
+3. Classify records currently in `docs/operations/` into repeatable procedure vs historical proof and move historical proof to `docs/sessions/` where doing so will not damage evidence identity.
+4. Perform deliberate governance review of `docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md`, whose historical Article VII label conflicts with the current Constitution's Article VII. The conflict is contained but not silently rewritten.
+5. Reconcile draft PR #161 with the latest `feature/jason-runtime-service` state before any merge.
+6. Keep the PR draft until documentation CI, broader CI, and authority-sensitive reconciliation are green.
 
 ## Work explicitly not performed by this documentation workstream
 
