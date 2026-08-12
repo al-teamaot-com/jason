@@ -32,18 +32,22 @@ else:
     print('PASS: canonical fact vocabulary import already present')
 PY
 
-echo "========== SECTION 3: STATIC VALIDATION =========="ngit diff --check
+echo "========== SECTION 3: STATIC VALIDATION =========="
+git diff --check
 $PY -m py_compile implementation/orchestrator/tests/test_resource_evidence.py
 
-echo "========== SECTION 4: FOCUSED TESTS =========="n$PY -m pytest -q \
+echo "========== SECTION 4: FOCUSED TESTS =========="
+$PY -m pytest -q \
   implementation/orchestrator/tests/test_resource_evidence.py \
   implementation/orchestrator/tests/test_semantic_request_bridge.py \
   implementation/orchestrator/tests/test_conversation_resource_intent.py \
   implementation/orchestrator/tests/test_ollama_reasoning.py
 
-echo "========== SECTION 5: CHANGE STATE =========="ngit status --short
+echo "========== SECTION 5: CHANGE STATE =========="
+git status --short
 
-echo "========== RESULT =========="necho "Semantic evidence context test imports repaired and validated."
+echo "========== RESULT =========="
+echo "Semantic evidence context test imports repaired and validated."
 echo "NO DEPLOYMENT PERFORMED."
 echo "NO COMMIT OR PUSH OF WORKTREE CHANGES PERFORMED."
 echo "========== END SEMANTIC EVIDENCE CONTEXT TEST IMPORT REPAIR =========="
