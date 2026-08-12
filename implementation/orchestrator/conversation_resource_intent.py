@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
+from .canonical_fact_vocabulary import CanonicalFactVocabulary
 from .resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
 from .teams_conversation_flow import BoundConversationPrincipal, ConversationIntent
 
@@ -27,6 +28,7 @@ class StructuredResourceInquiryReasoner(Protocol):
 @dataclass(frozen=True, slots=True)
 class ReasonedResourceInquiryInterpreter:
     reasoner: StructuredResourceInquiryReasoner
+    fact_vocabulary: CanonicalFactVocabulary | None = None
 
     _FORBIDDEN_TOP_LEVEL = frozenset(
         {
@@ -137,10 +139,17 @@ class ReasonedResourceInquiryInterpreter:
                 "resource inquiry proposal has invalid completeness_requirement"
             )
 
+        normalized_facts = tuple(str(item).strip() for item in requested_facts)
+        if self.fact_vocabulary is not None:
+            normalized_facts = tuple(
+                self.fact_vocabulary.canonicalize(item)
+                for item in normalized_facts
+            )
+
         return ResourceInquiry(
             resource_type=resource_type,
             resource_selector=normalized_selector,
-            requested_facts=tuple(str(item).strip() for item in requested_facts),
+            requested_facts=normalized_facts,
             execution_mode=str(proposed.get("execution_mode", "deterministic")).strip(),
             permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
             result_intent=result_intent,

@@ -649,3 +649,40 @@ def test_deterministic_inquiry_hints_separate_resource_identity_from_incidental_
     assert inquiry.requested_facts == ("sites",)
     assert inquiry.result_intent == "enumerate"
     assert inquiry.completeness_requirement == "complete"
+
+
+def test_reasoned_requested_facts_can_be_normalized_to_canonical_vocabulary():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+
+    class CanonicalFactReasoner:
+        def __init__(self, fact):
+            self.fact = fact
+
+        def propose(self, *, text, organization_id, client_id):
+            return {
+                "resource_type": "endpoint",
+                "resource_selector": {"hostname": "AOT-50282"},
+                "requested_facts": [self.fact],
+                "execution_mode": "deterministic",
+                "permission_mode": "observe",
+                "result_intent": "summary",
+                "completeness_requirement": "sufficient",
+            }
+
+    for human_fact, expected in (
+        ("processor", "processor model"),
+        ("CPU", "processor model"),
+        ("RAM", "total memory"),
+        ("memore", "total memory"),
+        ("Windows Display Version", "operating system display version"),
+    ):
+        interpreter = ReasonedResourceInquiryInterpreter(
+            CanonicalFactReasoner(human_fact),
+            fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        )
+        inquiry = interpreter.interpret(
+            text=f"What is the {human_fact} for AOT-50282?",
+            principal=principal(),
+        )
+        assert inquiry is not None
+        assert inquiry.requested_facts == (expected,)

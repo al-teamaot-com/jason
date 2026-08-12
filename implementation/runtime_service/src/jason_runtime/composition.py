@@ -39,6 +39,7 @@ from orchestrator.conversation_action_intent import (
     ChainedConversationIntentResolver,
     GovernedActionConversationIntentResolver,
 )
+from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
     MetadataFirstResourceInquiryInterpreter,
@@ -433,7 +434,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                     resource_types=resource_types,
                     selector_keys=selector_keys,
                     fact_hints=fact_hints,
-                )
+                ),
+                fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
             ),
         ),
         planner=GovernedResourceInquiryPlanner(
