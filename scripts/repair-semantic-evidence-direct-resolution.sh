@@ -16,7 +16,7 @@ path = Path('implementation/orchestrator/resource_evidence.py')
 text = path.read_text()
 
 anchor = '''    verified: list[VerifiedResourceFact] = []\n    for requested_fact in requested_facts:\n        wanted = _normalized_field_name(requested_fact)\n        candidates: list[tuple[str, Any]] = []\n'''
-replacement = '''    verified: list[VerifiedResourceFact] = []\n    for requested_fact in requested_facts:\n        wanted = _normalized_field_name(requested_fact)\n        candidates: list[tuple[str, Any]] = []\n\n        # Provider adapters may expose deterministic canonical facts beneath\n        # provider_data/semantic_evidence. Those paths are deliberately trusted\n        # only as locations, never as asserted values: Jason still dereferences\n        # the actual provider-derived value and applies semantic-context and\n        # expected-shape validation afterward. This avoids asking a language\n        # reasoner to rediscover a provider mapping that the adapter already\n        # declared explicitly.\n        if isinstance(data, Mapping):\n            provider_data = data.get("provider_data")\n            if isinstance(provider_data, Mapping):\n                semantic_root = provider_data.get("semantic_evidence")\n                if isinstance(semantic_root, Mapping):\n                    semantic_key = requested_fact.replace(" ", "_")\n\n                    def walk_semantic(value: Any, pointer: str) -> None:\n                        if not isinstance(value, Mapping):\n                            return\n                        for raw_key, child in value.items():\n                            key = str(raw_key)\n                            child_pointer = f"{pointer}/{_escape_json_pointer_segment(key)}"\n                            if _normalized_field_name(key) == wanted:\n                                candidates.append((child_pointer, child))\n                            walk_semantic(child, child_pointer)\n\n                    walk_semantic(\n                        semantic_root,\n                        "/provider_data/semantic_evidence",\n                    )\n'''
+replacement = '''    verified: list[VerifiedResourceFact] = []\n    for requested_fact in requested_facts:\n        wanted = _normalized_field_name(requested_fact)\n        candidates: list[tuple[str, Any]] = []\n\n        # Provider adapters may expose deterministic canonical facts beneath\n        # provider_data/semantic_evidence. Those paths are deliberately trusted\n        # only as locations, never as asserted values: Jason still dereferences\n        # the actual provider-derived value and applies semantic-context and\n        # expected-shape validation afterward. This avoids asking a language\n        # reasoner to rediscover a provider mapping that the adapter already\n        # declared explicitly.\n        if isinstance(data, Mapping):\n            provider_data = data.get("provider_data")\n            if isinstance(provider_data, Mapping):\n                semantic_root = provider_data.get("semantic_evidence")\n                if isinstance(semantic_root, Mapping):\n\n                    def walk_semantic(value: Any, pointer: str) -> None:\n                        if not isinstance(value, Mapping):\n                            return\n                        for raw_key, child in value.items():\n                            key = str(raw_key)\n                            child_pointer = f"{pointer}/{_escape_json_pointer_segment(key)}"\n                            if _normalized_field_name(key) == wanted:\n                                candidates.append((child_pointer, child))\n                            walk_semantic(child, child_pointer)\n\n                    walk_semantic(\n                        semantic_root,\n                        "/provider_data/semantic_evidence",\n                    )\n'''
 
 if anchor not in text:
     raise SystemExit('ERROR: direct fact resolution anchor not found')
@@ -97,16 +97,20 @@ def test_raw_processor_field_cannot_bypass_required_semantic_context():
         )
 PY
 
-echo "========== SECTION 4: STATIC VALIDATION =========="ngit diff --check
+echo "========== SECTION 4: STATIC VALIDATION =========="
+git diff --check
 
-echo "========== SECTION 5: FOCUSED TESTS =========="n.venv/bin/python -m pytest -q \
+echo "========== SECTION 5: FOCUSED TESTS =========="
+.venv/bin/python -m pytest -q \
   implementation/orchestrator/tests/test_resource_evidence.py \
   implementation/connectors/tests/test_datto_semantic_evidence.py \
   implementation/orchestrator/tests/test_resource_capability_catalog.py
 
-echo "========== SECTION 6: CHANGE STATE =========="ngit status --short
+echo "========== SECTION 6: CHANGE STATE =========="
+git status --short
 
-echo "========== RESULT =========="necho "Semantic adapter evidence now resolves deterministically before language evidence discovery."
+echo "========== RESULT =========="
+echo "Semantic adapter evidence now resolves deterministically before language evidence discovery."
 echo "NO DEPLOYMENT PERFORMED."
 echo "NO COMMIT OR PUSH OF WORKTREE CHANGES PERFORMED."
 echo "========== END SEMANTIC EVIDENCE DIRECT RESOLUTION REPAIR =========="
