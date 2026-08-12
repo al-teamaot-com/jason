@@ -101,7 +101,7 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
             "read_only": "true",
             "resource_types": "endpoint",
             "operation": "search",
-            "selector_keys": "hostname,name,resource_id,site,serial_number",
+            "selector_keys": "hostname,name,resource_id,site,serial_number,user_identity",
             "fact_hints": (
                 "hostname,device name,last logged in user,username,site,status,"
                 "online,offline,operating system,ip address,mac address,hardware,"

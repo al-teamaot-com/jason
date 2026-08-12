@@ -90,6 +90,47 @@ class CanonicalFactVocabulary:
         definition = self.resolve(value)
         return definition.canonical_fact if definition is not None else value.strip()
 
+    def canonicalize_requested_facts(
+        self,
+        *,
+        human_text: str,
+        requested_facts: Iterable[str],
+    ) -> tuple[str, ...]:
+        """Normalize reasoner fragments using explicit governed concepts in human text.
+
+        A language model may split one concept such as ``Windows Display Version``
+        into ``display`` and ``version``. Explicit canonical aliases in the original
+        human text outrank that fragmentation. This method never invents concepts that
+        are absent from the human request.
+        """
+        normalized_text = self.normalize_text(human_text)
+        explicit: list[tuple[int, CanonicalFactDefinition]] = []
+        for alias, definition in self._aliases.items():
+            if not alias or not normalized_text:
+                continue
+            pattern = r"(?<![a-z0-9])" + re.escape(alias) + r"(?![a-z0-9])"
+            if re.search(pattern, normalized_text):
+                explicit.append((len(alias), definition))
+
+        if explicit:
+            explicit.sort(key=lambda item: item[0], reverse=True)
+            best_len = explicit[0][0]
+            best = {definition for length, definition in explicit if length == best_len}
+            if len(best) == 1:
+                definition = next(iter(best))
+                requested_words = {
+                    token
+                    for fact in requested_facts
+                    for token in self.normalize_text(str(fact)).split()
+                }
+                concept_words = set()
+                for raw in (definition.canonical_fact, *definition.aliases):
+                    concept_words.update(self.normalize_text(raw).split())
+                if requested_words and requested_words.issubset(concept_words):
+                    return (definition.canonical_fact,)
+
+        return tuple(self.canonicalize(str(item)) for item in requested_facts)
+
 
 DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
     (

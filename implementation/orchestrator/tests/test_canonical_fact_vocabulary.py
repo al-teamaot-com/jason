@@ -42,3 +42,10 @@ def test_canonical_facts_expose_provider_neutral_evidence_hints():
     display_version = vocab.resolve("Windows Display Version")
     assert processor is not None and "model" in processor.evidence_hints
     assert display_version is not None and "displayversion" in display_version.evidence_hints
+
+
+def test_fragmented_windows_display_version_is_recombined_from_human_text():
+    assert DEFAULT_CANONICAL_FACT_VOCABULARY.canonicalize_requested_facts(
+        human_text="What is the Windows Display Version for AOT-50282?",
+        requested_facts=("display", "version"),
+    ) == ("operating system display version",)

@@ -222,19 +222,30 @@ class DattoRmmConnector(ConnectorBase):
         after complete discovery; ambiguity or incomplete discovery fails closed.
         """
 
-        search_request = self._prepare_provider_request(
-            capability="datto_rmm.device.search",
-            arguments=request.arguments,
-            credentials=credentials,
-            access_token=access_token,
-            token_type=token_type,
-        )
-        search_payload = self._execute_prepared_request(
-            request=request,
-            prepared=search_request,
-        )
-        discovery = self._normalize_result("datto_rmm.device.search", search_payload)
-        matches = discovery["resource_matches"]
+        user_reference = self._user_identity_reference(request.arguments)
+        if user_reference:
+            discovery = self._execute_user_identity_discovery(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+                user_reference=user_reference,
+            )
+            matches = discovery["resource_matches"]
+        else:
+            search_request = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments=request.arguments,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            search_payload = self._execute_prepared_request(
+                request=request,
+                prepared=search_request,
+            )
+            discovery = self._normalize_result("datto_rmm.device.search", search_payload)
+            matches = discovery["resource_matches"]
 
         hostname_reference = self._hostname_reference(request.arguments)
         if not matches and hostname_reference:
@@ -517,6 +528,96 @@ class DattoRmmConnector(ConnectorBase):
             },
             "discovery_complete": discovery_complete,
         }
+
+    def _execute_user_identity_discovery(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+        user_reference: str,
+    ) -> Mapping[str, Any]:
+        """Resolve endpoint association from provider-reported user identity evidence.
+
+        The provider-neutral contract supplies ``user_identity``. Datto adaptation
+        performs bounded account discovery and compares only provider-returned user
+        evidence. It preserves ambiguity and never selects the first device.
+        """
+        provider_pages: list[Any] = []
+        matches: list[Mapping[str, str]] = []
+        seen: set[str] = set()
+        discovery_complete = False
+
+        for page in range(1, self.fallback_discovery_max_pages + 1):
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments={"page": page, "max": self.fallback_discovery_page_size},
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            payload = self._execute_prepared_request(request=request, prepared=prepared)
+            provider_pages.append(payload)
+            records = self._device_records(payload)
+
+            for record in records:
+                provider_user = self._first_scalar(
+                    record,
+                    "lastUser",
+                    "last_user",
+                    "lastLoggedInUser",
+                    "last_logged_in_user",
+                    "username",
+                    "userName",
+                )
+                if not provider_user or not self._user_identity_matches(
+                    reference=user_reference,
+                    provider_identity=provider_user,
+                ):
+                    continue
+
+                match = self._canonical_device_match(record)
+                resource_id = str(match.get("resource_id", "")).strip()
+                key = resource_id or f"{match.get('hostname', '').casefold()}|{match.get('site_id', '')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(match)
+
+            if len(records) < self.fallback_discovery_page_size:
+                discovery_complete = True
+                break
+
+        return {
+            "resource_matches": matches,
+            "provider_data": {
+                "discovery_mode": "user_identity_relationship",
+                "pages": provider_pages,
+            },
+            "discovery_complete": discovery_complete,
+        }
+
+    @staticmethod
+    def _user_identity_reference(arguments: Mapping[str, Any]) -> str:
+        return str(arguments.get("user_identity") or "").strip()
+
+    @staticmethod
+    def _normalized_human_identity(value: str) -> str:
+        text = value.strip()
+        if "\\" in text:
+            text = text.rsplit("\\", 1)[-1]
+        elif "/" in text:
+            text = text.rsplit("/", 1)[-1]
+        if "@" in text:
+            text = text.split("@", 1)[0]
+        return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+    @classmethod
+    def _user_identity_matches(cls, *, reference: str, provider_identity: str) -> bool:
+        left = cls._normalized_human_identity(reference)
+        right = cls._normalized_human_identity(provider_identity)
+        return bool(left and right and left == right)
 
     @staticmethod
     def _hostname_reference(arguments: Mapping[str, Any]) -> str:

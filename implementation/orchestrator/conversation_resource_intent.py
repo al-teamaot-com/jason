@@ -141,9 +141,9 @@ class ReasonedResourceInquiryInterpreter:
 
         normalized_facts = tuple(str(item).strip() for item in requested_facts)
         if self.fact_vocabulary is not None:
-            normalized_facts = tuple(
-                self.fact_vocabulary.canonicalize(item)
-                for item in normalized_facts
+            normalized_facts = self.fact_vocabulary.canonicalize_requested_facts(
+                human_text=text,
+                requested_facts=normalized_facts,
             )
 
         return ResourceInquiry(

@@ -522,3 +522,64 @@ def test_site_search_can_represent_provider_page_zero() -> None:
     assert path == "/api/v2/account/sites"
     assert params["page"] == 0
     assert params["max"] == 25
+
+
+def test_user_identity_matching_normalizes_domain_spacing_and_case():
+    assert DattoRmmConnector._user_identity_matches(
+        reference="Lindsey Collins",
+        provider_identity="AzureAD\\LindseyCollins",
+    )
+    assert DattoRmmConnector._user_identity_matches(
+        reference="al davis",
+        provider_identity="AZUREAD\\AlDavis",
+    )
+    assert not DattoRmmConnector._user_identity_matches(
+        reference="Lindsey Collins",
+        provider_identity="AzureAD\\LindseyCole",
+    )
+
+
+def test_fact_bearing_user_relationship_discovery_preserves_provider_identity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    account_payload = {
+        "devices": [
+            {
+                "uid": "device-lindsey",
+                "hostname": "AOT-50001",
+                "siteName": "AOT",
+                "lastUser": "AzureAD\\LindseyCollins",
+            },
+            {
+                "uid": "device-other",
+                "hostname": "AOT-50002",
+                "siteName": "AOT",
+                "lastUser": "AzureAD\\OtherUser",
+            },
+        ]
+    }
+    exact_payload = {
+        "uid": "device-lindsey",
+        "hostname": "AOT-50001",
+        "siteName": "AOT",
+        "lastUser": "AzureAD\\LindseyCollins",
+    }
+    transport = Transport([account_payload, exact_payload])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "user_identity": "Lindsey Collins",
+                "requested_facts": ("hostname",),
+            }
+        )
+    )
+    assert len(transport.calls) == 2
+    assert "hostname" not in transport.calls[0]["params"]
+    assert result.data["resolved_resource_id"] == "device-lindsey"
+    assert result.data["resource_matches"] == [
+        {"resource_id": "device-lindsey", "hostname": "AOT-50001", "site": "AOT"}
+    ]
+    assert result.data["provider_data"] == exact_payload
