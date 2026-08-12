@@ -6,18 +6,13 @@ cd /home/al/projects/jason
 
 echo "========== START LIVE CANONICAL ENDPOINT FACT PROOF =========="
 echo "========== SECTION 1: PRECONDITIONS =========="
-STATUS="$(git status --porcelain)"
-# A prior fetch helper may leave an untracked repository-root FETCH_HEAD artifact.
-# Git's real fetch metadata lives under .git/FETCH_HEAD, so this root file is not
-# source state. Allow that one known artifact, but continue to fail closed for any
-# other uncommitted worktree/index changes.
-BLOCKING_STATUS="$(printf '%s\n' "$STATUS" | grep -v '^?? FETCH_HEAD$' || true)"
-if [[ -n "$BLOCKING_STATUS" ]]; then
+DIRTY="$(git status --porcelain | grep -v '^?? FETCH_HEAD$' || true)"
+if [[ -n "$DIRTY" ]]; then
   echo "ERROR: worktree must be clean before live proof."
-  printf '%s\n' "$STATUS"
+  printf '%s\n' "$DIRTY"
   exit 20
 fi
-if printf '%s\n' "$STATUS" | grep -q '^?? FETCH_HEAD$'; then
+if [[ -f FETCH_HEAD ]]; then
   echo "NOTE: ignoring untracked repository-root FETCH_HEAD artifact; .git/FETCH_HEAD remains authoritative git metadata."
 fi
 
@@ -42,17 +37,13 @@ from __future__ import annotations
 
 import os
 
-from jason_runtime.config import RuntimeSettings
-from jason_runtime.composition import build_runtime_application
+from jason_runtime.composition import RuntimeSettings, build_runtime_application
 
 
 target = os.environ["TARGET"]
-settings = RuntimeSettings.from_environment()
+settings = RuntimeSettings.from_env()
 app = build_runtime_application(settings)
 
-# Reach the governed flow through the same production composition rather than
-# constructing a provider connector or secret resolver ad hoc. We intentionally
-# use the resource intent resolver and orchestrator already owned by the runtime.
 ingress = app.ingress
 outer = getattr(ingress, "ingress", None)
 flow = getattr(outer, "flow", None)
@@ -64,8 +55,6 @@ resolver = flow.intent_resolver
 orchestrator = flow.orchestrator
 renderer = flow.response_renderer
 
-# Use the existing durable AOT Teams identity binding already configured for
-# production. No identity, authority, or registry records are created or changed.
 identity = None
 tenant_id = os.environ.get("JASON_PROOF_MICROSOFT_TENANT_ID")
 object_id = os.environ.get("JASON_PROOF_MICROSOFT_OBJECT_ID")
