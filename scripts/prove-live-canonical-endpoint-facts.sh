@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from orchestrator.teams_conversation_flow import TeamsConversationPrincipalEvidence
 
 
 target = os.environ["TARGET"]
@@ -59,7 +60,6 @@ identity = None
 tenant_id = os.environ.get("JASON_PROOF_MICROSOFT_TENANT_ID")
 object_id = os.environ.get("JASON_PROOF_MICROSOFT_OBJECT_ID")
 if tenant_id and object_id:
-    from orchestrator.teams_identity import TeamsConversationPrincipalEvidence
     identity = TeamsConversationPrincipalEvidence(
         microsoft_tenant_id=tenant_id,
         microsoft_object_id=object_id,
