@@ -398,3 +398,127 @@ def test_device_read_uses_resource_id_as_durable_device_uid() -> None:
 def test_device_read_requires_durable_identifier() -> None:
     with pytest.raises(ValueError, match="device_uid or resource_id is required"):
         DattoRmmConnector._resolve_operation("datto_rmm.device.get", {})
+
+def test_read_surface_operations_translate_to_confirmed_get_endpoints() -> None:
+    cases = (
+        (
+            "datto_rmm.device.alerts.open",
+            {"resource_id": "dev-1"},
+            "/api/v2/device/dev-1/alerts/open",
+        ),
+        (
+            "datto_rmm.device.alerts.resolved",
+            {"resource_id": "dev-1"},
+            "/api/v2/device/dev-1/alerts/resolved",
+        ),
+        (
+            "datto_rmm.device.audit.get",
+            {"resource_id": "dev-1"},
+            "/api/v2/audit/device/dev-1",
+        ),
+        (
+            "datto_rmm.device.software.list",
+            {"resource_id": "dev-1"},
+            "/api/v2/audit/device/dev-1/software",
+        ),
+        (
+            "datto_rmm.account.alerts.open",
+            {},
+            "/api/v2/account/alerts/open",
+        ),
+        (
+            "datto_rmm.site.search",
+            {},
+            "/api/v2/account/sites",
+        ),
+    )
+
+    for capability, arguments, expected_path in cases:
+        path, _ = DattoRmmConnector._resolve_operation(capability, arguments)
+        assert path == expected_path
+
+
+def test_device_scoped_read_surface_requires_durable_identity() -> None:
+    for capability in (
+        "datto_rmm.device.alerts.open",
+        "datto_rmm.device.alerts.resolved",
+        "datto_rmm.device.audit.get",
+        "datto_rmm.device.software.list",
+    ):
+        try:
+            DattoRmmConnector._resolve_operation(capability, {})
+        except ValueError as exc:
+            assert "resource_id" in str(exc)
+        else:
+            raise AssertionError(f"{capability} accepted a missing resource identity")
+
+
+def test_datto_connector_exposes_confirmed_read_surface() -> None:
+    expected = {
+        "datto_rmm.device.get",
+        "datto_rmm.device.search",
+        "datto_rmm.device.alerts.open",
+        "datto_rmm.device.alerts.resolved",
+        "datto_rmm.device.audit.get",
+        "datto_rmm.device.software.list",
+        "datto_rmm.account.alerts.open",
+        "datto_rmm.site.search",
+    }
+    assert expected <= DattoRmmConnector.capabilities
+
+def test_device_scoped_read_capabilities_are_declared_for_generic_resolution() -> None:
+    assert {
+        "datto_rmm.device.alerts.open",
+        "datto_rmm.device.alerts.resolved",
+        "datto_rmm.device.audit.get",
+        "datto_rmm.device.software.list",
+    } <= DattoRmmConnector.device_scoped_read_capabilities
+
+
+def test_durable_device_identity_detection_accepts_provider_identity_only() -> None:
+    assert DattoRmmConnector._durable_device_identity_present(
+        {"resource_id": "dev-1"}
+    )
+    assert DattoRmmConnector._durable_device_identity_present(
+        {"device_uid": "dev-1"}
+    )
+    assert not DattoRmmConnector._durable_device_identity_present(
+        {"hostname": "AOT-50282"}
+    )
+
+
+def test_software_inventory_uses_bounded_default_page_size() -> None:
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.software.list",
+        {"resource_id": "device-1"},
+    )
+
+    assert path == "/api/v2/audit/device/device-1/software"
+    assert params["page"] == 1
+    assert params["max"] == 50
+
+
+def test_software_inventory_caps_requested_page_size() -> None:
+    _, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.software.list",
+        {
+            "resource_id": "device-1",
+            "max": 500,
+        },
+    )
+
+    assert params["max"] == 50
+
+
+def test_site_search_can_represent_provider_page_zero() -> None:
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.site.search",
+        {
+            "page": 0,
+            "max": 25,
+        },
+    )
+
+    assert path == "/api/v2/account/sites"
+    assert params["page"] == 0
+    assert params["max"] == 25

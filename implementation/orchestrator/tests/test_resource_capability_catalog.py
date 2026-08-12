@@ -13,6 +13,11 @@ from orchestrator.resource_capability_catalog import (
     ENDPOINT_DEVICE_READ,
     ENDPOINT_DEVICE_SEARCH,
     register_endpoint_resource_foundation,
+    ENDPOINT_ALERT_SEARCH,
+    ENDPOINT_AUDIT_READ,
+    ENDPOINT_SOFTWARE_SEARCH,
+    MANAGEMENT_ALERT_SEARCH,
+    MANAGEMENT_SITE_SEARCH,
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
@@ -45,7 +50,15 @@ def test_bootstrap_registers_broad_provider_neutral_endpoint_reads():
     assert search.timeout_seconds == 60
     assert "exact read" in search.metadata["identity_semantics"]
     assert read.metadata["operation"] == "read"
-    assert datto.capabilities == frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ})
+    assert {
+        ENDPOINT_DEVICE_SEARCH,
+        ENDPOINT_DEVICE_READ,
+        ENDPOINT_ALERT_SEARCH,
+        ENDPOINT_AUDIT_READ,
+        ENDPOINT_SOFTWARE_SEARCH,
+        MANAGEMENT_ALERT_SEARCH,
+        MANAGEMENT_SITE_SEARCH,
+    } <= datto.capabilities
     assert datto.execution_modes == frozenset({"deterministic"})
     assert datto.limits.maximum_execution_seconds == 60
 
@@ -111,3 +124,52 @@ def test_datto_connector_translates_provider_neutral_resource_id_to_get():
 
     assert path == "/api/v2/device/device-uid-1"
     assert params is None
+
+def test_datto_provider_exposes_broad_governed_read_surface() -> None:
+    from datetime import datetime, timezone
+
+    from orchestrator.resource_capability_catalog import (
+        ENDPOINT_ALERT_SEARCH,
+        ENDPOINT_AUDIT_READ,
+        ENDPOINT_DEVICE_READ,
+        ENDPOINT_DEVICE_SEARCH,
+        ENDPOINT_SOFTWARE_SEARCH,
+        MANAGEMENT_ALERT_SEARCH,
+        MANAGEMENT_SITE_SEARCH,
+        datto_rmm_endpoint_provider,
+        endpoint_alert_search,
+        endpoint_audit_read,
+        endpoint_software_search,
+        management_alert_search,
+        management_site_search,
+    )
+
+    now = datetime.now(timezone.utc)
+    provider = datto_rmm_endpoint_provider(now)
+
+    assert {
+        ENDPOINT_DEVICE_SEARCH,
+        ENDPOINT_DEVICE_READ,
+        ENDPOINT_ALERT_SEARCH,
+        ENDPOINT_AUDIT_READ,
+        ENDPOINT_SOFTWARE_SEARCH,
+        MANAGEMENT_ALERT_SEARCH,
+        MANAGEMENT_SITE_SEARCH,
+    } <= provider.capabilities
+
+    definitions = (
+        endpoint_alert_search(now),
+        endpoint_audit_read(now),
+        endpoint_software_search(now),
+        management_alert_search(now),
+        management_site_search(now),
+    )
+
+    assert all(item.metadata["provider_neutral"] == "true" for item in definitions)
+    assert all(item.metadata["read_only"] == "true" for item in definitions)
+
+    hints = ",".join(item.metadata["fact_hints"] for item in definitions)
+    assert "alert" in hints
+    assert "bios" in hints
+    assert "software" in hints
+    assert "site" in hints

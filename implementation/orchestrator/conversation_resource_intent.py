@@ -85,7 +85,7 @@ class ReasonedResourceInquiryInterpreter:
         requested_facts = proposed.get("requested_facts")
         if not resource_type:
             raise ValueError("resource inquiry proposal is missing resource_type")
-        if not isinstance(selector, Mapping) or not selector:
+        if not isinstance(selector, Mapping):
             raise ValueError("resource inquiry proposal requires a resource_selector object")
         if not isinstance(requested_facts, (list, tuple)) or not requested_facts:
             raise ValueError("resource inquiry proposal requires requested_facts")
@@ -113,12 +113,38 @@ class ReasonedResourceInquiryInterpreter:
                 )
             normalized_selector[key] = value
 
+        result_intent = str(
+            proposed.get("result_intent", "summary")
+        ).strip()
+        completeness_requirement = str(
+            proposed.get("completeness_requirement", "sufficient")
+        ).strip()
+
+        if result_intent not in {
+            "summary",
+            "enumerate",
+            "count",
+            "search",
+            "inspect",
+        }:
+            raise ValueError("resource inquiry proposal has invalid result_intent")
+
+        if completeness_requirement not in {
+            "sufficient",
+            "complete",
+        }:
+            raise ValueError(
+                "resource inquiry proposal has invalid completeness_requirement"
+            )
+
         return ResourceInquiry(
             resource_type=resource_type,
             resource_selector=normalized_selector,
             requested_facts=tuple(str(item).strip() for item in requested_facts),
             execution_mode=str(proposed.get("execution_mode", "deterministic")).strip(),
             permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
+            result_intent=result_intent,
+            completeness_requirement=completeness_requirement,
         )
 
     @classmethod
@@ -133,6 +159,184 @@ class ReasonedResourceInquiryInterpreter:
         boundary = cls._IDENTIFIER_CHAR_CLASS
         pattern = rf"(?<![{boundary}]){re.escape(value)}(?![{boundary}])"
         return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataFirstResourceInquiryInterpreter:
+    """Resolve obvious read-only resource inquiries without requiring AI.
+
+    This layer is deliberately conservative. It only resolves a request when one
+    governed metadata contract produces a unique direct semantic match. Anything
+    ambiguous or requiring linguistic inference falls through to the existing
+    bounded reasoned interpreter.
+
+    Provider names in free-form text remain source context only and never become
+    authority, provider selection, tenant scope, or a resource selector.
+    """
+
+    contracts: tuple[Mapping[str, Any], ...]
+    fallback: "ResourceInquiryInterpreter"
+
+    def interpret(
+        self,
+        *,
+        text: str,
+        principal: BoundConversationPrincipal,
+    ) -> ResourceInquiry | None:
+        deterministic = self._interpret_deterministically(text)
+        if deterministic is not None:
+            return deterministic
+
+        return self.fallback.interpret(
+            text=text,
+            principal=principal,
+        )
+
+    def _interpret_deterministically(
+        self,
+        text: str,
+    ) -> ResourceInquiry | None:
+        normalized_text = self._normalize(text)
+        if not normalized_text:
+            return None
+
+        matches: list[tuple[Mapping[str, Any], str]] = []
+
+        for contract in self.contracts:
+            fact_hints = tuple(
+                str(item).strip()
+                for item in contract.get("fact_hints", ())
+                if str(item).strip()
+            )
+
+            matched_fact = self._best_explicit_fact_match(
+                normalized_text,
+                fact_hints,
+            )
+            if matched_fact is None:
+                continue
+
+            # Deterministic foundation currently handles only requests that do
+            # not require us to infer a resource selector. Endpoint/device and
+            # other named-resource requests continue through the reasoner until
+            # selector extraction is generalized safely.
+            selector_required = bool(contract.get("selector_required"))
+            if selector_required:
+                continue
+
+            matches.append((contract, matched_fact))
+
+        if len(matches) != 1:
+            return None
+
+        contract, requested_fact = matches[0]
+
+        resource_types = tuple(
+            str(item).strip()
+            for item in contract.get("resource_types", ())
+            if str(item).strip()
+        )
+
+        if len(resource_types) != 1:
+            return None
+
+        result_intent, completeness_requirement = (
+            self._result_outcome(normalized_text)
+        )
+
+        return ResourceInquiry(
+            resource_type=resource_types[0],
+            resource_selector={},
+            requested_facts=(requested_fact,),
+            execution_mode="deterministic",
+            permission_mode="observe",
+            result_intent=result_intent,
+            completeness_requirement=completeness_requirement,
+        )
+
+    @classmethod
+    def _best_explicit_fact_match(
+        cls,
+        normalized_text: str,
+        fact_hints: tuple[str, ...],
+    ) -> str | None:
+        candidates: list[tuple[int, str]] = []
+
+        for hint in fact_hints:
+            normalized_hint = cls._normalize(hint)
+            if not normalized_hint:
+                continue
+
+            pattern = (
+                r"(?<![a-z0-9])"
+                + re.escape(normalized_hint)
+                + r"(?![a-z0-9])"
+            )
+
+            if re.search(pattern, normalized_text):
+                candidates.append((len(normalized_hint), hint))
+
+        if not candidates:
+            return None
+
+        # Prefer the most specific explicit phrase: "open alerts" beats
+        # "alerts", "managed sites" beats "sites", etc.
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        return candidates[0][1]
+
+    @staticmethod
+    def _result_outcome(normalized_text: str) -> tuple[str, str]:
+        """Resolve only explicit generic result-shaping language.
+
+        This does not recognize provider-specific questions. It identifies
+        universal output operators such as count and complete enumeration.
+        Ordinary/vague questions remain summary/sufficient and may still use
+        semantic reasoning elsewhere when resource interpretation requires it.
+        """
+
+        words = set(normalized_text.split())
+
+        count_phrases = (
+            "how many",
+            "number of",
+            "count of",
+        )
+        if (
+            "count" in words
+            or any(phrase in normalized_text for phrase in count_phrases)
+        ):
+            return "count", "complete"
+
+        enumeration_verbs = {
+            "list",
+            "enumerate",
+        }
+        explicit_all = (
+            "all" in words
+            or "every" in words
+            or "complete list" in normalized_text
+            or "full list" in normalized_text
+        )
+
+        if words.intersection(enumeration_verbs):
+            return "enumerate", "complete"
+
+        if explicit_all and (
+            "show" in words
+            or "give" in words
+            or "display" in words
+            or "return" in words
+        ):
+            return "enumerate", "complete"
+
+        return "summary", "sufficient"
+
+    @staticmethod
+    def _normalize(value: str) -> str:
+        return " ".join(
+            re.sub(r"[^a-z0-9]+", " ", value.casefold()).split()
+        )
 
 
 class ResourceInquiryInterpreter(Protocol):

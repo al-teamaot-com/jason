@@ -1,7 +1,7 @@
 # Project Jason — Extension Construction Map
 
-**Status:** Active continuity/control record  
-**Owner:** Jason Architecture Authority  
+**Status:** Active continuity/control record
+**Owner:** Jason Architecture Authority
 **Purpose:** Give future sessions one place to determine how to create or extend a Jason component without rediscovering platform fundamentals or bypassing governance.
 
 This map is not a new architecture authority. It points to the governing architecture, standards, component contracts, engineering guides, implementation exemplars, and completion controls for each extensible component class.
@@ -73,3 +73,61 @@ Every material implementation workstream must make an explicit documentation-imp
 If it introduces a new reusable pattern, changes how an existing class is constructed, or exposes a missing prerequisite that had to be rediscovered, this map and the owning construction guidance must be updated in the same governed workstream.
 
 "No documentation impact" is an explicit reviewed conclusion, not the result of forgetting to update documentation.
+
+## 2026-08-12 construction guidance refinement
+
+Resource inquiry/evidence work now has a durable reusable guide at `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`.
+
+For capability/resource extensions that answer natural-language questions, use that guide together with the existing Capability / resource construction row above. It captures selector/fact separation, capability-derived canonical fact hints, minimal requested facts, relevance-bounded evidence indexing, bounded model-selected pointers, and deterministic provider-evidence dereference.
+
+Runtime rebuild/deploy rediscovery exposed a missing operational prerequisite. Use `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` for the current deployment construction/verification pattern, including Compose-label discovery, required interpolation inputs, protected secret-path checks, and the interactive-shell no-unconditional-exit rule.
+
+<!-- BEGIN PROVIDER ADAPTATION FOUNDATION -->
+## Provider Adaptation and Resource Outcome Foundation
+
+**Status:** Production foundation operational
+
+Implemented foundations:
+
+- provider-neutral governed Datto read capabilities;
+- organization-level provider-read authority matching;
+- deterministic-first natural-language resource interpretation;
+- Ollama semantic fallback for non-deterministic interpretation;
+- resource inquiry result intent;
+- resource inquiry completeness requirements;
+- structurally authoritative direct evidence;
+- generic bounded provider adaptation;
+- provider contradiction detection;
+- provider pagination recovery;
+- complete collection aggregation;
+- bounded collection rendering;
+- provider adaptation audit evidence.
+
+Primary implementation areas:
+
+- `implementation/orchestrator/conversation_resource_intent.py`
+- `implementation/orchestrator/resource_inquiry.py`
+- `implementation/orchestrator/resource_reasoner.py`
+- `implementation/orchestrator/resource_evidence.py`
+- `implementation/orchestrator/provider_read_authority.py`
+- `implementation/connectors/core/provider_adaptation.py`
+- `implementation/connectors/datto_rmm/connector.py`
+- `implementation/runtime_service/src/jason_runtime/composition.py`
+
+Architecture reference:
+
+`docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md`
+
+Production proof:
+
+`docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md`
+
+Future construction:
+
+- observed provider-behavior profiles;
+- provider drift detection;
+- generalized continuation-token handling;
+- rate-limit adaptation;
+- native Teams processing feedback;
+- separately governed provider write surfaces.
+<!-- END PROVIDER ADAPTATION FOUNDATION -->

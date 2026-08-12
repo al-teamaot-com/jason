@@ -358,3 +358,370 @@ def test_inconsistent_provider_provenance_fails_closed():
             result=bad,
             requested_facts=("last logged in user",),
         )
+
+
+def test_collection_renderer_summarizes_alert_without_dumping_raw_diagnostics():
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "severity",
+                "json_pointer": "/provider_data/alerts/0/priority",
+            },
+        ]
+    )
+
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "AOT-50282",
+                "site": "Atlantic Office Machines",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": {
+            "alerts": [
+                {
+                    "priority": "Moderate",
+                    "resolved": False,
+                    "diagnostics": "THIS RAW DIAGNOSTIC MUST NOT BE RETURNED",
+                    "alertContext": {
+                        "samples": {
+                            "Status": (
+                                "Unhealthy - Local user changes detected; "
+                                "AddedUsers=CodexSandboxOffline,CodexSandboxOnline"
+                            )
+                        }
+                    },
+                }
+            ]
+        },
+    }
+
+    alert_intent = ConversationIntent(
+        capability_name="endpoint.alert.search",
+        arguments={
+            "hostname": "AOT-50282",
+            "requested_facts": ("alerts", "severity"),
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+    text = renderer.render(
+        result(
+            data=data,
+            capability_name="endpoint.alert.search",
+        ),
+        alert_intent,
+    )
+
+    assert text.startswith("AOT-50282 — 1 alert found.")
+    assert "Moderate" in text
+    assert "Local user changes detected" in text
+    assert "CodexSandboxOffline" in text
+    assert "THIS RAW DIAGNOSTIC MUST NOT BE RETURNED" not in text
+    assert '"alertContext"' not in text
+    assert "Source: datto_rmm." in text
+    assert reasoner.calls
+    assert reasoner.calls[0][0] == ("severity",)
+
+
+def test_empty_collection_renderer_answers_no_items_concisely():
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "alerts",
+                "json_pointer": "/provider_data/alerts",
+            }
+        ]
+    )
+
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "AOT-50282",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": {"alerts": []},
+    }
+
+    alert_intent = ConversationIntent(
+        capability_name="endpoint.alert.search",
+        arguments={
+            "hostname": "AOT-50282",
+            "requested_facts": ("alerts",),
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+    text = renderer.render(
+        result(
+            data=data,
+            capability_name="endpoint.alert.search",
+        ),
+        alert_intent,
+    )
+
+    assert text == (
+        "AOT-50282 — no alerts found. Source: datto_rmm."
+    )
+
+
+def test_collection_renderer_bounds_large_results():
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "software",
+                "json_pointer": "/provider_data/software",
+            }
+        ]
+    )
+
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "AOT-50282",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": {
+            "software": [
+                {"name": f"Application {number}", "version": f"{number}.0"}
+                for number in range(1, 9)
+            ]
+        },
+    }
+
+    software_intent = ConversationIntent(
+        capability_name="endpoint.software.search",
+        arguments={
+            "hostname": "AOT-50282",
+            "requested_facts": ("software",),
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+    text = renderer.render(
+        result(
+            data=data,
+            capability_name="endpoint.software.search",
+        ),
+        software_intent,
+    )
+
+    assert "8 software found." in text
+    assert "Application 1" in text
+    assert "Application 5" in text
+    assert "Application 6" not in text
+    assert "+3 more" in text
+
+
+def test_provider_data_collection_is_selected_directly_without_reasoner():
+    reasoner = Reasoner([])
+
+    interpreter = GovernedResourceEvidenceInterpreter(reasoner)
+
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "AOT-50282",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": {
+            "software": [
+                {"name": "Application 1", "version": "1.0"},
+                {"name": "Application 2", "version": "2.0"},
+            ]
+        },
+    }
+
+    facts = interpreter.interpret(
+        result=result(
+            data=data,
+            capability_name="endpoint.software.search",
+        ),
+        requested_facts=("software",),
+    )
+
+    assert len(facts) == 1
+    assert facts[0].json_pointer == "/provider_data/software"
+    assert len(facts[0].value) == 2
+    assert reasoner.calls == []
+
+
+def test_provider_data_alert_collection_is_selected_directly_without_reasoner():
+    reasoner = Reasoner([])
+
+    interpreter = GovernedResourceEvidenceInterpreter(reasoner)
+
+    data = {
+        "resource_matches": [
+            {
+                "resource_id": "device-uid-1",
+                "hostname": "AOT-50282",
+            }
+        ],
+        "resolved_resource_id": "device-uid-1",
+        "provider_data": {
+            "alerts": [
+                {
+                    "priority": "Moderate",
+                    "message": "Test alert",
+                }
+            ]
+        },
+    }
+
+    facts = interpreter.interpret(
+        result=result(
+            data=data,
+            capability_name="endpoint.alert.search",
+        ),
+        requested_facts=("alerts",),
+    )
+
+    assert facts[0].json_pointer == "/provider_data/alerts"
+    assert len(facts[0].value) == 1
+    assert reasoner.calls == []
+
+
+def test_top_level_site_collection_is_selected_directly_without_reasoner():
+    reasoner = Reasoner([])
+
+    interpreter = GovernedResourceEvidenceInterpreter(reasoner)
+
+    data = {
+        "pageDetails": {
+            "count": 2,
+            "totalCount": 46,
+        },
+        "sites": [
+            {
+                "uid": "site-1",
+                "name": "Atlantic Office Machines",
+            },
+            {
+                "uid": "site-2",
+                "name": "Autotask Corporation",
+            },
+        ],
+    }
+
+    facts = interpreter.interpret(
+        result=result(
+            data=data,
+            capability_name="management.site.search",
+        ),
+        requested_facts=("sites",),
+    )
+
+    assert len(facts) == 1
+    assert facts[0].json_pointer == "/sites"
+    assert len(facts[0].value) == 2
+    assert reasoner.calls == []
+
+
+def test_top_level_sites_render_as_bounded_collection():
+    reasoner = Reasoner([])
+
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    data = {
+        "pageDetails": {
+            "count": 6,
+            "totalCount": 46,
+        },
+        "sites": [
+            {"name": f"Site {number}", "uid": f"site-{number}"}
+            for number in range(1, 7)
+        ],
+    }
+
+    site_intent = ConversationIntent(
+        capability_name="management.site.search",
+        arguments={
+            "requested_facts": ("sites",),
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+    text = renderer.render(
+        result(
+            data=data,
+            capability_name="management.site.search",
+        ),
+        site_intent,
+    )
+
+    assert "6 sites found." in text
+    assert "Site 1" in text
+    assert "Site 5" in text
+    assert "Site 6" not in text
+    assert "+1 more" in text
+    assert reasoner.calls == []
+
+
+def test_complete_enumeration_renders_every_collection_item():
+    reasoner = Reasoner([])
+
+    renderer = GovernedTeamsResourceResponseRenderer(
+        GovernedResourceEvidenceInterpreter(reasoner)
+    )
+
+    data = {
+        "pageDetails": {
+            "count": 6,
+            "totalCount": 6,
+        },
+        "sites": [
+            {"name": f"Site {number}"}
+            for number in range(1, 7)
+        ],
+    }
+
+    intent = ConversationIntent(
+        capability_name="management.site.search",
+        arguments={
+            "requested_facts": ("sites",),
+            "result_intent": "enumerate",
+            "completeness_requirement": "complete",
+        },
+        execution_mode="deterministic",
+        permission_mode="observe",
+    )
+
+    text = renderer.render(
+        result(
+            data=data,
+            capability_name="management.site.search",
+        ),
+        intent,
+    )
+
+    assert "6 sites found:" in text
+    for number in range(1, 7):
+        assert f"- Site {number}" in text
+    assert "+1 more" not in text

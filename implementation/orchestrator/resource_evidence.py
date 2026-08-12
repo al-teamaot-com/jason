@@ -147,6 +147,17 @@ def _deterministic_direct_facts(
     locations: list[tuple[str, Mapping[str, Any]]] = []
     if isinstance(data, Mapping):
         locations.append(("", data))
+
+        # Provider-scoped read capabilities return canonical evidence beneath
+        # provider_data. Treat direct fields at this boundary as structurally
+        # authoritative just like direct top-level fields. This lets a request
+        # for "software", "alerts", "bios", etc. resolve to the complete
+        # provider collection/object rather than allowing language reasoning
+        # to select an arbitrary nested scalar.
+        provider_data = data.get("provider_data")
+        if isinstance(provider_data, Mapping):
+            locations.append(("/provider_data", provider_data))
+
         raw_matches = data.get("resource_matches")
         if (
             isinstance(raw_matches, (list, tuple))
@@ -250,14 +261,239 @@ class GovernedTeamsResourceResponseRenderer:
             requested_facts=requested_facts,
         )
 
+        collection_facts = tuple(
+            fact
+            for fact in facts
+            if isinstance(fact.value, (list, tuple))
+        )
+
+        if collection_facts:
+            # A human asking about a resource collection normally needs the
+            # existence/count and a concise operational summary, not the raw
+            # provider object. Complete evidence remains in the governed
+            # orchestration result and can be requested explicitly later.
+            primary = collection_facts[0]
+            return _render_collection_response(
+                subject=subject,
+                source=source,
+                fact=primary,
+                result_intent=str(
+                    intent.arguments.get(
+                        "result_intent",
+                        "summary",
+                    )
+                ).strip(),
+                completeness_requirement=str(
+                    intent.arguments.get(
+                        "completeness_requirement",
+                        "sufficient",
+                    )
+                ).strip(),
+            )
+
         if len(facts) == 1:
             fact = facts[0]
-            return f"{subject} — {fact.requested_fact}: {_display_value(fact.value)}. Source: {source}."
+            return (
+                f"{subject} — {fact.requested_fact}: "
+                f"{_display_value(fact.value)}. Source: {source}."
+            )
 
         rendered = "; ".join(
-            f"{fact.requested_fact}: {_display_value(fact.value)}" for fact in facts
+            f"{fact.requested_fact}: {_display_value(fact.value)}"
+            for fact in facts
         )
         return f"{subject} — {rendered}. Source: {source}."
+
+
+def _render_collection_response(
+    *,
+    subject: str,
+    source: str,
+    fact: VerifiedResourceFact,
+    result_intent: str = "summary",
+    completeness_requirement: str = "sufficient",
+) -> str:
+    """Render provider evidence according to the governed result contract."""
+
+    values = tuple(fact.value)
+    label = _human_collection_label(
+        fact.requested_fact,
+        len(values),
+    )
+
+    if not values:
+        return f"{subject} — no {label} found. Source: {source}."
+
+    if result_intent == "count":
+        return (
+            f"{subject} — {len(values)} {label} found. "
+            f"Source: {source}."
+        )
+
+    if (
+        result_intent == "enumerate"
+        and completeness_requirement == "complete"
+    ):
+        # A complete inline enumeration remains bounded for transport safety.
+        # If a collection is too large for one message, do not pretend the
+        # partial rendering satisfied a complete request.
+        max_inline_items = 100
+
+        if len(values) > max_inline_items:
+            return (
+                f"{subject} — {len(values)} {label} found, but the complete "
+                f"collection exceeds the {max_inline_items}-item inline "
+                f"response limit. Source: {source}."
+            )
+
+        summaries = tuple(
+            summary
+            for item in values
+            if (summary := _summarize_collection_item(item))
+        )
+
+        if len(summaries) != len(values):
+            raise LookupError(
+                "complete collection rendering could not summarize every item"
+            )
+
+        heading = f"{subject} — {len(values)} {label} found:"
+        body = "\n".join(
+            f"- {summary}"
+            for summary in summaries
+        )
+        return f"{heading}\n{body}\nSource: {source}."
+
+    heading = f"{subject} — {len(values)} {label} found."
+
+    summaries = tuple(
+        summary
+        for item in values[:5]
+        if (summary := _summarize_collection_item(item))
+    )
+
+    if not summaries:
+        return f"{heading} Source: {source}."
+
+    detail = " | ".join(summaries)
+
+    remaining = len(values) - len(summaries)
+    if remaining > 0:
+        detail += f" | +{remaining} more"
+
+    return f"{heading} {detail}. Source: {source}."
+
+
+def _human_collection_label(requested_fact: str, count: int) -> str:
+    label = requested_fact.strip().replace("_", " ")
+
+    for prefix in ("open ", "resolved ", "installed "):
+        if label.casefold().startswith(prefix):
+            label = label[len(prefix):]
+            break
+
+    if count == 1 and label.endswith("s") and len(label) > 1:
+        label = label[:-1]
+
+    return label or "items"
+
+
+def _summarize_collection_item(value: Any) -> str:
+    """Return a bounded operational summary without dumping provider JSON."""
+
+    if value is None:
+        return ""
+
+    if isinstance(value, (str, int, float, bool)):
+        return _bounded_scalar(value)
+
+    if not isinstance(value, Mapping):
+        return ""
+
+    parts: list[str] = []
+
+    for key in (
+        "priority",
+        "severity",
+        "status",
+        "name",
+        "displayName",
+        "title",
+        "softwareName",
+        "productName",
+        "siteName",
+        "deviceName",
+        "hostname",
+        "version",
+    ):
+        scalar = _bounded_scalar(value.get(key))
+        if scalar and scalar not in parts:
+            parts.append(scalar)
+        if len(parts) >= 2:
+            break
+
+    descriptive = _find_descriptive_scalar(value)
+    if descriptive and descriptive not in parts:
+        parts.append(descriptive)
+
+    if not parts:
+        return "record"
+
+    return " — ".join(parts[:3])[:420]
+
+
+def _find_descriptive_scalar(value: Mapping[str, Any]) -> str:
+    preferred = (
+        "summary",
+        "message",
+        "description",
+        "reason",
+        "details",
+        "Status",
+    )
+
+    for key in preferred:
+        scalar = _bounded_scalar(value.get(key))
+        if scalar:
+            return scalar
+
+    for outer_key in (
+        "alertContext",
+        "samples",
+        "context",
+        "info",
+        "metadata",
+        "alertSourceInfo",
+    ):
+        nested = value.get(outer_key)
+        if not isinstance(nested, Mapping):
+            continue
+
+        for key in preferred:
+            scalar = _bounded_scalar(nested.get(key))
+            if scalar:
+                return scalar
+
+        samples = nested.get("samples")
+        if isinstance(samples, Mapping):
+            for key in preferred:
+                scalar = _bounded_scalar(samples.get(key))
+                if scalar:
+                    return scalar
+
+    return ""
+
+
+def _bounded_scalar(value: Any) -> str:
+    if not isinstance(value, (str, int, float, bool)):
+        return ""
+
+    rendered = str(value).strip()
+    if not rendered:
+        return ""
+
+    rendered = " ".join(rendered.split())
+    return rendered[:280]
 
 
 def _canonical_resource_matches(result: OrchestrationResult) -> tuple[Mapping[str, Any], ...]:

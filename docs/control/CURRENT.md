@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-12  
-**Status:** Teams → OpenClaw → Jason → Datto RMM resource inquiry is operationally proven for provider-backed semantic evidence selection. Runtime code used for the proof was deployed from an uncommitted worktree and still requires a separately authorized Git commit/push for source durability.  
+**Updated:** 2026-08-12
+**Status:** Teams → OpenClaw → Jason → Datto RMM resource inquiry is operationally proven for provider-backed semantic evidence selection. Runtime code used for the proof was deployed from an uncommitted worktree and still requires a separately authorized Git commit/push for source durability.
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -100,3 +100,42 @@ Do not guess Compose paths, deployment variables, or secret host paths in future
 ## Success condition
 
 A future session can reproduce why the AOT-50282 answer was wrong, locate the provider truth, understand the generic semantic/evidence correction, rebuild the runtime from the authoritative deployment topology, and distinguish operational deployment from Git durability without relying on this conversation.
+
+<!-- BEGIN 2026-08-12 DATTO READ WORKSTREAM -->
+## Last durable success — 2026-08-12 Adaptive Governed Datto Read Foundation
+
+Production Jason now supports broad governed Datto RMM read inquiries through reusable provider-neutral capabilities.
+
+Durable success includes:
+
+- organization-wide AOT Datto provider-read observe authority;
+- device alerts, audit, software, account alerts, and managed-site reads;
+- deterministic-first resource interpretation with Ollama semantic fallback;
+- structurally authoritative direct collection evidence;
+- bounded human-oriented collection rendering;
+- generic Provider Adaptation for contradictory provider evidence;
+- complete collection aggregation when the resource inquiry requires completeness;
+- `result_intent` and `completeness_requirement` as governed inquiry properties;
+- production proof of adaptive Datto site recovery and complete 46-site aggregation.
+
+Architecture:
+`docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md`
+
+Session proof:
+`docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md`
+
+Existing resource evidence pattern:
+`docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`
+
+Runtime deployment runbook:
+`docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`
+
+Current branch:
+`feature/jason-runtime-service`
+
+Next priority:
+
+- add visible Microsoft Teams processing feedback using OpenClaw's supported native typing/processing lifecycle;
+- continue generalized provider/resource behavior rather than question-specific scripts;
+- govern Datto write capabilities separately from the established read-only surface.
+<!-- END 2026-08-12 DATTO READ WORKSTREAM -->

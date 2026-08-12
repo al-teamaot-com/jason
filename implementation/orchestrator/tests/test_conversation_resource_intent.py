@@ -11,6 +11,7 @@ from kernel.execution_providers import (
 )
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
+    MetadataFirstResourceInquiryInterpreter,
     ReasonedResourceInquiryInterpreter,
 )
 from orchestrator.resource_capability_catalog import register_endpoint_resource_foundation
@@ -220,3 +221,338 @@ def test_unrecognized_language_can_return_no_resource_inquiry():
         )
         is None
     )
+
+def test_resource_interpreter_allows_empty_selector_for_broad_read_query() -> None:
+    from orchestrator.conversation_resource_intent import ReasonedResourceInquiryInterpreter
+
+    class EmptySelectorReasoner:
+        def propose(self, **kwargs):
+            return {
+                "resource_type": "alert",
+                "resource_selector": {},
+                "requested_facts": ["open alerts"],
+                "execution_mode": "deterministic",
+                "permission_mode": "observe",
+            }
+
+    interpreter = ReasonedResourceInquiryInterpreter(
+        reasoner=EmptySelectorReasoner()
+    )
+
+    principal = type(
+        "Principal",
+        (),
+        {
+            "organization_id": "aot",
+            "client_id": None,
+        },
+    )()
+
+    inquiry = interpreter.interpret(
+        text="Show me open alerts",
+        principal=principal,
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_selector == {}
+    assert inquiry.permission_mode == "observe"
+
+
+def test_metadata_first_interpreter_resolves_unique_management_collection_without_reasoner():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            raise AssertionError("fallback reasoner must not be called")
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                    "site name",
+                    "site identifier",
+                    "site details",
+                ),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    inquiry = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.execution_mode == "deterministic"
+    assert inquiry.permission_mode == "observe"
+    assert fallback.calls == []
+
+
+def test_metadata_first_interpreter_falls_back_when_selector_is_required():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "endpoint.software.search",
+                "resource_types": ("endpoint_software", "endpoint"),
+                "selector_keys": ("hostname", "name", "resource_id"),
+                "fact_hints": ("software", "installed software"),
+                "selector_required": True,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="What software is installed on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_falls_back_on_ambiguous_metadata_match():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "one",
+                "resource_types": ("one",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+            {
+                "capability_name": "two",
+                "resource_types": ("two",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="Show status",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_resolves_unique_management_collection_without_reasoner():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            raise AssertionError("fallback reasoner must not be called")
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                    "site name",
+                    "site identifier",
+                    "site details",
+                ),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    inquiry = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.execution_mode == "deterministic"
+    assert inquiry.permission_mode == "observe"
+    assert fallback.calls == []
+
+
+def test_metadata_first_interpreter_falls_back_when_selector_is_required():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "endpoint.software.search",
+                "resource_types": ("endpoint_software", "endpoint"),
+                "selector_keys": ("hostname", "name", "resource_id"),
+                "fact_hints": ("software", "installed software"),
+                "selector_required": True,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="What software is installed on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_falls_back_on_ambiguous_metadata_match():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "one",
+                "resource_types": ("one",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+            {
+                "capability_name": "two",
+                "resource_types": ("two",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="Show status",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_distinguishes_summary_from_complete_enumeration():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": ("site", "sites", "managed site"),
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    summary = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    listing = interpreter.interpret(
+        text="Please list the sites in Datto RMM",
+        principal=principal(),
+    )
+
+    assert summary.result_intent == "summary"
+    assert summary.completeness_requirement == "sufficient"
+
+    assert listing.result_intent == "enumerate"
+    assert listing.completeness_requirement == "complete"
+
+
+def test_metadata_first_count_requires_complete_collection():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": ("site", "sites", "managed site"),
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    inquiry = interpreter.interpret(
+        text="How many sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry.result_intent == "count"
+    assert inquiry.completeness_requirement == "complete"

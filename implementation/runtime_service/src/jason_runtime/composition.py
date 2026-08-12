@@ -41,6 +41,7 @@ from orchestrator.conversation_action_intent import (
 )
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
+    MetadataFirstResourceInquiryInterpreter,
     ReasonedResourceInquiryInterpreter,
 )
 from orchestrator.conversation_response import GovernedTeamsConversationResponseRenderer
@@ -54,8 +55,13 @@ from orchestrator.ollama_reasoning import (
 )
 from orchestrator.resource_capability_catalog import (
     DATTO_RMM_PROVIDER,
+    ENDPOINT_ALERT_SEARCH,
+    ENDPOINT_AUDIT_READ,
     ENDPOINT_DEVICE_READ,
     ENDPOINT_DEVICE_SEARCH,
+    ENDPOINT_SOFTWARE_SEARCH,
+    MANAGEMENT_ALERT_SEARCH,
+    MANAGEMENT_SITE_SEARCH,
     register_endpoint_resource_foundation,
 )
 from orchestrator.resource_evidence import (
@@ -63,6 +69,7 @@ from orchestrator.resource_evidence import (
     GovernedTeamsResourceResponseRenderer,
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
+from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.system_registry_resource import (
@@ -250,11 +257,12 @@ class ConnectorEventAudit:
 
 def _resource_language_contract(
     capabilities: CapabilityRegistryService,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """Derive language-normalization vocabulary from governed capability metadata."""
 
     resource_types: set[str] = set()
     selector_keys: set[str] = set()
+    fact_hints: set[str] = set()
     for capability in capabilities.list_all():
         metadata = capability.metadata
         if metadata.get("provider_neutral", "false").lower() != "true":
@@ -271,7 +279,77 @@ def _resource_language_contract(
             for item in metadata.get("selector_keys", "").split(",")
             if item.strip()
         )
-    return tuple(sorted(resource_types)), tuple(sorted(selector_keys))
+        fact_hints.update(
+            item.strip()
+            for item in metadata.get("fact_hints", "").split(",")
+            if item.strip()
+        )
+    return (
+        tuple(sorted(resource_types)),
+        tuple(sorted(selector_keys)),
+        tuple(sorted(fact_hints)),
+    )
+
+
+
+def _deterministic_resource_contracts(
+    capabilities: CapabilityRegistryService,
+) -> tuple[Mapping[str, Any], ...]:
+    """Build deterministic read-language contracts from governed metadata."""
+
+    contracts: list[Mapping[str, Any]] = []
+
+    for capability in capabilities.list_all():
+        metadata = capability.metadata
+
+        if metadata.get("provider_neutral", "false").lower() != "true":
+            continue
+        if metadata.get("read_only", "false").lower() != "true":
+            continue
+
+        resource_types = tuple(
+            item.strip()
+            for item in metadata.get("resource_types", "").split(",")
+            if item.strip()
+        )
+        selector_keys = tuple(
+            item.strip()
+            for item in metadata.get("selector_keys", "").split(",")
+            if item.strip()
+        )
+        fact_hints = tuple(
+            item.strip()
+            for item in metadata.get("fact_hints", "").split(",")
+            if item.strip()
+        )
+
+        # A zero-selector interpretation is safe only for resource contracts
+        # that have a meaningful account/environment-wide read surface.
+        #
+        # Current metadata convention:
+        # management-wide search resources can be queried without a selector;
+        # endpoint/device-scoped resources require discovery/identity grounding.
+        selector_required = any(
+            item in resource_types
+            for item in (
+                "endpoint",
+                "endpoint_alert",
+                "endpoint_audit",
+                "endpoint_software",
+            )
+        )
+
+        contracts.append(
+            {
+                "capability_name": capability.capability_name,
+                "resource_types": resource_types,
+                "selector_keys": selector_keys,
+                "fact_hints": fact_hints,
+                "selector_required": selector_required,
+            }
+        )
+
+    return tuple(contracts)
 
 
 def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
@@ -281,13 +359,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
     approval_repository = SQLiteApprovalRepository(authority_store)
-    identity_authority = IdentityAuthorityService(
-        identities=SQLiteIdentityRepository(authority_store),
-        grants=SQLiteAuthorityGrantRepository(authority_store),
-        approvals=approval_repository,
-        contexts=authority_store,
-        audit=authority_store,
-    )
     context_validator = ExecutionContextValidator(contexts=authority_store)
 
     http_transport = UrlLibJsonHttpTransport()
@@ -326,7 +397,19 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
-    resource_types, selector_keys = _resource_language_contract(capabilities)
+    identity_authority = IdentityAuthorityService(
+        identities=SQLiteIdentityRepository(authority_store),
+        grants=SQLiteAuthorityGrantRepository(authority_store),
+        approvals=approval_repository,
+        contexts=authority_store,
+        audit=authority_store,
+        capability_matcher=GovernedProviderReadAuthorityMatcher(
+            capabilities=capabilities,
+            providers=providers,
+        ),
+    )
+
+    resource_types, selector_keys, fact_hints = _resource_language_contract(capabilities)
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
         model=settings.ollama_model,
@@ -337,12 +420,16 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         reasoner=OllamaActionIntentReasoner(ollama_client),
     )
     resource_intent_resolver = GovernedResourceConversationIntentResolver(
-        interpreter=ReasonedResourceInquiryInterpreter(
-            reasoner=OllamaResourceInquiryReasoner(
-                ollama_client,
-                resource_types=resource_types,
-                selector_keys=selector_keys,
-            )
+        interpreter=MetadataFirstResourceInquiryInterpreter(
+            contracts=_deterministic_resource_contracts(capabilities),
+            fallback=ReasonedResourceInquiryInterpreter(
+                reasoner=OllamaResourceInquiryReasoner(
+                    ollama_client,
+                    resource_types=resource_types,
+                    selector_keys=selector_keys,
+                    fact_hints=fact_hints,
+                )
+            ),
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,
@@ -375,6 +462,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         provider_capability_map={
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_SEARCH): "datto_rmm.device.search",
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_READ): "datto_rmm.device.get",
+            (DATTO_RMM_PROVIDER, ENDPOINT_ALERT_SEARCH): "datto_rmm.device.alerts.open",
+            (DATTO_RMM_PROVIDER, ENDPOINT_AUDIT_READ): "datto_rmm.device.audit.get",
+            (DATTO_RMM_PROVIDER, ENDPOINT_SOFTWARE_SEARCH): "datto_rmm.device.software.list",
+            (DATTO_RMM_PROVIDER, MANAGEMENT_ALERT_SEARCH): "datto_rmm.account.alerts.open",
+            (DATTO_RMM_PROVIDER, MANAGEMENT_SITE_SEARCH): "datto_rmm.site.search",
         },
     )
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
@@ -401,6 +493,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers = CapabilityInvokerRegistry()
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
+    invokers.register(ENDPOINT_ALERT_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_AUDIT_READ, datto_invoker)
+    invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
+    invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
+    invokers.register(MANAGEMENT_SITE_SEARCH, datto_invoker)
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)

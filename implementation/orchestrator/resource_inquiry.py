@@ -15,6 +15,9 @@ class ResourceInquiry:
     requested_facts: tuple[str, ...]
     execution_mode: str = "deterministic"
     permission_mode: str = "observe"
+    result_intent: str = "summary"
+    completeness_requirement: str = "sufficient"
+
 
     def __post_init__(self) -> None:
         if not self.resource_type.strip():
@@ -27,6 +30,20 @@ class ResourceInquiry:
             raise ValueError("execution_mode is required")
         if self.permission_mode != "observe":
             raise PermissionError("resource inquiry planning is read-only")
+
+        if self.result_intent not in {
+            "summary",
+            "enumerate",
+            "count",
+            "search",
+            "inspect",
+        }:
+            raise ValueError("resource result_intent is invalid")
+        if self.completeness_requirement not in {
+            "sufficient",
+            "complete",
+        }:
+            raise ValueError("resource completeness_requirement is invalid")
 
 
 @dataclass(frozen=True, slots=True)

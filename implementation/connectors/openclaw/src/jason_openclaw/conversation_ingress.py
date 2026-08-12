@@ -260,13 +260,18 @@ class GovernedOpenClawTeamsConversationIngress:
                 reason="conversation_unresolved",
                 machine_identity=machine_identity,
             )
-        except Exception:
+        except Exception as error:
+            diagnostic_message = str(error).strip()
+            if len(diagnostic_message) > 500:
+                diagnostic_message = diagnostic_message[:500] + "..."
             self.audit.append(
                 "openclaw.teams_conversation_failed",
                 {
                     "request_id": parsed.request_id,
                     "correlation_id": parsed.correlation_id,
                     "machine_identity": machine_identity,
+                    "error_type": type(error).__name__,
+                    "error_message": diagnostic_message,
                 },
             )
             return {

@@ -107,6 +107,8 @@ def test_resource_inquiry_reasoner_returns_only_provider_neutral_structure():
         "requested_facts": ["last logged in user"],
         "execution_mode": "deterministic",
         "permission_mode": "observe",
+        "result_intent": "summary",
+        "completeness_requirement": "sufficient",
     }
     request = transport.calls[0]["json"]
     assert request["think"] is False
@@ -160,7 +162,9 @@ def test_resource_inquiry_reasoner_uses_closed_registered_language_contract():
     system_prompt = request["messages"][0]["content"]
     assert "Never infer ownership, tenant, client, site" in system_prompt
     assert "Authorization scope is not supplied to this language reasoner" in system_prompt
-    assert "requested_facts must describe what the human wants to know" in system_prompt
+    assert "requested_facts must describe only" in system_prompt
+    assert "Return the smallest set of requested facts necessary" in system_prompt
+    assert "Never add related, adjacent, potentially useful, or merely available facts" in system_prompt
 
 
 def test_capability_reasoner_selects_only_candidate_and_builds_arguments_deterministically():
@@ -180,6 +184,8 @@ def test_capability_reasoner_selects_only_candidate_and_builds_arguments_determi
     assert steps[0].arguments == {
         "hostname": "AOT-50282",
         "requested_facts": ["last logged in user"],
+        "result_intent": "summary",
+        "completeness_requirement": "sufficient",
     }
     assert transport.calls[0]["json"]["think"] is False
     assert transport.calls[0]["json"]["options"]["num_predict"] == 64
@@ -251,7 +257,163 @@ def test_evidence_reasoner_returns_locations_not_values():
     assert request["think"] is False
     assert request["options"]["num_predict"] == 96
     prompt = json.loads(request["messages"][1]["content"])
-    assert prompt["evidence"] == {"devices": [{"lastUser": "AOT\\real.user"}]}
+    assert "evidence" not in prompt
+    assert prompt["evidence_index"] == [
+        {
+            "json_pointer": "/devices/0/lastUser",
+            "field": "lastUser",
+            "type": "str",
+        },
+        {
+            "json_pointer": "/devices",
+            "field": "devices",
+            "type": "list",
+        },
+    ]
     system_prompt = request["messages"][0]["content"]
     assert "never prefix a pointer with /evidence" in system_prompt
     assert "/resource_matches/0/resource_id" in system_prompt
+
+
+
+def test_evidence_reasoner_sends_bounded_structural_index_not_full_payload():
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class Transport:
+        def __init__(self):
+            self.request_json = None
+
+        def request(self, **kwargs):
+            self.request_json = kwargs["json"]
+            return {
+                "message": {
+                    "content": '{"locations":[{"requested_fact":"last logged in user","json_pointer":"/devices/0/lastUser"}]}'
+                }
+            }
+
+    transport = Transport()
+    reasoner = OllamaResourceEvidenceReasoner(
+        OllamaStructuredJsonClient(
+            transport=transport,
+            model="local-test",
+        )
+    )
+
+    huge = {
+        "devices": [
+            {
+                "hostname": "AOT-50282",
+                "lastUser": "ExampleUser",
+                "noise": "x" * 10000,
+            }
+        ],
+        "large": [{"field": "value"} for _ in range(500)],
+    }
+
+    result = reasoner.locate(
+        requested_facts=("last logged in user",),
+        data=huge,
+    )
+
+    assert result[0]["json_pointer"] == "/devices/0/lastUser"
+
+    import json
+    payload = json.loads(transport.request_json["messages"][1]["content"])
+
+    assert "evidence" not in payload
+    assert "evidence_index" in payload
+
+    encoded = json.dumps(payload)
+    assert len(encoded) < 30000
+    assert "x" * 1000 not in encoded
+
+    pointers = {item["json_pointer"] for item in payload["evidence_index"]}
+    assert "/devices/0/lastUser" in pointers
+
+
+def test_bounded_evidence_index_has_hard_entry_limit():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "items": [
+            {f"field_{j}": f"value_{i}_{j}" for j in range(20)}
+            for i in range(100)
+        ]
+    }
+
+    index = _bounded_evidence_index(data, max_entries=25)
+    assert len(index) <= 25
+
+
+
+def test_relevance_bounded_index_prioritizes_requested_fact_and_excludes_values():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "noise": {f"field_{i}": f"value_{i}" for i in range(200)},
+        "device": {
+            "hostname": "AOT-50282",
+            "lastUser": "AOT\\verified.user",
+            "operatingSystem": "Windows",
+        },
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("last logged in user",),
+        max_entries=8,
+    )
+
+    assert index[0]["json_pointer"] == "/device/lastUser"
+    assert all("value" not in item for item in index)
+    assert len(index) <= 8
+
+
+
+def test_evidence_pointer_schema_is_constrained_to_supplied_index():
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class Transport:
+        def __init__(self):
+            self.request_json = None
+
+        def request(self, **kwargs):
+            self.request_json = kwargs["json"]
+            return {
+                "message": {
+                    "content": '{"locations":[{"requested_fact":"last logged in user","json_pointer":"/device/lastUser"}]}'
+                }
+            }
+
+    transport = Transport()
+    reasoner = OllamaResourceEvidenceReasoner(
+        OllamaStructuredJsonClient(
+            transport=transport,
+            model="local-test",
+        )
+    )
+
+    reasoner.locate(
+        requested_facts=("last logged in user",),
+        data={
+            "device": {
+                "hostname": "AOT-50282",
+                "lastUser": "AOT\\verified.user",
+            }
+        },
+    )
+
+    schema = transport.request_json["format"]
+    pointer_schema = (
+        schema["properties"]["locations"]["items"]["properties"]["json_pointer"]
+    )
+
+    assert pointer_schema["type"] == "string"
+    assert "/device/lastUser" in pointer_schema["enum"]
+    assert "/resource_matches/0/from" not in pointer_schema["enum"]

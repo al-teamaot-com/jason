@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from orchestrator.conversation_resource_intent import MetadataFirstResourceInquiryInterpreter
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -86,22 +87,43 @@ def test_production_conversation_planning_is_resource_first_and_metadata_driven(
     assert len(resolvers) == 2
     assert isinstance(resolvers[0], GovernedResourceConversationIntentResolver)
     assert isinstance(resolvers[0].planner.reasoner, MetadataResourceCapabilityReasoner)
-    language_reasoner = resolvers[0].interpreter.reasoner
-    assert language_reasoner.resource_types == ("endpoint", "system_registry")
-    assert language_reasoner.selector_keys == (
+    deterministic_interpreter = resolvers[0].interpreter
+    assert isinstance(
+        deterministic_interpreter,
+        MetadataFirstResourceInquiryInterpreter,
+    )
+    language_reasoner = deterministic_interpreter.fallback.reasoner
+    assert set(language_reasoner.resource_types) >= {
+        "endpoint",
+        "endpoint_alert",
+        "endpoint_audit",
+        "endpoint_software",
+        "alert",
+        "management_site",
+        "system_registry",
+    }
+    assert set(language_reasoner.selector_keys) >= {
         "entity_type",
         "environment",
         "from",
         "hostname",
         "lifecycle",
         "name",
+        "priority",
         "query",
         "registry_id",
         "resource_id",
         "serial_number",
+        "severity",
         "site",
+        "site_id",
+        "software",
+        "status",
         "to",
-    )
+    }
+    assert language_reasoner.fact_hints
+    assert "last logged in user" in language_reasoner.fact_hints
+    assert "operating system" in language_reasoner.fact_hints
     invokers = governed_ingress.flow.orchestrator._invoker.registered_capabilities()
     assert SYSTEM_REGISTRY_SEARCH in invokers
     assert SYSTEM_REGISTRY_READ in invokers
@@ -131,3 +153,16 @@ def test_runtime_settings_fail_closed_without_local_reasoning_model(tmp_path):
         assert "JASON_OLLAMA_MODEL" in str(error)
     else:
         raise AssertionError("runtime must fail closed without an explicit local model")
+
+
+def test_production_authority_uses_governed_provider_read_matcher(tmp_path):
+    from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
+
+    application = build_runtime_application(_settings(tmp_path))
+
+    authority = application.ingress.ingress.flow.request_factory.authority
+
+    assert isinstance(
+        authority.capability_matcher,
+        GovernedProviderReadAuthorityMatcher,
+    )
