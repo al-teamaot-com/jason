@@ -1,9 +1,9 @@
 # Project Jason — Fundamentals Continuity Enforcement — 2026-08-12
 
-**Status:** Implemented and ready for review; merge requires fresh CI/base/head verification and an explicit merge decision  
+**Status:** Complete  
 **Owner:** Jason Architecture Authority  
-**Branch:** `docs/fundamentals-enforcement-2026-08-12`  
-**Pull request:** `#162 — Enforce Jason fundamentals and extension continuity`  
+**Merged pull request:** `#162 — Enforce Jason fundamentals and extension continuity`  
+**Merge commit:** `c6ec6004b7b4d54e6f15dee4fb6138cf21d2eb6d`  
 **Production mutation:** None
 
 ## Purpose
@@ -23,11 +23,11 @@ Treat repeated rediscovery as a documentation-control defect, not a memory probl
 
 A material Jason workstream is not documentation-complete if a future competent human or AI must reconstruct fundamental boundaries from conversation history or code archaeology, or cannot determine how to create the next component of the same class from durable sources.
 
-## Changes made
+## Changes completed
 
 - Added `docs/control/JASON-FUNDAMENTALS.md` as the mandatory reconstruction/startup baseline.
 - Added `docs/control/EXTENSION-CONSTRUCTION-MAP.md` as the component-class construction/reuse map.
-- Updated `docs/control/CURRENT.md` to reflect the completed PR #161 merge and the active continuity-enforcement workstream.
+- Updated `docs/control/CURRENT.md` to use the fundamentals/construction startup sequence and to stop treating conversation memory as a source for fundamentals.
 - Updated J-404 so documentation must be reconstructable **and extensible** and requires explicit documentation-impact determination.
 - Updated `HOW-TO-DOCUMENT-JASON.md` to require fundamentals/construction loading before material Jason work and to preserve reusable construction knowledge.
 - Updated `DOCUMENTATION-REGISTER.md` to register the fundamentals and construction-map roles.
@@ -36,18 +36,21 @@ A material Jason workstream is not documentation-complete if a future competent 
 - Updated `tools/catch_me_up.py` so generated snapshots include and instruct future sessions to read the fundamentals/construction records.
 - Strengthened `tools/validate_documentation_control.py` so CI requires these records and their key no-rediscovery controls.
 
-## Validation evidence
+## Final validation and merge evidence
 
-Two validation cycles completed successfully before the final stable review-state wording was written:
+Immediately before merge, PR #162 was rechecked against current GitHub state:
 
-- `Validate Jason` run 2176: **success**.
-- `Validate OpenClaw Operations` run 92: **success**.
-- `Validate Jason` run 2180: **success**.
-- `Validate OpenClaw Operations` run 94: **success**.
+- PR head: `757732e0dbd812bb3bef1dd8d97a9f0a2096d533`.
+- Target branch: `feature/jason-runtime-service` at `39add8b61a94f604fd8e4b66c7e893d104f26775`.
+- `Validate Jason` run 2184: **success**.
+- `Validate OpenClaw Operations` run 96: **success**.
+- PR #162: **mergeable**.
 
-After run 2180/94, PR #162 was observed **mergeable** and was marked **ready for review** against `feature/jason-runtime-service`, whose base remained `39add8b61a94f604fd8e4b66c7e893d104f26775` at that check.
+The merge was executed with the expected-head guard and succeeded at:
 
-`CURRENT.md` and this session record were then given stable closeout wording: they no longer instruct a future session to mark the PR ready. Instead they require fresh current CI/base/head/mergeability verification immediately before merge. That wording remains valid as validation state evolves and avoids another stale-resume loop.
+`c6ec6004b7b4d54e6f15dee4fb6138cf21d2eb6d`
+
+A post-merge continuity check then found that the merged `CURRENT.md` necessarily still described PR #162 as awaiting merge. That is exactly the stale-resume failure this workstream is intended to prevent. A bounded post-merge closeout therefore advances `CURRENT.md` to the next real workstream and records this completed state without changing production/runtime state.
 
 ## Changes explicitly not made
 
@@ -68,18 +71,8 @@ Future documentation completion therefore includes both:
 - continuity of current work/state; and
 - continuity of construction/reuse knowledge.
 
-A canonical resume point that still describes completed work as a future action is itself a documentation defect.
+A canonical resume point that still describes completed work as a future action is itself a documentation defect and must be advanced to the next actual workstream.
 
-## Closeout requirements
+## Continuing work
 
-Immediately before merge:
-
-- refetch PR #162 head and target branch;
-- require current green CI on the actual PR head;
-- require the branch to remain mergeable/reconciled;
-- merge only under an explicit merge decision;
-- after merge, advance `docs/control/CURRENT.md` to the next actual workstream rather than leaving PR #162 active.
-
-## Next action
-
-Validate the final documentation-only head. If it remains green, leave PR #162 ready for review until an explicit merge decision is made.
+The continuity-enforcement workstream is complete. The next host-sensitive operational work remains the Teams/OpenClaw/System Registry return-path diagnosis. It must resume only from fresh Git, System Registry, ingress/orchestration, OpenClaw, and host evidence when an operator is present.
