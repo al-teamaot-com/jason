@@ -24,22 +24,97 @@ if [[ -n "$DIRTY" ]]; then
   exit 21
 fi
 
-if [[ ! -x scripts/deploy-jason-runtime.sh ]]; then
-  echo "ERROR: scripts/deploy-jason-runtime.sh is required."
+if ! command -v docker >/dev/null 2>&1; then
+  echo "ERROR: docker is required."
   exit 22
 fi
 
-echo "========== SECTION 2: DEPLOY JASON RUNTIME =========="
-bash scripts/deploy-jason-runtime.sh
-
-echo "========== SECTION 3: DEPLOYMENT STATUS =========="
-if command -v docker >/dev/null 2>&1; then
-  docker ps --filter name=jason-runtime --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-else
-  echo "WARN: docker command unavailable for post-deploy status."
+if ! docker inspect jason-runtime >/dev/null 2>&1; then
+  echo "ERROR: running jason-runtime container is required to derive live deployment inputs."
+  exit 23
 fi
 
-echo "========== SECTION 4: LIVE PROBE INSTRUCTIONS =========="
+echo "========== SECTION 2: DERIVE LIVE DEPLOYMENT INPUTS =========="
+
+container_env() {
+  local name="$1"
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' jason-runtime \
+    | awk -F= -v key="$name" '$1 == key {sub(/^[^=]*=/, ""); print; exit}'
+}
+
+mount_source() {
+  local destination="$1"
+  docker inspect --format '{{range .Mounts}}{{println .Destination "|" .Source}}{{end}}' jason-runtime \
+    | awk -F'|' -v dest="$destination" '$1 == dest {print $2; exit}'
+}
+
+export JASON_OLLAMA_MODEL="$(container_env JASON_OLLAMA_MODEL)"
+export JASON_OPENBAO_ROLE_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/role_id)"
+export JASON_OPENBAO_SECRET_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/secret_id)"
+export JASON_SES_OPENBAO_ROLE_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/aws-ses/role_id)"
+export JASON_SES_OPENBAO_SECRET_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/aws-ses/secret_id)"
+export JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/microsoft-graph/role_id)"
+export JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/microsoft-graph/secret_id)"
+
+required_vars=(
+  JASON_OLLAMA_MODEL
+  JASON_OPENBAO_ROLE_ID_HOST_PATH
+  JASON_OPENBAO_SECRET_ID_HOST_PATH
+  JASON_SES_OPENBAO_ROLE_ID_HOST_PATH
+  JASON_SES_OPENBAO_SECRET_ID_HOST_PATH
+  JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH
+  JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH
+)
+
+for name in "${required_vars[@]}"; do
+  if [[ -z "${!name:-}" ]]; then
+    echo "ERROR: could not derive $name from the running production container."
+    exit 24
+  fi
+  echo "$name = SET"
+done
+
+echo "========== SECTION 3: STATIC + COMPOSE VALIDATION =========="
+git diff --check
+
+COMPOSE_DIR=/home/al/projects/jason/infrastructure/jason-runtime
+COMPOSE_FILE="$COMPOSE_DIR/compose.yaml"
+if [[ ! -f "$COMPOSE_FILE" ]]; then
+  echo "ERROR: authoritative compose file missing: $COMPOSE_FILE"
+  exit 25
+fi
+
+cd "$COMPOSE_DIR"
+docker compose -f "$COMPOSE_FILE" config >/dev/null
+
+echo "========== SECTION 4: BUILD =========="
+docker compose -f "$COMPOSE_FILE" build jason-runtime
+
+echo "========== SECTION 5: DEPLOY =========="
+docker compose -f "$COMPOSE_FILE" up -d jason-runtime
+
+echo "========== SECTION 6: HEALTH =========="
+healthy=0
+for attempt in $(seq 1 20); do
+  status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' jason-runtime 2>/dev/null || true)"
+  echo "Health attempt $attempt: ${status:-unknown}"
+  if [[ "$status" == "healthy" ]]; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$healthy" -ne 1 ]]; then
+  echo "ERROR: Jason runtime did not become healthy within the bounded wait."
+  docker ps --filter name=jason-runtime --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+  exit 26
+fi
+
+echo "========== SECTION 7: DEPLOYMENT STATUS =========="
+docker ps --filter name=jason-runtime --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+
+echo "========== SECTION 8: LIVE PROBE INSTRUCTIONS =========="
 cat <<'EOF'
 Run these five questions through the normal Jason Teams interface, one at a time:
 
@@ -57,6 +132,6 @@ Expected semantic behavior:
 EOF
 
 echo "========== RESULT =========="
-echo "Deployment completed. Live semantic evidence questions are ready for Teams validation."
+echo "Deployment completed and health passed. Live semantic evidence questions are ready for Teams validation."
 echo "NO SOURCE CHANGES PERFORMED."
 echo "========== END DATTO SEMANTIC EVIDENCE DEPLOYMENT AND PROBE =========="
