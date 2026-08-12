@@ -305,6 +305,19 @@ class SemanticKnowledgeRegistry:
             raise LookupError("active semantic provider field mapping is ambiguous")
         return next(iter(unique.values())) if unique else None
 
+    @staticmethod
+    def normalize_text(value: str) -> str:
+        return normalize_semantic_term(value)
+
+    def active_terms(self) -> tuple[str, ...]:
+        return tuple(
+            binding.term
+            for binding in self._terms
+            if binding.state is SemanticLifecycleState.ACTIVE
+            and self._concepts.get(binding.concept_id) is not None
+            and self._concepts[binding.concept_id].state is SemanticLifecycleState.ACTIVE
+        )
+
     def get_concept(self, concept_id: str) -> SemanticConcept:
         return self._concepts[concept_id]
 
