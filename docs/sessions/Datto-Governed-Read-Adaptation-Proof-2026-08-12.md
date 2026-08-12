@@ -203,3 +203,30 @@ Jason did not require a question-specific script or Datto-sites workaround.
 Instead, the system detected contradictory provider evidence, safely adapted the read strategy, followed provider pagination evidence, verified completeness, and preserved governance.
 
 This pattern is reusable for future provider behavior and API drift.
+
+## Varied-Language Complete Site Enumeration Proof
+
+A later production Teams test exposed a second language-contract defect using the request:
+
+`List every site in Datto RMM`
+
+Before correction, Jason returned one scalar site identifier instead of the requested collection:
+
+`Requested resource — site: 59417980-b9eb-4c83-9080-f931cc210081. Source: datto_rmm.`
+
+The failure was not treated as a standard-question problem. Investigation established two reusable contract issues:
+
+1. exhaustive collection wording could retain the matched singular language hint (`site`) instead of the capability's canonical collection fact (`sites`); and
+2. `site` also appeared as an incidental returnable fact on management alerts, so deterministic recognition could see competing candidates.
+
+The reusable correction introduced/strengthened:
+
+- canonical `collection_fact` normalization for exhaustive collection/count outcomes;
+- propagation of `result_intent` and `completeness_requirement` through capability planning; and
+- separate `inquiry_hints` from broader `fact_hints`, so incidental return fields do not identify the wrong resource capability.
+
+Focused regression validation passed before deployment. The corrected runtime source checkpoint was committed and pushed as `5b2c6c6` (`Separate inquiry hints from resource fact hints`), rebuilt with the governed Jason runtime deployment helper, and passed runtime health verification.
+
+A subsequent production Microsoft Teams test of the same human request returned the complete site enumeration in the expected human-readable form. Operator acceptance: **PASS**.
+
+This proof establishes the architectural rule that Jason must normalize varied human wording into governed resource/outcome contracts rather than depend on standard questions or phrase-specific scripts.

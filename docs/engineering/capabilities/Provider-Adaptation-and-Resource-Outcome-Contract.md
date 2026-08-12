@@ -78,6 +78,22 @@ can resolve deterministically to:
 
 No Ollama invocation is required for that deterministic interpretation.
 
+## Recognition Vocabulary and Canonical Evidence Facts
+
+Human wording used to recognize a resource is not itself authoritative evidence vocabulary.
+
+Capability metadata therefore distinguishes:
+
+- `inquiry_hints` — words and phrases that identify the resource/capability being requested;
+- `fact_hints` — facts that the capability can return; and
+- `collection_fact` — the canonical collection evidence fact used when an exhaustive collection outcome is requested.
+
+This separation prevents incidental fields from competing with the resource the human actually asked about. For example, a management-alert capability may return a `site` field, but the word `site` must not cause a request for Datto managed sites to resolve as an alert inquiry.
+
+For exhaustive collection language such as `list every`, `list all`, or a count request, Jason normalizes recognized singular/plural/synonym wording to the governed `collection_fact` and carries the outcome contract through planning. A managed-site enumeration therefore resolves to the canonical `sites` fact with `result_intent=enumerate` and `completeness_requirement=complete`.
+
+The rule is generic: recognition aliases help understand human language; canonical facts define what governed evidence must be retrieved. Do not create phrase-specific handlers for individual questions.
+
 ## Provider Adaptation Layer
 
 Transport success is not equivalent to trustworthy evidence.

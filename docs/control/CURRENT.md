@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-08-12
-**Status:** Teams → OpenClaw → Jason → Datto RMM resource inquiry is operationally proven for provider-backed semantic evidence selection. Runtime code used for the proof was deployed from an uncommitted worktree and still requires a separately authorized Git commit/push for source durability.
+**Status:** Teams → OpenClaw → Jason → Datto RMM governed resource inquiry is operationally proven for varied human language, deterministic resource recognition, canonical collection outcomes, provider adaptation, complete managed-site enumeration, and source-attributed evidence. The latest live-proven source checkpoint is durable in GitHub at `5b2c6c6`.
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -139,3 +139,17 @@ Next priority:
 - continue generalized provider/resource behavior rather than question-specific scripts;
 - govern Datto write capabilities separately from the established read-only surface.
 <!-- END 2026-08-12 DATTO READ WORKSTREAM -->
+
+## Latest durable success — varied-language complete collection interpretation
+
+The production Teams request `List every site in Datto RMM` exposed and then verified correction of a generic language-contract defect. Jason now separates resource-recognition `inquiry_hints` from broader returnable `fact_hints`, normalizes exhaustive collection language to the capability's canonical `collection_fact`, and propagates `result_intent` plus `completeness_requirement` through planning.
+
+For managed sites, exhaustive wording resolves to canonical `sites` evidence with `enumerate + complete`, allowing the existing Provider Adaptation layer to retrieve and verify the full authorized collection rather than rendering an incidental scalar `site` identifier.
+
+Validated/deployed source checkpoint: `5b2c6c6` (`Separate inquiry hints from resource fact hints`). Runtime rebuild/deployment and health verification passed. The same production Teams request was retested and operator-accepted as correct.
+
+Durable evidence: `docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md`.
+
+Construction rule: recognition aliases are not evidence contracts. Future resource capabilities must distinguish recognition vocabulary from returnable facts and declare a canonical collection fact when they expose a collection. Representable varied/vague questions must be repaired at the reusable interpretation/capability/evidence layer, never with question-specific scripts.
+
+Next priority remains native Microsoft Teams processing feedback through OpenClaw's supported runtime/typing lifecycle.
