@@ -22,7 +22,9 @@ SECRET_PATTERNS = (
 CANONICAL_DOCS = (
     "README.md",
     "docs/index.md",
+    "docs/control/JASON-FUNDAMENTALS.md",
     "docs/control/CURRENT.md",
+    "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
     "docs/control/DOCUMENTATION-REGISTER.md",
     "docs/control/HOW-TO-DOCUMENT-JASON.md",
     "docs/roadmaps/Jason-Capability-Register.md",
@@ -424,7 +426,7 @@ def build_snapshot(repo):
         "",
         "> Paste this entire snapshot into a new ChatGPT session and say: **Continue Project Jason from this CatchMeUp snapshot.**",
         "> This report is intentionally secret-safe. It contains no credential values, OpenBao tokens, unseal shares, passwords, or API keys.",
-        "> The snapshot is evidence/context, not a replacement for `docs/control/CURRENT.md`, governed documentation, or System Registry runtime truth.",
+        "> The snapshot is evidence/context, not a replacement for `docs/control/JASON-FUNDAMENTALS.md`, `docs/control/CURRENT.md`, governed documentation, or System Registry runtime truth.",
     ]
 
     collect_host(lines)
@@ -438,13 +440,14 @@ def build_snapshot(repo):
     heading(lines, "Instructions For The Next Session")
     lines.extend(
         [
-            "1. Begin with `docs/index.md` and `docs/control/CURRENT.md`; use this snapshot as fresh host evidence/context.",
-            "2. Do **not** restart architectural discovery or re-ask decisions already recorded in canonical Jason documents.",
-            "3. Read `docs/control/HOW-TO-DOCUMENT-JASON.md` before creating or reorganizing durable documentation.",
-            "4. Preserve Jason's core rule: agents never communicate directly; all inter-agent coordination goes through the central orchestrator.",
-            "5. Preserve identity-first authorization, policy-as-data, capability registry, centralized evidence, event-based auditability, and integrate-before-innovate.",
-            "6. Never expose protected values from OpenBao, init artifacts, token files, shell history, or environment variables.",
-            "7. Reconcile contradictions among this host snapshot, repository-controlled documentation, System Registry state, and durable evidence before destructive or security-sensitive changes.",
+            "1. Begin with `docs/index.md`, then `docs/control/JASON-FUNDAMENTALS.md`, then `docs/control/CURRENT.md`; use this snapshot as fresh host evidence/context.",
+            "2. For material implementation/extension work, read `docs/control/EXTENSION-CONSTRUCTION-MAP.md` before designing or reverse-engineering a component pattern.",
+            "3. Do **not** restart architectural discovery or re-ask decisions already recorded in canonical Jason documents.",
+            "4. Read `docs/control/HOW-TO-DOCUMENT-JASON.md` before creating or reorganizing durable documentation.",
+            "5. Preserve Jason's core rule: agents never communicate directly; all inter-agent coordination goes through the Central Orchestrator.",
+            "6. Preserve identity-first authorization, policy-as-data, capability registry, centralized evidence, event-based auditability, and integrate-before-innovate.",
+            "7. Never expose protected values from OpenBao, init artifacts, token files, shell history, or environment variables.",
+            "8. Reconcile contradictions among this host snapshot, repository-controlled documentation, System Registry state, and durable evidence before destructive or security-sensitive changes.",
         ]
     )
 
