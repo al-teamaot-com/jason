@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol, Sequence
 from connectors.core.contracts import HttpTransport
 from kernel.capabilities import CapabilityDefinition
 
+from .canonical_fact_vocabulary import CanonicalFactVocabulary
 from .resource_inquiry import ResourceInquiry, ResourcePlanStep
 
 
@@ -308,6 +309,7 @@ def _bounded_evidence_index(
     data: Any,
     *,
     requested_facts: tuple[str, ...] = (),
+    fact_vocabulary: CanonicalFactVocabulary | None = None,
     max_entries: int = 32,
     max_depth: int = 6,
     max_scan_entries: int = 1000,
@@ -332,6 +334,11 @@ def _bounded_evidence_index(
     requested_words: set[str] = set()
     for fact in requested_facts:
         requested_words.update(words(fact))
+        if fact_vocabulary is not None:
+            definition = fact_vocabulary.resolve(fact)
+            if definition is not None:
+                for hint in definition.evidence_hints:
+                    requested_words.update(words(hint))
 
     def walk(value: Any, pointer: str, depth: int) -> None:
         if len(entries) >= max_scan_entries or depth > max_depth:
@@ -404,6 +411,7 @@ def _bounded_evidence_index(
 @dataclass(frozen=True, slots=True)
 class OllamaResourceEvidenceReasoner:
     client: OllamaStructuredJsonClient
+    fact_vocabulary: CanonicalFactVocabulary | None = None
 
     def locate(
         self,
@@ -414,6 +422,7 @@ class OllamaResourceEvidenceReasoner:
         evidence_index = _bounded_evidence_index(
             data,
             requested_facts=requested_facts,
+            fact_vocabulary=self.fact_vocabulary,
         )
         allowed_pointers = tuple(
             str(item["json_pointer"])

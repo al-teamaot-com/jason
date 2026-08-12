@@ -34,3 +34,11 @@ def test_windows_display_version_is_not_graphics_display():
 def test_unknown_or_ambiguous_language_is_not_invented():
     assert canonical("temperature") == "temperature"
     assert canonical("count") == "count"
+
+
+def test_canonical_facts_expose_provider_neutral_evidence_hints():
+    vocab = DEFAULT_CANONICAL_FACT_VOCABULARY
+    processor = vocab.resolve("processor")
+    display_version = vocab.resolve("Windows Display Version")
+    assert processor is not None and "model" in processor.evidence_hints
+    assert display_version is not None and "displayversion" in display_version.evidence_hints

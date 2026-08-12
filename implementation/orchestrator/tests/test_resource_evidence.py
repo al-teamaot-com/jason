@@ -725,3 +725,67 @@ def test_complete_enumeration_renders_every_collection_item():
     for number in range(1, 7):
         assert f"- Site {number}" in text
     assert "+1 more" not in text
+
+
+def test_processor_model_rejects_numeric_count_as_wrong_shape():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        Reasoner([
+            {
+                "requested_fact": "processor model",
+                "json_pointer": "/provider_data/processors/0/logicalProcessors",
+            }
+        ]),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    data = result()
+    data = OrchestrationResult(
+        execution_id=data.execution_id,
+        correlation_id=data.correlation_id,
+        capability_name=data.capability_name,
+        status=data.status,
+        stage=data.stage,
+        reason_codes=data.reason_codes,
+        resolution=data.resolution,
+        output={
+            "provider": "datto_rmm",
+            "data": {"provider_data": {"processors": [{"logicalProcessors": 8}]}},
+        },
+        attempts=data.attempts,
+        provider_id="datto_rmm",
+    )
+    with pytest.raises(LookupError, match="wrong shape"):
+        interpreter.interpret(result=data, requested_facts=("processor model",))
+
+
+def test_processor_model_accepts_descriptive_provider_value():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        Reasoner([
+            {
+                "requested_fact": "processor model",
+                "json_pointer": "/provider_data/processors/0/name",
+            }
+        ]),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    data = result()
+    data = OrchestrationResult(
+        execution_id=data.execution_id,
+        correlation_id=data.correlation_id,
+        capability_name=data.capability_name,
+        status=data.status,
+        stage=data.stage,
+        reason_codes=data.reason_codes,
+        resolution=data.resolution,
+        output={
+            "provider": "datto_rmm",
+            "data": {"provider_data": {"processors": [{"name": "Intel Core i7"}]}},
+        },
+        attempts=data.attempts,
+        provider_id="datto_rmm",
+    )
+    facts = interpreter.interpret(result=data, requested_facts=("processor model",))
+    assert facts[0].value == "Intel Core i7"

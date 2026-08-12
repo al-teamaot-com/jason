@@ -526,7 +526,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
-            reasoner=OllamaResourceEvidenceReasoner(ollama_client)
+            reasoner=OllamaResourceEvidenceReasoner(
+                ollama_client,
+                fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+            ),
+            fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
         )
     )
     response_renderer = GovernedTeamsConversationResponseRenderer(

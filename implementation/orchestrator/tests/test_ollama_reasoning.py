@@ -417,3 +417,23 @@ def test_evidence_pointer_schema_is_constrained_to_supplied_index():
     assert pointer_schema["type"] == "string"
     assert "/device/lastUser" in pointer_schema["enum"]
     assert "/resource_matches/0/from" not in pointer_schema["enum"]
+
+
+def test_canonical_evidence_hints_rank_provider_fields_without_changing_requested_fact_labels():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "provider_data": {
+            "processors": [
+                {"logicalProcessors": 8, "name": "Intel Core i7"}
+            ]
+        }
+    }
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("processor model",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    pointers = [item["json_pointer"] for item in index]
+    assert "/provider_data/processors/0/name" in pointers[:8]

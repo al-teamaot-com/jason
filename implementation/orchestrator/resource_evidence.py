@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
 from .contracts import OrchestrationResult, OrchestrationStatus
+from .canonical_fact_vocabulary import CanonicalFactVocabulary
 from .teams_conversation_flow import ConversationIntent
 
 
@@ -34,6 +35,7 @@ class VerifiedResourceFact:
 @dataclass(frozen=True, slots=True)
 class GovernedResourceEvidenceInterpreter:
     reasoner: StructuredResourceEvidenceReasoner
+    fact_vocabulary: CanonicalFactVocabulary | None = None
 
     def interpret(
         self,
@@ -89,6 +91,16 @@ class GovernedResourceEvidenceInterpreter:
                     raise ValueError("resource evidence must use an absolute JSON Pointer")
 
                 actual = _resolve_json_pointer(data, pointer)
+                if self.fact_vocabulary is not None:
+                    definition = self.fact_vocabulary.resolve(requested_fact)
+                    if definition is not None and not _value_matches_expected_shape(
+                        actual,
+                        definition.expected_shape,
+                    ):
+                        raise LookupError(
+                            f"provider evidence has wrong shape for {requested_fact}: "
+                            f"expected {definition.expected_shape}"
+                        )
                 verified_by_fact[requested_fact] = VerifiedResourceFact(
                     requested_fact=requested_fact,
                     value=actual,
@@ -197,6 +209,26 @@ def _normalized_field_name(value: str) -> str:
 
 def _escape_json_pointer_segment(value: str) -> str:
     return value.replace("~", "~0").replace("/", "~1")
+
+
+def _value_matches_expected_shape(value: Any, expected_shape: str) -> bool:
+    """Validate provider evidence against the provider-neutral fact contract."""
+    if expected_shape == "descriptive_string":
+        return isinstance(value, str) and bool(value.strip()) and not value.strip().isdigit()
+    if expected_shape == "integer_count":
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    if expected_shape == "capacity":
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value >= 0
+        if isinstance(value, str):
+            text = value.strip().casefold()
+            return bool(text) and any(
+                unit in text for unit in ("kb", "mb", "gb", "tb", "bytes", "byte")
+            )
+        return False
+    if expected_shape == "collection":
+        return isinstance(value, (list, tuple))
+    return True
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,6 +18,7 @@ class CanonicalFactDefinition:
     canonical_fact: str
     aliases: tuple[str, ...]
     expected_shape: str
+    evidence_hints: tuple[str, ...] = ()
 
 
 class CanonicalFactVocabulary:
@@ -102,6 +103,7 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "cpu name",
             ),
             expected_shape="descriptive_string",
+            evidence_hints=("model", "name", "caption", "processor", "cpu"),
         ),
         CanonicalFactDefinition(
             canonical_fact="logical processor count",
@@ -114,6 +116,7 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "thread count",
             ),
             expected_shape="integer_count",
+            evidence_hints=("logical processors", "logical processor count", "thread count", "threads"),
         ),
         CanonicalFactDefinition(
             canonical_fact="total memory",
@@ -126,6 +129,7 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "memory total",
             ),
             expected_shape="capacity",
+            evidence_hints=("total physical memory", "physical memory", "total memory", "memory", "ram"),
         ),
         CanonicalFactDefinition(
             canonical_fact="operating system display version",
@@ -137,6 +141,7 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "os display version",
             ),
             expected_shape="descriptive_string",
+            evidence_hints=("displayversion", "display version", "releaseid", "release id"),
         ),
         CanonicalFactDefinition(
             canonical_fact="operating system build",
