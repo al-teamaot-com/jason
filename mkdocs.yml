@@ -9,7 +9,9 @@ theme:
 nav:
   - Home: index.md
   - Documentation Control:
+      - Jason Fundamentals: control/JASON-FUNDAMENTALS.md
       - Current Resume Point: control/CURRENT.md
+      - Extension Construction Map: control/EXTENSION-CONSTRUCTION-MAP.md
       - Documentation Register: control/DOCUMENTATION-REGISTER.md
       - Documentation Migration Issues: control/DOCUMENTATION-MIGRATION-ISSUES.md
       - How to Document Jason: control/HOW-TO-DOCUMENT-JASON.md
