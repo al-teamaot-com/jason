@@ -14,38 +14,47 @@ git log -1 --oneline --decorate
 echo "========== SECTION 2: WORKTREE INTERPRETER PROOF =========="
 ./.venv-test/bin/python - <<'PY'
 from pathlib import Path
+import json
+import tempfile
+
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 
-settings = RuntimeSettings(
-    authority_db=Path('/tmp/jason-site-proof-authority.sqlite3'),
-    bindings_db=Path('/tmp/jason-site-proof-bindings.sqlite3'),
-    replay_db=Path('/tmp/jason-site-proof-replay.sqlite3'),
-    security_audit_db=Path('/tmp/jason-site-proof-security.sqlite3'),
-    orchestration_events_db=Path('/tmp/jason-site-proof-events.sqlite3'),
-    trusted_keys_registry=Path('/tmp/jason-site-proof-keys.json'),
-    openbao_url='http://openbao:8200',
-    openbao_role_id_path=Path('/tmp/unused-role'),
-    openbao_secret_id_path=Path('/tmp/unused-secret'),
-    ollama_url='http://jason-ollama:11434',
-    ollama_model='proof',
-    allowed_machine_identities=frozenset({'svc-openclaw-gateway'}),
-)
-app = build_runtime_application(settings)
-resolver = app.ingress.ingress.flow.intent_resolver.resolvers[0]
-interpreter = resolver.interpreter
+with tempfile.TemporaryDirectory(prefix='jason-site-proof-') as tempdir:
+    root = Path(tempdir)
+    trusted_keys = root / 'trusted-keys.json'
+    trusted_keys.write_text(json.dumps({"keys": []}), encoding='utf-8')
 
-for text in (
-    'List every site in Datto RMM',
-    'Please list the sites in Datto RMM',
-    'How many sites are in Datto RMM?',
-):
-    inquiry = interpreter._interpret_deterministically(text)
-    print('INPUT:', text)
-    print('INQUIRY:', inquiry)
-    if inquiry is not None:
-        plan = resolver.planner.plan(inquiry)
-        print('PLAN:', plan.steps[0].capability_name, dict(plan.steps[0].arguments))
-    print()
+    settings = RuntimeSettings(
+        authority_db=root / 'authority.sqlite3',
+        bindings_db=root / 'bindings.sqlite3',
+        replay_db=root / 'replay.sqlite3',
+        security_audit_db=root / 'security.sqlite3',
+        orchestration_events_db=root / 'events.sqlite3',
+        trusted_keys_registry=trusted_keys,
+        openbao_url='http://openbao:8200',
+        openbao_role_id_path=root / 'unused-role',
+        openbao_secret_id_path=root / 'unused-secret',
+        ollama_url='http://jason-ollama:11434',
+        ollama_model='proof',
+        allowed_machine_identities=frozenset({'svc-openclaw-gateway'}),
+    )
+
+    app = build_runtime_application(settings)
+    resolver = app.ingress.ingress.flow.intent_resolver.resolvers[0]
+    interpreter = resolver.interpreter
+
+    for text in (
+        'List every site in Datto RMM',
+        'Please list the sites in Datto RMM',
+        'How many sites are in Datto RMM?',
+    ):
+        inquiry = interpreter._interpret_deterministically(text)
+        print('INPUT:', text)
+        print('INQUIRY:', inquiry)
+        if inquiry is not None:
+            plan = resolver.planner.plan(inquiry)
+            print('PLAN:', plan.steps[0].capability_name, dict(plan.steps[0].arguments))
+        print()
 PY
 
 echo "========== SECTION 3: DEPLOYED CONTAINER SOURCE CHECK =========="
