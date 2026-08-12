@@ -163,3 +163,58 @@ def test_registry_version_changes_on_governed_mutation():
     first = registry.version
     registry.transition_concept("memory.total", SemanticLifecycleState.REVIEWED)
     assert registry.version > first
+
+
+def test_equivalent_provider_field_registration_is_idempotent():
+    registry = processor_registry()
+    promote_concept_to_active(registry, "processor.model")
+    first = SemanticProviderFieldBinding(
+        provider="datto_rmm",
+        resource_type="endpoint",
+        provider_field="cpuModel",
+        concept_id="processor.model",
+        provenance=provenance(),
+    )
+    equivalent = SemanticProviderFieldBinding(
+        provider="datto_rmm",
+        resource_type="endpoint",
+        provider_field="CPUModel",
+        concept_id="processor.model",
+        provenance=provenance(),
+    )
+    registry.add_provider_field(first)
+    version_after_first = registry.version
+    registry.add_provider_field(equivalent)
+
+    assert registry.version == version_after_first
+
+
+def test_equivalent_provider_field_cannot_map_to_different_concept():
+    registry = processor_registry()
+    registry.add_concept(
+        SemanticConcept(
+            concept_id="processor.count",
+            canonical_label="logical processor count",
+            kind="fact",
+            provenance=provenance(),
+        )
+    )
+    registry.add_provider_field(
+        SemanticProviderFieldBinding(
+            provider="datto_rmm",
+            resource_type="endpoint",
+            provider_field="cpuModel",
+            concept_id="processor.model",
+            provenance=provenance(),
+        )
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        registry.add_provider_field(
+            SemanticProviderFieldBinding(
+                provider="datto_rmm",
+                resource_type="endpoint",
+                provider_field="CPUModel",
+                concept_id="processor.count",
+                provenance=provenance(),
+            )
+        )

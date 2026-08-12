@@ -213,7 +213,12 @@ class SemanticKnowledgeRegistry:
             ):
                 if existing.concept_id != binding.concept_id:
                     raise ValueError("semantic provider field mapping is ambiguous")
-                raise ValueError("semantic provider field mapping already exists")
+                # Provider schemas commonly expose case/style aliases such as
+                # displayVersion and DisplayVersion. After normalization these are
+                # the same governed binding, so repeated registration is idempotent
+                # rather than a second semantic fact. Conflicting concept mappings
+                # still fail closed above.
+                return
         self._provider_fields.append(binding)
         self._bump()
 
