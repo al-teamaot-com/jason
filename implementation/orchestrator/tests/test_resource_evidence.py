@@ -858,3 +858,71 @@ def test_semantic_context_accepts_operating_system_release_path():
         },
     )
     assert facts[0].value == "24H2"
+
+
+def test_semantic_adapter_processor_fact_resolves_deterministically_before_reasoner():
+    class NoEvidenceReasoner:
+        def locate(self, *, requested_facts, data):
+            raise AssertionError("semantic adapter fact should resolve without language reasoning")
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoEvidenceReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "processor": "Intel(R) Core(TM) i7-9700F CPU @ 3.00GHz",
+                "semantic_evidence": {
+                    "processor": {
+                        "hardware_inventory": {
+                            "processor_model": "Intel(R) Core(TM) i7-9700F CPU @ 3.00GHz",
+                        }
+                    }
+                },
+            }
+        }
+    )
+
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("processor model",),
+        evidence_contexts={
+            "processor model": ("processor", "hardware_inventory"),
+        },
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value == "Intel(R) Core(TM) i7-9700F CPU @ 3.00GHz"
+    assert facts[0].json_pointer == "/provider_data/semantic_evidence/processor/hardware_inventory/processor_model"
+
+
+def test_raw_processor_field_cannot_bypass_required_semantic_context():
+    class WrongPathReasoner:
+        def locate(self, *, requested_facts, data):
+            return ({
+                "requested_fact": "processor model",
+                "json_pointer": "/provider_data/processor",
+            },)
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=WrongPathReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "processor": "Intel(R) Core(TM) i7-9700F CPU @ 3.00GHz",
+            }
+        }
+    )
+
+    import pytest
+    with pytest.raises(LookupError, match="outside required semantic context"):
+        interpreter.interpret(
+            result=orchestration_result,
+            requested_facts=("processor model",),
+            evidence_contexts={
+                "processor model": ("processor", "hardware_inventory"),
+            },
+        )

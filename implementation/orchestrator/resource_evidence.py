@@ -203,6 +203,34 @@ def _deterministic_direct_facts(
     for requested_fact in requested_facts:
         wanted = _normalized_field_name(requested_fact)
         candidates: list[tuple[str, Any]] = []
+
+        # Provider adapters may expose deterministic canonical facts beneath
+        # provider_data/semantic_evidence. Those paths are deliberately trusted
+        # only as locations, never as asserted values: Jason still dereferences
+        # the actual provider-derived value and applies semantic-context and
+        # expected-shape validation afterward. This avoids asking a language
+        # reasoner to rediscover a provider mapping that the adapter already
+        # declared explicitly.
+        if isinstance(data, Mapping):
+            provider_data = data.get("provider_data")
+            if isinstance(provider_data, Mapping):
+                semantic_root = provider_data.get("semantic_evidence")
+                if isinstance(semantic_root, Mapping):
+
+                    def walk_semantic(value: Any, pointer: str) -> None:
+                        if not isinstance(value, Mapping):
+                            return
+                        for raw_key, child in value.items():
+                            key = str(raw_key)
+                            child_pointer = f"{pointer}/{_escape_json_pointer_segment(key)}"
+                            if _normalized_field_name(key) == wanted:
+                                candidates.append((child_pointer, child))
+                            walk_semantic(child, child_pointer)
+
+                    walk_semantic(
+                        semantic_root,
+                        "/provider_data/semantic_evidence",
+                    )
         for prefix, mapping in locations:
             for raw_key, value in mapping.items():
                 key = str(raw_key)
