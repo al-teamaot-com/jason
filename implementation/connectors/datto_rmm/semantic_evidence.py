@@ -64,9 +64,19 @@ def _find_unique_provider_value(data: Any, provider_keys: tuple[str, ...]) -> An
         for raw_key, value in mapping.items():
             if _normalized_key(str(raw_key)) in wanted:
                 matches.append(value)
-    if len(matches) != 1:
+
+    if not matches:
         return None
-    return matches[0]
+    if len(matches) == 1:
+        return matches[0]
+
+    # Provider payloads may repeat the same authoritative value under multiple
+    # aliases or inventory sections. Equivalent duplicates are not ambiguity.
+    # Conflicting values remain unresolved and fail closed.
+    first = matches[0]
+    if all(value == first for value in matches[1:]):
+        return first
+    return None
 
 
 def adapt_datto_device_semantic_evidence(data: Any) -> Any:
