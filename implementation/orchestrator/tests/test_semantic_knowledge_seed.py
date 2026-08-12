@@ -68,3 +68,52 @@ def test_case_equivalent_provider_aliases_seed_once():
     assert lower is not None and upper is not None
     assert lower.concept_id == "operating_system.windows.display_version"
     assert upper.concept_id == lower.concept_id
+
+
+def test_broad_seed_covers_endpoint_and_identity_terms():
+    registry = build_trusted_semantic_registry()
+    expected = {
+        "hostname": "endpoint.hostname",
+        "serial number": "endpoint.serial_number",
+        "installed software": "software.installed.collection",
+        "firewall status": "security.firewall.status",
+        "email address": "identity.email_address",
+        "m365 license": "microsoft365.license.assignment",
+    }
+    for term, concept_id in expected.items():
+        concept = registry.resolve_term(term)
+        assert concept is not None
+        assert concept.concept_id == concept_id
+
+
+def test_broad_seed_preserves_ambiguous_generic_words_as_unresolved():
+    registry = build_trusted_semantic_registry()
+    for term in ("version", "status", "name", "owner", "user"):
+        assert registry.resolve_term(term) is None
+
+
+def test_broad_seed_has_common_cross_system_relationships():
+    registry = build_trusted_semantic_registry()
+    relationship_ids = {
+        "person.member_of.organization",
+        "person.owns.endpoint",
+        "person.assigned_to.ticket",
+        "contact.belongs_to.organization",
+        "endpoint.belongs_to.organization",
+        "endpoint.located_at.site",
+        "ticket.belongs_to.organization",
+        "ticket.references.endpoint",
+        "alert.affects.endpoint",
+        "control.applies_to.resource",
+    }
+    active = {item.relationship_id for item in registry.active_relationships()}
+    assert relationship_ids.issubset(active)
+
+
+def test_broad_seed_collapses_equivalent_normalized_term_aliases():
+    registry = build_trusted_semantic_registry()
+    spaced = registry.resolve_term("last check in")
+    hyphenated = registry.resolve_term("last check-in")
+    assert spaced is not None and hyphenated is not None
+    assert spaced.concept_id == "endpoint.last_seen"
+    assert hyphenated.concept_id == "endpoint.last_seen"

@@ -29,8 +29,23 @@ def test_registry_supplies_windows_display_version_context():
     assert result.evidence_contexts == ("operating_system", "windows_release")
 
 
-def test_unmigrated_concept_uses_legacy_compatibility_fallback():
+def test_bios_uses_registry_after_broad_seed_migration():
     resolver = SemanticFactResolver()
+    result = resolver.resolve("BIOS")
+    assert result is not None
+    assert result.canonical_fact == "bios version"
+    assert result.concept_id == "firmware.bios.version"
+    assert result.source == "semantic_knowledge_registry"
+
+
+def test_legacy_compatibility_fallback_remains_available_for_unmigrated_registry():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+    from orchestrator.semantic_knowledge_registry import SemanticKnowledgeRegistry
+
+    resolver = SemanticFactResolver(
+        registry=SemanticKnowledgeRegistry(),
+        legacy_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
     result = resolver.resolve("BIOS")
     assert result is not None
     assert result.canonical_fact == "bios version"

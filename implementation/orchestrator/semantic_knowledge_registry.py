@@ -327,6 +327,14 @@ class SemanticKnowledgeRegistry:
             return None
         return relationship
 
+    def active_relationships(self) -> tuple[SemanticRelationshipDefinition, ...]:
+        """Return all currently authoritative relationship definitions."""
+        return tuple(
+            relationship
+            for relationship in self._relationships.values()
+            if relationship.state is SemanticLifecycleState.ACTIVE
+        )
+
 
 def promote_concept_to_active(registry: SemanticKnowledgeRegistry, concept_id: str) -> None:
     for state in (

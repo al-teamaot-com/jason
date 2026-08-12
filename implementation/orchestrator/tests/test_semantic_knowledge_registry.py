@@ -218,3 +218,23 @@ def test_equivalent_provider_field_cannot_map_to_different_concept():
                 provenance=provenance(),
             )
         )
+
+
+def test_active_relationships_returns_only_authoritative_relationships():
+    registry = SemanticKnowledgeRegistry()
+    relationship = SemanticRelationshipDefinition(
+        relationship_id="person.assigned_to.ticket",
+        subject_type="person",
+        target_type="ticket",
+    )
+    registry.add_relationship(relationship)
+    assert registry.active_relationships() == ()
+    for state in (
+        SemanticLifecycleState.REVIEWED,
+        SemanticLifecycleState.APPROVED,
+        SemanticLifecycleState.ACTIVE,
+    ):
+        registry.transition_relationship(relationship.relationship_id, state)
+    assert tuple(item.relationship_id for item in registry.active_relationships()) == (
+        "person.assigned_to.ticket",
+    )
