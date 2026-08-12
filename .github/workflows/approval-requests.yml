@@ -6,7 +6,7 @@ on:
       - 'implementation/connectors/src/jason_connectors/approval_requests.py'
       - 'implementation/connectors/microsoft_graph/teams_approval_channel.py'
       - 'implementation/connectors/tests/test_approval_requests.py'
-      - '03-Components/Approval-Requests-Foundation.md'
+      - 'docs/components/Approval-Requests-Foundation.md'
       - '.github/workflows/approval-requests.yml'
   push:
     branches: [main]
@@ -14,7 +14,7 @@ on:
       - 'implementation/connectors/src/jason_connectors/approval_requests.py'
       - 'implementation/connectors/microsoft_graph/teams_approval_channel.py'
       - 'implementation/connectors/tests/test_approval_requests.py'
-      - '03-Components/Approval-Requests-Foundation.md'
+      - 'docs/components/Approval-Requests-Foundation.md'
 
 jobs:
   validate:

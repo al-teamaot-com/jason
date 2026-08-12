@@ -18,7 +18,7 @@ from kernel.system_registry.manifest import registry_from_manifest  # noqa: E402
 
 DEFAULT_MANIFEST = REPO_ROOT / "implementation/kernel/system_registry/production-registry.json"
 DEFAULT_LIFECYCLE_EVENTS = REPO_ROOT / "implementation/kernel/system_registry/production-lifecycle-events.json"
-DEFAULT_OUTPUT = REPO_ROOT / "07-Operations/System-Registry-Current-Operational-State.md"
+DEFAULT_OUTPUT = REPO_ROOT / "docs/operations/System-Registry-Current-Operational-State.md"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,6 +34,26 @@ def parse_args() -> argparse.Namespace:
         help="Fail when the committed generated document differs from current registry truth.",
     )
     return parser.parse_args()
+
+
+def _current_repo_evidence_reference(reference: str) -> str | None:
+    """Map immutable historical repository evidence references to their current path.
+
+    Lifecycle events remain append-only evidence and are not rewritten merely because
+    the documentation control plane moved. The generated human view resolves the old
+    repository location to the current canonical session-record location.
+    """
+
+    legacy_prefix = "08-Session-Records/"
+    current_prefix = "docs/sessions/"
+    if reference.startswith(legacy_prefix):
+        candidate = current_prefix + reference.removeprefix(legacy_prefix)
+        if (REPO_ROOT / candidate).is_file():
+            return candidate
+        return reference
+    if reference.startswith(current_prefix):
+        return reference
+    return None
 
 
 def render(manifest: Path, lifecycle_events: Path) -> str:
@@ -74,9 +94,9 @@ def render(manifest: Path, lifecycle_events: Path) -> str:
         if verification is None:
             raise RuntimeError(f"Verified entity lacks verification record: {entity.registry_id}")
         repo_evidence = [
-            reference
+            current
             for reference in verification.evidence_references
-            if reference.startswith("08-Session-Records/")
+            if (current := _current_repo_evidence_reference(reference)) is not None
         ]
         rendered_evidence = "<br>".join(f"`{item}`" for item in repo_evidence) or "—"
         lines.append(
@@ -114,9 +134,11 @@ def render(manifest: Path, lifecycle_events: Path) -> str:
             "",
             "The lifecycle event history is append-only operational evidence. Baseline declared state remains separate from the effective lifecycle derived from governed events.",
             "",
+            "Historical lifecycle-event repository paths are preserved in the append-only event source. This generated view resolves those references to the current `docs/sessions/` location when the migrated evidence record exists.",
+            "",
             "## Regeneration",
             "",
-            "Run `python tools/system_registry_docs.py` after an approved registry or lifecycle-event change. CI runs `python tools/system_registry_docs.py --check` and fails if this generated view is stale.",
+            "Run `python tools/system_registry_docs.py` after an approved registry, lifecycle-event, or documentation-path change. CI runs `python tools/system_registry_docs.py --check` and fails if this generated view is stale.",
             "",
         ]
     )
