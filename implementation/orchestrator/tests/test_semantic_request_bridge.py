@@ -111,3 +111,30 @@ def test_windows_display_version_lowering_preserves_evidence_contexts():
     assert inquiry.evidence_contexts == {
         "operating system display version": ("operating_system", "windows_release")
     }
+
+
+def test_registry_first_fact_resolver_drives_bridge_fact_and_evidence_contexts():
+    from orchestrator.semantic_fact_resolver import SemanticFactResolver
+    from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
+
+    semantic_bridge = SemanticRequestBridge(
+        fact_resolver=SemanticFactResolver(
+            registry=build_trusted_semantic_registry(),
+            legacy_vocabulary=None,
+        )
+    )
+
+    request = semantic_bridge.build(
+        human_text="What CPU does AOT-50282 have?",
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("CPU",),
+        result_intent="summary",
+        completeness_requirement="sufficient",
+    )
+
+    assert request.requested_facts == ("processor model",)
+    assert request.evidence_constraints is not None
+    constraint = request.evidence_constraints["processor model"]
+    assert constraint.contexts == ("processor", "hardware_inventory")
+    assert constraint.expected_shape == "descriptive_string"

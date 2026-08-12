@@ -8,7 +8,7 @@ from orchestrator.canonical_fact_vocabulary import (
     CanonicalFactVocabulary,
     DEFAULT_CANONICAL_FACT_VOCABULARY,
 )
-from orchestrator.semantic_knowledge_registry import SemanticConcept
+from orchestrator.semantic_knowledge_registry import SemanticConcept, SemanticKnowledgeRegistry
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
@@ -19,6 +19,10 @@ class SemanticFactResolution:
     evidence_contexts: tuple[str, ...]
     source: str
     concept_id: str | None = None
+
+    @property
+    def canonical_label(self) -> str:
+        return self.canonical_fact
 
 
 class SemanticFactResolver:
@@ -33,10 +37,18 @@ class SemanticFactResolver:
     def __init__(
         self,
         *,
-        vocabulary: CanonicalFactVocabulary = DEFAULT_CANONICAL_FACT_VOCABULARY,
+        registry: SemanticKnowledgeRegistry | None = None,
+        legacy_vocabulary: CanonicalFactVocabulary | None = DEFAULT_CANONICAL_FACT_VOCABULARY,
+        vocabulary: CanonicalFactVocabulary | None = None,
     ) -> None:
-        self._registry = build_trusted_semantic_registry()
-        self._vocabulary = vocabulary
+        # ``vocabulary`` is retained as a temporary compatibility alias for older
+        # composition/tests. New construction should use ``legacy_vocabulary``.
+        if vocabulary is not None:
+            if legacy_vocabulary is not DEFAULT_CANONICAL_FACT_VOCABULARY:
+                raise ValueError("specify either legacy_vocabulary or vocabulary, not both")
+            legacy_vocabulary = vocabulary
+        self._registry = registry if registry is not None else build_trusted_semantic_registry()
+        self._vocabulary = legacy_vocabulary
 
     @staticmethod
     def _from_registry(concept: SemanticConcept) -> SemanticFactResolution:
@@ -63,14 +75,39 @@ class SemanticFactResolver:
         if concept is not None:
             return self._from_registry(concept)
 
-        definition = self._vocabulary.resolve(value)
-        if definition is not None:
-            return self._from_legacy(definition)
+        if self._vocabulary is not None:
+            definition = self._vocabulary.resolve(value)
+            if definition is not None:
+                return self._from_legacy(definition)
         return None
 
     def canonicalize(self, value: str) -> str:
         resolution = self.resolve(value)
         return resolution.canonical_fact if resolution is not None else value.strip()
+
+    def resolve_requested_facts(
+        self,
+        *,
+        human_text: str,
+        requested_facts: Iterable[str],
+    ) -> tuple[SemanticFactResolution, ...]:
+        canonical = self.canonicalize_requested_facts(
+            human_text=human_text,
+            requested_facts=requested_facts,
+        )
+        resolved: list[SemanticFactResolution] = []
+        for fact in canonical:
+            resolution = self.resolve(fact)
+            if resolution is None:
+                resolution = SemanticFactResolution(
+                    canonical_fact=str(fact).strip(),
+                    expected_shape=None,
+                    evidence_contexts=(),
+                    source="unresolved_passthrough",
+                    concept_id=None,
+                )
+            resolved.append(resolution)
+        return tuple(resolved)
 
     def canonicalize_requested_facts(
         self,
@@ -111,6 +148,9 @@ class SemanticFactResolver:
 
         # Compatibility path preserves existing conservative explicit-fragment
         # handling for concepts that have not yet been migrated into the registry.
+        if self._vocabulary is None:
+            return tuple(self.canonicalize(item) for item in requested)
+
         legacy = self._vocabulary.canonicalize_requested_facts(
             human_text=human_text,
             requested_facts=requested,

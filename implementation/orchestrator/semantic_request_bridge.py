@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from .canonical_fact_vocabulary import CanonicalFactVocabulary
+from .semantic_fact_resolver import SemanticFactResolver
 from .resource_inquiry import ResourceInquiry
 from .semantic_resource_request import (
     SemanticEntityReference,
@@ -24,6 +25,7 @@ class SemanticRequestBridge:
     """
 
     fact_vocabulary: CanonicalFactVocabulary | None = None
+    fact_resolver: SemanticFactResolver | None = None
 
     def build(
         self,
@@ -37,7 +39,13 @@ class SemanticRequestBridge:
         permission_mode: str = "observe",
     ) -> SemanticResourceRequest:
         facts = requested_facts
-        if self.fact_vocabulary is not None:
+        if self.fact_resolver is not None:
+            resolutions = self.fact_resolver.resolve_requested_facts(
+                human_text=human_text,
+                requested_facts=facts,
+            )
+            facts = tuple(item.canonical_label for item in resolutions)
+        elif self.fact_vocabulary is not None:
             facts = self.fact_vocabulary.canonicalize_requested_facts(
                 human_text=human_text,
                 requested_facts=facts,
@@ -71,7 +79,15 @@ class SemanticRequestBridge:
             )
 
         constraints: dict[str, SemanticEvidenceConstraint] = {}
-        if self.fact_vocabulary is not None:
+        if self.fact_resolver is not None:
+            for resolution in resolutions:
+                if resolution.expected_shape is None and not resolution.evidence_contexts:
+                    continue
+                constraints[resolution.canonical_label] = SemanticEvidenceConstraint(
+                    contexts=resolution.evidence_contexts,
+                    expected_shape=resolution.expected_shape,
+                )
+        elif self.fact_vocabulary is not None:
             for fact in facts:
                 definition = self.fact_vocabulary.resolve(fact)
                 if definition is None:

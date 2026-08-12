@@ -1,4 +1,5 @@
 from orchestrator.semantic_fact_resolver import SemanticFactResolver
+from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
 def test_registry_precedes_legacy_vocabulary_for_cpu():
@@ -57,3 +58,38 @@ def test_registry_canonicalizes_windows_display_version_fragment():
         requested_facts=("display", "version"),
     )
     assert result == ("operating system display version",)
+
+
+def test_resolve_requested_facts_returns_registry_metadata_for_cpu():
+    resolver = SemanticFactResolver(
+        registry=build_trusted_semantic_registry(),
+        legacy_vocabulary=None,
+    )
+    resolutions = resolver.resolve_requested_facts(
+        human_text="What CPU does AOT-50282 have?",
+        requested_facts=("CPU",),
+    )
+    assert len(resolutions) == 1
+    resolution = resolutions[0]
+    assert resolution.canonical_fact == "processor model"
+    assert resolution.canonical_label == "processor model"
+    assert resolution.concept_id == "processor.model"
+    assert resolution.evidence_contexts == ("processor", "hardware_inventory")
+    assert resolution.expected_shape == "descriptive_string"
+
+
+def test_resolve_requested_facts_preserves_unknown_fact_without_inventing_semantics():
+    resolver = SemanticFactResolver(
+        registry=build_trusted_semantic_registry(),
+        legacy_vocabulary=None,
+    )
+    resolutions = resolver.resolve_requested_facts(
+        human_text="What quantum widget is on AOT-50282?",
+        requested_facts=("quantum widget",),
+    )
+    assert len(resolutions) == 1
+    resolution = resolutions[0]
+    assert resolution.canonical_fact == "quantum widget"
+    assert resolution.expected_shape is None
+    assert resolution.evidence_contexts == ()
+    assert resolution.source == "unresolved_passthrough"
