@@ -35,7 +35,6 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(errors="replace")
 
-# Defense in depth: never print authorization material or obvious credential values.
 patterns = [
     (re.compile(r"(?i)(authorization\s*[:=]\s*)([^\s,;]+)"), r"\1[REDACTED]"),
     (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1[REDACTED]"),
@@ -75,7 +74,7 @@ else:
 PY
 
 echo "========== SECTION 4: DEPLOYED SEMANTIC ADAPTER CONTRACT =========="
-docker exec jason-runtime python - <<'PY'
+ADAPTER_OUTPUT="$(docker exec -i jason-runtime python - <<'PY'
 from connectors.datto_rmm.semantic_evidence import DATTO_DEVICE_SEMANTIC_FIELDS
 
 for field in DATTO_DEVICE_SEMANTIC_FIELDS:
@@ -85,10 +84,15 @@ for field in DATTO_DEVICE_SEMANTIC_FIELDS:
         f"PROVIDER_KEYS={','.join(field.provider_keys)}"
     )
 PY
+)"
+if [[ -z "$ADAPTER_OUTPUT" ]]; then
+  echo "ERROR: deployed semantic adapter contract produced no output."
+  exit 22
+fi
+printf '%s\n' "$ADAPTER_OUTPUT"
 
 echo "========== SECTION 5: DEPLOYED DIRECT-RESOLUTION CHECK =========="
-docker exec jason-runtime python - <<'PY'
-from pathlib import Path
+DIRECT_OUTPUT="$(docker exec -i jason-runtime python - <<'PY'
 import inspect
 import orchestrator.resource_evidence as module
 
@@ -100,6 +104,12 @@ checks = {
 for name, value in checks.items():
     print(f"{name}={'PASS' if value else 'FAIL'}")
 PY
+)"
+if [[ -z "$DIRECT_OUTPUT" ]]; then
+  echo "ERROR: deployed direct-resolution check produced no output."
+  exit 23
+fi
+printf '%s\n' "$DIRECT_OUTPUT"
 
 echo "========== RESULT =========="
 echo "Diagnostic complete. No source changes, deployment changes, or provider mutations were performed."
