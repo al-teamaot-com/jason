@@ -57,45 +57,40 @@ resolver = flow.intent_resolver
 orchestrator = flow.orchestrator
 renderer = flow.response_renderer
 
-# Prefer explicitly supplied values when present. Otherwise derive the already-bound
-# production identity for person-al from the durable binding database. This is a
-# read-only proof convenience; it creates or modifies no identity/authority state.
-tenant_id = os.environ.get("JASON_PROOF_MICROSOFT_TENANT_ID")
-object_id = os.environ.get("JASON_PROOF_MICROSOFT_OBJECT_ID")
-if not (tenant_id and object_id):
-    uri = f"file:{settings.bindings_db}?mode=ro"
+# The durable production binding database is authoritative for this proof. Historical
+# JASON_PROOF_* environment values are deliberately ignored so stale shell state cannot
+# override the current identity binding.
+uri = f"file:{settings.bindings_db}?mode=ro"
+try:
+    connection = sqlite3.connect(uri, uri=True)
+    rows = connection.execute(
+        """
+        SELECT microsoft_tenant_id, microsoft_object_id
+        FROM microsoft_identity_bindings
+        WHERE jason_identity_id = ? AND status = 'active'
+        ORDER BY microsoft_tenant_id, microsoft_object_id
+        """,
+        ("person-al",),
+    ).fetchall()
+except sqlite3.Error as exc:
+    raise SystemExit(f"ERROR: could not read production identity bindings: {exc}") from exc
+finally:
     try:
-        connection = sqlite3.connect(uri, uri=True)
-        rows = connection.execute(
-            """
-            SELECT microsoft_tenant_id, microsoft_object_id
-            FROM microsoft_identity_bindings
-            WHERE jason_identity_id = ? AND status = 'active'
-            ORDER BY microsoft_tenant_id, microsoft_object_id
-            """,
-            ("person-al",),
-        ).fetchall()
-    except sqlite3.Error as exc:
-        raise SystemExit(f"ERROR: could not read production identity bindings: {exc}") from exc
-    finally:
-        try:
-            connection.close()
-        except Exception:
-            pass
+        connection.close()
+    except Exception:
+        pass
 
-    if len(rows) != 1:
-        raise SystemExit(
-            "ERROR: expected exactly one active production Microsoft binding for person-al; "
-            f"found {len(rows)}. No identity was selected."
-        )
-    tenant_id, object_id = (str(rows[0][0]), str(rows[0][1]))
-    print("IDENTITY_SOURCE: existing active production binding for person-al")
-else:
-    print("IDENTITY_SOURCE: explicit proof environment variables")
+if len(rows) != 1:
+    raise SystemExit(
+        "ERROR: expected exactly one active production Microsoft binding for person-al; "
+        f"found {len(rows)}. No identity was selected."
+    )
+tenant_id, object_id = (str(rows[0][0]), str(rows[0][1]))
+print("IDENTITY_SOURCE: existing active production binding for person-al")
 
 identity = TeamsConversationPrincipalEvidence(
-    microsoft_tenant_id=str(tenant_id),
-    microsoft_object_id=str(object_id),
+    microsoft_tenant_id=tenant_id,
+    microsoft_object_id=object_id,
     authentication_assurance="botframework-authenticated",
     conversation_id="canonical-fact-proof",
     message_id="canonical-fact-proof",
@@ -103,7 +98,7 @@ identity = TeamsConversationPrincipalEvidence(
 
 principal = binder.bind(identity)
 if principal is None:
-    raise SystemExit("ERROR: derived/supplied proof identity is not bound to an active Jason principal")
+    raise SystemExit("ERROR: derived production identity is not bound to an active Jason principal")
 print("PRINCIPAL_BINDING: PASS")
 
 queries = (
