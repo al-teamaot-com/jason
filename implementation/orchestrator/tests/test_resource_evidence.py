@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
 from orchestrator.contracts import (
     ExecutionStage,
     OrchestrationResult,
@@ -101,6 +102,14 @@ def registry_intent(*facts, name="Jason Runtime Service"):
         permission_mode="observe",
     )
 
+
+
+class FakeEvidenceReasoner:
+    def __init__(self, proposals):
+        self.proposals = tuple(proposals)
+
+    def locate(self, *, requested_facts, data):
+        return self.proposals
 
 def test_reasoner_identifies_path_but_actual_provider_value_becomes_the_assertion():
     reasoner = Reasoner(
@@ -789,3 +798,63 @@ def test_processor_model_accepts_descriptive_provider_value():
     )
     facts = interpreter.interpret(result=data, requested_facts=("processor model",))
     assert facts[0].value == "Intel Core i7"
+
+
+def test_semantic_context_rejects_unrelated_descriptive_version():
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=FakeEvidenceReasoner([
+            {
+                "requested_fact": "operating system display version",
+                "json_pointer": "/provider_data/health/version",
+            }
+        ]),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "health": {
+                    "version": "Unhealthy - Local user changes detected",
+                }
+            }
+        }
+    )
+    with pytest.raises(LookupError, match="outside required semantic context"):
+        interpreter.interpret(
+            result=orchestration_result,
+            requested_facts=("operating system display version",),
+            evidence_contexts={
+                "operating system display version": ("operating_system", "windows_release")
+            },
+        )
+
+
+def test_semantic_context_accepts_operating_system_release_path():
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=FakeEvidenceReasoner([
+            {
+                "requested_fact": "operating system display version",
+                "json_pointer": "/provider_data/operating_system/windows_release/display_version",
+            }
+        ]),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "operating_system": {
+                    "windows_release": {
+                        "display_version": "24H2",
+                    }
+                }
+            }
+        }
+    )
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("operating system display version",),
+        evidence_contexts={
+            "operating system display version": ("operating_system", "windows_release")
+        },
+    )
+    assert facts[0].value == "24H2"

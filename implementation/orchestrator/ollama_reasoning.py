@@ -296,6 +296,15 @@ class OllamaResourceCapabilityReasoner:
         arguments["result_intent"] = inquiry.result_intent
 
         arguments["completeness_requirement"] = inquiry.completeness_requirement
+        if inquiry.evidence_contexts:
+            arguments["evidence_contexts"] = {
+                fact: list(contexts)
+                for fact, contexts in inquiry.evidence_contexts.items()
+            }
+        if inquiry.relationship_type:
+            arguments["relationship_type"] = inquiry.relationship_type
+        if inquiry.temporal_semantics != "unspecified":
+            arguments["temporal_semantics"] = inquiry.temporal_semantics
         for raw_name in selected:
             name = str(raw_name).strip()
             if name not in allowed:

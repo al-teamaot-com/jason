@@ -42,6 +42,7 @@ class GovernedResourceEvidenceInterpreter:
         *,
         result: OrchestrationResult,
         requested_facts: tuple[str, ...],
+        evidence_contexts: Mapping[str, tuple[str, ...]] | None = None,
     ) -> tuple[VerifiedResourceFact, ...]:
         if result.status is not OrchestrationStatus.SUCCEEDED:
             raise LookupError("resource evidence is unavailable because orchestration did not succeed")
@@ -55,13 +56,25 @@ class GovernedResourceEvidenceInterpreter:
             raise RuntimeError("resource result does not contain provider data")
         data = result.output["data"]
 
-        verified_by_fact = {
-            fact.requested_fact: fact
-            for fact in _deterministic_direct_facts(
-                data=data,
-                requested_facts=requested_facts,
-            )
-        }
+        direct_facts = _deterministic_direct_facts(
+            data=data,
+            requested_facts=requested_facts,
+        )
+        verified_by_fact: dict[str, VerifiedResourceFact] = {}
+        for fact in direct_facts:
+            if not _evidence_matches_contexts(
+                pointer=fact.json_pointer,
+                contexts=(evidence_contexts or {}).get(fact.requested_fact, ()),
+            ):
+                continue
+            if self.fact_vocabulary is not None:
+                definition = self.fact_vocabulary.resolve(fact.requested_fact)
+                if definition is not None and not _value_matches_expected_shape(
+                    fact.value,
+                    definition.expected_shape,
+                ):
+                    continue
+            verified_by_fact[fact.requested_fact] = fact
         unresolved = tuple(
             fact for fact in requested_facts if fact not in verified_by_fact
         )
@@ -91,6 +104,14 @@ class GovernedResourceEvidenceInterpreter:
                     raise ValueError("resource evidence must use an absolute JSON Pointer")
 
                 actual = _resolve_json_pointer(data, pointer)
+                required_contexts = (evidence_contexts or {}).get(requested_fact, ())
+                if not _evidence_matches_contexts(
+                    pointer=pointer,
+                    contexts=required_contexts,
+                ):
+                    raise LookupError(
+                        f"provider evidence is outside required semantic context for {requested_fact}"
+                    )
                 if self.fact_vocabulary is not None:
                     definition = self.fact_vocabulary.resolve(requested_fact)
                     if definition is not None and not _value_matches_expected_shape(
@@ -211,6 +232,39 @@ def _escape_json_pointer_segment(value: str) -> str:
     return value.replace("~", "~0").replace("/", "~1")
 
 
+def _normalized_semantic_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in "".join(
+            character if character.isalnum() else " "
+            for character in value.casefold()
+        ).split()
+        if token
+    }
+
+
+def _evidence_matches_contexts(*, pointer: str, contexts: tuple[str, ...]) -> bool:
+    """Require evidence location to carry provider-neutral semantic context.
+
+    Contexts describe meaning domains, not provider field paths. Matching is deliberately
+    conservative: every required context contributes at least one token that must be
+    present in the JSON pointer. A provider adapter can later expose normalized semantic
+    containers when native field names do not carry enough meaning.
+    """
+    if not contexts:
+        return True
+    pointer_tokens = _normalized_semantic_tokens(pointer)
+    if not pointer_tokens:
+        return False
+    for context in contexts:
+        context_tokens = _normalized_semantic_tokens(context)
+        if not context_tokens:
+            continue
+        if pointer_tokens.isdisjoint(context_tokens):
+            return False
+    return True
+
+
 def _value_matches_expected_shape(value: Any, expected_shape: str) -> bool:
     """Validate provider evidence against the provider-neutral fact contract."""
     if expected_shape == "descriptive_string":
@@ -288,9 +342,21 @@ class GovernedTeamsResourceResponseRenderer:
         if not isinstance(raw_requested_facts, (list, tuple)):
             raise ValueError("conversation resource intent is missing requested_facts")
         requested_facts = tuple(str(item).strip() for item in raw_requested_facts)
+        raw_contexts = intent.arguments.get("evidence_contexts")
+        evidence_contexts: dict[str, tuple[str, ...]] | None = None
+        if isinstance(raw_contexts, Mapping):
+            evidence_contexts = {}
+            for raw_fact, raw_values in raw_contexts.items():
+                if not isinstance(raw_values, (list, tuple)):
+                    raise ValueError("conversation evidence contexts must be a list/tuple")
+                evidence_contexts[str(raw_fact).strip()] = tuple(
+                    str(item).strip() for item in raw_values if str(item).strip()
+                )
+
         facts = self.interpreter.interpret(
             result=result,
             requested_facts=requested_facts,
+            evidence_contexts=evidence_contexts,
         )
 
         collection_facts = tuple(

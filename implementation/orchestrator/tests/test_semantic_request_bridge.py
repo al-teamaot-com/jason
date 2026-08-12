@@ -78,3 +78,36 @@ def test_semantic_bridge_rejects_execute_permission_mode():
             completeness_requirement="sufficient",
             permission_mode="execute",
         )
+
+
+def test_lowering_preserves_evidence_and_relationship_semantics():
+    b = bridge()
+    semantic = b.build(
+        human_text="Which endpoint was Lindsey Collins last logged into?",
+        resource_type="endpoint",
+        resource_selector={"user_identity": "Lindsey Collins"},
+        requested_facts=("hostname",),
+        result_intent="summary",
+        completeness_requirement="sufficient",
+        permission_mode="observe",
+    )
+    inquiry = b.lower(semantic, selector={"user_identity": "Lindsey Collins"})
+    assert inquiry.relationship_type == "logged_in_to"
+    assert inquiry.temporal_semantics == "most_recent"
+
+
+def test_windows_display_version_lowering_preserves_evidence_contexts():
+    b = bridge()
+    semantic = b.build(
+        human_text="What is the Windows Display Version for AOT-50282?",
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("display", "version"),
+        result_intent="summary",
+        completeness_requirement="sufficient",
+        permission_mode="observe",
+    )
+    inquiry = b.lower(semantic, selector={"hostname": "AOT-50282"})
+    assert inquiry.evidence_contexts == {
+        "operating system display version": ("operating_system", "windows_release")
+    }

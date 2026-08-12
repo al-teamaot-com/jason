@@ -96,6 +96,14 @@ class SemanticRequestBridge:
     @staticmethod
     def lower(request: SemanticResourceRequest, *, selector: Mapping[str, str]) -> ResourceInquiry:
         """Lower semantic meaning into the existing governed planner contract."""
+        evidence_contexts = None
+        if request.evidence_constraints is not None:
+            evidence_contexts = {
+                fact: tuple(constraint.contexts)
+                for fact, constraint in request.evidence_constraints.items()
+                if constraint.contexts
+            } or None
+
         return ResourceInquiry(
             resource_type=request.target_resource_type,
             resource_selector=dict(selector),
@@ -104,6 +112,17 @@ class SemanticRequestBridge:
             permission_mode=request.permission_mode,
             result_intent=request.result_intent,
             completeness_requirement=request.completeness_requirement,
+            evidence_contexts=evidence_contexts,
+            relationship_type=(
+                request.relationship.relationship_type
+                if request.relationship is not None
+                else None
+            ),
+            temporal_semantics=(
+                request.relationship.temporal_semantics
+                if request.relationship is not None
+                else "unspecified"
+            ),
         )
 
     @staticmethod

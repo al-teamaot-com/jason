@@ -17,6 +17,9 @@ class ResourceInquiry:
     permission_mode: str = "observe"
     result_intent: str = "summary"
     completeness_requirement: str = "sufficient"
+    evidence_contexts: Mapping[str, tuple[str, ...]] | None = None
+    relationship_type: str | None = None
+    temporal_semantics: str = "unspecified"
 
 
     def __post_init__(self) -> None:
@@ -44,6 +47,25 @@ class ResourceInquiry:
             "complete",
         }:
             raise ValueError("resource completeness_requirement is invalid")
+        if self.evidence_contexts is not None:
+            unknown = set(self.evidence_contexts).difference(self.requested_facts)
+            if unknown:
+                raise ValueError(
+                    "resource evidence contexts reference unrequested facts: "
+                    + ", ".join(sorted(unknown))
+                )
+            for contexts in self.evidence_contexts.values():
+                if any(not str(item).strip() for item in contexts):
+                    raise ValueError("resource evidence contexts must be non-empty")
+        if self.relationship_type is not None and not self.relationship_type.strip():
+            raise ValueError("resource relationship_type must be non-empty when supplied")
+        if self.temporal_semantics not in {
+            "unspecified",
+            "current",
+            "most_recent",
+            "historical",
+        }:
+            raise ValueError("resource temporal_semantics is invalid")
 
 
 @dataclass(frozen=True, slots=True)
