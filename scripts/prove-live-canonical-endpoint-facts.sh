@@ -32,7 +32,7 @@ echo "It prints only requested endpoint fact values and structural evidence poin
 echo "It does not print credentials, tokens, or secret material."
 
 echo "========== SECTION 2: LIVE GOVERNED REQUESTS =========="
-PYTHONPATH="implementation:implementation/runtime_service/src" .venv/bin/python - <<'PY'
+PYTHONPATH="implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src" .venv/bin/python - <<'PY'
 from __future__ import annotations
 
 import os
