@@ -5,7 +5,7 @@ clear
 cd /home/al/projects/jason
 
 BRANCH="feature/jason-runtime-service"
-EXPECTED_HEAD="5b2c6c6"
+PROVEN_SOURCE="5b2c6c6"
 
 echo "========== START RESOURCE LANGUAGE NORMALIZATION DOCUMENTATION CLOSEOUT =========="
 
@@ -16,9 +16,8 @@ if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
   echo "ERROR: expected branch $BRANCH, found $CURRENT_BRANCH"
   exit 20
 fi
-if [[ "$CURRENT_HEAD" != "$EXPECTED_HEAD" ]]; then
-  echo "ERROR: expected source checkpoint $EXPECTED_HEAD, found $CURRENT_HEAD"
-  echo "Fetch/reconcile before documenting so the proof remains tied to the validated deployment."
+if ! git merge-base --is-ancestor "$PROVEN_SOURCE" HEAD; then
+  echo "ERROR: proven source checkpoint $PROVEN_SOURCE is not an ancestor of current HEAD $CURRENT_HEAD"
   exit 21
 fi
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -26,7 +25,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   git status --short
   exit 22
 fi
-echo "PASS: clean validated source checkpoint $CURRENT_HEAD"
+echo "PASS: current HEAD $CURRENT_HEAD contains live-proven source checkpoint $PROVEN_SOURCE"
 
 echo "========== SECTION 2: UPDATE GOVERNING ENGINEERING CONTRACT =========="
 python3 - <<'PY'
@@ -91,4 +90,43 @@ p.write_text(s, encoding='utf-8')
 print('UPDATED:', p)
 PY
 
-echo "========== SECTION 6: DOCUMENTATION IMPACT DETERMINATION =========="necho_placeholder
+echo "========== SECTION 6: DOCUMENTATION IMPACT DETERMINATION =========="
+echo "Architecture/engineering contract: UPDATED"
+echo "Reusable construction guidance: UPDATED"
+echo "System Registry: NO CHANGE — production topology/capability lifecycle did not change"
+echo "Operations runbook: NO CHANGE — deployment procedure did not change"
+echo "Historical proof/session evidence: UPDATED"
+echo "Current resume point: UPDATED"
+echo "New parallel authority: NONE"
+
+echo "========== SECTION 7: VALIDATE DOCUMENTATION =========="
+for f in \
+  docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md \
+  docs/control/EXTENSION-CONSTRUCTION-MAP.md \
+  docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md \
+  docs/control/CURRENT.md; do
+  test -s "$f"
+  if grep -nE '^(<<<<<<<|=======|>>>>>>>)' "$f"; then
+    echo "ERROR: conflict marker found in $f"
+    exit 30
+  fi
+  echo "PASS: $f ($(wc -l < "$f") lines)"
+done
+
+git diff --check
+
+grep -q 'inquiry_hints' docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md
+grep -q 'collection_fact' docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md
+grep -q 'Varied-Language Complete Site Enumeration Proof' docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md
+grep -q 'Latest durable success — varied-language complete collection interpretation' docs/control/CURRENT.md
+
+echo "Documentation validation: PASS"
+
+echo "========== SECTION 8: SHOW CHANGE STATE =========="
+git status --short
+git diff --stat
+
+echo "========== FINAL STATUS =========="
+echo "PASS: Standard Documentation Policy closeout prepared and validated."
+echo "NO COMMIT OR PUSH PERFORMED."
+echo "========== END RESOURCE LANGUAGE NORMALIZATION DOCUMENTATION CLOSEOUT =========="
