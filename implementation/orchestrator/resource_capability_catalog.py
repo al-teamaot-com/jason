@@ -199,6 +199,7 @@ def _read_resource_capability(
     fact_hints: str,
     planning_guidance: str,
     collection_fact: str | None = None,
+    inquiry_hints: str | None = None,
 ) -> CapabilityDefinition:
     """Construct one governed provider-neutral read-only resource capability."""
 
@@ -253,6 +254,7 @@ def _read_resource_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            "inquiry_hints": inquiry_hints or fact_hints,
             **({"collection_fact": collection_fact} if collection_fact else {}),
             "planning_guidance": planning_guidance,
         },
@@ -349,6 +351,10 @@ def management_alert_search(now: datetime) -> CapabilityDefinition:
             "one already identified endpoint."
         ),
         collection_fact="alerts",
+        inquiry_hints=(
+            "alert,alerts,open alert,open alerts,monitoring alert,monitoring alerts,"
+            "severity,priority,status,message"
+        ),
     )
 
 
@@ -368,6 +374,9 @@ def management_site_search(now: datetime) -> CapabilityDefinition:
             "Use for questions about managed Datto RMM sites or site discovery."
         ),
         collection_fact="sites",
+        inquiry_hints=(
+            "site,sites,client site,managed site,site name,site identifier,site details"
+        ),
     )
 
 

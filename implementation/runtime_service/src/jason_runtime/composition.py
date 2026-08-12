@@ -319,7 +319,10 @@ def _deterministic_resource_contracts(
         )
         fact_hints = tuple(
             item.strip()
-            for item in metadata.get("fact_hints", "").split(",")
+            for item in metadata.get(
+                "inquiry_hints",
+                metadata.get("fact_hints", ""),
+            ).split(",")
             if item.strip()
         )
         collection_fact = metadata.get("collection_fact", "").strip()

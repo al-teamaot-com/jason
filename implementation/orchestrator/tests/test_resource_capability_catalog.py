@@ -202,3 +202,17 @@ def test_datto_provider_exposes_broad_governed_read_surface() -> None:
     assert "bios" in hints
     assert "software" in hints
     assert "site" in hints
+
+
+def test_management_resource_inquiry_hints_do_not_cross_match_incidental_site_fields():
+    from orchestrator.resource_capability_catalog import (
+        management_alert_search,
+        management_site_search,
+    )
+
+    alerts = management_alert_search(NOW)
+    sites = management_site_search(NOW)
+
+    assert "site" in sites.metadata["inquiry_hints"].split(",")
+    assert "site" not in alerts.metadata["inquiry_hints"].split(",")
+    assert "site" in alerts.metadata["fact_hints"].split(",")
