@@ -216,3 +216,36 @@ def test_management_resource_inquiry_hints_do_not_cross_match_incidental_site_fi
     assert "site" in sites.metadata["inquiry_hints"].split(",")
     assert "site" not in alerts.metadata["inquiry_hints"].split(",")
     assert "site" in alerts.metadata["fact_hints"].split(",")
+
+
+def test_metadata_reasoner_preserves_semantic_evidence_and_relationship_contract():
+    capabilities, _ = services()
+    planner = GovernedResourceInquiryPlanner(
+        registry=capabilities,
+        reasoner=MetadataResourceCapabilityReasoner(),
+    )
+
+    plan = planner.plan(
+        ResourceInquiry(
+            resource_type="endpoint",
+            resource_selector={"user_identity": "Lindsey Collins"},
+            requested_facts=("operating system display version",),
+            evidence_contexts={
+                "operating system display version": (
+                    "operating_system",
+                    "windows_release",
+                ),
+            },
+            relationship_type="logged_in_to",
+            temporal_semantics="most_recent",
+        )
+    )
+
+    assert plan.steps[0].arguments["evidence_contexts"] == {
+        "operating system display version": (
+            "operating_system",
+            "windows_release",
+        ),
+    }
+    assert plan.steps[0].arguments["relationship_type"] == "logged_in_to"
+    assert plan.steps[0].arguments["temporal_semantics"] == "most_recent"

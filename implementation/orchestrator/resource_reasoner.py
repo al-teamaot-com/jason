@@ -81,15 +81,26 @@ class MetadataResourceCapabilityReasoner:
         if score < self.minimum_score:
             return ()
 
+        arguments = {
+            **dict(inquiry.resource_selector),
+            "requested_facts": inquiry.requested_facts,
+            "result_intent": inquiry.result_intent,
+            "completeness_requirement": inquiry.completeness_requirement,
+        }
+        if inquiry.evidence_contexts:
+            arguments["evidence_contexts"] = {
+                fact: tuple(contexts)
+                for fact, contexts in inquiry.evidence_contexts.items()
+            }
+        if inquiry.relationship_type:
+            arguments["relationship_type"] = inquiry.relationship_type
+        if inquiry.temporal_semantics != "unspecified":
+            arguments["temporal_semantics"] = inquiry.temporal_semantics
+
         return (
             ResourcePlanStep(
                 capability_name=selected.capability_name,
-                arguments={
-                    **dict(inquiry.resource_selector),
-                    "requested_facts": inquiry.requested_facts,
-                    "result_intent": inquiry.result_intent,
-                    "completeness_requirement": inquiry.completeness_requirement,
-                },
+                arguments=arguments,
                 purpose=(
                     "retrieve the governed resource record most likely to contain "
                     "the requested facts"
