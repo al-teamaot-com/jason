@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = (
     "docs/index.md",
+    "docs/control/JASON-FUNDAMENTALS.md",
     "docs/control/CURRENT.md",
+    "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
     "docs/control/DOCUMENTATION-REGISTER.md",
     "docs/control/DOCUMENTATION-MIGRATION-ISSUES.md",
     "docs/control/HOW-TO-DOCUMENT-JASON.md",
@@ -44,40 +46,13 @@ LEGACY_ROOTS = (
     "architecture",
 )
 
-LEGACY_CURRENT_USE_PATTERNS = (
-    re.compile(r"01-Foundation/"),
-    re.compile(r"01-Governance/"),
-    re.compile(r"02-Architecture/"),
-    re.compile(r"02-Canonical-Models/"),
-    re.compile(r"03-Components/"),
-    re.compile(r"04-Standards/"),
-    re.compile(r"05-ADR/"),
-    re.compile(r"06-Roadmaps/"),
-    re.compile(r"07-Operations/"),
-    re.compile(r"07-Roadmap/"),
-    re.compile(r"08-Session-Records/"),
-    re.compile(r"09-Architecture-Journal/"),
-    re.compile(r"10-Milestones/"),
+LEGACY_CURRENT_USE_PATTERNS = tuple(re.compile(re.escape(root) + r"/") for root in LEGACY_ROOTS[:-1]) + (
     re.compile(r"(?<!docs/)architecture/"),
 )
 
-CURRENT_USE_AUDIT_ROOTS = (
-    "tools",
-    ".github/workflows",
-    "docs/operations",
-)
-
-CURRENT_USE_AUDIT_EXCLUSIONS = {
-    "tools/validate_documentation_control.py",
-}
-
-# Append-only System Registry lifecycle events retain their historical repository
-# evidence references. The generator deliberately translates that exact legacy
-# prefix to the current docs/sessions path without rewriting immutable history.
-CURRENT_USE_AUDIT_ALLOWED = {
-    ("tools/system_registry_docs.py", "08-Session-Records/"),
-}
-
+CURRENT_USE_AUDIT_ROOTS = ("tools", ".github/workflows", "docs/operations")
+CURRENT_USE_AUDIT_EXCLUSIONS = {"tools/validate_documentation_control.py"}
+CURRENT_USE_AUDIT_ALLOWED = {("tools/system_registry_docs.py", "08-Session-Records/")}
 CURRENT_USE_AUDIT_SUFFIXES = {".md", ".py", ".sh", ".yml", ".yaml", ".json", ".txt"}
 
 REQUIRED_DOC_DIRECTORIES = (
@@ -98,10 +73,7 @@ REQUIRED_DOC_DIRECTORIES = (
     "docs/archive",
 )
 
-IMPLEMENTATION_README_ROOTS = (
-    "implementation",
-    "infrastructure",
-)
+IMPLEMENTATION_README_ROOTS = ("implementation", "infrastructure")
 
 
 def fail(message: str) -> None:
@@ -113,6 +85,14 @@ def read(path: str) -> str:
     if not file_path.is_file():
         fail(f"Required documentation-control file is missing: {path}")
     return file_path.read_text(encoding="utf-8")
+
+
+def require_phrases(path: str, phrases: tuple[str, ...], label: str) -> str:
+    text = read(path)
+    for phrase in phrases:
+        if phrase not in text:
+            fail(f"{label} is missing required continuity control: {phrase}")
+    return text
 
 
 def audit_current_use_paths() -> None:
@@ -134,13 +114,12 @@ def audit_current_use_paths() -> None:
             for line_number, line in enumerate(text.splitlines(), start=1):
                 for pattern in LEGACY_CURRENT_USE_PATTERNS:
                     match = pattern.search(line)
-                    if match is not None:
-                        matched_text = match.group(0)
-                        if (relative, matched_text) in CURRENT_USE_AUDIT_ALLOWED:
-                            continue
-                        findings.append(
-                            f"{relative}:{line_number}: {matched_text}"
-                        )
+                    if match is None:
+                        continue
+                    matched_text = match.group(0)
+                    if (relative, matched_text) in CURRENT_USE_AUDIT_ALLOWED:
+                        continue
+                    findings.append(f"{relative}:{line_number}: {matched_text}")
     if findings:
         preview = "\n".join(findings[:25])
         remainder = len(findings) - min(len(findings), 25)
@@ -162,88 +141,150 @@ def main() -> int:
 
     for root in LEGACY_ROOTS:
         if (ROOT / root).exists():
-            fail(
-                "Legacy human-documentation root must not be recreated after consolidation: "
-                + root
-            )
+            fail("Legacy human-documentation root must not be recreated after consolidation: " + root)
 
     if (ROOT / "TODO.md").exists():
         fail("Governed backlog must remain under docs/roadmaps, not repository-root TODO.md")
 
     if (ROOT / "docs/governance/ARTICLE_VII_PLATFORM_INTEGRITY.md").exists():
-        fail(
-            "Historical Platform Integrity Article VII must remain archived rather than "
-            "reappearing as current governance authority"
-        )
+        fail("Historical Platform Integrity Article VII must remain archived rather than reappearing as current governance authority")
 
     audit_current_use_paths()
 
-    index = read("docs/index.md")
-    for path in REQUIRED_FILES[1:9]:
-        relative = path.removeprefix("docs/")
-        if relative not in index:
-            fail(f"docs/index.md does not link to required control record: {relative}")
-    for path in ("engineering/", "roadmaps/"):
-        if path not in index:
-            fail(f"docs/index.md does not expose consolidated documentation area: {path}")
+    index = require_phrases(
+        "docs/index.md",
+        (
+            "control/JASON-FUNDAMENTALS.md",
+            "control/CURRENT.md",
+            "control/EXTENSION-CONSTRUCTION-MAP.md",
+            "control/DOCUMENTATION-REGISTER.md",
+            "control/HOW-TO-DOCUMENT-JASON.md",
+            "engineering/",
+            "roadmaps/",
+            "No-rediscovery rule",
+        ),
+        "docs/index.md",
+    )
 
     repository_readme = read("README.md")
     if "docs/index.md" not in repository_readme:
         fail("README.md must direct readers to docs/index.md")
 
-    contributing = read("CONTRIBUTING.md")
-    if "docs/control/HOW-TO-DOCUMENT-JASON.md" not in contributing:
-        fail("CONTRIBUTING.md must require the Jason documentation authoring guide")
+    contributing = require_phrases(
+        "CONTRIBUTING.md",
+        (
+            "docs/control/JASON-FUNDAMENTALS.md",
+            "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
+            "docs/control/HOW-TO-DOCUMENT-JASON.md",
+            "Explicit documentation-impact determination",
+        ),
+        "CONTRIBUTING.md",
+    )
 
     register = read("docs/control/DOCUMENTATION-REGISTER.md")
     for root in LEGACY_ROOTS:
         if f"`{root}/`" not in register and f"`{root}`" not in register:
             fail(f"Documentation Register is missing migration history for: {root}")
+    for phrase in ("JASON-FUNDAMENTALS.md", "EXTENSION-CONSTRUCTION-MAP.md", "Reusable extension/construction discovery"):
+        if phrase not in register:
+            fail(f"Documentation Register is missing continuity mapping: {phrase}")
 
-    how_to = read("docs/control/HOW-TO-DOCUMENT-JASON.md")
-    required_practices = (
-        "Search before creating",
-        "Separate intended state, actual state, and proof",
-        "System Registry documentation rules",
-        "Session and proof records",
-        "Current-work record",
-        "Security rules",
-        "Future-session startup procedure",
+    fundamentals = require_phrases(
+        "docs/control/JASON-FUNDAMENTALS.md",
+        (
+            "Mandatory startup rule",
+            "Fundamentals that must not be rediscovered",
+            "Central Orchestrator",
+            "Agents never invoke or communicate with other agents directly",
+            "System Registry",
+            "No-rediscovery rule",
+            "Reconstruction test",
+        ),
+        "Jason Fundamentals baseline",
     )
-    for heading in required_practices:
-        if heading not in how_to:
-            fail(f"Documentation authoring guide is missing required practice: {heading}")
 
-    standard = read("docs/standards/J-404-Documentation-Governance-and-Continuity.md")
-    for phrase in (
-        "Single documentation control plane",
-        "One fact, one authoritative owner",
-        "Current-work continuity",
-        "Documentation migration",
-        "Definition of documentation complete",
-        "docs/engineering/",
-    ):
-        if phrase not in standard:
-            fail(f"J-404 is missing required governance section or path: {phrase}")
-
-    platform_integrity = read(
-        "docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md"
+    construction = require_phrases(
+        "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
+        (
+            "Universal extension lifecycle",
+            "Provider / connector",
+            "Capability / resource",
+            "Agent / reasoning component",
+            "Governance / policy gate",
+            "Ingress / interface adapter",
+            "Identity / authority component",
+            "Secret / credential integration",
+            "Internal service / runtime component",
+            "System Registry entity / verification method",
+            "Evidence / audit component",
+            "Universal extension Definition of Done",
+            "Documentation-impact rule",
+        ),
+        "Extension Construction Map",
     )
-    for phrase in (
-        "Prohibited bypasses",
-        "Central orchestration",
-        "Policy and business authority separation",
-        "Integrate before innovate",
-        "Exception governance",
-        "Production-readiness enforcement",
-        "ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md",
-    ):
-        if phrase not in platform_integrity:
-            fail(f"J-405 is missing required platform-integrity control: {phrase}")
 
-    historical_platform_integrity = read(
-        "docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md"
+    current = require_phrases(
+        "docs/control/CURRENT.md",
+        (
+            "docs/control/JASON-FUNDAMENTALS.md",
+            "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
+            "Last durable success",
+            "Next safe actions",
+            "Production/runtime boundary",
+        ),
+        "CURRENT.md",
     )
+
+    how_to = require_phrases(
+        "docs/control/HOW-TO-DOCUMENT-JASON.md",
+        (
+            "Mandatory startup before material Jason work",
+            "Search before creating",
+            "Separate intended state, actual state, and proof",
+            "Preserve reusable construction knowledge",
+            "System Registry documentation rules",
+            "Session and proof records",
+            "Current-work record",
+            "Security rules",
+            "Documentation-impact determination",
+            "Future-session startup procedure",
+        ),
+        "Documentation authoring guide",
+    )
+
+    standard = require_phrases(
+        "docs/standards/J-404-Documentation-Governance-and-Continuity.md",
+        (
+            "Single documentation control plane",
+            "One fact, one authoritative owner",
+            "Fundamentals baseline",
+            "Extension/construction continuity",
+            "Current-work continuity",
+            "Documentation migration",
+            "Explicit documentation-impact determination",
+            "Definition of documentation complete",
+            "docs/engineering/",
+        ),
+        "J-404",
+    )
+    if "**Status:** Active" not in standard:
+        fail("J-404 must be Active after the documentation control-plane merge")
+
+    platform_integrity = require_phrases(
+        "docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md",
+        (
+            "Prohibited bypasses",
+            "Central orchestration",
+            "Policy and business authority separation",
+            "Integrate before innovate",
+            "Exception governance",
+            "Production-readiness enforcement",
+            "ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md",
+        ),
+        "J-405",
+    )
+
+    historical_platform_integrity = read("docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md")
     if "Historical / Superseded as governing authority" not in historical_platform_integrity:
         fail("Archived Platform Integrity record must be explicitly historical/superseded")
     if "# Article VII - Platform Integrity" not in historical_platform_integrity:
@@ -274,19 +315,17 @@ def main() -> int:
         for readme in sorted(base.rglob("README.md")):
             relative = readme.relative_to(ROOT).as_posix()
             if relative not in implementation_index:
-                fail(
-                    "Material implementation-local README is not represented in "
-                    f"the implementation documentation index: {relative}"
-                )
+                fail("Material implementation-local README is not represented in the implementation documentation index: " + relative)
 
     mkdocs = read("mkdocs.yml")
     if "docs_dir: docs" not in mkdocs:
         fail("MkDocs must publish directly from the canonical docs tree")
     if ".build/docs" in mkdocs:
         fail("MkDocs must not depend on the retired mixed-source documentation assembly tree")
-
     for path in (
+        "control/JASON-FUNDAMENTALS.md",
         "control/CURRENT.md",
+        "control/EXTENSION-CONSTRUCTION-MAP.md",
         "control/DOCUMENTATION-REGISTER.md",
         "control/HOW-TO-DOCUMENT-JASON.md",
         "control/IMPLEMENTATION-DOCUMENTATION-INDEX.md",
@@ -301,7 +340,9 @@ def main() -> int:
 
     catch_me_up = read("tools/catch_me_up.py")
     required_current_signals = (
+        "docs/control/JASON-FUNDAMENTALS.md",
         "docs/control/CURRENT.md",
+        "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
         "docs/control/HOW-TO-DOCUMENT-JASON.md",
         "docs/roadmaps/Jason-Roadmap-Status.json",
         "docs/operations/System-Registry-Current-Operational-State.md",
