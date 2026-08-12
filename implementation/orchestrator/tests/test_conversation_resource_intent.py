@@ -556,3 +556,38 @@ def test_metadata_first_count_requires_complete_collection():
 
     assert inquiry.result_intent == "count"
     assert inquiry.completeness_requirement == "complete"
+
+
+
+def test_metadata_first_normalizes_complete_collection_fact_aliases():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                ),
+                "collection_fact": "sites",
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    inquiry = interpreter.interpret(
+        text="List every site in Datto RMM",
+        principal=principal(),
+    )
+
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.result_intent == "enumerate"
+    assert inquiry.completeness_requirement == "complete"

@@ -245,6 +245,19 @@ class MetadataFirstResourceInquiryInterpreter:
             self._result_outcome(normalized_text)
         )
 
+        # Fact hints are recognition aliases, not evidence contracts. When the
+        # human requests an exhaustive collection outcome, normalize any matched
+        # singular/plural/synonym hint to the capability's canonical collection
+        # fact. This keeps varied language from collapsing a collection into one
+        # arbitrary nested scalar.
+        collection_fact = str(contract.get("collection_fact", "")).strip()
+        if (
+            collection_fact
+            and result_intent in {"enumerate", "count"}
+            and completeness_requirement == "complete"
+        ):
+            requested_fact = collection_fact
+
         return ResourceInquiry(
             resource_type=resource_types[0],
             resource_selector={},

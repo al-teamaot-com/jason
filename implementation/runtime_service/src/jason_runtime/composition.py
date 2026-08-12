@@ -322,6 +322,7 @@ def _deterministic_resource_contracts(
             for item in metadata.get("fact_hints", "").split(",")
             if item.strip()
         )
+        collection_fact = metadata.get("collection_fact", "").strip()
 
         # A zero-selector interpretation is safe only for resource contracts
         # that have a meaningful account/environment-wide read surface.
@@ -345,6 +346,7 @@ def _deterministic_resource_contracts(
                 "resource_types": resource_types,
                 "selector_keys": selector_keys,
                 "fact_hints": fact_hints,
+                "collection_fact": collection_fact,
                 "selector_required": selector_required,
             }
         )

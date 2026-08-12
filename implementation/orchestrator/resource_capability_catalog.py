@@ -198,6 +198,7 @@ def _read_resource_capability(
     selector_keys: str,
     fact_hints: str,
     planning_guidance: str,
+    collection_fact: str | None = None,
 ) -> CapabilityDefinition:
     """Construct one governed provider-neutral read-only resource capability."""
 
@@ -252,6 +253,7 @@ def _read_resource_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            **({"collection_fact": collection_fact} if collection_fact else {}),
             "planning_guidance": planning_guidance,
         },
     )
@@ -277,6 +279,7 @@ def endpoint_alert_search(now: datetime) -> CapabilityDefinition:
             "alert details. Resolve a human endpoint selector before invoking the "
             "device-scoped provider alert operation."
         ),
+        collection_fact="alerts",
     )
 
 
@@ -322,6 +325,7 @@ def endpoint_software_search(now: datetime) -> CapabilityDefinition:
             "Use when the human asks what software/applications/programs are installed "
             "on a managed endpoint or asks whether particular software is present."
         ),
+        collection_fact="software",
     )
 
 
@@ -344,6 +348,7 @@ def management_alert_search(now: datetime) -> CapabilityDefinition:
             "Use for account/site-wide alert questions rather than a question about "
             "one already identified endpoint."
         ),
+        collection_fact="alerts",
     )
 
 
@@ -362,6 +367,7 @@ def management_site_search(now: datetime) -> CapabilityDefinition:
         planning_guidance=(
             "Use for questions about managed Datto RMM sites or site discovery."
         ),
+        collection_fact="sites",
     )
 
 
