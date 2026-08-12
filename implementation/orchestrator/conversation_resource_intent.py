@@ -6,6 +6,7 @@ from typing import Any, Mapping, Protocol
 
 from .canonical_fact_vocabulary import CanonicalFactVocabulary
 from .resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
+from .semantic_request_bridge import SemanticRequestBridge
 from .teams_conversation_flow import BoundConversationPrincipal, ConversationIntent
 
 
@@ -140,21 +141,17 @@ class ReasonedResourceInquiryInterpreter:
             )
 
         normalized_facts = tuple(str(item).strip() for item in requested_facts)
-        if self.fact_vocabulary is not None:
-            normalized_facts = self.fact_vocabulary.canonicalize_requested_facts(
-                human_text=text,
-                requested_facts=normalized_facts,
-            )
-
-        return ResourceInquiry(
+        bridge = SemanticRequestBridge(fact_vocabulary=self.fact_vocabulary)
+        semantic_request = bridge.build(
+            human_text=text,
             resource_type=resource_type,
             resource_selector=normalized_selector,
             requested_facts=normalized_facts,
-            execution_mode=str(proposed.get("execution_mode", "deterministic")).strip(),
-            permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
             result_intent=result_intent,
             completeness_requirement=completeness_requirement,
+            permission_mode=str(proposed.get("permission_mode", "observe")).strip(),
         )
+        return bridge.lower(semantic_request, selector=normalized_selector)
 
     @classmethod
     def _selector_value_is_grounded(cls, *, text: str, value: str) -> bool:
