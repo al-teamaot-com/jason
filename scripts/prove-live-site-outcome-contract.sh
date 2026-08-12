@@ -106,4 +106,4 @@ echo "========== SECTION 4: DEPLOYED IMAGE/CONTAINER =========="
 docker inspect jason-runtime --format 'Image={{.Image}} Created={{.Created}} Status={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
 docker image inspect jason-runtime:local --format 'LocalImage={{.Id}} Created={{.Created}}'
 
-echo "========== END LIVE SITE OUTCOME CONTRACT PROOF =========="n
+echo "========== END LIVE SITE OUTCOME CONTRACT PROOF =========="
