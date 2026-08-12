@@ -38,7 +38,7 @@ echo
 echo "========== SECTION 3: NATIVE MSTEAMS TYPING LIFECYCLE =========="
 if [ -d "$MSTEAMS_DIR" ]; then
   grep -RniE \
-    'sendActivity\(.*typing|type:[[:space:]]*["'"']typing["'"']|typingInterval|typing.*interval|sendTyping|startTyping|stopTyping' \
+    "sendActivity.*typing|type:[[:space:]]*['\"]typing['\"]|typingInterval|typing.*interval|sendTyping|startTyping|stopTyping" \
     "$MSTEAMS_DIR" 2>/dev/null | head -n 220 || true
 else
   echo "ERROR: msteams source directory not found: $MSTEAMS_DIR"
