@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-08-12  
-**Status:** Documentation control-plane consolidation is merged. Continuity-enforcement follow-up is active to prevent future sessions from rediscovering Jason fundamentals or reusable construction patterns.  
+**Status:** Continuity-enforcement follow-up is implemented on PR #162. Initial `Validate Jason` and `Validate OpenClaw Operations` checks are green; final readiness requires the post-closeout validation triggered by the latest CURRENT/session updates and a fresh base/head check immediately before merge.  
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -45,6 +45,10 @@ Branch:
 
 `docs/fundamentals-enforcement-2026-08-12`
 
+Pull request:
+
+`#162 — Enforce Jason fundamentals and extension continuity`
+
 Purpose:
 
 Prevent repeated rediscovery of Jason's fundamental architecture and the method used to create reusable component classes.
@@ -54,14 +58,24 @@ Prevent repeated rediscovery of Jason's fundamental architecture and the method 
 - `docs/control/JASON-FUNDAMENTALS.md` — mandatory reconstruction/startup baseline pointing to authoritative owners of Jason's fundamental rules.
 - `docs/control/EXTENSION-CONSTRUCTION-MAP.md` — construction map for providers/connectors, capabilities/resources, agents/reasoning components, governance/policy gates, ingress/interfaces, identity/authority, secret integrations, internal services, System Registry entities, evidence/audit, approval/communication actions, and deployment/operational procedures.
 
-### Enforcement being added
+### Enforcement implemented
 
 - J-404 defines documentation completeness as **reconstructable and extensible**, not merely discoverable.
 - `HOW-TO-DOCUMENT-JASON.md` requires future sessions to load fundamentals and the construction map before material design/implementation work.
-- `CONTRIBUTING.md`, `docs/index.md`, MkDocs navigation, handoff templates, and documentation CI expose/enforce the same startup baseline.
-- `tools/catch_me_up.py` remains a supporting secret-safe snapshot; it is not authoritative and must direct sessions through `docs/index.md`/`CURRENT.md` rather than becoming another continuity authority.
+- `CONTRIBUTING.md`, `docs/index.md`, MkDocs navigation, handoff templates, CatchMeUp, and documentation CI expose/enforce the same startup baseline.
 - New reusable patterns must update their construction guidance in the same governed workstream.
 - A material implementation PR must make an explicit documentation-impact determination; `no documentation impact` cannot be an accidental default.
+- Documentation CI now requires the fundamentals baseline, extension construction map, no-rediscovery controls, component-class coverage, CURRENT continuity signals, and CatchMeUp startup references.
+
+## Validation state
+
+At PR head `1463ad3e406e6d242758e744b8c8debc5ad07804`:
+
+- `Validate Jason` run 2176: **success**.
+- `Validate OpenClaw Operations` run 92: **success**.
+- PR #162 was observed as **mergeable** against base `feature/jason-runtime-service` at `39add8b61a94f604fd8e4b66c7e893d104f26775`.
+
+This file and the durable session record are being advanced after those checks so the canonical resume point does not become stale immediately after validation. The resulting new head must be validated again before readiness/merge.
 
 ## Governing continuity rule
 
@@ -88,10 +102,10 @@ The prior live Teams/System Registry troubleshooting remains host-sensitive. Res
 
 ## Next safe actions
 
-1. Finish continuity-enforcement controls and validation on `docs/fundamentals-enforcement-2026-08-12`.
-2. Run/observe repository validation and strict MkDocs CI.
-3. Refetch `feature/jason-runtime-service` immediately before PR readiness/merge.
-4. Merge only after continuity controls are green and branch is reconciled with current base.
+1. Allow CI to validate the latest closeout head after this CURRENT/session update.
+2. Refetch `feature/jason-runtime-service` and PR #162 immediately before changing readiness or merge state.
+3. If CI remains green and the base/head are unchanged/reconciled, mark PR #162 ready for review.
+4. Do not merge until an explicit merge decision is made against that revalidated state.
 5. When host work resumes, load canonical fundamentals/construction guidance before returning to live Teams return-path diagnosis.
 
 ## Success condition
