@@ -16,7 +16,7 @@ if ! docker ps --format '{{.Names}}' | grep -qx 'jason-runtime'; then
 fi
 
 echo "========== SECTION 2: GOVERNED READ + SANITIZED STRUCTURAL EVIDENCE =========="
-docker exec jason-runtime python - <<'PY'
+docker exec -i jason-runtime python - <<'PY'
 from __future__ import annotations
 
 import os
