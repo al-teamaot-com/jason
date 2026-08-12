@@ -7,6 +7,7 @@ from connectors.core.connector_base import ConnectorBase, PreparedRequest
 from connectors.core.provider_adaptation import BoundedCollectionReadAdapter
 from connectors.core.contracts import ConnectorRequest, ConnectorResult, require_capability
 from connectors.datto_rmm.auth import acquire_access_token, require_durable_credentials
+from connectors.datto_rmm.semantic_evidence import adapt_datto_device_semantic_evidence
 
 
 class DattoRmmConnector(ConnectorBase):
@@ -284,7 +285,7 @@ class DattoRmmConnector(ConnectorBase):
             "resolved_resource_id": resource_id,
             # Requested facts must be located in the exact device read, never in a
             # summary record returned by the discovery request.
-            "provider_data": read_payload,
+            "provider_data": adapt_datto_device_semantic_evidence(read_payload),
         }
 
     def _execute_device_scoped_read(
@@ -364,7 +365,7 @@ class DattoRmmConnector(ConnectorBase):
         return {
             "resource_matches": matches,
             "resolved_resource_id": resource_id,
-            "provider_data": payload,
+            "provider_data": adapt_datto_device_semantic_evidence(payload),
         }
 
 
