@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-08-12  
-**Status:** Continuity-enforcement follow-up is implemented on PR #162. Initial `Validate Jason` and `Validate OpenClaw Operations` checks are green; final readiness requires the post-closeout validation triggered by the latest CURRENT/session updates and a fresh base/head check immediately before merge.  
+**Status:** Continuity-enforcement follow-up is implemented on PR #162 and is ready for review. Before merge, recheck the current PR head, base branch, mergeability, and CI; do not rely on a stored validation snapshot.  
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -49,6 +49,8 @@ Pull request:
 
 `#162 — Enforce Jason fundamentals and extension continuity`
 
+PR state at the last documented check: **ready for review and mergeable**.
+
 Purpose:
 
 Prevent repeated rediscovery of Jason's fundamental architecture and the method used to create reusable component classes.
@@ -65,17 +67,20 @@ Prevent repeated rediscovery of Jason's fundamental architecture and the method 
 - `CONTRIBUTING.md`, `docs/index.md`, MkDocs navigation, handoff templates, CatchMeUp, and documentation CI expose/enforce the same startup baseline.
 - New reusable patterns must update their construction guidance in the same governed workstream.
 - A material implementation PR must make an explicit documentation-impact determination; `no documentation impact` cannot be an accidental default.
-- Documentation CI now requires the fundamentals baseline, extension construction map, no-rediscovery controls, component-class coverage, CURRENT continuity signals, and CatchMeUp startup references.
+- Documentation CI requires the fundamentals baseline, extension construction map, no-rediscovery controls, component-class coverage, CURRENT continuity signals, and CatchMeUp startup references.
 
-## Validation state
+## Validation evidence
 
-At PR head `1463ad3e406e6d242758e744b8c8debc5ad07804`:
+Two validation cycles completed successfully before this final stable-state wording was written:
 
 - `Validate Jason` run 2176: **success**.
 - `Validate OpenClaw Operations` run 92: **success**.
-- PR #162 was observed as **mergeable** against base `feature/jason-runtime-service` at `39add8b61a94f604fd8e4b66c7e893d104f26775`.
+- `Validate Jason` run 2180: **success**.
+- `Validate OpenClaw Operations` run 94: **success**.
 
-This file and the durable session record are being advanced after those checks so the canonical resume point does not become stale immediately after validation. The resulting new head must be validated again before readiness/merge.
+PR #162 was then observed ready for review and mergeable against `feature/jason-runtime-service`, with the base still at `39add8b61a94f604fd8e4b66c7e893d104f26775`.
+
+Because this final CURRENT wording itself creates a new documentation-only head, merge decisions must always use fresh GitHub CI/base/head state rather than treating the run numbers above as perpetual authority.
 
 ## Governing continuity rule
 
@@ -102,11 +107,10 @@ The prior live Teams/System Registry troubleshooting remains host-sensitive. Res
 
 ## Next safe actions
 
-1. Allow CI to validate the latest closeout head after this CURRENT/session update.
-2. Refetch `feature/jason-runtime-service` and PR #162 immediately before changing readiness or merge state.
-3. If CI remains green and the base/head are unchanged/reconciled, mark PR #162 ready for review.
-4. Do not merge until an explicit merge decision is made against that revalidated state.
-5. When host work resumes, load canonical fundamentals/construction guidance before returning to live Teams return-path diagnosis.
+1. Before merging PR #162, refetch its current head, `feature/jason-runtime-service`, mergeability, and CI status.
+2. Merge only on current green/reconciled evidence and an explicit merge decision.
+3. After merge, advance `CURRENT.md` to the next actual workstream rather than leaving PR #162 described as active.
+4. When host work resumes, load canonical fundamentals/construction guidance before returning to live Teams return-path diagnosis.
 
 ## Success condition
 
