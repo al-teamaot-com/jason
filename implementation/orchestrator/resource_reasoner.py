@@ -87,6 +87,8 @@ class MetadataResourceCapabilityReasoner:
                 arguments={
                     **dict(inquiry.resource_selector),
                     "requested_facts": inquiry.requested_facts,
+                    "result_intent": inquiry.result_intent,
+                    "completeness_requirement": inquiry.completeness_requirement,
                 },
                 purpose=(
                     "retrieve the governed resource record most likely to contain "
