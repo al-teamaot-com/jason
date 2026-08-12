@@ -1,6 +1,6 @@
 # Project Jason — Fundamentals Continuity Enforcement — 2026-08-12
 
-**Status:** Implemented; final closeout validation pending on latest documentation-only head  
+**Status:** Implemented and ready for review; merge requires fresh CI/base/head verification and an explicit merge decision  
 **Owner:** Jason Architecture Authority  
 **Branch:** `docs/fundamentals-enforcement-2026-08-12`  
 **Pull request:** `#162 — Enforce Jason fundamentals and extension continuity`  
@@ -38,13 +38,16 @@ A material Jason workstream is not documentation-complete if a future competent 
 
 ## Validation evidence
 
-At PR head `1463ad3e406e6d242758e744b8c8debc5ad07804`:
+Two validation cycles completed successfully before the final stable review-state wording was written:
 
-- `Validate Jason` run 2176 completed successfully.
-- `Validate OpenClaw Operations` run 92 completed successfully.
-- PR #162 was observed mergeable against `feature/jason-runtime-service` at base `39add8b61a94f604fd8e4b66c7e893d104f26775`.
+- `Validate Jason` run 2176: **success**.
+- `Validate OpenClaw Operations` run 92: **success**.
+- `Validate Jason` run 2180: **success**.
+- `Validate OpenClaw Operations` run 94: **success**.
 
-After those successful checks, `CURRENT.md` and this record were deliberately advanced to record the actual validated state. That produces a newer documentation-only head, which must pass CI again before the PR is marked ready or merged. This prevents the canonical resume record from being stale at the moment the workstream closes.
+After run 2180/94, PR #162 was observed **mergeable** and was marked **ready for review** against `feature/jason-runtime-service`, whose base remained `39add8b61a94f604fd8e4b66c7e893d104f26775` at that check.
+
+`CURRENT.md` and this session record were then given stable closeout wording: they no longer instruct a future session to mark the PR ready. Instead they require fresh current CI/base/head/mergeability verification immediately before merge. That wording remains valid as validation state evolves and avoids another stale-resume loop.
 
 ## Changes explicitly not made
 
@@ -65,15 +68,18 @@ Future documentation completion therefore includes both:
 - continuity of current work/state; and
 - continuity of construction/reuse knowledge.
 
-A canonical resume point that still describes a completed PR as future work is itself a documentation defect and must be corrected before closeout.
+A canonical resume point that still describes completed work as a future action is itself a documentation defect.
 
 ## Closeout requirements
 
-- latest documentation-control validator and strict MkDocs build pass;
-- latest repository/PR CI remains green;
-- branch is reconciled with the current `feature/jason-runtime-service` base immediately before readiness/merge;
-- PR is not merged on stale validation evidence.
+Immediately before merge:
+
+- refetch PR #162 head and target branch;
+- require current green CI on the actual PR head;
+- require the branch to remain mergeable/reconciled;
+- merge only under an explicit merge decision;
+- after merge, advance `docs/control/CURRENT.md` to the next actual workstream rather than leaving PR #162 active.
 
 ## Next action
 
-Allow CI to validate the latest documentation-only head, refetch the base and PR, and mark PR #162 ready for review only if the latest head remains green and mergeable. Merge remains a separate explicit decision.
+Validate the final documentation-only head. If it remains green, leave PR #162 ready for review until an explicit merge decision is made.
