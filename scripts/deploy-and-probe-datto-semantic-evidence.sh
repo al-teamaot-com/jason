@@ -6,7 +6,8 @@ cd /home/al/projects/jason
 
 echo "========== START DATTO SEMANTIC EVIDENCE DEPLOYMENT AND PROBE =========="
 
-echo "========== SECTION 1: PRECONDITIONS =========="nBRANCH="$(git branch --show-current)"
+echo "========== SECTION 1: PRECONDITIONS =========="
+BRANCH="$(git branch --show-current)"
 HEAD="$(git rev-parse --short HEAD)"
 echo "Branch: $BRANCH"
 echo "HEAD: $HEAD"
@@ -28,15 +29,18 @@ if [[ ! -x scripts/deploy-jason-runtime.sh ]]; then
   exit 22
 fi
 
-echo "========== SECTION 2: DEPLOY JASON RUNTIME =========="nbash scripts/deploy-jason-runtime.sh
+echo "========== SECTION 2: DEPLOY JASON RUNTIME =========="
+bash scripts/deploy-jason-runtime.sh
 
-echo "========== SECTION 3: DEPLOYMENT STATUS =========="nif command -v docker >/dev/null 2>&1; then
+echo "========== SECTION 3: DEPLOYMENT STATUS =========="
+if command -v docker >/dev/null 2>&1; then
   docker ps --filter name=jason-runtime --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 else
   echo "WARN: docker command unavailable for post-deploy status."
 fi
 
-echo "========== SECTION 4: LIVE PROBE INSTRUCTIONS =========="ncat <<'EOF'
+echo "========== SECTION 4: LIVE PROBE INSTRUCTIONS =========="
+cat <<'EOF'
 Run these five questions through the normal Jason Teams interface, one at a time:
 
 1. What is the Windows Display Version for AOT-50282?
@@ -52,6 +56,7 @@ Expected semantic behavior:
 - If Datto does not expose a uniquely mapped provider value, Jason should fail closed rather than return an unrelated field.
 EOF
 
-echo "========== RESULT =========="necho "Deployment completed. Live semantic evidence questions are ready for Teams validation."
+echo "========== RESULT =========="
+echo "Deployment completed. Live semantic evidence questions are ready for Teams validation."
 echo "NO SOURCE CHANGES PERFORMED."
 echo "========== END DATTO SEMANTIC EVIDENCE DEPLOYMENT AND PROBE =========="
