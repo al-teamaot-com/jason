@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-11  
-**Status:** Documentation consolidation and reconciliation complete; documentation-control validation and strict MkDocs are green; final broader CI and PR/base readiness review remain  
+**Updated:** 2026-08-12  
+**Status:** Documentation control-plane consolidation is merged. Continuity-enforcement follow-up is active to prevent future sessions from rediscovering Jason fundamentals or reusable construction patterns.  
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -9,134 +9,85 @@
 A future session resuming Project Jason should read, in order:
 
 1. `docs/index.md`
-2. this file
-3. `docs/control/DOCUMENTATION-REGISTER.md`
-4. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-5. `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` when implementation-local guidance is relevant
-6. `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` when documentation authority or historical paths matter
-7. `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` when platform boundary or bypass rules matter
-8. `docs/operations/README.md` for the procedure/deployment/generated-state/evidence boundary
-9. the governing architecture/ADR/runbook/component/engineering records for the intended workstream
-10. current GitHub state and System Registry/host evidence before asserting live production state
+2. `docs/control/JASON-FUNDAMENTALS.md`
+3. this file
+4. `docs/control/EXTENSION-CONSTRUCTION-MAP.md` when creating/changing a Jason component or reusable pattern
+5. `docs/control/DOCUMENTATION-REGISTER.md`
+6. `docs/control/HOW-TO-DOCUMENT-JASON.md`
+7. the governing architecture/ADR/component/standard/runbook/engineering records for the workstream
+8. current GitHub state and System Registry/host evidence before asserting live production state
 
-## Current documentation workstream
+Conversation memory is context only. It is not authority and must not be used to reconstruct fundamentals that already have durable owners.
 
-The active documentation-standardization branch is:
+## Last durable success
 
-`docs/documentation-standardization-2026-08-11`
+PR #161 — **Standardize Project Jason documentation control plane** — was merged into `feature/jason-runtime-service` on 2026-08-12.
 
-Draft PR:
+The target branch was observed at GitHub-verified merge commit:
 
-`#161 — Standardize Project Jason documentation control plane`
+`39add8b61a94f604fd8e4b66c7e893d104f26775`
 
-The base branch most recently observed is `feature/jason-runtime-service` at commit `28719135e25639c48b5cce847ff83b6e4825d502`. This SHA is a last-observed Git fact only; refetch the base immediately before final PR readiness or merge decisions.
+That merge established `docs/` as Jason's single human-facing documentation control plane, J-404 documentation governance, J-405 platform-integrity/boundary enforcement, documentation path/control validation, operations/evidence classification, and the canonical current-work mechanism.
 
-## Durable result
+Refetch Git before relying on this SHA for any future write or deployment decision.
 
-The documentation-control-plane work now establishes:
+## Active continuity-enforcement workstream
 
-- `docs/` as the single human-facing documentation control plane;
-- `docs/control/HOW-TO-DOCUMENT-JASON.md` as the repeatable documentation method for future human and AI sessions;
-- `docs/control/DOCUMENTATION-REGISTER.md` as the ownership/classification and historical-migration register;
-- `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` as the governed discovery boundary for implementation- and infrastructure-local README files;
-- `docs/control/DOCUMENTATION-MIGRATION-ISSUES.md` as the durable reconciliation register, with no currently open migration issue;
-- `docs/control/CURRENT.md` as the only canonical current resume point;
-- canonical Foundation, Governance, Architecture, Models, Components, Standards, Decisions, Roadmaps, Operations, Sessions, Journal, and Milestones beneath `docs/`;
-- the former top-level engineering `architecture/` tree under `docs/engineering/`, explicitly subordinate to the Constitution, project ADRs, and canonical J-series platform architecture;
-- the former numbered documentation roots retired and rejected by documentation validation;
-- direct MkDocs publication from `docs_dir: docs` without the retired mixed-source assembly staging tree;
-- current-use tooling/workflow/operations path auditing for retired documentation roots;
-- implementation-local README coverage enforced by CI;
-- `docs/operations/README.md` as the authority/classification boundary for repeatable operational material, deployment records, generated current-state representation, and historical proof evidence;
-- point-in-time CAP-007 live-pilot evidence preserved under `docs/sessions/` without changing what the proof established;
-- the historical Platform Integrity “Article VII” conflict deliberately reconciled without changing the current Constitution; and
-- J-405 plus CI enforcement protecting the platform-integrity/boundary requirements at the correct standards layer.
+Branch:
 
-Repository-root `README.md`, `CONTRIBUTING.md`, and `SECURITY.md` remain conventional entry/control files only and direct durable project knowledge into `docs/` rather than maintaining parallel current-state narratives.
+`docs/fundamentals-enforcement-2026-08-12`
 
-## Important reconciliations completed
+Purpose:
 
-### Documentation layout decision
+Prevent repeated rediscovery of Jason's fundamental architecture and the method used to create reusable component classes.
 
-ADR-008 — Documentation Control Plane Consolidation — explicitly supersedes ADR-002 while preserving one authoritative source, no duplicate editable canonical copies, disposable generated output, publishing-tool independence, and institutional-memory preservation.
+This follow-up exists because the documentation structure was successfully consolidated but the acceptance criteria did not sufficiently force every future session to load the fundamentals and construction patterns before proposing new work.
 
-### Duplicate ADR-004
+### Added
 
-Datto RMM Managed-Device Authority retains ADR-004. Teams proactive messaging is corrected to ADR-007, with the identifier correction recorded as non-semantic.
+- `docs/control/JASON-FUNDAMENTALS.md` — mandatory reconstruction/startup baseline pointing to the authoritative owners of Jason's fundamental rules.
+- `docs/control/EXTENSION-CONSTRUCTION-MAP.md` — one construction map for providers/connectors, capabilities/resources, agents/reasoning components, governance/policy gates, ingress/interfaces, identity/authority, secret integrations, internal services, System Registry entities, evidence/audit, approval/communication actions, and deployment/operational procedures.
 
-### Architecture and engineering boundary
+### Enforcement being added
 
-`docs/architecture/README.md` defines J-100 through J-103 as canonical platform-architecture owners for their named subjects. `docs/engineering/README.md` defines the detailed engineering tree as subordinate implementation engineering. JIS, engineering-ADR, and provider landing pages preserve that authority boundary and make the tree navigable.
+- J-404 must define documentation completeness as **reconstructable and extensible**, not merely discoverable.
+- `HOW-TO-DOCUMENT-JASON.md` must require future sessions to load the fundamentals and construction map before material implementation/design work.
+- `CONTRIBUTING.md`, `docs/index.md`, `mkdocs.yml`, and `tools/catch_me_up.py` must expose the same startup baseline.
+- Documentation CI must require the fundamentals/construction records and the no-rediscovery/extension-completeness practices.
+- New reusable patterns must update their construction guidance in the same governed workstream.
+- A material implementation PR must make an explicit documentation-impact determination; "no documentation impact" cannot be an accidental default.
 
-### Platform Integrity constitutional conflict
+## Governing continuity rule
 
-The historical Platform Integrity record formerly labeled itself an approved constitutional Article VII, while the authoritative J-002 Constitution defines Article VII as **Knowledge as an Asset**.
+A Jason workstream is not complete if a future competent human or AI must rediscover from code archaeology or conversation history:
 
-The deliberate governance disposition is complete:
+- the component's governing boundaries;
+- how it is created;
+- how it obtains authority;
+- how policy/gates apply;
+- how it reaches providers/resources;
+- how secrets/evidence/audit work;
+- how it is registered, tested, deployed, verified, rolled back, deprecated, or retired; or
+- which existing governed pattern should be reused.
 
-- J-002 and its Article VII remain unchanged;
-- the original Platform Integrity text is preserved at `docs/archive/governance/ARTICLE_VII_PLATFORM_INTEGRITY-Historical.md` as historical/superseded evidence;
-- `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` owns the durable platform-integrity requirements beneath the Constitution;
-- J-405 preserves central orchestration, approved platform contracts, prohibited bypasses, secrets/workload-identity boundaries, policy/provider separation, client isolation, integrate-before-innovate, governed exceptions, and production-readiness enforcement; and
-- documentation CI fails if the historical file reappears as current governance authority or if the J-405/archive reconciliation disappears.
+When a missing prerequisite has to be rediscovered, that is a documentation defect and the durable construction guidance must be corrected before the workstream closes.
 
-MIG-DOC-003 is resolved.
+## Production/runtime boundary
 
-### Operations and historical proof classification
+This documentation workstream does **not** claim or modify current production runtime state.
 
-`docs/operations/README.md` defines the rule:
+No production container, OpenClaw bridge, Jason runtime, provider credential, System Registry lifecycle state, authority grant, or host configuration is changed by this workstream.
 
-- reusable procedures/runbooks/checklists remain in `docs/operations/`;
-- deployment/bootstrap records may remain operational records but are not substitutes for observed runtime state;
-- `System-Registry-Current-Operational-State.md` is a generated human view derived from System Registry structured truth;
-- point-in-time host proofs, pilot evidence, and reconciliation evidence belong in `docs/sessions/`; and
-- classification changes do not rewrite what historical evidence established.
+The prior live Teams/System Registry troubleshooting work remains host-sensitive. Resume it only from fresh Git, ingress/orchestration evidence, and System Registry/host verification when an operator is present.
 
-MIG-DOC-005 is resolved/controlled.
+## Next safe actions
 
-### Current-use path audit
+1. Finish the continuity-enforcement edits and CI checks on `docs/fundamentals-enforcement-2026-08-12`.
+2. Run/observe repository validation and strict MkDocs CI.
+3. Refetch `feature/jason-runtime-service` immediately before PR readiness/merge.
+4. Merge only after the continuity controls are green and the branch is reconciled with the current base.
+5. When host work resumes, use the canonical fundamentals/construction map before returning to the live Teams return-path diagnosis.
 
-The final current-use audit is complete and enforced by `tools/validate_documentation_control.py` across `tools/`, `.github/workflows/`, and `docs/operations/`.
+## Success condition
 
-Stale current operator/tool paths were repaired to `docs/control/`, `docs/operations/`, and `docs/sessions/`. The audit also removed the obsolete documentation-assembly instruction from the INF-001 checklist.
-
-One narrow historical compatibility mapping remains intentionally allowed in `tools/system_registry_docs.py`: append-only lifecycle events retain historical `08-Session-Records/...` evidence references and the generator maps them to current `docs/sessions/...` paths without rewriting immutable event history. The validator permits only that exact file/prefix case rather than excluding the file.
-
-The strengthened documentation-control validator and strict MkDocs build both pass. MIG-DOC-007 is resolved.
-
-### System Registry generated documentation
-
-`tools/system_registry_docs.py` generates/checks `docs/operations/System-Registry-Current-Operational-State.md`. Append-only lifecycle events are not rewritten merely because documentation paths move; human rendering may resolve historical evidence references to their migrated `docs/sessions/` path.
-
-## Remaining work
-
-1. Allow the final broader `Validate Jason` and targeted PR workflows to finish after the closeout-record updates.
-2. Refetch `feature/jason-runtime-service` and PR #161 immediately before changing PR readiness state.
-3. Confirm the PR synthetic merge remains clean against the latest base and all required CI is green.
-4. If those checks remain clean, PR #161 is ready to leave draft for final review. No unresolved documentation migration or constitutional disposition remains.
-
-## Work explicitly not performed by this documentation workstream
-
-No production container, OpenClaw bridge, Jason runtime, provider credential, System Registry lifecycle state, authority grant, or host configuration is changed by this documentation-standardization work.
-
-This record does not claim the latest production runtime state. If another workstream has advanced runtime development, reconcile current Git/System Registry/host evidence before continuing host-sensitive work.
-
-## Host-sensitive continuation
-
-Live Teams/OpenClaw/Jason work is outside the authority of this documentation cleanup. A future host session must use fresh ingress/orchestration/System Registry evidence rather than this document or conversational memory to determine current runtime state.
-
-## Documentation success condition
-
-The documentation control plane is structurally and semantically complete when the final PR validation remains green against the current base.
-
-Ongoing documentation governance is successful when:
-
-- each material fact has one authoritative owner;
-- current operational topology comes from System Registry structured truth rather than narrative duplication;
-- future sessions consistently use `docs/control/HOW-TO-DOCUMENT-JASON.md`;
-- implementation-local documentation is indexed and bounded as supporting material;
-- historical proofs remain evidence rather than current-state authority;
-- constitutional/governance conflicts are deliberately reconciled rather than silently normalized;
-- current-use references cannot drift back to retired documentation roots unnoticed;
-- documentation remains indexed, portable, versioned, and provider/tool independent; and
-- a future contributor can reconstruct Jason's governance, architecture, engineering boundaries, operating method, proof history, and safe next action without access to chat history.
+This workstream is complete when a future session can begin from `docs/index.md` → `JASON-FUNDAMENTALS.md` → `CURRENT.md` → `EXTENSION-CONSTRUCTION-MAP.md`, locate the authoritative records for a component class, and extend Jason without re-deriving its fundamental architecture from previous chats or reverse-engineering existing code.
