@@ -38,14 +38,29 @@ echo "========== SECTION 2: DERIVE LIVE DEPLOYMENT INPUTS =========="
 
 container_env() {
   local name="$1"
-  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' jason-runtime \
-    | awk -F= -v key="$name" '$1 == key {sub(/^[^=]*=/, ""); print; exit}'
+  docker inspect jason-runtime | python3 -c '
+import json, sys
+name = sys.argv[1]
+data = json.load(sys.stdin)[0]
+for item in data.get("Config", {}).get("Env", []):
+    key, sep, value = item.partition("=")
+    if sep and key == name:
+        print(value)
+        break
+' "$name"
 }
 
 mount_source() {
   local destination="$1"
-  docker inspect --format '{{range .Mounts}}{{println .Destination "|" .Source}}{{end}}' jason-runtime \
-    | awk -F'|' -v dest="$destination" '$1 == dest {print $2; exit}'
+  docker inspect jason-runtime | python3 -c '
+import json, sys
+destination = sys.argv[1]
+data = json.load(sys.stdin)[0]
+for mount in data.get("Mounts", []):
+    if mount.get("Destination") == destination:
+        print(mount.get("Source", ""))
+        break
+' "$destination"
 }
 
 export JASON_OLLAMA_MODEL="$(container_env JASON_OLLAMA_MODEL)"
