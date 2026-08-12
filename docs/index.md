@@ -10,12 +10,13 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 2. **Current resume point:** [`control/CURRENT.md`](control/CURRENT.md).
 3. **How to create/extend Jason component classes:** [`control/EXTENSION-CONSTRUCTION-MAP.md`](control/EXTENSION-CONSTRUCTION-MAP.md).
 4. **Where authoritative knowledge lives:** [`control/DOCUMENTATION-REGISTER.md`](control/DOCUMENTATION-REGISTER.md).
-5. **How to write/update Jason documentation:** [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md).
-6. **Implementation-local documentation index:** [`control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`](control/IMPLEMENTATION-DOCUMENTATION-INDEX.md).
-7. **Known reconciliation issues:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
-8. **Documentation governance standard:** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
-9. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
-10. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
+5. **Standard Documentation Policy:** [`control/STANDARD-DOCUMENTATION-POLICY.md`](control/STANDARD-DOCUMENTATION-POLICY.md).
+6. **How to write/update Jason documentation:** [`control/HOW-TO-DOCUMENT-JASON.md`](control/HOW-TO-DOCUMENT-JASON.md).
+7. **Implementation-local documentation index:** [`control/IMPLEMENTATION-DOCUMENTATION-INDEX.md`](control/IMPLEMENTATION-DOCUMENTATION-INDEX.md).
+8. **Known reconciliation issues:** [`control/DOCUMENTATION-MIGRATION-ISSUES.md`](control/DOCUMENTATION-MIGRATION-ISSUES.md).
+9. **Governing documentation standard (J-404):** [`standards/J-404-Documentation-Governance-and-Continuity.md`](standards/J-404-Documentation-Governance-and-Continuity.md).
+10. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
+11. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
 ## No-rediscovery rule
 
@@ -87,9 +88,11 @@ Do not assume a prior branch, container, provider, hash, lifecycle state, or dep
 
 Read the Fundamentals Baseline and current-work records first, then inspect current Git state and use the System Registry plus fresh host verification when production state matters. If a chat summary conflicts with governed documentation or observed evidence, the governed durable source wins.
 
-## Documentation governance
+## Standard Documentation Policy
 
-Documentation structure and continuity are controlled by:
+The umbrella name for Jason's documentation-governance, continuity, reconstruction, and reusable-construction framework is the **Standard Documentation Policy**.
+
+Its canonical entry point is [`control/STANDARD-DOCUMENTATION-POLICY.md`](control/STANDARD-DOCUMENTATION-POLICY.md). The policy is implemented and governed through:
 
 - [`control/JASON-FUNDAMENTALS.md`](control/JASON-FUNDAMENTALS.md)
 - [`control/CURRENT.md`](control/CURRENT.md)
