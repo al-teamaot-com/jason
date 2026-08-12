@@ -16,11 +16,6 @@ class SemanticEvidenceField:
 # provider evidence; it never manufactures or infers provider values.
 DATTO_DEVICE_SEMANTIC_FIELDS = (
     SemanticEvidenceField(
-        canonical_fact="operating system display version",
-        semantic_contexts=("operating_system", "windows_release"),
-        provider_keys=("displayVersion", "DisplayVersion", "display_version", "windowsDisplayVersion"),
-    ),
-    SemanticEvidenceField(
         canonical_fact="operating system build",
         semantic_contexts=("operating_system",),
         provider_keys=("build", "buildNumber", "osBuild", "osBuildNumber"),

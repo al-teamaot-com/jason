@@ -53,21 +53,14 @@ def test_person_endpoint_relationship_is_active_with_temporal_semantics():
     assert set(relationship.temporal_semantics) == {"current", "most_recent", "historical"}
 
 
-def test_case_equivalent_provider_aliases_seed_once():
+def test_datto_display_version_is_not_seeded_as_windows_release_provider_evidence():
     registry = build_trusted_semantic_registry()
-    lower = registry.resolve_provider_field(
-        provider="datto_rmm",
-        resource_type="endpoint",
-        provider_field="displayVersion",
-    )
-    upper = registry.resolve_provider_field(
-        provider="datto_rmm",
-        resource_type="endpoint",
-        provider_field="DisplayVersion",
-    )
-    assert lower is not None and upper is not None
-    assert lower.concept_id == "operating_system.windows.display_version"
-    assert upper.concept_id == lower.concept_id
+    for provider_field in ("displayVersion", "DisplayVersion", "display_version", "windowsDisplayVersion"):
+        assert registry.resolve_provider_field(
+            provider="datto_rmm",
+            resource_type="endpoint",
+            provider_field=provider_field,
+        ) is None
 
 
 def test_broad_seed_covers_endpoint_and_identity_terms():

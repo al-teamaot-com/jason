@@ -1,21 +1,16 @@
 from connectors.datto_rmm.semantic_evidence import adapt_datto_device_semantic_evidence
 
 
-def test_display_version_is_exposed_only_under_os_windows_release_context():
+def test_datto_display_version_is_not_treated_as_windows_release_evidence():
     adapted = adapt_datto_device_semantic_evidence({
-        "health": {"version": "Unhealthy - Local user changes detected"},
-        "operatingSystem": {"displayVersion": "24H2"},
+        "operatingSystem": "Microsoft Windows 11 Pro 10.0.26200",
+        "cagVersion": "11965",
+        "displayVersion": "4.4.11965.11965",
     })
-    assert adapted["semantic_evidence"]["operating_system"]["windows_release"]["operating_system_display_version"] == "24H2"
-    assert adapted["health"]["version"] == "Unhealthy - Local user changes detected"
-
-
-def test_ambiguous_provider_keys_fail_closed_by_omission():
-    adapted = adapt_datto_device_semantic_evidence({
-        "a": {"displayVersion": "23H2"},
-        "b": {"DisplayVersion": "24H2"},
-    })
-    assert "semantic_evidence" not in adapted
+    semantic = adapted.get("semantic_evidence", {})
+    assert "operating_system" not in semantic
+    assert adapted["operatingSystem"] == "Microsoft Windows 11 Pro 10.0.26200"
+    assert adapted["displayVersion"] == "4.4.11965.11965"
 
 
 def test_processor_model_and_count_remain_distinct_semantic_fields():

@@ -182,7 +182,6 @@ def build_trusted_semantic_registry() -> SemanticKnowledgeRegistry:
         "processor.model": ("processor", "processorModel", "cpu", "cpuModel", "processorName"),
         "processor.logical_count": ("logicalProcessors", "logicalProcessorCount", "processorCount", "threadCount"),
         "memory.total": ("totalMemory", "physicalMemory", "totalPhysicalMemory", "ram"),
-        "operating_system.windows.display_version": ("displayVersion", "DisplayVersion", "display_version", "windowsDisplayVersion"),
         "operating_system.build": ("build", "buildNumber", "osBuild", "osBuildNumber"),
     }
 
