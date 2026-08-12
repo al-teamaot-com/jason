@@ -31,6 +31,14 @@ That merge established `docs/` as Jason's single human-facing documentation cont
 
 Refetch Git before relying on this SHA for any future write or deployment decision.
 
+## Continuity defect discovered after the merge
+
+Immediately after the documentation-control merge, the canonical `CURRENT.md` still described PR #161 as an active draft/future merge. That was stale and could have sent a future session backward into already-completed work.
+
+The broader documentation was discoverable, but the acceptance criteria also did not strongly require future sessions to load Jason's fundamentals and existing construction patterns before proposing new implementation work.
+
+This is being treated as a documentation-control defect, not as a request to remember better next time.
+
 ## Active continuity-enforcement workstream
 
 Branch:
@@ -41,21 +49,19 @@ Purpose:
 
 Prevent repeated rediscovery of Jason's fundamental architecture and the method used to create reusable component classes.
 
-This follow-up exists because the documentation structure was successfully consolidated but the acceptance criteria did not sufficiently force every future session to load the fundamentals and construction patterns before proposing new work.
-
 ### Added
 
-- `docs/control/JASON-FUNDAMENTALS.md` — mandatory reconstruction/startup baseline pointing to the authoritative owners of Jason's fundamental rules.
-- `docs/control/EXTENSION-CONSTRUCTION-MAP.md` — one construction map for providers/connectors, capabilities/resources, agents/reasoning components, governance/policy gates, ingress/interfaces, identity/authority, secret integrations, internal services, System Registry entities, evidence/audit, approval/communication actions, and deployment/operational procedures.
+- `docs/control/JASON-FUNDAMENTALS.md` — mandatory reconstruction/startup baseline pointing to authoritative owners of Jason's fundamental rules.
+- `docs/control/EXTENSION-CONSTRUCTION-MAP.md` — construction map for providers/connectors, capabilities/resources, agents/reasoning components, governance/policy gates, ingress/interfaces, identity/authority, secret integrations, internal services, System Registry entities, evidence/audit, approval/communication actions, and deployment/operational procedures.
 
 ### Enforcement being added
 
-- J-404 must define documentation completeness as **reconstructable and extensible**, not merely discoverable.
-- `HOW-TO-DOCUMENT-JASON.md` must require future sessions to load the fundamentals and construction map before material implementation/design work.
-- `CONTRIBUTING.md`, `docs/index.md`, `mkdocs.yml`, and `tools/catch_me_up.py` must expose the same startup baseline.
-- Documentation CI must require the fundamentals/construction records and the no-rediscovery/extension-completeness practices.
+- J-404 defines documentation completeness as **reconstructable and extensible**, not merely discoverable.
+- `HOW-TO-DOCUMENT-JASON.md` requires future sessions to load fundamentals and the construction map before material design/implementation work.
+- `CONTRIBUTING.md`, `docs/index.md`, MkDocs navigation, handoff templates, and documentation CI expose/enforce the same startup baseline.
+- `tools/catch_me_up.py` remains a supporting secret-safe snapshot; it is not authoritative and must direct sessions through `docs/index.md`/`CURRENT.md` rather than becoming another continuity authority.
 - New reusable patterns must update their construction guidance in the same governed workstream.
-- A material implementation PR must make an explicit documentation-impact determination; "no documentation impact" cannot be an accidental default.
+- A material implementation PR must make an explicit documentation-impact determination; `no documentation impact` cannot be an accidental default.
 
 ## Governing continuity rule
 
@@ -78,16 +84,16 @@ This documentation workstream does **not** claim or modify current production ru
 
 No production container, OpenClaw bridge, Jason runtime, provider credential, System Registry lifecycle state, authority grant, or host configuration is changed by this workstream.
 
-The prior live Teams/System Registry troubleshooting work remains host-sensitive. Resume it only from fresh Git, ingress/orchestration evidence, and System Registry/host verification when an operator is present.
+The prior live Teams/System Registry troubleshooting remains host-sensitive. Resume it only from fresh Git, ingress/orchestration evidence, and System Registry/host verification when an operator is present.
 
 ## Next safe actions
 
-1. Finish the continuity-enforcement edits and CI checks on `docs/fundamentals-enforcement-2026-08-12`.
+1. Finish continuity-enforcement controls and validation on `docs/fundamentals-enforcement-2026-08-12`.
 2. Run/observe repository validation and strict MkDocs CI.
 3. Refetch `feature/jason-runtime-service` immediately before PR readiness/merge.
-4. Merge only after the continuity controls are green and the branch is reconciled with the current base.
-5. When host work resumes, use the canonical fundamentals/construction map before returning to the live Teams return-path diagnosis.
+4. Merge only after continuity controls are green and branch is reconciled with current base.
+5. When host work resumes, load canonical fundamentals/construction guidance before returning to live Teams return-path diagnosis.
 
 ## Success condition
 
-This workstream is complete when a future session can begin from `docs/index.md` → `JASON-FUNDAMENTALS.md` → `CURRENT.md` → `EXTENSION-CONSTRUCTION-MAP.md`, locate the authoritative records for a component class, and extend Jason without re-deriving its fundamental architecture from previous chats or reverse-engineering existing code.
+This workstream is complete when a future session can begin from `docs/index.md` → `JASON-FUNDAMENTALS.md` → `CURRENT.md` → `EXTENSION-CONSTRUCTION-MAP.md`, locate authoritative records for a component class, and extend Jason without re-deriving its fundamental architecture from previous chats or reverse-engineering existing code.
