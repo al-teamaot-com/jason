@@ -70,6 +70,7 @@ from orchestrator.resource_evidence import (
     GovernedTeamsResourceResponseRenderer,
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
+from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -436,6 +437,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                     fact_hints=fact_hints,
                 ),
                 fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+                fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             ),
         ),
         planner=GovernedResourceInquiryPlanner(

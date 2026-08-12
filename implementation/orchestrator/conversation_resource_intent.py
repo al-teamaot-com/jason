@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
 from .canonical_fact_vocabulary import CanonicalFactVocabulary
+from .semantic_fact_resolver import SemanticFactResolver
 from .resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
 from .semantic_request_bridge import SemanticRequestBridge
 from .teams_conversation_flow import BoundConversationPrincipal, ConversationIntent
@@ -30,6 +31,7 @@ class StructuredResourceInquiryReasoner(Protocol):
 class ReasonedResourceInquiryInterpreter:
     reasoner: StructuredResourceInquiryReasoner
     fact_vocabulary: CanonicalFactVocabulary | None = None
+    fact_resolver: SemanticFactResolver | None = None
 
     _FORBIDDEN_TOP_LEVEL = frozenset(
         {
@@ -141,7 +143,10 @@ class ReasonedResourceInquiryInterpreter:
             )
 
         normalized_facts = tuple(str(item).strip() for item in requested_facts)
-        bridge = SemanticRequestBridge(fact_vocabulary=self.fact_vocabulary)
+        bridge = SemanticRequestBridge(
+            fact_vocabulary=self.fact_vocabulary,
+            fact_resolver=self.fact_resolver,
+        )
         semantic_request = bridge.build(
             human_text=text,
             resource_type=resource_type,

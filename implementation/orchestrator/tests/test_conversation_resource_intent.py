@@ -686,3 +686,41 @@ def test_reasoned_requested_facts_can_be_normalized_to_canonical_vocabulary():
         )
         assert inquiry is not None
         assert inquiry.requested_facts == (expected,)
+
+
+def test_reasoned_resource_interpreter_uses_injected_registry_first_fact_resolver():
+    from orchestrator.semantic_fact_resolver import SemanticFactResolver
+    from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
+
+    class CpuReasoner:
+        def propose(self, *, text, organization_id, client_id):
+            return {
+                "resource_type": "endpoint",
+                "resource_selector": {"hostname": "AOT-50282"},
+                "requested_facts": ["CPU"],
+                "result_intent": "summary",
+                "completeness_requirement": "sufficient",
+                "permission_mode": "observe",
+            }
+
+    interpreter = ReasonedResourceInquiryInterpreter(
+        reasoner=CpuReasoner(),
+        fact_resolver=SemanticFactResolver(
+            registry=build_trusted_semantic_registry(),
+            legacy_vocabulary=None,
+        ),
+    )
+    inquiry = interpreter.interpret(
+        text="What CPU does AOT-50282 have?",
+        principal=BoundConversationPrincipal(
+            principal_id="person-al",
+            organization_id="aot",
+            client_id=None,
+        ),
+    )
+
+    assert inquiry is not None
+    assert inquiry.requested_facts == ("processor model",)
+    assert inquiry.evidence_contexts == {
+        "processor model": ("processor", "hardware_inventory")
+    }
