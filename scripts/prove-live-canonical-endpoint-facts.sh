@@ -6,10 +6,19 @@ cd /home/al/projects/jason
 
 echo "========== START LIVE CANONICAL ENDPOINT FACT PROOF =========="
 echo "========== SECTION 1: PRECONDITIONS =========="
-if [[ -n "$(git status --porcelain)" ]]; then
+STATUS="$(git status --porcelain)"
+# A prior fetch helper may leave an untracked repository-root FETCH_HEAD artifact.
+# Git's real fetch metadata lives under .git/FETCH_HEAD, so this root file is not
+# source state. Allow that one known artifact, but continue to fail closed for any
+# other uncommitted worktree/index changes.
+BLOCKING_STATUS="$(printf '%s\n' "$STATUS" | grep -v '^?? FETCH_HEAD$' || true)"
+if [[ -n "$BLOCKING_STATUS" ]]; then
   echo "ERROR: worktree must be clean before live proof."
-  git status --short
+  printf '%s\n' "$STATUS"
   exit 20
+fi
+if printf '%s\n' "$STATUS" | grep -q '^?? FETCH_HEAD$'; then
+  echo "NOTE: ignoring untracked repository-root FETCH_HEAD artifact; .git/FETCH_HEAD remains authoritative git metadata."
 fi
 
 echo "HEAD: $(git rev-parse --short HEAD)"
@@ -31,21 +40,10 @@ echo "========== SECTION 2: LIVE GOVERNED REQUESTS =========="
 PYTHONPATH="implementation:implementation/runtime_service/src" .venv/bin/python - <<'PY'
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
 
 from jason_runtime.config import RuntimeSettings
 from jason_runtime.composition import build_runtime_application
-from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
-
-
-def summarize(value):
-    if isinstance(value, (list, tuple)):
-        return {"type": type(value).__name__, "count": len(value)}
-    if isinstance(value, dict):
-        return {"type": "dict", "keys": sorted(str(k) for k in value.keys())[:25]}
-    return {"type": type(value).__name__, "value": value}
 
 
 target = os.environ["TARGET"]
@@ -69,18 +67,17 @@ renderer = flow.response_renderer
 # Use the existing durable AOT Teams identity binding already configured for
 # production. No identity, authority, or registry records are created or changed.
 identity = None
-for tenant_id, object_id in (
-    (os.environ.get("JASON_PROOF_MICROSOFT_TENANT_ID"), os.environ.get("JASON_PROOF_MICROSOFT_OBJECT_ID")),
-):
-    if tenant_id and object_id:
-        from orchestrator.teams_identity import TeamsConversationPrincipalEvidence
-        identity = TeamsConversationPrincipalEvidence(
-            microsoft_tenant_id=tenant_id,
-            microsoft_object_id=object_id,
-            authentication_assurance="botframework-authenticated",
-            conversation_id="canonical-fact-proof",
-            message_id="canonical-fact-proof",
-        )
+tenant_id = os.environ.get("JASON_PROOF_MICROSOFT_TENANT_ID")
+object_id = os.environ.get("JASON_PROOF_MICROSOFT_OBJECT_ID")
+if tenant_id and object_id:
+    from orchestrator.teams_identity import TeamsConversationPrincipalEvidence
+    identity = TeamsConversationPrincipalEvidence(
+        microsoft_tenant_id=tenant_id,
+        microsoft_object_id=object_id,
+        authentication_assurance="botframework-authenticated",
+        conversation_id="canonical-fact-proof",
+        message_id="canonical-fact-proof",
+    )
 
 if identity is None:
     print("SKIP_LIVE_EXECUTION: production proof identity env vars are not set.")
