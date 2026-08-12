@@ -83,6 +83,34 @@ def test_reasoner_selects_search_for_hostname_without_field_specific_script():
     assert plan.steps[0].arguments == {
         "hostname": "AOT-50282",
         "requested_facts": ("last logged in user",),
+        "result_intent": "summary",
+        "completeness_requirement": "sufficient",
+    }
+
+
+def test_reasoner_propagates_complete_collection_outcome():
+    capabilities, _ = services()
+    planner = GovernedResourceInquiryPlanner(
+        registry=capabilities,
+        reasoner=MetadataResourceCapabilityReasoner(),
+    )
+
+    plan = planner.plan(
+        ResourceInquiry(
+            resource_type="management_site",
+            resource_selector={},
+            requested_facts=("sites",),
+            result_intent="enumerate",
+            completeness_requirement="complete",
+        )
+    )
+
+    assert len(plan.steps) == 1
+    assert plan.steps[0].capability_name == MANAGEMENT_SITE_SEARCH
+    assert plan.steps[0].arguments == {
+        "requested_facts": ("sites",),
+        "result_intent": "enumerate",
+        "completeness_requirement": "complete",
     }
 
 
@@ -124,6 +152,7 @@ def test_datto_connector_translates_provider_neutral_resource_id_to_get():
 
     assert path == "/api/v2/device/device-uid-1"
     assert params is None
+
 
 def test_datto_provider_exposes_broad_governed_read_surface() -> None:
     from datetime import datetime, timezone
