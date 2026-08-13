@@ -270,3 +270,73 @@ def test_unrelated_approved_mapping_does_not_force_capability():
 
     assert len(selected) == 1
     assert selected[0].capability_name == "endpoint.alert.search"
+
+
+def test_approved_mapping_can_recover_from_overly_narrow_resource_subtype():
+    from datetime import datetime, timezone
+
+    from kernel.capabilities import (
+        CapabilityRegistryService,
+        InMemoryCapabilityRegistry,
+    )
+    from orchestrator.resource_capability_catalog import (
+        endpoint_alert_search,
+        endpoint_device_search,
+    )
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+    from orchestrator.semantic_mapping_registry import (
+        ApprovedSemanticMapping,
+        SemanticMappingRegistry,
+    )
+
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+
+    now = datetime.now(timezone.utc)
+
+    for capability in (
+        endpoint_alert_search(now),
+        endpoint_device_search(now),
+    ):
+        capabilities.register(capability)
+
+    mapping = ApprovedSemanticMapping(
+        mapping_id="example-display-version",
+        version=1,
+        provider_id="example_provider",
+        canonical_fact="operating system display version",
+        provider_schema="Device",
+        provider_field="displayVersion",
+        resource_authority="managed_endpoint",
+        approval_status="approved",
+        approved_by="technology-steward",
+        approval_basis="authoritative evidence",
+        openapi_source_reference="openapi:test",
+        semantic_source_reference="help:test",
+        capability_names=(
+            "endpoint.device.search",
+            "endpoint.device.read",
+        ),
+        active=True,
+    )
+
+    registry = SemanticMappingRegistry((mapping,))
+
+    # Deliberately simulate an overly narrow language interpretation.
+    inquiry = ResourceInquiry(
+        resource_type="endpoint_alert",
+        resource_selector={"hostname": "EXAMPLE-1"},
+        requested_facts=("operating system display version",),
+    )
+
+    plan = GovernedResourceInquiryPlanner(
+        registry=capabilities,
+        reasoner=MetadataResourceCapabilityReasoner(
+            semantic_mapping_registry=registry,
+        ),
+        semantic_mapping_registry=registry,
+    ).plan(inquiry)
+
+    assert len(plan.steps) == 1
+    assert plan.steps[0].capability_name == "endpoint.device.search"

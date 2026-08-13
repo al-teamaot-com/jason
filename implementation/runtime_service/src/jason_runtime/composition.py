@@ -496,6 +496,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             reasoner=MetadataResourceCapabilityReasoner(
                 semantic_mapping_registry=semantic_mapping_registry,
             ),
+            semantic_mapping_registry=semantic_mapping_registry,
         ),
     )
     # Prefer read-only resource interpretation before action interpretation. This

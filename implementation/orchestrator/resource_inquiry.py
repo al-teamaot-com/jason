@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence
 
 from kernel.capabilities import CapabilityDefinition, CapabilityRegistryService
+from .semantic_mapping_registry import SemanticMappingRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +114,29 @@ class GovernedResourceInquiryPlanner:
 
     registry: CapabilityRegistryService
     reasoner: ResourceCapabilityReasoner
+    semantic_mapping_registry: SemanticMappingRegistry | None = None
 
     def plan(self, inquiry: ResourceInquiry) -> ResourceInquiryPlan:
+        mapped_capability_names: set[str] = set()
+
+        if self.semantic_mapping_registry is not None:
+            for requested_fact in inquiry.requested_facts:
+                for mapping in self.semantic_mapping_registry.find_active(
+                    canonical_fact=requested_fact,
+                ):
+                    mapped_capability_names.update(mapping.capability_names)
+
         candidates = tuple(
             capability
             for capability in self.registry.list_all()
             if self._eligible(capability, inquiry)
+            or (
+                capability.capability_name in mapped_capability_names
+                and self._eligible_by_governed_mapping(
+                    capability,
+                    inquiry,
+                )
+            )
         )
         if not candidates:
             raise LookupError("no governed read capabilities are available for this resource inquiry")
@@ -148,6 +166,25 @@ class GovernedResourceInquiryPlanner:
             steps=tuple(validated),
             requested_facts=inquiry.requested_facts,
         )
+
+    @staticmethod
+    def _eligible_by_governed_mapping(
+        capability: CapabilityDefinition,
+        inquiry: ResourceInquiry,
+    ) -> bool:
+        """Permit only otherwise-governed read capabilities bound by approved mappings.
+
+        An approved semantic mapping may correct an overly narrow language-derived
+        resource subtype, but it does not relax execution mode, provider-neutrality,
+        or read-only controls.
+        """
+        if inquiry.execution_mode not in capability.permitted_execution_modes:
+            return False
+        if capability.metadata.get("provider_neutral", "false").lower() != "true":
+            return False
+        if capability.metadata.get("read_only", "false").lower() != "true":
+            return False
+        return True
 
     @staticmethod
     def _eligible(capability: CapabilityDefinition, inquiry: ResourceInquiry) -> bool:
