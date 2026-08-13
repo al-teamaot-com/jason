@@ -1017,7 +1017,7 @@ def test_approved_semantic_mapping_projects_real_provider_field_without_reasoner
         capability_name="endpoint.device.search",
         status=OrchestrationStatus.SUCCEEDED,
         stage=ExecutionStage.COMPLETED,
-        reason_codes=(),
+        reason_codes=("capability_completed",),
         resolution=None,
         provider_id="example_provider",
         output={
