@@ -19,8 +19,8 @@ def datto_rmm_openapi_source() -> ProviderDocumentationSourceDefinition:
         display_name="Datto RMM API documentation",
         authority="Kaseya Datto RMM authoritative API v2 Swagger documentation",
         retrieval_method=DocumentationRetrievalMethod.OPENAPI,
-        locator="https://vidal-api.centrastage.net/api/swagger-ui/index.html",
-        content_type="text/html+swagger-ui",
+        locator="https://vidal-api.centrastage.net/api/v3/api-docs/Datto-RMM",
+        content_type="application/json",
         lifecycle_status=DocumentationSourceLifecycle.AVAILABLE,
         approval_status=DocumentationSourceApproval.APPROVED,
         technology_steward="technology-steward",
@@ -44,7 +44,7 @@ def datto_rmm_openapi_source() -> ProviderDocumentationSourceDefinition:
             ),
             "vendor": "Kaseya",
             "api_version": "v2",
-            "documentation_kind": "swagger-ui",
+            "documentation_kind": "openapi-3.0",
             "vendor_api_help": (
                 "https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm"
             ),

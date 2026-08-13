@@ -29,13 +29,15 @@ def test_datto_openapi_source_uses_vendor_authoritative_documentation():
 
     assert (
         source.locator
-        == "https://vidal-api.centrastage.net/api/swagger-ui/index.html"
+        == "https://vidal-api.centrastage.net/api/v3/api-docs/Datto-RMM"
     )
     assert (
         source.metadata["vendor_api_help"]
         == "https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm"
     )
     assert source.metadata["api_version"] == "v2"
+    assert source.content_type == "application/json"
+    assert source.metadata["documentation_kind"] == "openapi-3.0"
     assert source.metadata["vendor"] == "Kaseya"
 
 
