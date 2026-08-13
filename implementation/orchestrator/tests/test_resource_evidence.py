@@ -926,3 +926,49 @@ def test_raw_processor_field_cannot_bypass_required_semantic_context():
                 "processor model": ("processor", "hardware_inventory"),
             },
         )
+
+
+def test_renderer_reports_unavailable_fact_without_generic_failure():
+    from orchestrator.resource_evidence import GovernedTeamsResourceResponseRenderer
+    from orchestrator.teams_conversation_flow import ConversationIntent
+
+    class MissingEvidenceInterpreter:
+        def interpret(self, **kwargs):
+            raise LookupError("requested facts were not located in governed provider evidence")
+
+    renderer = GovernedTeamsResourceResponseRenderer(interpreter=MissingEvidenceInterpreter())
+    response = renderer.render(
+        result=result(data={"resource_matches": [{"resource_id": "device-1", "hostname": "AOT-50282"}], "provider_data": {}}),
+        intent=ConversationIntent(
+            capability_name="endpoint.device.search",
+            arguments={
+                "hostname": "AOT-50282",
+                "requested_facts": ("operating system display version",),
+            },
+        ),
+    )
+    assert "operating system display version: unavailable" in response
+    assert "Source:" in response
+
+
+def test_renderer_unavailable_response_does_not_invent_display_version_value():
+    from orchestrator.resource_evidence import GovernedTeamsResourceResponseRenderer
+    from orchestrator.teams_conversation_flow import ConversationIntent
+
+    class MissingEvidenceInterpreter:
+        def interpret(self, **kwargs):
+            raise LookupError("provider evidence is outside required semantic context")
+
+    renderer = GovernedTeamsResourceResponseRenderer(interpreter=MissingEvidenceInterpreter())
+    response = renderer.render(
+        result=result(data={"resource_matches": [{"resource_id": "device-1", "hostname": "AOT-50282"}], "provider_data": {"displayVersion": "4.4.11965.11965"}}),
+        intent=ConversationIntent(
+            capability_name="endpoint.device.search",
+            arguments={
+                "hostname": "AOT-50282",
+                "requested_facts": ("operating system display version",),
+            },
+        ),
+    )
+    assert "unavailable from the current governed provider evidence" in response
+    assert "4.4.11965.11965" not in response

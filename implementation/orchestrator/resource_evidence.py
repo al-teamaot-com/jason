@@ -381,11 +381,21 @@ class GovernedTeamsResourceResponseRenderer:
                     str(item).strip() for item in raw_values if str(item).strip()
                 )
 
-        facts = self.interpreter.interpret(
-            result=result,
-            requested_facts=requested_facts,
-            evidence_contexts=evidence_contexts,
-        )
+        try:
+            facts = self.interpreter.interpret(
+                result=result,
+                requested_facts=requested_facts,
+                evidence_contexts=evidence_contexts,
+            )
+        except LookupError:
+            # A successful governed provider read can legitimately lack evidence for
+            # a requested semantic fact. That is not an unsafe action failure. Preserve
+            # fail-closed semantics while telling the human exactly what is unavailable.
+            rendered_facts = ", ".join(requested_facts)
+            return (
+                f"{subject} — {rendered_facts}: unavailable from the current governed "
+                f"provider evidence. Source: {source}."
+            )
 
         collection_facts = tuple(
             fact
