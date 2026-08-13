@@ -567,3 +567,125 @@ def test_fulfillment_infeasible_outcome_exposes_review_only_provider_discovery()
     assert len(candidates) == 1
     assert candidates[0]["provider_id"] == "example_provider"
     assert candidates[0]["vendor_change_sources"] == ("Example Provider API documentation",)
+
+
+
+def test_fulfillment_gap_can_expose_bounded_provider_documentation_review_plan():
+    from datetime import datetime, timezone
+
+    from kernel.execution_providers import (
+        ExecutionProvider,
+        ProviderApproval,
+        ProviderFeatures,
+        ProviderHealth,
+        ProviderLifecycle,
+        ProviderLimits,
+        ProviderStewardship,
+        ProviderType,
+    )
+    from orchestrator.provider_capability_discovery import GovernedProviderCapabilityDiscovery
+    from orchestrator.provider_documentation_review import GovernedProviderDocumentationReviewPlanner
+    from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAssessor
+    from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
+
+    class Reasoner:
+        def next_turn(self, *, intent, context, history):
+            return PlanningTurn(
+                status="propose_plan",
+                plan=FulfillmentPlanCandidate(
+                    steps=(
+                        FulfillmentPlanStepCandidate(
+                            capability_name="endpoint.device.search",
+                            purpose="attempt governed read",
+                        ),
+                    ),
+                    rationale_summary="candidate",
+                ),
+            )
+
+    class Reader:
+        def read(self, *, request, intent):
+            if request.view == "capability_registry":
+                return {
+                    "view_name": request.view,
+                    "items": (
+                        {
+                            "capability_name": "endpoint.device.search",
+                            "fact_hints": "hostname",
+                        },
+                    ),
+                    "capability_names": ("endpoint.device.search",),
+                }
+            return {"view_name": request.view, "items": ()}
+
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(view="capability_registry"),
+                PlanningContextRequest(view="evidence_catalog"),
+                PlanningContextRequest(view="derivation_registry"),
+            )
+
+    class Validator:
+        def validate(self, *, intent, plan, context):
+            class Result:
+                sufficient = False
+                issues = ("unsupported",)
+            return Result()
+
+    provider = ExecutionProvider(
+        provider_id="example_provider",
+        display_name="Example Provider",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=ProviderLifecycle.AVAILABLE,
+        health_status=ProviderHealth.HEALTHY,
+        approval_status=ProviderApproval.APPROVED,
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=frozenset({"endpoint.device.search"}),
+        supported_classifications=frozenset({"internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="test",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification="test provider",
+            review_interval_days=90,
+            last_reviewed_at=datetime.now(timezone.utc),
+            retirement_criteria=("retire when replaced",),
+            vendor_change_sources=("Example Provider API documentation",),
+        ),
+        created_at=datetime.now(timezone.utc),
+        metadata={
+            "connector_id": "example_connector",
+            "resource_authority": "managed_endpoint",
+        },
+    )
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+        plan_validator=Validator(),
+        feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
+        capability_gap_assessor=GovernedSemanticCapabilityGapAssessor(),
+        provider_capability_discovery=GovernedProviderCapabilityDiscovery(),
+        provider_documentation_review_planner=GovernedProviderDocumentationReviewPlanner(),
+        registered_providers=(provider,),
+    ).plan(
+        intent={
+            "resource_type": "endpoint",
+            "requested_facts": ("special governed fact",),
+        }
+    )
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.documentation_review_details is not None
+    assert outcome.documentation_review_details["review_only"] is True
+    assert outcome.documentation_review_details["governance_owner"] == "technology-steward"
+
+    targets = outcome.documentation_review_details["targets"]
+    assert len(targets) == 1
+    assert targets[0]["provider_id"] == "example_provider"
+    assert targets[0]["documentation_source"] == "Example Provider API documentation"
+    assert targets[0]["unsupported_facts"] == ("special governed fact",)

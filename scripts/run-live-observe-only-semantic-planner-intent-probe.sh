@@ -63,6 +63,7 @@ from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficien
 from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
 from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAssessor
 from orchestrator.provider_capability_discovery import GovernedProviderCapabilityDiscovery
+from orchestrator.provider_documentation_review import GovernedProviderDocumentationReviewPlanner
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
@@ -219,6 +220,7 @@ planner = BoundedSemanticIntentPlanningLoop(
     feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
     capability_gap_assessor=GovernedSemanticCapabilityGapAssessor(),
     provider_capability_discovery=GovernedProviderCapabilityDiscovery(),
+    provider_documentation_review_planner=GovernedProviderDocumentationReviewPlanner(),
     registered_providers=(datto_rmm_endpoint_provider(now),),
 )
 
@@ -261,6 +263,21 @@ if outcome.provider_discovery_details:
         print(f"PROVIDER_DISCOVERY[{index}]_DOCS={' | '.join(candidate.get('vendor_change_sources', ())) or '-'}")
         print(f"PROVIDER_DISCOVERY[{index}]_AUTHORITY={candidate.get('resource_authority', '-') or '-'}")
 PY
+
+
+if outcome.documentation_review_details:
+    review = outcome.documentation_review_details
+    targets = tuple(review.get("targets", ()))
+    print(f"DOCUMENTATION_REVIEW_ONLY={review.get('review_only', False)}")
+    print(f"DOCUMENTATION_REVIEW_OWNER={review.get('governance_owner', '-')}")
+    print(f"DOCUMENTATION_REVIEW_TARGET_COUNT={len(targets)}")
+    for index, target in enumerate(targets, start=1):
+        print(f"DOCUMENTATION_REVIEW[{index}]_PROVIDER={target.get('provider_id', '-')}")
+        print(f"DOCUMENTATION_REVIEW[{index}]_SOURCE={target.get('documentation_source', '-')}")
+        print(
+            f"DOCUMENTATION_REVIEW[{index}]_FACTS="
+            f"{','.join(target.get('unsupported_facts', ())) or '-'}"
+        )
 
 echo "========== SECTION 3: CHANGE STATE =========="
 git status --short
