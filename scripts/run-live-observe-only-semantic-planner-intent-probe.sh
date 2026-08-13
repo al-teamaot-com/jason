@@ -55,12 +55,14 @@ from orchestrator.resource_capability_catalog import (
     endpoint_software_search,
     management_alert_search,
     management_site_search,
+    datto_rmm_endpoint_provider,
 )
 from orchestrator.semantic_intent_planning_loop import BoundedSemanticIntentPlanningLoop, IntentPlanningBudget
 from orchestrator.semantic_planning_bootstrap import ProviderNeutralIntentContextBootstrapper
 from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficiencyValidator
 from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
 from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAssessor
+from orchestrator.provider_capability_discovery import GovernedProviderCapabilityDiscovery
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
@@ -216,6 +218,8 @@ planner = BoundedSemanticIntentPlanningLoop(
     plan_validator=GovernedSemanticPlanSufficiencyValidator(),
     feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
     capability_gap_assessor=GovernedSemanticCapabilityGapAssessor(),
+    provider_capability_discovery=GovernedProviderCapabilityDiscovery(),
+    registered_providers=(datto_rmm_endpoint_provider(now),),
 )
 
 intent = {
@@ -248,6 +252,14 @@ if outcome.gap_details:
     print(f"CAPABILITY_GAP_FACTS={','.join(outcome.gap_details.get('unsupported_facts', ())) or '-'}")
     print(f"CAPABILITY_GAP_OWNER={outcome.gap_details.get('governance_owner', '-')}")
     print(f"CAPABILITY_GAP_NEXT_ACTION={outcome.gap_details.get('recommended_next_action', '-')}")
+if outcome.provider_discovery_details:
+    print(f"PROVIDER_DISCOVERY_REVIEW_ONLY={outcome.provider_discovery_details.get('review_only', False)}")
+    candidates = outcome.provider_discovery_details.get("candidates", ())
+    print(f"PROVIDER_DISCOVERY_CANDIDATE_COUNT={len(candidates)}")
+    for index, candidate in enumerate(candidates, 1):
+        print(f"PROVIDER_DISCOVERY[{index}]_ID={candidate.get('provider_id', '-')}")
+        print(f"PROVIDER_DISCOVERY[{index}]_DOCS={' | '.join(candidate.get('vendor_change_sources', ())) or '-'}")
+        print(f"PROVIDER_DISCOVERY[{index}]_AUTHORITY={candidate.get('resource_authority', '-') or '-'}")
 PY
 
 echo "========== SECTION 3: CHANGE STATE =========="

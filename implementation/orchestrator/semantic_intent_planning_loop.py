@@ -115,6 +115,7 @@ class IntentPlanningOutcome:
     iterations_used: int
     context_requests_used: int
     gap_details: Mapping[str, Any] | None = None
+    provider_discovery_details: Mapping[str, Any] | None = None
 
 
 class SemanticIntentPlanningReasoner(Protocol):
@@ -167,6 +168,10 @@ class IntentCapabilityGapAssessor(Protocol):
     def assess(self, *, feasibility_result: Any) -> Any: ...
 
 
+class IntentProviderCapabilityDiscovery(Protocol):
+    def discover(self, *, gap: Any, providers: Sequence[Any]) -> Any: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedSemanticIntentPlanningLoop:
     reasoner: SemanticIntentPlanningReasoner
@@ -176,6 +181,8 @@ class BoundedSemanticIntentPlanningLoop:
     plan_validator: IntentPlanSufficiencyValidator | None = None
     feasibility_gate: IntentFulfillmentFeasibilityGate | None = None
     capability_gap_assessor: IntentCapabilityGapAssessor | None = None
+    provider_capability_discovery: IntentProviderCapabilityDiscovery | None = None
+    registered_providers: tuple[Any, ...] = ()
 
     def plan(self, *, intent: Mapping[str, Any]) -> IntentPlanningOutcome:
         _reject_forbidden_keys(intent)
@@ -292,6 +299,8 @@ class BoundedSemanticIntentPlanningLoop:
                                 getattr(feasibility, "feasible", False)
                             ):
                                 gap_details = None
+                                provider_discovery_details = None
+                                assessment = None
                                 if self.capability_gap_assessor is not None:
                                     assessment = self.capability_gap_assessor.assess(
                                         feasibility_result=feasibility,
@@ -301,6 +310,17 @@ class BoundedSemanticIntentPlanningLoop:
                                         if callable(as_context):
                                             gap_details = dict(as_context())
                                             _reject_forbidden_keys(gap_details)
+                                if (
+                                    assessment is not None
+                                    and self.provider_capability_discovery is not None
+                                ):
+                                    discovery = self.provider_capability_discovery.discover(
+                                        gap=assessment,
+                                        providers=tuple(self.registered_providers),
+                                    )
+                                    as_context = getattr(discovery, "as_context", None)
+                                    if callable(as_context):
+                                        provider_discovery_details = dict(as_context())
                                 trace.append(PlanningTraceEntry(iteration, "fulfillment_infeasible"))
                                 return IntentPlanningOutcome(
                                     status="knowledge_gap",
@@ -316,6 +336,7 @@ class BoundedSemanticIntentPlanningLoop:
                                     iterations_used=iteration,
                                     context_requests_used=context_requests,
                                     gap_details=gap_details,
+                                    provider_discovery_details=provider_discovery_details,
                                 )
                         context["plan_validation"] = {
                             "sufficient": False,
