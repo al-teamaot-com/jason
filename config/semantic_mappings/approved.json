@@ -9,17 +9,16 @@
       "provider_schema": "Device",
       "provider_field": "displayVersion",
       "resource_authority": "managed_endpoint",
-      "approval_status": "pending_review",
+      "approval_status": "approved",
       "approved_by": "project-owner",
-      "approval_basis": "Explicit Technology Steward approval in Project Jason session on 2026-08-13 after cross-source authoritative Kaseya evidence review.",
+      "approval_basis": "Explicit project-owner approval to proceed with the current Datto Device.displayVersion mapping for operational Teams validation.",
       "openapi_source_reference": "datto-rmm-openapi-v2:sha256:cd50215c0d1edce53de52173f8694a6d2dbdd18e2205c4a38f0fec82a8bc10ad#components/schemas/Device/properties/displayVersion",
       "semantic_source_reference": "datto-rmm-product-help:sha256:907db7ceb4035efd44377910bb437b452c269acabacbc068e4a8a56a795bfb9a",
-      "active": false,
+      "active": true,
       "capability_names": [
         "endpoint.device.search",
         "endpoint.device.read"
-      ],
-      "review_reason": "Datto authoritative API schema exposes Device.displayVersion and live provider data returns the field, but the observed value must be reconciled with Datto's documented semantic definition before activation."
+      ]
     }
   ]
 }
