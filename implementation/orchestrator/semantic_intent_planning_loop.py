@@ -153,6 +153,15 @@ class IntentPlanSufficiencyValidator(Protocol):
     ) -> Any: ...
 
 
+class IntentFulfillmentFeasibilityGate(Protocol):
+    def evaluate(
+        self,
+        *,
+        intent: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> Any: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedSemanticIntentPlanningLoop:
     reasoner: SemanticIntentPlanningReasoner
@@ -160,6 +169,7 @@ class BoundedSemanticIntentPlanningLoop:
     budget: IntentPlanningBudget = IntentPlanningBudget()
     context_bootstrapper: IntentPlanningContextBootstrapper | None = None
     plan_validator: IntentPlanSufficiencyValidator | None = None
+    feasibility_gate: IntentFulfillmentFeasibilityGate | None = None
 
     def plan(self, *, intent: Mapping[str, Any]) -> IntentPlanningOutcome:
         _reject_forbidden_keys(intent)
@@ -267,6 +277,29 @@ class BoundedSemanticIntentPlanningLoop:
                                 context_requests_used=context_requests,
                             )
                         rejected_plan_signatures.add(signature)
+                        if self.feasibility_gate is not None:
+                            feasibility = self.feasibility_gate.evaluate(
+                                intent=dict(intent),
+                                context=dict(context),
+                            )
+                            if bool(getattr(feasibility, "conclusive", False)) and not bool(
+                                getattr(feasibility, "feasible", False)
+                            ):
+                                trace.append(PlanningTraceEntry(iteration, "fulfillment_infeasible"))
+                                return IntentPlanningOutcome(
+                                    status="knowledge_gap",
+                                    plan=None,
+                                    gap_summary=str(
+                                        getattr(
+                                            feasibility,
+                                            "summary",
+                                            "no governed fulfillment path supports the original intent",
+                                        )
+                                    ),
+                                    trace=tuple(trace),
+                                    iterations_used=iteration,
+                                    context_requests_used=context_requests,
+                                )
                         context["plan_validation"] = {
                             "sufficient": False,
                             "issues": issues,

@@ -348,3 +348,59 @@ def test_already_satisfied_context_request_is_reconciled_once_before_gap():
     assert outcome.iterations_used == 2
     assert outcome.context_requests_used == 0
     assert outcome.trace[0].status == "context_reconciled"
+
+
+
+def test_infeasible_fulfillment_stops_rejected_plan_retry_loop():
+    from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
+    from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficiencyValidator
+
+    class Reasoner:
+        def next_turn(self, *, intent, context, history):
+            return PlanningTurn(
+                status="propose_plan",
+                plan=FulfillmentPlanCandidate(
+                    steps=(
+                        FulfillmentPlanStepCandidate(
+                            capability_name="endpoint.device.search",
+                            purpose="attempt governed endpoint fact retrieval",
+                            expected_evidence=("special fact",),
+                        ),
+                    ),
+                    rationale_summary="candidate plan",
+                ),
+            )
+
+    class Reader:
+        def read(self, *, request, intent):
+            if request.view == "capability_registry":
+                return {
+                    "items": ({"capability_name": "endpoint.device.search", "fact_hints": "hostname"},),
+                    "capability_names": ("endpoint.device.search",),
+                }
+            if request.view == "evidence_catalog":
+                return {"items": ({"fact_hints": "operating system"},)}
+            if request.view == "derivation_registry":
+                return {"items": ({"relationship_id": "endpoint.belongs_to.organization"},)}
+            return {"items": ()}
+
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(view="capability_registry"),
+                PlanningContextRequest(view="evidence_catalog"),
+                PlanningContextRequest(view="derivation_registry"),
+            )
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+        plan_validator=GovernedSemanticPlanSufficiencyValidator(),
+        feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
+    ).plan(intent={"requested_facts": ("special fact",), "resource_type": "endpoint"})
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.iterations_used == 1
+    assert [entry.status for entry in outcome.trace] == ["fulfillment_infeasible"]
+    assert "special fact" in str(outcome.gap_summary)
