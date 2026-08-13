@@ -49,6 +49,13 @@ from orchestrator.conversation_response import GovernedTeamsConversationResponse
 from orchestrator.event_store import SQLiteOrchestrationEventStore
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.ollama_action_reasoning import OllamaActionIntentReasoner
+from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
+from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
+from orchestrator.planning_context_views import GovernedPlanningContextCatalog
+from orchestrator.semantic_intent_planning_loop import (
+    BoundedSemanticIntentPlanningLoop,
+    IntentPlanningBudget,
+)
 from orchestrator.ollama_reasoning import (
     OllamaResourceEvidenceReasoner,
     OllamaResourceInquiryReasoner,
@@ -110,6 +117,7 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    semantic_planner_enabled: bool = False
     microsoft_boundary_db: Path | None = None
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -170,6 +178,9 @@ class RuntimeSettings:
             ),
             ollama_url=os.getenv("JASON_OLLAMA_URL", "http://jason-ollama:11434").strip(),
             ollama_model=os.getenv("JASON_OLLAMA_MODEL", "").strip(),
+            semantic_planner_enabled=os.getenv(
+                "JASON_SEMANTIC_PLANNER_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
             allowed_machine_identities=allowed,
             microsoft_boundary_db=Path(
                 os.getenv(
@@ -226,6 +237,30 @@ class RuntimeSettings:
             raise ValueError("runtime host is required")
         if not (0 < self.port < 65536):
             raise ValueError("runtime port is invalid")
+
+
+def build_disabled_semantic_intent_planner(
+    *,
+    settings: RuntimeSettings,
+    client: OllamaStructuredJsonClient,
+    context_catalog: GovernedPlanningContextCatalog,
+) -> BoundedSemanticIntentPlanningLoop | None:
+    """Compose the semantic planner only when explicitly enabled.
+
+    This helper intentionally performs no execution wiring. The returned planner can
+    reason only over governed context snapshots and can only propose provider-neutral
+    capability plans.
+    """
+    if not settings.semantic_planner_enabled:
+        return None
+
+    reasoner = OllamaSemanticIntentPlanningReasoner(client=client)
+    reader = GovernedPlanningContextReaderAdapter(catalog=context_catalog)
+    return BoundedSemanticIntentPlanningLoop(
+        reasoner=reasoner,
+        context_reader=reader,
+        budget=IntentPlanningBudget(max_iterations=6, max_context_requests=6),
+    )
 
 
 @dataclass(frozen=True, slots=True)
