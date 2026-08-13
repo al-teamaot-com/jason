@@ -800,12 +800,12 @@ def test_processor_model_accepts_descriptive_provider_value():
     assert facts[0].value == "Intel Core i7"
 
 
-def test_semantic_context_rejects_unrelated_descriptive_version():
+def test_evidence_context_labels_do_not_require_provider_path_vocabulary():
     interpreter = GovernedResourceEvidenceInterpreter(
         reasoner=FakeEvidenceReasoner([
             {
                 "requested_fact": "operating system display version",
-                "json_pointer": "/provider_data/health/version",
+                "json_pointer": "/provider_data/releaseValue",
             }
         ]),
         fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
@@ -813,21 +813,24 @@ def test_semantic_context_rejects_unrelated_descriptive_version():
     orchestration_result = result(
         data={
             "provider_data": {
-                "health": {
-                    "version": "Unhealthy - Local user changes detected",
-                }
+                "releaseValue": "24H2",
             }
         }
     )
-    with pytest.raises(LookupError, match="outside required semantic context"):
-        interpreter.interpret(
-            result=orchestration_result,
-            requested_facts=("operating system display version",),
-            evidence_contexts={
-                "operating system display version": ("operating_system", "windows_release")
-            },
-        )
 
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("operating system display version",),
+        evidence_contexts={
+            "operating system display version": (
+                "operating_system",
+                "windows_release",
+            )
+        },
+    )
+
+    assert facts[0].value == "24H2"
+    assert facts[0].json_pointer == "/provider_data/releaseValue"
 
 def test_semantic_context_accepts_operating_system_release_path():
     interpreter = GovernedResourceEvidenceInterpreter(
@@ -897,8 +900,8 @@ def test_semantic_adapter_processor_fact_resolves_deterministically_before_reaso
     assert facts[0].json_pointer == "/provider_data/semantic_evidence/processor/hardware_inventory/processor_model"
 
 
-def test_raw_processor_field_cannot_bypass_required_semantic_context():
-    class WrongPathReasoner:
+def test_raw_provider_fact_is_accepted_without_provider_field_semantic_mapping():
+    class RawEvidenceReasoner:
         def locate(self, *, requested_facts, data):
             return ({
                 "requested_fact": "processor model",
@@ -906,7 +909,7 @@ def test_raw_processor_field_cannot_bypass_required_semantic_context():
             },)
 
     interpreter = GovernedResourceEvidenceInterpreter(
-        reasoner=WrongPathReasoner(),
+        reasoner=RawEvidenceReasoner(),
         fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
     )
     orchestration_result = result(
@@ -917,16 +920,16 @@ def test_raw_processor_field_cannot_bypass_required_semantic_context():
         }
     )
 
-    import pytest
-    with pytest.raises(LookupError, match="outside required semantic context"):
-        interpreter.interpret(
-            result=orchestration_result,
-            requested_facts=("processor model",),
-            evidence_contexts={
-                "processor model": ("processor", "hardware_inventory"),
-            },
-        )
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("processor model",),
+        evidence_contexts={
+            "processor model": ("processor", "hardware_inventory"),
+        },
+    )
 
+    assert facts[0].value == "Intel(R) Core(TM) i7-9700F CPU @ 3.00GHz"
+    assert facts[0].json_pointer == "/provider_data/processor"
 
 def test_renderer_reports_unavailable_fact_without_generic_failure():
     from orchestrator.resource_evidence import GovernedTeamsResourceResponseRenderer
@@ -1130,3 +1133,42 @@ def test_governed_semantic_evidence_does_not_fail_on_human_lexical_context():
         facts[0].json_pointer
         == "/provider_data/semantic_evidence/operating_system_display_version"
     )
+
+
+def test_resource_reasoner_receives_sanitized_provider_evidence():
+    class InspectingReasoner:
+        def __init__(self):
+            self.seen = None
+
+        def locate(self, *, requested_facts, data):
+            self.seen = data
+            return ({
+                "requested_fact": "processor model",
+                "json_pointer": "/provider_data/processor",
+            },)
+
+    reasoner = InspectingReasoner()
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=reasoner,
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "processor": "Intel Core i7",
+                "siteVariable": {
+                    "name": "IntegrationPassword",
+                    "value": "short-real-secret",
+                },
+            }
+        }
+    )
+
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("processor model",),
+    )
+
+    assert facts[0].value == "Intel Core i7"
+    assert reasoner.seen["provider_data"]["siteVariable"]["value"] == "[REDACTED]"

@@ -6,6 +6,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from .contracts import OrchestrationResult, OrchestrationStatus
 from .canonical_fact_vocabulary import CanonicalFactVocabulary
+from .evidence_sanitization import sanitize_evidence_tree
 from .teams_conversation_flow import ConversationIntent
 
 
@@ -77,17 +78,17 @@ class GovernedResourceEvidenceInterpreter:
                 requested_facts=requested_facts,
             )
 
+        # Evidence exposed to language reasoning or response assembly must be
+        # deterministically sanitized first. The provider remains the source of
+        # truth; sanitization only removes credential-bearing values.
+        data = sanitize_evidence_tree(data)
+
         direct_facts = _deterministic_direct_facts(
             data=data,
             requested_facts=requested_facts,
         )
         verified_by_fact: dict[str, VerifiedResourceFact] = {}
         for fact in direct_facts:
-            if not _evidence_matches_contexts(
-                pointer=fact.json_pointer,
-                contexts=(evidence_contexts or {}).get(fact.requested_fact, ()),
-            ):
-                continue
             if self.fact_vocabulary is not None:
                 definition = self.fact_vocabulary.resolve(fact.requested_fact)
                 if definition is not None and not _value_matches_expected_shape(
@@ -125,14 +126,12 @@ class GovernedResourceEvidenceInterpreter:
                     raise ValueError("resource evidence must use an absolute JSON Pointer")
 
                 actual = _resolve_json_pointer(data, pointer)
-                required_contexts = (evidence_contexts or {}).get(requested_fact, ())
-                if not _evidence_matches_contexts(
-                    pointer=pointer,
-                    contexts=required_contexts,
-                ):
-                    raise LookupError(
-                        f"provider evidence is outside required semantic context for {requested_fact}"
-                    )
+
+                # Semantic context remains useful knowledge for planning and
+                # explanation, but provider field names are not required to
+                # repeat Jason's ontology terminology. The bounded reasoner
+                # selects only an allowed structural path; Jason then
+                # deterministically dereferences the sanitized provider value.
                 if self.fact_vocabulary is not None:
                     definition = self.fact_vocabulary.resolve(requested_fact)
                     if definition is not None and not _value_matches_expected_shape(

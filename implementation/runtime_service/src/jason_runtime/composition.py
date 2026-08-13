@@ -78,9 +78,6 @@ from orchestrator.resource_evidence import (
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
-from orchestrator.semantic_mapping_evidence import (
-    GovernedSemanticMappingEvidenceProjector,
-)
 from orchestrator.semantic_mapping_registry import (
     JsonSemanticMappingRegistryLoader,
 )
@@ -587,9 +584,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
             ),
             fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
-            semantic_mapping_projector=GovernedSemanticMappingEvidenceProjector(
-                registry=semantic_mapping_registry,
-            ),
         )
     )
     response_renderer = GovernedTeamsConversationResponseRenderer(
