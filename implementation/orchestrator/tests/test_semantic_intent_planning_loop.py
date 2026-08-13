@@ -170,3 +170,68 @@ def test_repeated_identical_context_request_fails_closed_without_burning_budget(
     assert outcome.iterations_used == 2
     assert reader.calls == 1
     assert "already-satisfied" in str(outcome.gap_summary)
+
+
+def test_bootstrap_context_is_supplied_before_first_reasoning_turn():
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(
+                    view="semantic_knowledge",
+                    query={"query": "processor model"},
+                    purpose="establish semantic meaning",
+                ),
+                PlanningContextRequest(
+                    view="capability_registry",
+                    query={"query": "endpoint"},
+                    purpose="establish relevant capabilities",
+                ),
+            )
+
+    class Reader:
+        def read(self, *, request, intent):
+            if request.view == "capability_registry":
+                return {
+                    "view_name": request.view,
+                    "items": ({"capability_name": "endpoint.device.search"},),
+                    "capability_names": ("endpoint.device.search",),
+                }
+            return {
+                "view_name": request.view,
+                "items": ({"concept_id": "processor.model"},),
+            }
+
+    class Reasoner:
+        def next_turn(self, *, intent, context, history):
+            assert "semantic_knowledge" in context
+            assert "capability_registry" in context
+            return PlanningTurn(
+                status="propose_plan",
+                plan=FulfillmentPlanCandidate(
+                    steps=(
+                        FulfillmentPlanStepCandidate(
+                            capability_name="endpoint.device.search",
+                            purpose="retrieve governed endpoint evidence",
+                            required_facts=("processor model",),
+                            expected_evidence=("processor model",),
+                        ),
+                    ),
+                    rationale_summary="Governed semantic and capability context establish a valid read path.",
+                ),
+            )
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+    ).plan(
+        intent={
+            "resource_type": "endpoint",
+            "requested_facts": ("processor model",),
+            "permission_mode": "observe",
+        }
+    )
+
+    assert outcome.status == "planned"
+    assert outcome.iterations_used == 1
+    assert outcome.context_requests_used == 0

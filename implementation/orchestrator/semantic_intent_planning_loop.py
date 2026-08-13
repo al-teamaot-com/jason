@@ -135,11 +135,20 @@ class GovernedPlanningContextReader(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class IntentPlanningContextBootstrapper(Protocol):
+    def requests_for(
+        self,
+        *,
+        intent: Mapping[str, Any],
+    ) -> Sequence[PlanningContextRequest]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedSemanticIntentPlanningLoop:
     reasoner: SemanticIntentPlanningReasoner
     context_reader: GovernedPlanningContextReader
     budget: IntentPlanningBudget = IntentPlanningBudget()
+    context_bootstrapper: IntentPlanningContextBootstrapper | None = None
 
     def plan(self, *, intent: Mapping[str, Any]) -> IntentPlanningOutcome:
         _reject_forbidden_keys(intent)
@@ -147,6 +156,20 @@ class BoundedSemanticIntentPlanningLoop:
         trace: list[PlanningTraceEntry] = []
         context_requests = 0
         satisfied_requests: set[tuple[str, str]] = set()
+
+        if self.context_bootstrapper is not None:
+            bootstrap_requests = tuple(self.context_bootstrapper.requests_for(intent=dict(intent)))
+            if len(bootstrap_requests) > 5:
+                raise ValueError("planning bootstrap context request limit exceeded")
+            for request in bootstrap_requests:
+                snapshot = self.context_reader.read(request=request, intent=dict(intent))
+                _reject_forbidden_keys(snapshot)
+                request_signature = (
+                    request.view,
+                    repr(sorted((str(key), repr(value)) for key, value in request.query.items())),
+                )
+                satisfied_requests.add(request_signature)
+                context[request.view] = dict(snapshot)
 
         for iteration in range(1, self.budget.max_iterations + 1):
             turn = self.reasoner.next_turn(
