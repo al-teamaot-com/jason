@@ -92,3 +92,50 @@ def test_reasoner_rejects_unknown_context_view_even_if_model_returns_it():
     reasoner = OllamaSemanticIntentPlanningReasoner(FakeClient(response))
     with pytest.raises(PermissionError):
         reasoner.next_turn(intent={"goal": "retrieve_fact"}, context={}, history=())
+
+
+def test_reasoner_schema_exposes_only_context_views_not_already_supplied():
+    response = _base_response("request_context")
+    response.update(
+        {
+            "context_view": "evidence_catalog",
+            "context_query": "operating system display version",
+            "context_purpose": "inspect governed evidence availability",
+        }
+    )
+    client = FakeClient(response)
+    reasoner = OllamaSemanticIntentPlanningReasoner(client)
+    turn = reasoner.next_turn(
+        intent={"goal": "retrieve_fact"},
+        context={
+            "semantic_knowledge": {"items": []},
+            "capability_registry": {"items": []},
+        },
+        history=(),
+    )
+    assert turn.status == "request_context"
+    assert client.calls is not None
+    schema = client.calls[0]["schema"]
+    assert schema["properties"]["context_view"]["enum"] == [
+        "system_registry",
+        "evidence_catalog",
+        "derivation_registry",
+    ]
+
+
+def test_reasoner_rejects_model_request_for_context_already_supplied():
+    response = _base_response("request_context")
+    response.update(
+        {
+            "context_view": "semantic_knowledge",
+            "context_query": "operating system display version",
+            "context_purpose": "repeat supplied semantic context",
+        }
+    )
+    reasoner = OllamaSemanticIntentPlanningReasoner(FakeClient(response))
+    with pytest.raises(PermissionError, match="not requestable"):
+        reasoner.next_turn(
+            intent={"goal": "retrieve_fact"},
+            context={"semantic_knowledge": {"items": []}},
+            history=(),
+        )

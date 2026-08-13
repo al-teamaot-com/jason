@@ -27,23 +27,34 @@ class OllamaSemanticIntentPlanningReasoner:
         context: Mapping[str, Any],
         history: Sequence[PlanningTraceEntry],
     ) -> PlanningTurn:
+        governed_context_views = (
+            "semantic_knowledge",
+            "capability_registry",
+            "system_registry",
+            "evidence_catalog",
+            "derivation_registry",
+        )
+        available_context_views = tuple(
+            view for view in governed_context_views if view in context
+        )
+        requestable_context_views = tuple(
+            view for view in governed_context_views if view not in context
+        )
+        allowed_statuses = ["propose_plan", "declare_gap"]
+        if requestable_context_views:
+            allowed_statuses.insert(0, "request_context")
+
         schema = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "status": {
                     "type": "string",
-                    "enum": ["request_context", "propose_plan", "declare_gap"],
+                    "enum": allowed_statuses,
                 },
                 "context_view": {
                     "type": "string",
-                    "enum": [
-                        "semantic_knowledge",
-                        "capability_registry",
-                        "system_registry",
-                        "evidence_catalog",
-                        "derivation_registry",
-                    ],
+                    "enum": list(requestable_context_views) if requestable_context_views else [""],
                 },
                 "context_query": {"type": "string"},
                 "context_purpose": {"type": "string"},
@@ -107,8 +118,11 @@ class OllamaSemanticIntentPlanningReasoner:
                 "approved derivations represented in context. If plan_validation context is present, the prior "
                 "plan was rejected as insufficient for the original intent: consume those issues, revise the "
                 "plan, request different governed context, or declare a knowledge gap. Never repeat a rejected "
-                "plan unchanged. If context_request_feedback is present, the requested context is already supplied; "
-                "consume the existing snapshot and do not request that same view/query again. If no governed "
+                "plan unchanged. The user payload explicitly lists available_context_views and "
+                "requestable_context_views. A request_context response is permitted only for a view listed in "
+                "requestable_context_views; never request a view already listed in available_context_views. "
+                "If context_request_feedback is present, consume the existing snapshot and do not request that "
+                "same view/query again. If no governed "
                 "fulfillment path is established, declare a knowledge gap. Keep "
                 "reasoning concise and structured."
             ),
@@ -116,6 +130,8 @@ class OllamaSemanticIntentPlanningReasoner:
                 {
                     "intent": dict(intent),
                     "governed_context": dict(context),
+                    "available_context_views": list(available_context_views),
+                    "requestable_context_views": list(requestable_context_views),
                     "history": [
                         {
                             "iteration": item.iteration,
@@ -134,6 +150,10 @@ class OllamaSemanticIntentPlanningReasoner:
         status = str(result.get("status", "")).strip()
         if status == "request_context":
             view = str(result.get("context_view", "")).strip()
+            if view not in requestable_context_views:
+                raise PermissionError(
+                    f"semantic planner requested context view that is not requestable this turn: {view}"
+                )
             query = str(result.get("context_query", "")).strip()
             purpose = str(result.get("context_purpose", "")).strip()
             return PlanningTurn(
