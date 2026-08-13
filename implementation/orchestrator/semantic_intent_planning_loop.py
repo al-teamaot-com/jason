@@ -146,6 +146,7 @@ class BoundedSemanticIntentPlanningLoop:
         context: dict[str, Any] = {}
         trace: list[PlanningTraceEntry] = []
         context_requests = 0
+        satisfied_requests: set[tuple[str, str]] = set()
 
         for iteration in range(1, self.budget.max_iterations + 1):
             turn = self.reasoner.next_turn(
@@ -166,8 +167,25 @@ class BoundedSemanticIntentPlanningLoop:
                         context_requests_used=context_requests,
                     )
                 request = turn.context_request
+                request_signature = (
+                    request.view,
+                    repr(sorted((str(key), repr(value)) for key, value in request.query.items())),
+                )
+                if request_signature in satisfied_requests:
+                    return IntentPlanningOutcome(
+                        status="knowledge_gap",
+                        plan=None,
+                        gap_summary=(
+                            "planning reasoner repeated an already-satisfied governed context request "
+                            "without progressing the fulfillment plan"
+                        ),
+                        trace=tuple(trace),
+                        iterations_used=iteration,
+                        context_requests_used=context_requests,
+                    )
                 snapshot = self.context_reader.read(request=request, intent=dict(intent))
                 _reject_forbidden_keys(snapshot)
+                satisfied_requests.add(request_signature)
                 context_requests += 1
                 context[request.view] = dict(snapshot)
                 trace.append(PlanningTraceEntry(iteration, turn.status, request.view))

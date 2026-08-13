@@ -136,3 +136,37 @@ def test_loop_can_declare_structured_knowledge_gap_without_inventing_plan():
     assert outcome.status == "knowledge_gap"
     assert outcome.plan is None
     assert "no governed fulfillment path" in str(outcome.gap_summary)
+
+
+def test_repeated_identical_context_request_fails_closed_without_burning_budget():
+    class RepeatingReasoner:
+        def next_turn(self, *, intent, context, history):
+            return PlanningTurn(
+                status="request_context",
+                context_request=PlanningContextRequest(
+                    view="system_registry",
+                    query={"query": "runtime availability"},
+                    purpose="inspect governed system state",
+                ),
+            )
+
+    class Reader:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self, *, request, intent):
+            self.calls += 1
+            return {"view_name": request.view, "items": ({"state": "available"},)}
+
+    reader = Reader()
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=RepeatingReasoner(),
+        context_reader=reader,
+        budget=IntentPlanningBudget(max_iterations=8, max_context_requests=7),
+    ).plan(intent={"resource_type": "endpoint", "permission_mode": "observe"})
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.context_requests_used == 1
+    assert outcome.iterations_used == 2
+    assert reader.calls == 1
+    assert "already-satisfied" in str(outcome.gap_summary)

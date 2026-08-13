@@ -153,15 +153,15 @@ for term in registry.active_terms():
         {
             "term": term,
             "concept_id": concept.concept_id,
-            "canonical_name": concept.canonical_name,
+            "canonical_name": concept.canonical_label,
         }
     )
 
 relationship_records = tuple(
     {
         "relationship_id": rel.relationship_id,
-        "source_concept_id": rel.source_concept_id,
-        "target_concept_id": rel.target_concept_id,
+        "subject_type": rel.subject_type,
+        "target_type": rel.target_type,
     }
     for rel in registry.active_relationships()
 )
@@ -191,7 +191,7 @@ catalog = GovernedPlanningContextCatalog(
         "derivations": StaticPlanningContextProvider(
             view_name="derivations",
             records=relationship_records,
-            searchable_fields=("relationship_id", "source_concept_id", "target_concept_id"),
+            searchable_fields=("relationship_id", "subject_type", "target_type"),
         ),
     }
 )
@@ -237,9 +237,11 @@ if outcome.gap_summary:
     print(f"KNOWLEDGE_GAP={outcome.gap_summary}")
 PY
 
-echo "========== SECTION 3: CHANGE STATE =========="ngit status --short
+echo "========== SECTION 3: CHANGE STATE =========="
+git status --short
 
-echo "========== RESULT =========="necho "Live local-Ollama semantic intent planning probe completed in observe-only mode."
+echo "========== RESULT =========="
+echo "Live local-Ollama semantic intent planning probe completed in observe-only mode."
 echo "The probe used governed semantic/capability/evidence context and did not execute any proposed capability."
 echo "NO PROVIDER READ OR MUTATION WAS PERFORMED BY THE PLANNER."
 echo "NO RUNTIME ACTIVATION PERFORMED."
