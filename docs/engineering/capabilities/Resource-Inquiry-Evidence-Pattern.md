@@ -52,3 +52,83 @@ Final Teams proof:
 Do not create a bespoke `Who is logged into X?` script. If a representable resource question fails, identify and fix the reusable layer that is actually defective: interpretation, capability metadata, evidence indexing, bounded pointer selection, deterministic dereference, or rendering.
 
 Historical proof: `docs/sessions/Teams-Datto-Resource-Semantic-Proof-2026-08-12.md`.
+
+<!-- BEGIN 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
+## 2026-08-13 semantic capability-gap and provider-documentation discovery
+
+The resource inquiry pattern now extends beyond selecting evidence already exposed by registered capabilities.
+
+When the human asks for a representable fact but the current governed capability/evidence/derivation surface cannot establish it, Jason uses this generalized fail-closed progression:
+
+1. Interpret the requested semantic fact.
+2. Bootstrap the bounded planner with provider-neutral governed context.
+3. Propose a provider-neutral fulfillment plan.
+4. Validate plan sufficiency against the original requested facts.
+5. Request additional governed context only when necessary and only from requestable views.
+6. If capability/evidence/derivation context conclusively proves the fact cannot currently be fulfilled, return a structured capability-registry gap.
+7. Review only registered provider candidates under Technology Steward ownership.
+8. Resolve provider documentation through the governed documentation-source registry.
+9. Read authoritative documentation using a bounded source adapter and transport.
+10. Interpret operations, schemas, and fields as candidate evidence only.
+11. Perform semantic-evidence and corroborating-evidence review.
+12. If evidence remains ambiguous, preserve the unresolved gap.
+13. If evidence is sufficient, permit creation of a governed semantic-mapping proposal only; approval and registry activation remain separate governed actions.
+
+### Evidence-before-assertion rule
+
+**Documentation similarity is not semantic proof.**
+
+A field name such as `displayVersion`, `version`, `operatingSystem`, or any other plausible-looking provider property must not become a canonical Jason fact merely because its name resembles the requested concept.
+
+Evidence review may consider:
+
+- containing schema;
+- provider-authored field description;
+- field type;
+- examples/defaults/enums;
+- sibling fields;
+- authoritative endpoint documentation;
+- read-only operations returning the containing schema;
+- independent authoritative provider documentation;
+- immutable source/provenance references.
+
+A documentation reader or reasoning model cannot approve a semantic mapping.
+
+### Datto RMM proof case
+
+The acceptance question was the provider-neutral fact:
+
+`operating system display version`
+
+The initial registered capability surface did not prove support for that fact.
+
+The semantic planning path correctly returned a `capability_registry_gap` and identified `datto_rmm` as the registered managed-endpoint provider whose authoritative documentation should be reviewed.
+
+The governed Datto OpenAPI source returned a valid OpenAPI 3.1.0 document with:
+
+- 53 paths;
+- 113 schemas; and
+- SHA-256-addressed provenance.
+
+The provider-neutral interpreter surfaced `Device.displayVersion` as candidate evidence and also surfaced unrelated textual matches such as BIOS, driver, display-hardware, and system-status fields. This demonstrated why lexical matching cannot establish semantics.
+
+Further evidence established:
+
+- schema: `Device`;
+- field: `displayVersion`;
+- type: `string`;
+- sibling field: `operatingSystem`;
+- schema description: `Device data`;
+- read-only responses returning `Device`:
+  - `GET /v2/device/id/{deviceId}`
+  - `GET /v2/device/macAddress/{macAddress}`
+  - `GET /v2/device/{deviceUid}`
+
+The OpenAPI field itself has no description/example/default/enum, so OpenAPI-only semantic review correctly remained `ambiguous` and did not allow proposal creation.
+
+That is the required behavior: missing semantic evidence produces an unresolved governed gap rather than an invented mapping.
+
+Historical proof:
+
+`docs/sessions/Governed-Semantic-Capability-Discovery-Proof-2026-08-13.md`
+<!-- END 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->

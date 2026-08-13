@@ -27,6 +27,7 @@ Working code alone is not completion.
 | Provider / connector | `docs/engineering/jis/JIS-Provider-Development-Guide.md` | JIS provider template, completion checklist, provider engineering records, existing provider implementations/tests | Named capabilities/operations; governed authentication and secret references; provider-neutral shared infrastructure; authority/policy not embedded in connector; structured errors/results; audit/correlation; deterministic tests; System Registry registration/verification when production-bound |
 | Capability / resource | `docs/architecture/J-101-Capability-Registry.md` and `docs/engineering/capabilities/Capability-Registry.md` | Existing CAP records and capability registry/runtime composition/tests | Stable capability name and contract; execution/permission mode; scope; provider-resolution rules; evidence semantics; deterministic tests; registry/provider metadata; no workflow-specific bypass |
 | Natural-language resource inquiry / evidence selection | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` and `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` | Production endpoint/site inquiries, deterministic metadata interpreter, bounded evidence index, Ollama fallback/evidence reasoners, runtime composition, focused tests | Separate selectors from facts; separate `inquiry_hints` from returnable `fact_hints`; declare canonical `collection_fact` for collection capabilities; normalize exhaustive/count language to canonical collection evidence; propagate result intent/completeness through planning; route only through Central Orchestrator; deterministic dereference/source attribution; no bespoke question-specific script |
+| Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
 | Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs | OpenClaw/Teams ingress records and implementation/tests | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable |
@@ -131,3 +132,59 @@ Future construction:
 - native Teams processing feedback;
 - separately governed provider write surfaces.
 <!-- END PROVIDER ADAPTATION FOUNDATION -->
+
+<!-- BEGIN SEMANTIC CAPABILITY DISCOVERY FOUNDATION -->
+## Semantic Capability Discovery and Documentation Evidence Foundation
+
+**Status:** Governed observe-only foundation validated 2026-08-13
+
+When a natural-language request identifies a requested fact that cannot be satisfied by the currently registered capability/evidence/derivation surface, Jason must not create a bespoke workflow or invent a provider mapping.
+
+Use this bounded progression:
+
+1. Semantic planning proposes only provider-neutral capabilities.
+2. Plan sufficiency validates the proposal against the original requested facts.
+3. Fulfillment feasibility fails closed when no governed fulfillment path exists.
+4. A structured capability-registry gap is created under Technology Steward ownership.
+5. Registered-provider discovery exposes only existing governed providers and their authoritative documentation sources.
+6. Documentation-review planning creates bounded review targets.
+7. A governed documentation source registry resolves symbolic documentation names to approved source definitions.
+8. Provider-neutral source adapters retrieve documentation only through approved bounded transports.
+9. Documentation interpretation may surface candidate operations, schemas, and fields.
+10. Semantic-evidence review and corroborating-evidence review determine whether the documentation is strong enough to permit a mapping proposal.
+11. Documentation evidence never approves or activates a semantic mapping.
+12. Registration or activation requires normal governance, evidence, versioning, and approval.
+
+Non-negotiable rules:
+
+- Documentation similarity is not semantic proof.
+- A model may not invent provider mappings, derivations, capabilities, or evidence authority.
+- Documentation discovery does not grant provider execution authority.
+- No credentials are required for public documentation review.
+- Provider/source/fact scope is carried from the governed review target and enforced by the reader.
+- Documentation reads are bounded, provenance-addressed, and fail closed.
+- An ambiguous result remains unresolved rather than being guessed.
+- Provider-specific discoveries must improve the reusable source/semantic architecture rather than create question-specific code.
+
+Current validated implementation includes:
+
+- `implementation/orchestrator/semantic_intent_planning_loop.py`
+- `implementation/orchestrator/semantic_planning_bootstrap.py`
+- `implementation/orchestrator/semantic_plan_sufficiency.py`
+- `implementation/orchestrator/semantic_fulfillment_feasibility.py`
+- `implementation/orchestrator/semantic_capability_gap.py`
+- `implementation/orchestrator/provider_capability_discovery.py`
+- `implementation/orchestrator/provider_documentation_review.py`
+- `implementation/orchestrator/provider_documentation_reader.py`
+- `implementation/orchestrator/provider_documentation_source_registry.py`
+- `implementation/orchestrator/provider_documentation_source_catalog.py`
+- `implementation/orchestrator/openapi_documentation_source_adapter.py`
+- `implementation/orchestrator/https_documentation_transport.py`
+- `implementation/orchestrator/openapi_documentation_interpreter.py`
+- `implementation/orchestrator/provider_semantic_evidence_review.py`
+- `implementation/orchestrator/provider_corroborating_evidence_review.py`
+
+Historical proof:
+
+`docs/sessions/Governed-Semantic-Capability-Discovery-Proof-2026-08-13.md`
+<!-- END SEMANTIC CAPABILITY DISCOVERY FOUNDATION -->

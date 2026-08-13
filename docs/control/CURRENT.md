@@ -1,6 +1,6 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-12
+**Updated:** 2026-08-13
 **Status:** Teams → OpenClaw → Jason → Datto RMM governed resource inquiry is operationally proven for varied human language, deterministic resource recognition, canonical collection outcomes, provider adaptation, complete managed-site enumeration, and source-attributed evidence. The latest live-proven source checkpoint is durable in GitHub at `5b2c6c6`.
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
@@ -153,3 +153,52 @@ Durable evidence: `docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12
 Construction rule: recognition aliases are not evidence contracts. Future resource capabilities must distinguish recognition vocabulary from returnable facts and declare a canonical collection fact when they expose a collection. Representable varied/vague questions must be repaired at the reusable interpretation/capability/evidence layer, never with question-specific scripts.
 
 Next priority remains native Microsoft Teams processing feedback through OpenClaw's supported runtime/typing lifecycle.
+
+<!-- BEGIN 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
+## Latest durable success — governed semantic capability discovery
+
+Jason now has a bounded observe-only semantic capability-discovery path for requested facts that are not yet supported by registered capability/evidence metadata.
+
+The validated progression is:
+
+`intent → semantic planning → sufficiency validation → governed context progression → fulfillment infeasibility → capability-registry gap → registered-provider discovery → documentation-review target → governed documentation-source resolution → bounded documentation read → candidate evidence → semantic/corroborating evidence review`
+
+The acceptance fact was:
+
+`operating system display version`
+
+Jason correctly determined that its current registered capability/evidence/derivation surface did not prove support for that fact. It produced a structured Technology Steward capability gap rather than inventing a mapping or requesting a bespoke script.
+
+Registered-provider discovery identified Datto RMM as the existing `managed_endpoint` authority and exposed its authoritative API documentation for review.
+
+A governed live read of the Datto OpenAPI source succeeded:
+
+- OpenAPI `3.1.0`
+- 53 paths
+- 113 schemas
+- SHA-256 provenance
+- no credentials
+- no operational provider invocation
+
+The generic interpreter surfaced `Device.displayVersion` as candidate evidence. Semantic review remained correctly `ambiguous` because the OpenAPI property has no field description. Corroborating OpenAPI evidence established that `displayVersion` is a `string`, belongs to the `Device` schema beside `operatingSystem`, and is returned by three documented read-only device operations, but this still does not constitute semantic proof.
+
+No semantic mapping, capability registration, runtime activation, or deployment was performed.
+
+Current source checkpoint:
+
+`060de83` — `Add live Datto corroborating evidence probe`
+
+Reusable guidance:
+
+`docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`
+
+Historical proof:
+
+`docs/sessions/Governed-Semantic-Capability-Discovery-Proof-2026-08-13.md`
+
+### Next safe action
+
+Register the independent Kaseya Datto RMM product/help documentation as a second governed authoritative documentation source and use it to corroborate the meaning of `Device.displayVersion`.
+
+If independent authoritative evidence is sufficient, create only a governed semantic-mapping proposal. Do not activate/register that mapping without Technology Steward/governance approval.
+<!-- END 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
