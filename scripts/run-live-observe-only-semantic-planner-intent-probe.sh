@@ -262,9 +262,6 @@ if outcome.provider_discovery_details:
         print(f"PROVIDER_DISCOVERY[{index}]_ID={candidate.get('provider_id', '-')}")
         print(f"PROVIDER_DISCOVERY[{index}]_DOCS={' | '.join(candidate.get('vendor_change_sources', ())) or '-'}")
         print(f"PROVIDER_DISCOVERY[{index}]_AUTHORITY={candidate.get('resource_authority', '-') or '-'}")
-PY
-
-
 if outcome.documentation_review_details:
     review = outcome.documentation_review_details
     targets = tuple(review.get("targets", ()))
@@ -278,6 +275,8 @@ if outcome.documentation_review_details:
             f"DOCUMENTATION_REVIEW[{index}]_FACTS="
             f"{','.join(target.get('unsupported_facts', ())) or '-'}"
         )
+
+PY
 
 echo "========== SECTION 3: CHANGE STATE =========="
 git status --short
