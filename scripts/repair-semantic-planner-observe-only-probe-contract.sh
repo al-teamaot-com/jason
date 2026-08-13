@@ -119,18 +119,18 @@ def test_semantic_planner_runs_iteratively_without_execution(monkeypatch):
     second_user_payload = json.loads(transport.calls[1]["json"]["messages"][1]["content"])
     assert first_user_payload["governed_context"] == {}
     assert "capability_registry" in second_user_payload["governed_context"]
-    assert second_user_payload["governed_context"]["capability_registry"]["capability_names"] == [
-        "endpoint.device.search"
-    ] or tuple(second_user_payload["governed_context"]["capability_registry"]["capability_names"]) == (
-        "endpoint.device.search",
-    )
+    assert tuple(
+        second_user_payload["governed_context"]["capability_registry"]["capability_names"]
+    ) == ("endpoint.device.search",)
 PY
 
 echo "UPDATED: implementation/runtime_service/tests/test_semantic_planner_observe_only_probe.py"
 
-echo "========== SECTION 3: STATIC VALIDATION =========="ngit diff --check
+echo "========== SECTION 3: STATIC VALIDATION =========="
+git diff --check
 
-echo "========== SECTION 4: FOCUSED TESTS =========="n"$PY" -m pytest -q \
+echo "========== SECTION 4: FOCUSED TESTS =========="
+"$PY" -m pytest -q \
   implementation/orchestrator/tests/test_semantic_intent_planning_loop.py \
   implementation/orchestrator/tests/test_planning_context_views.py \
   implementation/orchestrator/tests/test_planning_context_reader.py \
@@ -138,9 +138,11 @@ echo "========== SECTION 4: FOCUSED TESTS =========="n"$PY" -m pytest -q \
   implementation/runtime_service/tests/test_semantic_planner_composition.py \
   implementation/runtime_service/tests/test_semantic_planner_observe_only_probe.py
 
-echo "========== SECTION 5: CHANGE STATE =========="ngit status --short
+echo "========== SECTION 5: CHANGE STATE =========="
+git status --short
 
-echo "========== RESULT =========="necho "Observe-only runtime probe now uses the actual Ollama semantic planning schema and verifies a two-turn governed planning cycle."
+echo "========== RESULT =========="
+echo "Observe-only runtime probe now uses the actual Ollama semantic planning schema and verifies a two-turn governed planning cycle."
 echo "The probe does not execute the proposed capability."
 echo "NO RUNTIME ACTIVATION PERFORMED."
 echo "NO DEPLOYMENT PERFORMED."
