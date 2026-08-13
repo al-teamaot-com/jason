@@ -37,6 +37,7 @@ class GovernedSemanticMappingApprover:
         mapping_id: str,
         version: int,
         resource_authority: str,
+        capability_names: tuple[str, ...],
     ) -> ApprovedSemanticMapping:
         if decision.authority_role != self.required_authority_role:
             raise PermissionError(
@@ -66,5 +67,6 @@ class GovernedSemanticMappingApprover:
             approval_basis=decision.decision_basis,
             openapi_source_reference=proposal.openapi_source_reference,
             semantic_source_reference=proposal.semantic_source_reference,
+            capability_names=capability_names,
             active=True,
         )

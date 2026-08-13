@@ -65,6 +65,10 @@ from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAs
 from orchestrator.provider_capability_discovery import GovernedProviderCapabilityDiscovery
 from orchestrator.provider_documentation_review import GovernedProviderDocumentationReviewPlanner
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
+from pathlib import Path
+from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLoader
+from orchestrator.semantic_mapping_capability_overlay import GovernedSemanticMappingCapabilityOverlay
+from orchestrator.semantic_mapping_planning_context import SemanticMappingPlanningContextProvider
 
 
 class DockerExecOllamaTransport:
@@ -121,7 +125,7 @@ capability_defs = (
     management_alert_search(now),
     management_site_search(now),
 )
-capability_records = tuple(
+base_capability_records = tuple(
     {
         "capability_name": item.capability_name,
         "display_name": item.display_name,
@@ -132,6 +136,16 @@ capability_records = tuple(
         "planning_guidance": str(item.metadata.get("planning_guidance", "")),
     }
     for item in capability_defs
+)
+
+semantic_mapping_registry = JsonSemanticMappingRegistryLoader(
+    Path("config/semantic_mappings/approved.json")
+).load()
+
+capability_records = GovernedSemanticMappingCapabilityOverlay(
+    registry=semantic_mapping_registry,
+).apply(
+    capability_records=base_capability_records,
 )
 
 evidence_records = tuple(
@@ -177,8 +191,20 @@ catalog = GovernedPlanningContextCatalog(
     providers={
         "semantic_knowledge": StaticPlanningContextProvider(
             view_name="semantic_knowledge",
-            records=tuple(semantic_records),
-            searchable_fields=("term", "concept_id", "canonical_name"),
+            records=tuple(semantic_records)
+            + tuple(
+                semantic_mapping_registry.as_context()
+            ),
+            searchable_fields=(
+                "term",
+                "concept_id",
+                "canonical_name",
+                "canonical_fact",
+                "provider_id",
+                "provider_schema",
+                "provider_field",
+                "resource_authority",
+            ),
         ),
         "capabilities": StaticPlanningContextProvider(
             view_name="capabilities",
@@ -197,8 +223,36 @@ catalog = GovernedPlanningContextCatalog(
         ),
         "derivations": StaticPlanningContextProvider(
             view_name="derivations",
-            records=relationship_records,
-            searchable_fields=("relationship_id", "subject_type", "target_type"),
+            records=relationship_records
+            + tuple(
+                {
+                    "relationship_id": item["mapping_id"],
+                    "relationship_type": "approved_provider_fact_mapping",
+                    "canonical_fact": item["canonical_fact"],
+                    "provider_id": item["provider_id"],
+                    "provider_schema": item["provider_schema"],
+                    "provider_field": item["provider_field"],
+                    "resource_authority": item["resource_authority"],
+                    "capability_names": item["capability_names"],
+                    "approved": True,
+                    "active": item["active"],
+                    "evidence_references": (
+                        item["openapi_source_reference"],
+                        item["semantic_source_reference"],
+                    ),
+                }
+                for item in semantic_mapping_registry.as_context()
+            ),
+            searchable_fields=(
+                "relationship_id",
+                "relationship_type",
+                "subject_type",
+                "target_type",
+                "canonical_fact",
+                "provider_id",
+                "provider_schema",
+                "provider_field",
+            ),
         ),
     }
 )

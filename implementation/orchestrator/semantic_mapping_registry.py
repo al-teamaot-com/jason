@@ -29,6 +29,7 @@ class ApprovedSemanticMapping:
     approval_basis: str
     openapi_source_reference: str
     semantic_source_reference: str
+    capability_names: tuple[str, ...]
     active: bool
 
     def __post_init__(self) -> None:
@@ -56,6 +57,9 @@ class ApprovedSemanticMapping:
         if self.approval_status not in _ALLOWED_STATUSES:
             raise ValueError("semantic mapping approval status is invalid")
 
+        if not self.capability_names:
+            raise ValueError("semantic mapping requires at least one capability binding")
+
         if self.active and self.approval_status != "approved":
             raise PermissionError(
                 "only approved semantic mappings may be active"
@@ -75,6 +79,7 @@ class ApprovedSemanticMapping:
             "approval_basis": self.approval_basis,
             "openapi_source_reference": self.openapi_source_reference,
             "semantic_source_reference": self.semantic_source_reference,
+            "capability_names": self.capability_names,
             "active": self.active,
         }
 
@@ -226,6 +231,11 @@ class JsonSemanticMappingRegistryLoader:
                 ),
                 semantic_source_reference=str(
                     item["semantic_source_reference"]
+                ),
+                capability_names=tuple(
+                    str(value).strip()
+                    for value in item.get("capability_names", ())
+                    if str(value).strip()
                 ),
                 active=bool(item["active"]),
             )

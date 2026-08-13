@@ -77,6 +77,7 @@ def test_registry_resolves_active_mapping_by_fact_and_authority():
         approval_basis="test",
         openapi_source_reference="openapi:test",
         semantic_source_reference="help:test",
+        capability_names=("endpoint.device.read",),
         active=True,
     )
 
@@ -108,6 +109,7 @@ def test_loader_reads_machine_readable_registry(tmp_path):
                         "approval_basis": "test",
                         "openapi_source_reference": "openapi:test",
                         "semantic_source_reference": "help:test",
+                        "capability_names": ["endpoint.device.read"],
                         "active": True,
                     }
                 ],
