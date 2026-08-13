@@ -20,12 +20,21 @@ path.write_text(text.replace(old, new, 1))
 print(f"UPDATED: {path}")
 PY
 
-echo "========== SECTION 3: STATIC VALIDATION =========="ngit diff --check
+echo "========== SECTION 3: STATIC VALIDATION =========="
+git diff --check
 
-echo "========== SECTION 4: FOCUSED TESTS =========="n/home/al/projects/jason/.venv/bin/python -m pytest -q \
+echo "========== SECTION 4: FOCUSED TESTS =========="
+/home/al/projects/jason/.venv/bin/python -m pytest -q \
   implementation/orchestrator/tests/test_ollama_reasoning.py \
   implementation/orchestrator/tests/test_ollama_semantic_intent_planning.py
 
-echo "========== SECTION 5: CHANGE STATE =========="ngit status --short
+echo "========== SECTION 5: CHANGE STATE =========="
+git status --short
 
-echo "========== RESULT =========="necho "The first Ollama structured-generation attempt now uses the caller's exact token budget."necho "Only the bounded retry escalates to up to 2x, capped at 1024 tokens."necho "NO RUNTIME ACTIVATION PERFORMED."necho "NO DEPLOYMENT PERFORMED."necho "NO COMMIT OR PUSH OF WORKTREE CHANGES PERFORMED."necho "========== END BOUNDED OLLAMA RETRY BUDGET MUTATION REPAIR V2 =========="
+echo "========== RESULT =========="
+echo "The first Ollama structured-generation attempt now uses the caller's exact token budget."
+echo "Only the bounded retry escalates to up to 2x, capped at 1024 tokens."
+echo "NO RUNTIME ACTIVATION PERFORMED."
+echo "NO DEPLOYMENT PERFORMED."
+echo "NO COMMIT OR PUSH OF WORKTREE CHANGES PERFORMED."
+echo "========== END BOUNDED OLLAMA RETRY BUDGET MUTATION REPAIR V2 =========="
