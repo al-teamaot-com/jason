@@ -143,12 +143,23 @@ class IntentPlanningContextBootstrapper(Protocol):
     ) -> Sequence[PlanningContextRequest]: ...
 
 
+class IntentPlanSufficiencyValidator(Protocol):
+    def validate(
+        self,
+        *,
+        intent: Mapping[str, Any],
+        plan: FulfillmentPlanCandidate,
+        context: Mapping[str, Any],
+    ) -> Any: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedSemanticIntentPlanningLoop:
     reasoner: SemanticIntentPlanningReasoner
     context_reader: GovernedPlanningContextReader
     budget: IntentPlanningBudget = IntentPlanningBudget()
     context_bootstrapper: IntentPlanningContextBootstrapper | None = None
+    plan_validator: IntentPlanSufficiencyValidator | None = None
 
     def plan(self, *, intent: Mapping[str, Any]) -> IntentPlanningOutcome:
         _reject_forbidden_keys(intent)
@@ -156,6 +167,7 @@ class BoundedSemanticIntentPlanningLoop:
         trace: list[PlanningTraceEntry] = []
         context_requests = 0
         satisfied_requests: set[tuple[str, str]] = set()
+        rejected_plan_signatures: set[str] = set()
 
         if self.context_bootstrapper is not None:
             bootstrap_requests = tuple(self.context_bootstrapper.requests_for(intent=dict(intent)))
@@ -217,6 +229,38 @@ class BoundedSemanticIntentPlanningLoop:
             if turn.status == "propose_plan":
                 assert turn.plan is not None
                 _validate_plan_against_governed_capabilities(turn.plan, context)
+                if self.plan_validator is not None:
+                    validation = self.plan_validator.validate(
+                        intent=dict(intent),
+                        plan=turn.plan,
+                        context=dict(context),
+                    )
+                    if not bool(getattr(validation, "sufficient", False)):
+                        issues = tuple(str(item) for item in getattr(validation, "issues", ()))
+                        signature = repr((turn.plan.steps, turn.plan.unresolved_requirements, issues))
+                        if signature in rejected_plan_signatures:
+                            trace.append(PlanningTraceEntry(iteration, "plan_rejected"))
+                            return IntentPlanningOutcome(
+                                status="knowledge_gap",
+                                plan=None,
+                                gap_summary=(
+                                    "planning reasoner repeated a plan that did not satisfy the original intent"
+                                ),
+                                trace=tuple(trace),
+                                iterations_used=iteration,
+                                context_requests_used=context_requests,
+                            )
+                        rejected_plan_signatures.add(signature)
+                        context["plan_validation"] = {
+                            "sufficient": False,
+                            "issues": issues,
+                            "instruction": (
+                                "Revise the plan using governed context, request different governed context, "
+                                "or declare a knowledge gap. Do not repeat the rejected plan."
+                            ),
+                        }
+                        trace.append(PlanningTraceEntry(iteration, "plan_rejected"))
+                        continue
                 trace.append(PlanningTraceEntry(iteration, turn.status))
                 return IntentPlanningOutcome(
                     status="planned",

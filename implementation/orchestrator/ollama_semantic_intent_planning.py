@@ -104,8 +104,11 @@ class OllamaSemanticIntentPlanningReasoner:
                 "before system-state context unless system availability is specifically unresolved. A proposed "
                 "plan may reference only capability names present in governed capability registry context. "
                 "Prefer direct authoritative evidence; otherwise consider alternate governed capabilities or "
-                "approved derivations represented in context. If no governed fulfillment path is established, "
-                "declare a knowledge gap. Keep reasoning concise and structured."
+                "approved derivations represented in context. If plan_validation context is present, the prior "
+                "plan was rejected as insufficient for the original intent: consume those issues, revise the "
+                "plan, request different governed context, or declare a knowledge gap. Never repeat a rejected "
+                "plan unchanged. If no governed fulfillment path is established, declare a knowledge gap. Keep "
+                "reasoning concise and structured."
             ),
             user=json.dumps(
                 {

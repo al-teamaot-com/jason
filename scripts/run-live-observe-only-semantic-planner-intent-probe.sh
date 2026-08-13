@@ -58,6 +58,7 @@ from orchestrator.resource_capability_catalog import (
 )
 from orchestrator.semantic_intent_planning_loop import BoundedSemanticIntentPlanningLoop, IntentPlanningBudget
 from orchestrator.semantic_planning_bootstrap import ProviderNeutralIntentContextBootstrapper
+from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficiencyValidator
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
@@ -210,6 +211,7 @@ planner = BoundedSemanticIntentPlanningLoop(
     context_reader=GovernedPlanningContextReaderAdapter(catalog=catalog, default_limit=48),
     budget=IntentPlanningBudget(max_iterations=8, max_context_requests=7),
     context_bootstrapper=ProviderNeutralIntentContextBootstrapper(),
+    plan_validator=GovernedSemanticPlanSufficiencyValidator(),
 )
 
 intent = {

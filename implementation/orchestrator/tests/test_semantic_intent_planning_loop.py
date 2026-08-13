@@ -235,3 +235,66 @@ def test_bootstrap_context_is_supplied_before_first_reasoning_turn():
     assert outcome.status == "planned"
     assert outcome.iterations_used == 1
     assert outcome.context_requests_used == 0
+
+
+def test_insufficient_plan_is_returned_to_reasoner_for_revision():
+    from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficiencyValidator
+
+    class Reasoner:
+        def __init__(self):
+            self.calls = 0
+
+        def next_turn(self, *, intent, context, history):
+            self.calls += 1
+            if self.calls == 1:
+                return PlanningTurn(
+                    status="propose_plan",
+                    plan=FulfillmentPlanCandidate(
+                        steps=(
+                            FulfillmentPlanStepCandidate(
+                                capability_name="endpoint.device.search",
+                                purpose="read endpoint",
+                                expected_evidence=("special fact",),
+                            ),
+                        ),
+                        rationale_summary="candidate plan",
+                    ),
+                )
+            assert context["plan_validation"]["sufficient"] is False
+            return PlanningTurn(status="declare_gap", gap_summary="no governed capability supports special fact")
+
+    class Reader:
+        def read(self, *, request, intent):
+            return {
+                "view_name": request.view,
+                "items": (
+                    {
+                        "capability_name": "endpoint.device.search",
+                        "fact_hints": "hostname,operating system",
+                    },
+                ),
+                "capability_names": ("endpoint.device.search",),
+                "authoritative": True,
+                "truncated": False,
+            }
+
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(
+                    view="capability_registry",
+                    query={"query": "endpoint"},
+                    purpose="bootstrap governed capabilities",
+                ),
+            )
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+        plan_validator=GovernedSemanticPlanSufficiencyValidator(),
+    ).plan(intent={"requested_facts": ("special fact",), "resource_type": "endpoint"})
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.iterations_used == 2
+    assert [entry.status for entry in outcome.trace] == ["plan_rejected", "declare_gap"]
