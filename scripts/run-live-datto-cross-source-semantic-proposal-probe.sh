@@ -37,6 +37,7 @@ from orchestrator.provider_semantic_mapping_proposal import (
 )
 from orchestrator.provider_semantic_statement import (
     GovernedSemanticStatementExtractor,
+    SemanticStatementQuery,
 )
 
 registry = ProviderDocumentationSourceRegistry()
@@ -92,8 +93,13 @@ help_source = tuple(
     ).read(target=help_target)
 )[0]
 
-statement = GovernedSemanticStatementExtractor().extract_windows_display_version(
-    source=help_source
+statement = GovernedSemanticStatementExtractor().extract(
+    source=help_source,
+    query=SemanticStatementQuery(
+        canonical_fact="operating system display version",
+        vendor_term="Windows Display Version",
+        required_phrases=("friendly name", "Windows 10"),
+    ),
 )
 
 proposal = GovernedCrossSourceSemanticMappingProposer().propose(

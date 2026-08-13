@@ -1,9 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from .provider_documentation_reader import ProviderDocumentationSourceRecord
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticStatementQuery:
+    canonical_fact: str
+    vendor_term: str
+    required_phrases: tuple[str, ...] = ()
+    context_window_chars: int = 1200
+
+    def __post_init__(self) -> None:
+        if not self.canonical_fact.strip():
+            raise ValueError("canonical_fact is required")
+        if not self.vendor_term.strip():
+            raise ValueError("vendor_term is required")
+        if self.context_window_chars < 128 or self.context_window_chars > 10000:
+            raise ValueError("context_window_chars is outside governed bounds")
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,37 +46,40 @@ class AuthoritativeSemanticStatement:
 
 @dataclass(frozen=True, slots=True)
 class GovernedSemanticStatementExtractor:
-    def extract_windows_display_version(
+    def extract(
         self,
         *,
         source: ProviderDocumentationSourceRecord,
+        query: SemanticStatementQuery,
     ) -> AuthoritativeSemanticStatement:
         content = " ".join(source.content.split())
-        marker = "Windows Display Version"
 
-        index = content.find(marker)
+        index = content.casefold().find(query.vendor_term.casefold())
         if index < 0:
             raise LookupError(
-                "authoritative product documentation does not define Windows Display Version"
+                "authoritative product documentation does not contain "
+                "the governed vendor semantic term"
             )
 
-        window = content[index:index + 900]
+        window = content[index:index + query.context_window_chars]
 
-        required = (
-            "friendly name",
-            "Windows 10",
+        missing = tuple(
+            phrase
+            for phrase in query.required_phrases
+            if phrase.casefold() not in window.casefold()
         )
 
-        if not all(term.casefold() in window.casefold() for term in required):
+        if missing:
             raise ValueError(
-                "product documentation mentions Windows Display Version but "
-                "does not contain sufficient authoritative semantic definition"
+                "authoritative documentation contains the vendor term but "
+                "does not satisfy the governed semantic evidence query; "
+                f"missing required phrase(s): {', '.join(missing)}"
             )
 
         return AuthoritativeSemanticStatement(
             provider_id=source.provider_id,
-            canonical_fact="operating system display version",
-            vendor_term="Windows Display Version",
+            canonical_fact=query.canonical_fact,
+            vendor_term=query.vendor_term,
             statement=window,
             source_reference=source.source_reference,
             authoritative=True,

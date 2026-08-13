@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "mappings": [
+    {
+      "mapping_id": "datto-rmm-device-display-version",
+      "version": 1,
+      "provider_id": "datto_rmm",
+      "canonical_fact": "operating system display version",
+      "provider_schema": "Device",
+      "provider_field": "displayVersion",
+      "resource_authority": "managed_endpoint",
+      "approval_status": "approved",
+      "approved_by": "project-owner",
+      "approval_basis": "Explicit Technology Steward approval in Project Jason session on 2026-08-13 after cross-source authoritative Kaseya evidence review.",
+      "openapi_source_reference": "datto-rmm-openapi-v2:sha256:cd50215c0d1edce53de52173f8694a6d2dbdd18e2205c4a38f0fec82a8bc10ad#components/schemas/Device/properties/displayVersion",
+      "semantic_source_reference": "datto-rmm-product-help:sha256:907db7ceb4035efd44377910bb437b452c269acabacbc068e4a8a56a795bfb9a",
+      "active": true
+    }
+  ]
+}
