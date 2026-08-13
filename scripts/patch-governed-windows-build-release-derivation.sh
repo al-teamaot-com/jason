@@ -35,7 +35,8 @@ PY
 echo "========== SECTION 3: STATIC VALIDATION =========="
 git diff --check
 
-echo "========== SECTION 4: FOCUSED TESTS =========="n"$PY" -m pytest -q \
+echo "========== SECTION 4: FOCUSED TESTS =========="
+"$PY" -m pytest -q \
   implementation/orchestrator/tests/test_semantic_derivations.py \
   implementation/orchestrator/tests/test_semantic_knowledge_seed.py \
   implementation/orchestrator/tests/test_semantic_fact_resolver.py
