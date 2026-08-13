@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY implementation /app/implementation
+COPY config /app/config
 
 RUN python -m pip install --no-cache-dir \
       /app/implementation \
