@@ -167,8 +167,12 @@ def test_repeated_identical_context_request_fails_closed_without_burning_budget(
 
     assert outcome.status == "knowledge_gap"
     assert outcome.context_requests_used == 1
-    assert outcome.iterations_used == 2
+    assert outcome.iterations_used == 3
     assert reader.calls == 1
+    assert tuple(item.status for item in outcome.trace) == (
+        "request_context",
+        "context_reconciled",
+    )
     assert "already-satisfied" in str(outcome.gap_summary)
 
 
@@ -298,3 +302,49 @@ def test_insufficient_plan_is_returned_to_reasoner_for_revision():
     assert outcome.status == "knowledge_gap"
     assert outcome.iterations_used == 2
     assert [entry.status for entry in outcome.trace] == ["plan_rejected", "declare_gap"]
+
+
+def test_already_satisfied_context_request_is_reconciled_once_before_gap():
+    class Reasoner:
+        def __init__(self):
+            self.calls = 0
+
+        def next_turn(self, *, intent, context, history):
+            self.calls += 1
+            if self.calls == 1:
+                return PlanningTurn(
+                    status="request_context",
+                    context_request=PlanningContextRequest(
+                        view="semantic_knowledge",
+                        query={"query": "operating system display version"},
+                        purpose="inspect semantic meaning",
+                    ),
+                )
+            assert context["context_request_feedback"]["status"] == "already_satisfied"
+            return PlanningTurn(status="declare_gap", gap_summary="no different governed path established")
+
+    class Reader:
+        def read(self, *, request, intent):
+            return {"view_name": request.view, "items": ({"concept_id": "fact.example"},)}
+
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(
+                    view="semantic_knowledge",
+                    query={"query": "operating system display version"},
+                    purpose="bootstrap semantic meaning",
+                ),
+            )
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+        budget=IntentPlanningBudget(max_iterations=4, max_context_requests=2),
+    ).plan(intent={"requested_facts": ("operating system display version",)})
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.iterations_used == 2
+    assert outcome.context_requests_used == 0
+    assert outcome.trace[0].status == "context_reconciled"

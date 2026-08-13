@@ -167,6 +167,7 @@ class BoundedSemanticIntentPlanningLoop:
         trace: list[PlanningTraceEntry] = []
         context_requests = 0
         satisfied_requests: set[tuple[str, str]] = set()
+        reconciled_satisfied_requests: set[tuple[str, str]] = set()
         rejected_plan_signatures: set[str] = set()
 
         if self.context_bootstrapper is not None:
@@ -207,19 +208,34 @@ class BoundedSemanticIntentPlanningLoop:
                     repr(sorted((str(key), repr(value)) for key, value in request.query.items())),
                 )
                 if request_signature in satisfied_requests:
-                    return IntentPlanningOutcome(
-                        status="knowledge_gap",
-                        plan=None,
-                        gap_summary=(
-                            "planning reasoner repeated an already-satisfied governed context request "
-                            "without progressing the fulfillment plan"
+                    if request_signature in reconciled_satisfied_requests:
+                        return IntentPlanningOutcome(
+                            status="knowledge_gap",
+                            plan=None,
+                            gap_summary=(
+                                "planning reasoner repeated an already-satisfied governed context request "
+                                "after explicit reconciliation feedback"
+                            ),
+                            trace=tuple(trace),
+                            iterations_used=iteration,
+                            context_requests_used=context_requests,
+                        )
+                    reconciled_satisfied_requests.add(request_signature)
+                    context["context_request_feedback"] = {
+                        "status": "already_satisfied",
+                        "view": request.view,
+                        "query": dict(request.query),
+                        "instruction": (
+                            "The requested governed context is already present in governed_context. "
+                            "Do not request it again. Consume the existing snapshot, request a different "
+                            "governed information need, revise the plan, or declare a knowledge gap."
                         ),
-                        trace=tuple(trace),
-                        iterations_used=iteration,
-                        context_requests_used=context_requests,
-                    )
+                    }
+                    trace.append(PlanningTraceEntry(iteration, "context_reconciled", request.view))
+                    continue
                 snapshot = self.context_reader.read(request=request, intent=dict(intent))
                 _reject_forbidden_keys(snapshot)
+                context.pop("context_request_feedback", None)
                 satisfied_requests.add(request_signature)
                 context_requests += 1
                 context[request.view] = dict(snapshot)

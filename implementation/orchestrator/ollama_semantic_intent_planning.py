@@ -107,7 +107,9 @@ class OllamaSemanticIntentPlanningReasoner:
                 "approved derivations represented in context. If plan_validation context is present, the prior "
                 "plan was rejected as insufficient for the original intent: consume those issues, revise the "
                 "plan, request different governed context, or declare a knowledge gap. Never repeat a rejected "
-                "plan unchanged. If no governed fulfillment path is established, declare a knowledge gap. Keep "
+                "plan unchanged. If context_request_feedback is present, the requested context is already supplied; "
+                "consume the existing snapshot and do not request that same view/query again. If no governed "
+                "fulfillment path is established, declare a knowledge gap. Keep "
                 "reasoning concise and structured."
             ),
             user=json.dumps(
