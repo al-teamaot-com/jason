@@ -40,6 +40,7 @@ def test_approval_creates_active_versioned_mapping():
         mapping_id="example-mapping",
         version=1,
         resource_authority="example_resource",
+        capability_names=("endpoint.device.read",),
     )
 
     assert mapping.active is True
@@ -60,6 +61,7 @@ def test_non_steward_cannot_approve_mapping():
             mapping_id="example",
             version=1,
             resource_authority="example",
+            capability_names=("endpoint.device.read",),
         )
 
 
@@ -142,5 +144,6 @@ def test_active_mapping_must_be_approved():
             approval_basis="test",
             openapi_source_reference="openapi:test",
             semantic_source_reference="help:test",
+            capability_names=("endpoint.device.read",),
             active=True,
         )
