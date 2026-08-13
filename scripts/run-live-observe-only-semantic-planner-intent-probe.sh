@@ -60,6 +60,7 @@ from orchestrator.semantic_intent_planning_loop import BoundedSemanticIntentPlan
 from orchestrator.semantic_planning_bootstrap import ProviderNeutralIntentContextBootstrapper
 from orchestrator.semantic_plan_sufficiency import GovernedSemanticPlanSufficiencyValidator
 from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
+from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAssessor
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
 
 
@@ -214,6 +215,7 @@ planner = BoundedSemanticIntentPlanningLoop(
     context_bootstrapper=ProviderNeutralIntentContextBootstrapper(),
     plan_validator=GovernedSemanticPlanSufficiencyValidator(),
     feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
+    capability_gap_assessor=GovernedSemanticCapabilityGapAssessor(),
 )
 
 intent = {
@@ -241,6 +243,11 @@ if outcome.plan is not None:
     print(f"UNRESOLVED_REQUIREMENTS={','.join(outcome.plan.unresolved_requirements) or '-'}")
 if outcome.gap_summary:
     print(f"KNOWLEDGE_GAP={outcome.gap_summary}")
+if outcome.gap_details:
+    print(f"CAPABILITY_GAP_TYPE={outcome.gap_details.get('gap_type', '-')}")
+    print(f"CAPABILITY_GAP_FACTS={','.join(outcome.gap_details.get('unsupported_facts', ())) or '-'}")
+    print(f"CAPABILITY_GAP_OWNER={outcome.gap_details.get('governance_owner', '-')}")
+    print(f"CAPABILITY_GAP_NEXT_ACTION={outcome.gap_details.get('recommended_next_action', '-')}")
 PY
 
 echo "========== SECTION 3: CHANGE STATE =========="

@@ -114,6 +114,7 @@ class IntentPlanningOutcome:
     trace: tuple[PlanningTraceEntry, ...]
     iterations_used: int
     context_requests_used: int
+    gap_details: Mapping[str, Any] | None = None
 
 
 class SemanticIntentPlanningReasoner(Protocol):
@@ -162,6 +163,10 @@ class IntentFulfillmentFeasibilityGate(Protocol):
     ) -> Any: ...
 
 
+class IntentCapabilityGapAssessor(Protocol):
+    def assess(self, *, feasibility_result: Any) -> Any: ...
+
+
 @dataclass(frozen=True, slots=True)
 class BoundedSemanticIntentPlanningLoop:
     reasoner: SemanticIntentPlanningReasoner
@@ -170,6 +175,7 @@ class BoundedSemanticIntentPlanningLoop:
     context_bootstrapper: IntentPlanningContextBootstrapper | None = None
     plan_validator: IntentPlanSufficiencyValidator | None = None
     feasibility_gate: IntentFulfillmentFeasibilityGate | None = None
+    capability_gap_assessor: IntentCapabilityGapAssessor | None = None
 
     def plan(self, *, intent: Mapping[str, Any]) -> IntentPlanningOutcome:
         _reject_forbidden_keys(intent)
@@ -285,6 +291,16 @@ class BoundedSemanticIntentPlanningLoop:
                             if bool(getattr(feasibility, "conclusive", False)) and not bool(
                                 getattr(feasibility, "feasible", False)
                             ):
+                                gap_details = None
+                                if self.capability_gap_assessor is not None:
+                                    assessment = self.capability_gap_assessor.assess(
+                                        feasibility_result=feasibility,
+                                    )
+                                    if assessment is not None:
+                                        as_context = getattr(assessment, "as_context", None)
+                                        if callable(as_context):
+                                            gap_details = dict(as_context())
+                                            _reject_forbidden_keys(gap_details)
                                 trace.append(PlanningTraceEntry(iteration, "fulfillment_infeasible"))
                                 return IntentPlanningOutcome(
                                     status="knowledge_gap",
@@ -299,6 +315,7 @@ class BoundedSemanticIntentPlanningLoop:
                                     trace=tuple(trace),
                                     iterations_used=iteration,
                                     context_requests_used=context_requests,
+                                    gap_details=gap_details,
                                 )
                         context["plan_validation"] = {
                             "sufficient": False,

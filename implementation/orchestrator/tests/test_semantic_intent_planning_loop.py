@@ -404,3 +404,61 @@ def test_infeasible_fulfillment_stops_rejected_plan_retry_loop():
     assert outcome.iterations_used == 1
     assert [entry.status for entry in outcome.trace] == ["fulfillment_infeasible"]
     assert "special fact" in str(outcome.gap_summary)
+
+
+
+def test_fulfillment_infeasible_outcome_exposes_governed_capability_gap_details():
+    from orchestrator.semantic_capability_gap import GovernedSemanticCapabilityGapAssessor
+    from orchestrator.semantic_fulfillment_feasibility import GovernedSemanticFulfillmentFeasibilityGate
+
+    class Reasoner:
+        def next_turn(self, *, intent, context, history):
+            return PlanningTurn(
+                status="propose_plan",
+                plan=FulfillmentPlanCandidate(
+                    steps=(FulfillmentPlanStepCandidate(
+                        capability_name="endpoint.device.search",
+                        purpose="attempt governed read",
+                    ),),
+                    rationale_summary="candidate",
+                ),
+            )
+
+    class Reader:
+        def read(self, *, request, intent):
+            if request.view == "capability_registry":
+                return {
+                    "view_name": request.view,
+                    "items": ({"capability_name": "endpoint.device.search", "fact_hints": "hostname"},),
+                    "capability_names": ("endpoint.device.search",),
+                }
+            return {"view_name": request.view, "items": ()}
+
+    class Bootstrapper:
+        def requests_for(self, *, intent):
+            return (
+                PlanningContextRequest(view="capability_registry"),
+                PlanningContextRequest(view="evidence_catalog"),
+                PlanningContextRequest(view="derivation_registry"),
+            )
+
+    class Validator:
+        def validate(self, *, intent, plan, context):
+            class Result:
+                sufficient = False
+                issues = ("unsupported",)
+            return Result()
+
+    outcome = BoundedSemanticIntentPlanningLoop(
+        reasoner=Reasoner(),
+        context_reader=Reader(),
+        context_bootstrapper=Bootstrapper(),
+        plan_validator=Validator(),
+        feasibility_gate=GovernedSemanticFulfillmentFeasibilityGate(),
+        capability_gap_assessor=GovernedSemanticCapabilityGapAssessor(),
+    ).plan(intent={"resource_type": "endpoint", "requested_facts": ("special governed fact",)})
+
+    assert outcome.status == "knowledge_gap"
+    assert outcome.gap_details is not None
+    assert outcome.gap_details["gap_type"] == "capability_registry_gap"
+    assert outcome.gap_details["unsupported_facts"] == ("special governed fact",)
