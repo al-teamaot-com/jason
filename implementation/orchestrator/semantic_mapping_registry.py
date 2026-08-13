@@ -8,6 +8,7 @@ from typing import Mapping, Sequence
 
 _ALLOWED_STATUSES = frozenset(
     {
+        "pending_review",
         "approved",
         "deprecated",
         "retired",

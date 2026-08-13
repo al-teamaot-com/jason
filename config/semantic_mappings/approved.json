@@ -9,7 +9,7 @@
       "provider_schema": "Device",
       "provider_field": "displayVersion",
       "resource_authority": "managed_endpoint",
-      "approval_status": "retired",
+      "approval_status": "pending_review",
       "approved_by": "project-owner",
       "approval_basis": "Explicit Technology Steward approval in Project Jason session on 2026-08-13 after cross-source authoritative Kaseya evidence review.",
       "openapi_source_reference": "datto-rmm-openapi-v2:sha256:cd50215c0d1edce53de52173f8694a6d2dbdd18e2205c4a38f0fec82a8bc10ad#components/schemas/Device/properties/displayVersion",
@@ -19,7 +19,7 @@
         "endpoint.device.search",
         "endpoint.device.read"
       ],
-      "retirement_reason": "Live Datto evidence returned displayVersion 4.4.11965.11965, which does not establish the canonical Windows display version fact."
+      "review_reason": "Datto authoritative API schema exposes Device.displayVersion and live provider data returns the field, but the observed value must be reconciled with Datto's documented semantic definition before activation."
     }
   ]
 }
