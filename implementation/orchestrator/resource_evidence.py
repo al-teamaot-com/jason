@@ -33,9 +33,22 @@ class VerifiedResourceFact:
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticMappingEvidenceProjector(Protocol):
+    def project(
+        self,
+        *,
+        provider_id: str,
+        capability_name: str,
+        data: Any,
+        requested_facts: tuple[str, ...],
+    ) -> Any: ...
+
+
+@dataclass(frozen=True, slots=True)
 class GovernedResourceEvidenceInterpreter:
     reasoner: StructuredResourceEvidenceReasoner
     fact_vocabulary: CanonicalFactVocabulary | None = None
+    semantic_mapping_projector: SemanticMappingEvidenceProjector | None = None
 
     def interpret(
         self,
@@ -55,6 +68,14 @@ class GovernedResourceEvidenceInterpreter:
         if "data" not in result.output:
             raise RuntimeError("resource result does not contain provider data")
         data = result.output["data"]
+
+        if self.semantic_mapping_projector is not None:
+            data = self.semantic_mapping_projector.project(
+                provider_id=result.provider_id,
+                capability_name=result.capability_name,
+                data=data,
+                requested_facts=requested_facts,
+            )
 
         direct_facts = _deterministic_direct_facts(
             data=data,

@@ -972,3 +972,78 @@ def test_renderer_unavailable_response_does_not_invent_display_version_value():
     )
     assert "unavailable from the current governed provider evidence" in response
     assert "4.4.11965.11965" not in response
+
+
+def test_approved_semantic_mapping_projects_real_provider_field_without_reasoner_mapping():
+    from orchestrator.semantic_mapping_evidence import (
+        GovernedSemanticMappingEvidenceProjector,
+    )
+    from orchestrator.semantic_mapping_registry import (
+        ApprovedSemanticMapping,
+        SemanticMappingRegistry,
+    )
+
+    class NoSemanticGuessReasoner:
+        def locate(self, *, requested_facts, data):
+            return ()
+
+    mapping = ApprovedSemanticMapping(
+        mapping_id="example-display-version",
+        version=1,
+        provider_id="example_provider",
+        canonical_fact="operating system display version",
+        provider_schema="Device",
+        provider_field="displayVersion",
+        resource_authority="managed_endpoint",
+        approval_status="approved",
+        approved_by="technology-steward",
+        approval_basis="authoritative cross-source evidence",
+        openapi_source_reference="openapi:test",
+        semantic_source_reference="help:test",
+        capability_names=("endpoint.device.search",),
+        active=True,
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoSemanticGuessReasoner(),
+        semantic_mapping_projector=GovernedSemanticMappingEvidenceProjector(
+            registry=SemanticMappingRegistry((mapping,))
+        ),
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-1",
+        correlation_id="corr-1",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        provider_id="example_provider",
+        output={
+            "provider": "example_provider",
+            "data": {
+                "resource_matches": [
+                    {
+                        "resource_id": "device-1",
+                        "hostname": "EXAMPLE-1",
+                    }
+                ],
+                "resolved_resource_id": "device-1",
+                "provider_data": {
+                    "hostname": "EXAMPLE-1",
+                    "displayVersion": "24H2",
+                },
+            },
+        },
+    )
+
+    facts = interpreter.interpret(
+        result=result,
+        requested_facts=("operating system display version",),
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value == "24H2"
+    assert (
+        facts[0].json_pointer
+        == "/provider_data/semantic_evidence/operating_system_display_version"
+    )

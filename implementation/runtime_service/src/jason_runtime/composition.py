@@ -78,6 +78,12 @@ from orchestrator.resource_evidence import (
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
+from orchestrator.semantic_mapping_evidence import (
+    GovernedSemanticMappingEvidenceProjector,
+)
+from orchestrator.semantic_mapping_registry import (
+    JsonSemanticMappingRegistryLoader,
+)
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -561,6 +567,16 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         require_authority_context=True,
     )
 
+    semantic_mapping_path = (
+        Path(__file__).resolve().parents[4]
+        / "config"
+        / "semantic_mappings"
+        / "approved.json"
+    )
+    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(
+        semantic_mapping_path
+    ).load()
+
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
             reasoner=OllamaResourceEvidenceReasoner(
@@ -568,6 +584,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
             ),
             fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+            semantic_mapping_projector=GovernedSemanticMappingEvidenceProjector(
+                registry=semantic_mapping_registry,
+            ),
         )
     )
     response_renderer = GovernedTeamsConversationResponseRenderer(
