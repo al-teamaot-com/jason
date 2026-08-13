@@ -1049,3 +1049,84 @@ def test_approved_semantic_mapping_projects_real_provider_field_without_reasoner
         facts[0].json_pointer
         == "/provider_data/semantic_evidence/operating_system_display_version"
     )
+
+
+def test_governed_semantic_evidence_does_not_fail_on_human_lexical_context():
+    from orchestrator.semantic_mapping_evidence import (
+        GovernedSemanticMappingEvidenceProjector,
+    )
+    from orchestrator.semantic_mapping_registry import (
+        ApprovedSemanticMapping,
+        SemanticMappingRegistry,
+    )
+
+    class NoSemanticGuessReasoner:
+        def locate(self, *, requested_facts, data):
+            return ()
+
+    mapping = ApprovedSemanticMapping(
+        mapping_id="example-display-version-context",
+        version=1,
+        provider_id="example_provider",
+        canonical_fact="operating system display version",
+        provider_schema="Device",
+        provider_field="displayVersion",
+        resource_authority="managed_endpoint",
+        approval_status="approved",
+        approved_by="technology-steward",
+        approval_basis="authoritative provider evidence",
+        openapi_source_reference="openapi:test",
+        semantic_source_reference="help:test",
+        capability_names=("endpoint.device.search",),
+        active=True,
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoSemanticGuessReasoner(),
+        semantic_mapping_projector=GovernedSemanticMappingEvidenceProjector(
+            registry=SemanticMappingRegistry((mapping,))
+        ),
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-semantic-context",
+        correlation_id="corr-semantic-context",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        provider_id="example_provider",
+        output={
+            "provider": "example_provider",
+            "data": {
+                "resource_matches": [
+                    {
+                        "resource_id": "device-1",
+                        "hostname": "EXAMPLE-1",
+                    }
+                ],
+                "resolved_resource_id": "device-1",
+                "provider_data": {
+                    "hostname": "EXAMPLE-1",
+                    "displayVersion": "4.4.11965.11965",
+                },
+            },
+        },
+    )
+
+    facts = interpreter.interpret(
+        result=result,
+        requested_facts=("operating system display version",),
+        # Simulates extra wording introduced by the human question.
+        evidence_contexts={
+            "operating system display version": ("windows",),
+        },
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value == "4.4.11965.11965"
+    assert (
+        facts[0].json_pointer
+        == "/provider_data/semantic_evidence/operating_system_display_version"
+    )

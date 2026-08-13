@@ -295,11 +295,22 @@ def _normalized_semantic_tokens(value: str) -> set[str]:
 def _evidence_matches_contexts(*, pointer: str, contexts: tuple[str, ...]) -> bool:
     """Require evidence location to carry provider-neutral semantic context.
 
-    Contexts describe meaning domains, not provider field paths. Matching is deliberately
-    conservative: every required context contributes at least one token that must be
-    present in the JSON pointer. A provider adapter can later expose normalized semantic
-    containers when native field names do not carry enough meaning.
+    Contexts protect arbitrary provider paths selected through bounded reasoning.
+
+    Evidence beneath provider_data/semantic_evidence is different: that location exists
+    only because a governed provider adapter or approved semantic mapping deliberately
+    projected a provider-derived value into a canonical semantic location. Requiring the
+    canonical path to repeat every lexical context from the human request can therefore
+    reject correctly governed evidence (for example, a human saying "Windows" when the
+    canonical fact is "operating system display version").
+
+    The value is still dereferenced from provider evidence and still passes canonical
+    expected-shape validation; this exception grants no authority to an AI reasoner and
+    does not permit arbitrary provider paths.
     """
+    if pointer.startswith("/provider_data/semantic_evidence/"):
+        return True
+
     if not contexts:
         return True
     pointer_tokens = _normalized_semantic_tokens(pointer)
