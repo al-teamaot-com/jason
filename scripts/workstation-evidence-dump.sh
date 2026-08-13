@@ -97,11 +97,29 @@ mkdir -p "$output_dir"
 tmp_path="${output_path}.tmp.$$"
 trap 'rm -f "$tmp_path"' EXIT
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+host_python="$repo_root/.venv/bin/python"
+if [[ ! -x "$host_python" ]]; then
+    host_python="$(command -v python3 || true)"
+fi
+[[ -n "$host_python" ]] || fail "host Python is unavailable for evidence sanitization"
+
 docker exec -i \
     -e "PROBE_HOSTNAME=$hostname" \
     -e "PROBE_INCLUDE_SITE_CONTEXT=$include_site_context" \
     "$container_name" \
-    python - <<'PY' > "$tmp_path"
+    python - <<'PY' | \
+    PYTHONPATH="$repo_root/implementation${PYTHONPATH:+:$PYTHONPATH}" \
+    "$host_python" -c '
+import json
+import sys
+from orchestrator.evidence_sanitization import sanitize_evidence_tree
+
+evidence = json.load(sys.stdin)
+safe = sanitize_evidence_tree(evidence)
+json.dump(safe, sys.stdout, indent=2, ensure_ascii=False, default=str)
+sys.stdout.write("\n")
+' > "$tmp_path"
 from __future__ import annotations
 
 import json
@@ -475,12 +493,6 @@ PY
 
 mv "$tmp_path" "$output_path"
 trap - EXIT
-
-host_python="/home/al/projects/jason/.venv/bin/python"
-if [[ ! -x "$host_python" ]]; then
-    host_python="$(command -v python3 || true)"
-fi
-[[ -n "$host_python" ]] || fail "host Python is unavailable for summary rendering"
 
 "$host_python" - "$output_path" <<'PY'
 import json
