@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Any, Mapping, Sequence
+
+from .ollama_reasoning import OllamaStructuredJsonClient
+from .semantic_intent_planning_loop import (
+    FulfillmentPlanCandidate,
+    FulfillmentPlanStepCandidate,
+    PlanningContextRequest,
+    PlanningTraceEntry,
+    PlanningTurn,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OllamaSemanticIntentPlanningReasoner:
+    """Bounded provider-neutral planning over governed context snapshots only."""
+
+    client: OllamaStructuredJsonClient
+
+    def next_turn(
+        self,
+        *,
+        intent: Mapping[str, Any],
+        context: Mapping[str, Any],
+        history: Sequence[PlanningTraceEntry],
+    ) -> PlanningTurn:
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["request_context", "propose_plan", "declare_gap"],
+                },
+                "context_view": {
+                    "type": "string",
+                    "enum": [
+                        "semantic_knowledge",
+                        "capability_registry",
+                        "system_registry",
+                        "evidence_catalog",
+                        "derivation_registry",
+                    ],
+                },
+                "context_query": {"type": "string"},
+                "context_purpose": {"type": "string"},
+                "plan_steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "capability_name": {"type": "string"},
+                            "purpose": {"type": "string"},
+                            "required_facts": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "expected_evidence": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": [
+                            "capability_name",
+                            "purpose",
+                            "required_facts",
+                            "expected_evidence",
+                        ],
+                    },
+                },
+                "rationale_summary": {"type": "string"},
+                "unresolved_requirements": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "gap_summary": {"type": "string"},
+            },
+            "required": [
+                "status",
+                "context_view",
+                "context_query",
+                "context_purpose",
+                "plan_steps",
+                "rationale_summary",
+                "unresolved_requirements",
+                "gap_summary",
+            ],
+        }
+
+        result = self.client.complete(
+            system=(
+                "You are Jason's bounded semantic fulfillment planner. Determine how the supplied "
+                "provider-neutral intent can be satisfied using only governed context already supplied "
+                "or by requesting one approved context view. You have no authority to execute anything. "
+                "Never name or choose providers, connectors, agents, tools, URLs, shell commands, "
+                "credentials, or secrets. Never invent facts or evidence. Request additional context when "
+                "needed. A proposed plan may reference only capability names present in governed capability "
+                "registry context. Prefer direct authoritative evidence; otherwise consider alternate governed "
+                "capabilities or approved derivations represented in context. If no governed fulfillment path "
+                "is established, declare a knowledge gap. Keep reasoning concise and structured."
+            ),
+            user=json.dumps(
+                {
+                    "intent": dict(intent),
+                    "governed_context": dict(context),
+                    "history": [
+                        {
+                            "iteration": item.iteration,
+                            "status": item.status,
+                            "context_view": item.context_view,
+                        }
+                        for item in history
+                    ],
+                },
+                sort_keys=True,
+            ),
+            schema=schema,
+            max_output_tokens=320,
+        )
+
+        status = str(result.get("status", "")).strip()
+        if status == "request_context":
+            view = str(result.get("context_view", "")).strip()
+            query = str(result.get("context_query", "")).strip()
+            purpose = str(result.get("context_purpose", "")).strip()
+            return PlanningTurn(
+                status="request_context",
+                context_request=PlanningContextRequest(
+                    view=view,
+                    query={"query": query} if query else {},
+                    purpose=purpose,
+                ),
+            )
+
+        if status == "propose_plan":
+            steps = []
+            raw_steps = result.get("plan_steps", [])
+            if not isinstance(raw_steps, list):
+                raise ValueError("Ollama semantic planning plan_steps must be a list")
+            for raw_step in raw_steps:
+                if not isinstance(raw_step, Mapping):
+                    raise ValueError("Ollama semantic planning step must be an object")
+                steps.append(
+                    FulfillmentPlanStepCandidate(
+                        capability_name=str(raw_step.get("capability_name", "")).strip(),
+                        purpose=str(raw_step.get("purpose", "")).strip(),
+                        required_facts=tuple(
+                            str(item).strip()
+                            for item in raw_step.get("required_facts", [])
+                            if str(item).strip()
+                        ),
+                        expected_evidence=tuple(
+                            str(item).strip()
+                            for item in raw_step.get("expected_evidence", [])
+                            if str(item).strip()
+                        ),
+                    )
+                )
+            unresolved = tuple(
+                str(item).strip()
+                for item in result.get("unresolved_requirements", [])
+                if str(item).strip()
+            )
+            return PlanningTurn(
+                status="propose_plan",
+                plan=FulfillmentPlanCandidate(
+                    steps=tuple(steps),
+                    rationale_summary=str(result.get("rationale_summary", "")).strip(),
+                    unresolved_requirements=unresolved,
+                ),
+            )
+
+        if status != "declare_gap":
+            raise ValueError("Ollama semantic planning returned invalid status")
+        return PlanningTurn(
+            status="declare_gap",
+            gap_summary=str(result.get("gap_summary", "")).strip(),
+        )
