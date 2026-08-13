@@ -60,6 +60,12 @@ class OllamaStructuredJsonClient:
         last_json_error: json.JSONDecodeError | None = None
 
         for attempt in range(2):
+            attempt_output_tokens = (
+                max_output_tokens
+                if attempt == 0
+                else min(max_output_tokens * 2, 1024)
+            )
+            request_payload["options"]["num_predict"] = attempt_output_tokens
             response = self.transport.request(
                 method="POST",
                 url=f"{self.base_url.rstrip('/')}/api/chat",

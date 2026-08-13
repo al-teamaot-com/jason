@@ -144,7 +144,7 @@ class OllamaSemanticIntentPlanningReasoner:
                 sort_keys=True,
             ),
             schema=schema,
-            max_output_tokens=320,
+            max_output_tokens=512,
         )
 
         status = str(result.get("status", "")).strip()

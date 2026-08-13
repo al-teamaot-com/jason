@@ -437,3 +437,31 @@ def test_canonical_evidence_hints_rank_provider_fields_without_changing_requeste
     )
     pointers = [item["json_pointer"] for item in index]
     assert "/provider_data/processors/0/name" in pointers[:8]
+
+
+def test_structured_json_retry_increases_generation_budget_after_truncated_json():
+    import json
+
+    class TruncatingTransport:
+        def __init__(self):
+            self.payloads = []
+
+        def request(self, **kwargs):
+            import copy
+            self.payloads.append(copy.deepcopy(kwargs["json"]))
+            if len(self.payloads) == 1:
+                return {"message": {"content": '{"status":"propose_plan","rationale_summary":"unterminated'}}
+            return {"message": {"content": json.dumps({"status": "ok"})}}
+
+    transport = TruncatingTransport()
+    client = OllamaStructuredJsonClient(transport=transport, model="test-model")
+    result = client.complete(
+        system="bounded test",
+        user="bounded test",
+        schema={"type": "object"},
+        max_output_tokens=160,
+    )
+
+    assert result == {"status": "ok"}
+    assert transport.payloads[0]["options"]["num_predict"] == 160
+    assert transport.payloads[1]["options"]["num_predict"] == 320
