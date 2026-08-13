@@ -7,6 +7,7 @@ from typing import Sequence
 from kernel.capabilities import CapabilityDefinition
 
 from .resource_inquiry import ResourceInquiry, ResourcePlanStep
+from .semantic_mapping_registry import SemanticMappingRegistry
 
 
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -34,6 +35,7 @@ class MetadataResourceCapabilityReasoner:
     """
 
     minimum_score: int = 1
+    semantic_mapping_registry: SemanticMappingRegistry | None = None
 
     def select(
         self,
@@ -63,6 +65,21 @@ class MetadataResourceCapabilityReasoner:
             selector_overlap = len(selector_keys.intersection(supported_selectors))
             fact_overlap = len(requested_tokens.intersection(capability_tokens))
             score = selector_overlap * 6 + fact_overlap
+
+            # Approved semantic mappings are authoritative capability coverage data.
+            # They do not select a provider or execute anything. They only tell the
+            # provider-neutral resource reasoner which governed capabilities have
+            # approved support for the requested canonical facts.
+            if self.semantic_mapping_registry is not None:
+                for requested_fact in inquiry.requested_facts:
+                    approved = self.semantic_mapping_registry.find_active(
+                        canonical_fact=requested_fact,
+                    )
+                    if any(
+                        capability.capability_name in mapping.capability_names
+                        for mapping in approved
+                    ):
+                        score += 20
 
             # Generic resource-planning preference: use direct read when a durable
             # resource_id is already known; otherwise prefer search for selectors.

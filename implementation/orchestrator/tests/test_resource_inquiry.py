@@ -167,3 +167,106 @@ def test_planner_excludes_capabilities_not_declared_read_only():
 
     with pytest.raises(LookupError, match="no governed read capabilities"):
         planner.plan(inquiry())
+
+
+def test_approved_semantic_mapping_guides_generic_capability_selection():
+    from datetime import datetime, timezone
+
+    from orchestrator.resource_capability_catalog import (
+        endpoint_alert_search,
+        endpoint_device_search,
+    )
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+    from orchestrator.semantic_mapping_registry import (
+        ApprovedSemanticMapping,
+        SemanticMappingRegistry,
+    )
+
+    mapping = ApprovedSemanticMapping(
+        mapping_id="example-display-version",
+        version=1,
+        provider_id="example_provider",
+        canonical_fact="operating system display version",
+        provider_schema="Device",
+        provider_field="displayVersion",
+        resource_authority="managed_endpoint",
+        approval_status="approved",
+        approved_by="technology-steward",
+        approval_basis="authoritative evidence",
+        openapi_source_reference="openapi:test",
+        semantic_source_reference="help:test",
+        capability_names=(
+            "endpoint.device.search",
+            "endpoint.device.read",
+        ),
+        active=True,
+    )
+
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "EXAMPLE-1"},
+        requested_facts=("operating system display version",),
+    )
+
+    selected = MetadataResourceCapabilityReasoner(
+        semantic_mapping_registry=SemanticMappingRegistry((mapping,))
+    ).select(
+        inquiry=inquiry,
+        candidates=(
+            endpoint_alert_search(datetime.now(timezone.utc)),
+            endpoint_device_search(datetime.now(timezone.utc)),
+        ),
+    )
+
+    assert len(selected) == 1
+    assert selected[0].capability_name == "endpoint.device.search"
+
+
+def test_unrelated_approved_mapping_does_not_force_capability():
+    from datetime import datetime, timezone
+
+    from orchestrator.resource_capability_catalog import (
+        endpoint_alert_search,
+        endpoint_device_search,
+    )
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+    from orchestrator.semantic_mapping_registry import (
+        ApprovedSemanticMapping,
+        SemanticMappingRegistry,
+    )
+
+    mapping = ApprovedSemanticMapping(
+        mapping_id="example-display-version",
+        version=1,
+        provider_id="example_provider",
+        canonical_fact="operating system display version",
+        provider_schema="Device",
+        provider_field="displayVersion",
+        resource_authority="managed_endpoint",
+        approval_status="approved",
+        approved_by="technology-steward",
+        approval_basis="authoritative evidence",
+        openapi_source_reference="openapi:test",
+        semantic_source_reference="help:test",
+        capability_names=("endpoint.device.search",),
+        active=True,
+    )
+
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "EXAMPLE-1"},
+        requested_facts=("open alerts",),
+    )
+
+    selected = MetadataResourceCapabilityReasoner(
+        semantic_mapping_registry=SemanticMappingRegistry((mapping,))
+    ).select(
+        inquiry=inquiry,
+        candidates=(
+            endpoint_alert_search(datetime.now(timezone.utc)),
+            endpoint_device_search(datetime.now(timezone.utc)),
+        ),
+    )
+
+    assert len(selected) == 1
+    assert selected[0].capability_name == "endpoint.alert.search"

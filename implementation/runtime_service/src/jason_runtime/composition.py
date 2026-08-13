@@ -457,6 +457,16 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ),
     )
 
+    semantic_mapping_path = (
+        Path(__file__).resolve().parents[4]
+        / "config"
+        / "semantic_mappings"
+        / "approved.json"
+    )
+    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(
+        semantic_mapping_path
+    ).load()
+
     resource_types, selector_keys, fact_hints = _resource_language_contract(capabilities)
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
@@ -483,7 +493,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,
-            reasoner=MetadataResourceCapabilityReasoner(),
+            reasoner=MetadataResourceCapabilityReasoner(
+                semantic_mapping_registry=semantic_mapping_registry,
+            ),
         ),
     )
     # Prefer read-only resource interpretation before action interpretation. This
@@ -566,16 +578,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         authority_context=JKD001OrchestrationContextEnforcer(context_validator),
         require_authority_context=True,
     )
-
-    semantic_mapping_path = (
-        Path(__file__).resolve().parents[4]
-        / "config"
-        / "semantic_mappings"
-        / "approved.json"
-    )
-    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(
-        semantic_mapping_path
-    ).load()
 
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
