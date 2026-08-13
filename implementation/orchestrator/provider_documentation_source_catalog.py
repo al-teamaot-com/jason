@@ -10,6 +10,7 @@ from .provider_documentation_source_registry import (
 
 
 DATTO_RMM_OPENAPI_SOURCE = "datto-rmm-openapi-v2"
+DATTO_RMM_PRODUCT_HELP_SOURCE = "datto-rmm-product-help"
 
 
 def datto_rmm_openapi_source() -> ProviderDocumentationSourceDefinition:
@@ -52,7 +53,47 @@ def datto_rmm_openapi_source() -> ProviderDocumentationSourceDefinition:
     )
 
 
+
+def datto_rmm_product_help_source() -> ProviderDocumentationSourceDefinition:
+    return ProviderDocumentationSourceDefinition(
+        source_id=DATTO_RMM_PRODUCT_HELP_SOURCE,
+        provider_id="datto_rmm",
+        display_name="Datto RMM product documentation",
+        authority="Kaseya Datto RMM authoritative product help",
+        retrieval_method=DocumentationRetrievalMethod.HTTPS,
+        locator=(
+            "https://rmm.datto.com/help/en/Content/3NEWUI/"
+            "ColumnChooserFieldDefinitions.htm"
+        ),
+        content_type="text/html",
+        lifecycle_status=DocumentationSourceLifecycle.AVAILABLE,
+        approval_status=DocumentationSourceApproval.APPROVED,
+        technology_steward="technology-steward",
+        business_justification=(
+            "Kaseya product documentation provides authoritative human-readable "
+            "semantic definitions that may corroborate fields exposed by the "
+            "Datto RMM OpenAPI specification."
+        ),
+        review_interval_days=90,
+        retirement_criteria=(
+            "Kaseya retires or replaces this product-help source.",
+            "A newer authoritative semantic source supersedes it.",
+            "Datto RMM is no longer the managed-endpoint authority.",
+        ),
+        allowed_resource_authorities=("managed_endpoint",),
+        metadata={
+            "aliases": (
+                "Datto RMM product documentation|"
+                "Datto RMM Column Chooser documentation|"
+                "Kaseya Datto RMM help"
+            ),
+            "vendor": "Kaseya",
+            "documentation_kind": "product-help",
+        },
+    )
+
 def register_provider_documentation_sources(
     registry: ProviderDocumentationSourceRegistry,
 ) -> None:
     registry.register(datto_rmm_openapi_source())
+    registry.register(datto_rmm_product_help_source())
