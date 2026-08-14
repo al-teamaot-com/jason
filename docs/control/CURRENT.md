@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-13
-**Status:** Teams → OpenClaw → Jason → Datto RMM governed resource inquiry is operationally proven for varied human language, deterministic resource recognition, canonical collection outcomes, provider adaptation, complete managed-site enumeration, and source-attributed evidence. The latest live-proven source checkpoint is durable in GitHub at `5b2c6c6`.
+**Updated:** 2026-08-14  
+**Status:** Teams → OpenClaw → Jason governed interaction is operationally proven with visible processing acknowledgement, governed Datto RMM read execution, provider-derived evidence, and source-attributed responses. The latest live-proven implementation checkpoint is durable in GitHub at `e98e4bd` (`Add Teams processing acknowledgement for governed turns`).  
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -15,190 +15,110 @@ A future session resuming Project Jason should read, in order:
 5. `docs/control/DOCUMENTATION-REGISTER.md`
 6. `docs/control/HOW-TO-DOCUMENT-JASON.md`
 7. `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` for natural-language resource inquiries
-8. `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` before rebuilding/redeploying `jason-runtime`
-9. the governing architecture/ADR/component/standard/runbook records for the workstream
-10. current GitHub state and System Registry/host evidence before asserting live production state
+8. `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` for collection/provider adaptation
+9. `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` before rebuilding/redeploying `jason-runtime`
+10. `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` before changing Teams/OpenClaw messaging behavior
+11. current GitHub state and System Registry/host evidence before asserting live production state
 
 Conversation memory is context only. It is not authority and must not be used to reconstruct fundamentals that already have durable owners.
 
 ## Last durable success
 
-The 2026-08-12 resource inquiry work established and deployed a generic semantic/evidence correction through the production Teams → OpenClaw → Jason → Datto RMM path.
+The 2026-08-14 Teams processing-feedback work established and live-proved a reusable best-effort acknowledgement for governed Teams turns.
 
-Provider truth for `AOT-50282` was established directly from Datto RMM:
+The problem was not Teams configuration. OpenClaw native Teams typing is owned by its normal reply lifecycle, while Jason-bound conversations use the `jason-bridge` compatibility pre-agent path and return a handled governed response before the normal model/reply lifecycle begins. Enabling native typing therefore did not produce a visible indicator for Jason-bound turns.
 
-`/lastLoggedInUser = AzureAD\AlDavis`
+The correction stayed inside the existing OpenClaw/Jason transport boundary. `infrastructure/openclaw-jason-bridge/index.mjs` now uses OpenClaw's supported channel outbound adapter to send the static receipt:
 
-The production-shaped Jason result exposed the value at `/provider_data/lastLoggedInUser`. The bounded evidence index included that pointer first, and live Ollama evidence selection chose that exact pointer when the requested fact was `last logged in user`.
+`Received - working on that now...`
 
-The root defect was upstream natural-language interpretation: selector/inventory vocabulary was being emitted as requested facts. Production composition now derives resource types, selector keys, and fact hints from governed provider-neutral read-only capability metadata and supplies those fact hints to the resource inquiry reasoner. Endpoint fact hints are canonicalized as discrete facts, and the reasoner is constrained to return the smallest requested fact set.
+The acknowledgement is emitted after required inbound transport identity/conversation fields are validated and before the synchronous governed Jason runtime call begins. It is transport feedback only: it does not imply authorization success, does not expose reasoning or chain-of-thought, does not contain provider data, and is not authoritative for task outcome. If acknowledgement delivery fails or is unavailable, the governed Jason request continues normally and the final governed response/error remains authoritative.
 
-Focused automated tests passed (`20 passed`), static validation passed, the authoritative runtime deployment completed successfully, and the runtime health check passed.
+Validation and proof:
 
-Final Teams proof:
+- Node syntax validation passed using the OpenClaw container runtime.
+- OpenClaw bridge tests passed: `10 passed`.
+- Live repository/host/container bridge source parity passed.
+- `jason-bridge` and `msteams` both loaded successfully.
+- Live Teams proof showed the acknowledgement immediately followed by the normal governed Jason response.
+- Durable implementation commit: `e98e4bd19e3881025f5167c5be57529961e73ebe`.
+- Proof record: `docs/sessions/Teams-Processing-Feedback-Proof-2026-08-14.md`.
 
-`AOT-50282 — last logged in user: AzureAD\AlDavis. Source: datto_rmm.`
-
-Proof: `docs/sessions/Teams-Datto-Resource-Semantic-Proof-2026-08-12.md`
-
-Reusable pattern: `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`
-
-Deployment procedure: `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`
-
-## Continuity rule now in force
-
-Natural-language resource inquiry handling is a reusable governed platform pattern, not a family of workflow-specific scripts. Future work must preserve:
-
-- provider-neutral resource interpretation;
-- selector/fact separation;
-- capability-derived language vocabulary;
-- minimal requested facts;
-- Central Orchestrator authority and routing;
-- bounded structural evidence indexes;
-- model selection only among Jason-supplied evidence pointers;
-- deterministic pointer dereference and source attribution; and
-- no direct agent-to-agent or agent-to-provider bypass.
-
-If a representable question fails, repair the reusable layer that failed rather than creating a bespoke query script.
+No Jason runtime service, provider capability, authorization rule, model, or System Registry entity was added by this change.
 
 ## Current workstream
 
-The semantic resource inquiry defect for `Who last used AOT-50282?` is operationally resolved.
+Teams processing feedback is complete and live-proven.
 
-The next source-control task is to review and, only with explicit authorization, commit/push the runtime implementation changes that were deployed from the uncommitted working tree. At deployment time the last verified HEAD was `25bc07a` and modified files included:
+The next implementation workstream is **in-flight duplicate-request protection** for governed Teams turns. The design must preserve Jason's central-governance boundary:
 
-- `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py`
-- `implementation/orchestrator/ollama_reasoning.py`
-- `implementation/orchestrator/resource_capability_catalog.py`
-- `implementation/orchestrator/tests/test_ollama_reasoning.py`
-- `implementation/runtime_service/src/jason_runtime/composition.py`
-- `implementation/runtime_service/tests/test_composition.py`
+- exact duplicate transport activities should be idempotent using stable authenticated transport identity such as Teams message/activity identifiers;
+- duplicate suppression belongs centrally after authenticated ingress rather than being trusted to volatile bridge memory;
+- a repeated new Teams message with the same text is not automatically the same request and must not be suppressed merely by text similarity;
+- consequential actions will require governed idempotency/precondition semantics rather than heuristic text deduplication;
+- duplicate handling must be auditable and must not bypass the Central Orchestrator.
 
-Do not assume those local modifications are durable in GitHub until verified from Git.
+After duplicate protection, return to the bounded semantic fact-resolution defect demonstrated by:
+
+`What IP is AOT-50282 using internally?`
+
+The current production path preserves the endpoint selector but can reduce `using internally` to generic `ip address`, producing an evidence-unavailable response even though governed LAN IP evidence exists. Repair must occur in the reusable canonical-fact interpretation layer, not through a question-specific Datto mapping or script.
+
+## Unresolved controls / risks
+
+1. **Semantic qualifier resolution:** internal/private/local-network language still needs bounded canonical resolution to `LAN IP address`; public/external/internet-facing language should similarly resolve to `WAN IP address`; bare ambiguous IP wording should not silently choose one.
+2. **Rollback verification:** the Teams acknowledgement deployment exposed a weakness in an ad hoc rollback harness that verified container restart but did not verify restored file content afterward. Future rollback procedures must verify restored hashes/state, not merely process restart. Known baseline backups from the live test retained the original bridge hash and were not committed to Git.
+3. **System Registry Datto read-surface gap:** prior governance review found active Datto read operations that are not yet fully represented/verified as production capabilities in the System Registry. Do not silently hand-edit production registry state. Close this through the governed System Registry mutation/approval path when that path is available.
+4. **OpenClaw plugin-registry metadata warning:** OpenClaw has reported stale persisted plugin-registry metadata while successfully deriving/loading the current registry. This is separate from Teams processing feedback and should be handled as its own controlled maintenance item.
+5. **Pre-existing test debt:** approval continuation/recovery tests have known missing test helpers unrelated to the Teams acknowledgement/resource-routing work. Do not attribute those failures to the current changes without new evidence.
 
 ## Production/runtime boundary
 
-The production runtime was rebuilt and restarted successfully on 2026-08-12 using the authoritative Compose project discovered from the running container:
+The Teams acknowledgement change modified the existing OpenClaw Jason Bridge only. It did not rebuild or change `jason-runtime`.
 
-- Compose directory: `/home/al/projects/jason/infrastructure/jason-runtime`
-- Compose file: `/home/al/projects/jason/infrastructure/jason-runtime/compose.yaml`
-- Project/service: `jason-runtime`
-- Image: `jason-runtime:local`
+During live validation the authoritative bridge path was:
 
-Deployment inputs were derived from the running service environment and bind mounts. Protected Microsoft Graph secret paths required privileged metadata verification because the ordinary account could not traverse the parent directory. Secret contents were not printed.
+`/opt/jason/services/openclaw/data/config/extensions/jason-bridge/index.mjs`
 
-Do not guess Compose paths, deployment variables, or secret host paths in future sessions. Re-derive them from authoritative live state when needed.
+inside the OpenClaw container it was visible at:
+
+`/home/node/.openclaw/extensions/jason-bridge/index.mjs`
+
+Do not treat these narrative paths as a substitute for fresh deployment evidence. Re-derive live mounts/source parity before future production mutation.
+
+For Jason runtime rebuild/deployment, continue to use `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` and derive Compose inputs from current live state rather than assumption.
+
+## Continuity rules now in force
+
+Natural-language resource inquiry handling remains a reusable governed platform pattern, not a family of workflow-specific scripts. Future work must preserve:
+
+- provider-neutral resource interpretation;
+- selector/fact separation;
+- canonical fact vocabulary derived from governed capability metadata;
+- minimal requested facts;
+- Central Orchestrator authority and routing;
+- bounded structural evidence indexes;
+- AI selection only among Jason-supplied bounded evidence/canonical choices;
+- deterministic provider-derived fact values and pointer dereference;
+- source attribution;
+- no direct agent-to-agent or agent-to-provider bypass; and
+- failure closed when evidence or semantic support is insufficient.
+
+Teams/OpenClaw remain interface/transport providers only. Transport feedback may improve user experience, but it must never become an authority, policy, provider, or reasoning bypass.
+
+If a representable question fails, repair the reusable layer that failed rather than creating a bespoke query script.
 
 ## Next safe actions
 
-1. Fetch current Git state before making any source-control claim.
-2. Confirm whether the six deployed runtime modifications remain uncommitted locally.
-3. If authorized, run the full relevant validation suite and commit/push those implementation changes as a coherent governed change.
-4. Continue broad resource-inquiry validation with other endpoint facts/resources using the generic capability/resource path, not bespoke scripts.
-5. Update construction guidance whenever a reusable pattern changes or a prerequisite has to be rediscovered.
+1. Validate the documentation control plane after the 2026-08-14 closeout changes.
+2. Confirm the documentation commits are durable on `feature/jason-runtime-service` and synchronize the Jason host before new local work.
+3. Inspect the current authenticated ingress/replay-store implementation and existing tests before designing duplicate protection.
+4. Implement exact transport-message idempotency centrally, with audit evidence and deterministic tests, before considering bounded in-flight same-request handling.
+5. Live-test duplicate protection through Teams without weakening the existing acknowledgement or governed runtime path.
+6. Update documentation again before closing the duplicate-protection workstream.
+7. Then implement the bounded canonical-fact semantic resolver for qualifier-rich human language.
+8. Separately plan governed closure of the System Registry Datto read-surface gap and rollback-verification hardening.
 
 ## Success condition
 
-A future session can reproduce why the AOT-50282 answer was wrong, locate the provider truth, understand the generic semantic/evidence correction, rebuild the runtime from the authoritative deployment topology, and distinguish operational deployment from Git durability without relying on this conversation.
-
-<!-- BEGIN 2026-08-12 DATTO READ WORKSTREAM -->
-## Last durable success — 2026-08-12 Adaptive Governed Datto Read Foundation
-
-Production Jason now supports broad governed Datto RMM read inquiries through reusable provider-neutral capabilities.
-
-Durable success includes:
-
-- organization-wide AOT Datto provider-read observe authority;
-- device alerts, audit, software, account alerts, and managed-site reads;
-- deterministic-first resource interpretation with Ollama semantic fallback;
-- structurally authoritative direct collection evidence;
-- bounded human-oriented collection rendering;
-- generic Provider Adaptation for contradictory provider evidence;
-- complete collection aggregation when the resource inquiry requires completeness;
-- `result_intent` and `completeness_requirement` as governed inquiry properties;
-- production proof of adaptive Datto site recovery and complete 46-site aggregation.
-
-Architecture:
-`docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md`
-
-Session proof:
-`docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md`
-
-Existing resource evidence pattern:
-`docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`
-
-Runtime deployment runbook:
-`docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`
-
-Current branch:
-`feature/jason-runtime-service`
-
-Next priority:
-
-- add visible Microsoft Teams processing feedback using OpenClaw's supported native typing/processing lifecycle;
-- continue generalized provider/resource behavior rather than question-specific scripts;
-- govern Datto write capabilities separately from the established read-only surface.
-<!-- END 2026-08-12 DATTO READ WORKSTREAM -->
-
-## Latest durable success — varied-language complete collection interpretation
-
-The production Teams request `List every site in Datto RMM` exposed and then verified correction of a generic language-contract defect. Jason now separates resource-recognition `inquiry_hints` from broader returnable `fact_hints`, normalizes exhaustive collection language to the capability's canonical `collection_fact`, and propagates `result_intent` plus `completeness_requirement` through planning.
-
-For managed sites, exhaustive wording resolves to canonical `sites` evidence with `enumerate + complete`, allowing the existing Provider Adaptation layer to retrieve and verify the full authorized collection rather than rendering an incidental scalar `site` identifier.
-
-Validated/deployed source checkpoint: `5b2c6c6` (`Separate inquiry hints from resource fact hints`). Runtime rebuild/deployment and health verification passed. The same production Teams request was retested and operator-accepted as correct.
-
-Durable evidence: `docs/sessions/Datto-Governed-Read-Adaptation-Proof-2026-08-12.md`.
-
-Construction rule: recognition aliases are not evidence contracts. Future resource capabilities must distinguish recognition vocabulary from returnable facts and declare a canonical collection fact when they expose a collection. Representable varied/vague questions must be repaired at the reusable interpretation/capability/evidence layer, never with question-specific scripts.
-
-Next priority remains native Microsoft Teams processing feedback through OpenClaw's supported runtime/typing lifecycle.
-
-<!-- BEGIN 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
-## Latest durable success — governed semantic capability discovery
-
-Jason now has a bounded observe-only semantic capability-discovery path for requested facts that are not yet supported by registered capability/evidence metadata.
-
-The validated progression is:
-
-`intent → semantic planning → sufficiency validation → governed context progression → fulfillment infeasibility → capability-registry gap → registered-provider discovery → documentation-review target → governed documentation-source resolution → bounded documentation read → candidate evidence → semantic/corroborating evidence review`
-
-The acceptance fact was:
-
-`operating system display version`
-
-Jason correctly determined that its current registered capability/evidence/derivation surface did not prove support for that fact. It produced a structured Technology Steward capability gap rather than inventing a mapping or requesting a bespoke script.
-
-Registered-provider discovery identified Datto RMM as the existing `managed_endpoint` authority and exposed its authoritative API documentation for review.
-
-A governed live read of the Datto OpenAPI source succeeded:
-
-- OpenAPI `3.1.0`
-- 53 paths
-- 113 schemas
-- SHA-256 provenance
-- no credentials
-- no operational provider invocation
-
-The generic interpreter surfaced `Device.displayVersion` as candidate evidence. Semantic review remained correctly `ambiguous` because the OpenAPI property has no field description. Corroborating OpenAPI evidence established that `displayVersion` is a `string`, belongs to the `Device` schema beside `operatingSystem`, and is returned by three documented read-only device operations, but this still does not constitute semantic proof.
-
-No semantic mapping, capability registration, runtime activation, or deployment was performed.
-
-Current source checkpoint:
-
-`060de83` — `Add live Datto corroborating evidence probe`
-
-Reusable guidance:
-
-`docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md`
-
-Historical proof:
-
-`docs/sessions/Governed-Semantic-Capability-Discovery-Proof-2026-08-13.md`
-
-### Next safe action
-
-Register the independent Kaseya Datto RMM product/help documentation as a second governed authoritative documentation source and use it to corroborate the meaning of `Device.displayVersion`.
-
-If independent authoritative evidence is sufficient, create only a governed semantic-mapping proposal. Do not activate/register that mapping without Technology Steward/governance approval.
-<!-- END 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
+A future competent human or AI can resume from the repository and determine, without this chat, that Teams processing feedback is operational, why OpenClaw native typing did not cover the Jason compatibility path, how the acknowledgement is bounded and non-authoritative, what was live-proven and committed, what risks remain, and that the next safe implementation target is centrally governed duplicate protection followed by canonical semantic qualifier resolution.
