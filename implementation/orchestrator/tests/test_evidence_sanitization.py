@@ -166,3 +166,19 @@ def test_sensitive_key_metadata_redacts_sibling_value():
 
     assert sanitized["setting"]["key"] == "ApiToken"
     assert sanitized["setting"]["value"] == REDACTED
+
+
+def test_relative_api_path_is_not_mistaken_for_opaque_secret():
+    value = (
+        "/api/v2/site/"
+        "9bb56523-cade-4ffb-bc34-696e788f0f4c/"
+        "devices/network-interface"
+    )
+
+    assert sanitize_evidence_tree({"path": value})["path"] == value
+
+
+def test_windows_path_is_not_mistaken_for_opaque_secret():
+    value = r"C:\Program Files\Microsoft OneDrive\OneDrive.exe"
+
+    assert sanitize_evidence_tree({"path": value})["path"] == value

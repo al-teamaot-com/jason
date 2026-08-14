@@ -135,6 +135,154 @@ class CanonicalFactVocabulary:
 DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
     (
         CanonicalFactDefinition(
+            canonical_fact="LAN IP address",
+            aliases=(
+                "lan ip",
+                "lan ip address",
+                "local ip",
+                "local ip address",
+                "private ip",
+                "private ip address",
+                "internal ip",
+                "internal ip address",
+            ),
+            expected_shape="private_ip_address",
+            evidence_hints=(
+                "lan",
+                "local",
+                "private",
+                "internal",
+                "ip",
+                "ip address",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="WAN IP address",
+            aliases=(
+                "wan ip",
+                "wan ip address",
+                "public ip",
+                "public ip address",
+                "external ip",
+                "external ip address",
+                "internet ip",
+            ),
+            expected_shape="public_ip_address",
+            evidence_hints=(
+                "wan",
+                "public",
+                "external",
+                "internet",
+                "ip",
+                "ip address",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="last logged in user",
+            aliases=(
+                "last logged in user",
+                "logged in user",
+                "last login user",
+                "last user",
+            ),
+            expected_shape="descriptive_string",
+            evidence_hints=(
+                "last logged in user",
+                "logged in user",
+                "last user",
+                "login user",
+                "username",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="motherboard model",
+            aliases=(
+                "motherboard",
+                "motherboard model",
+                "mainboard",
+                "mainboard model",
+                "baseboard",
+                "baseboard model",
+                "system board",
+                "system board model",
+            ),
+            expected_shape="descriptive_string",
+            evidence_hints=(
+                "motherboard",
+                "mainboard",
+                "baseboard",
+                "system board",
+                "product",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="printers",
+            aliases=(
+                "printer",
+                "printers",
+                "installed printers",
+                "printer devices",
+            ),
+            expected_shape="collection",
+            evidence_hints=(
+                "printer",
+                "printers",
+                "print device",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="free disk space",
+            aliases=(
+                "free disk space",
+                "disk free space",
+                "available disk space",
+                "free space",
+            ),
+            expected_shape="capacity",
+            evidence_hints=(
+                "free disk space",
+                "disk free space",
+                "freespace",
+                "available space",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="open alerts",
+            aliases=(
+                "open alert",
+                "open alerts",
+                "active alerts",
+                "unresolved alerts",
+                "alerts open",
+            ),
+            expected_shape="collection",
+            evidence_hints=(
+                "open alerts",
+                "active alerts",
+                "unresolved alerts",
+                "alerts open",
+            ),
+        ),
+        CanonicalFactDefinition(
+            canonical_fact="disk error evidence",
+            aliases=(
+                "disk error",
+                "disk errors",
+                "disk error evidence",
+                "disk error history",
+                "historical disk errors",
+                "disk event errors",
+            ),
+            expected_shape="evidence",
+            evidence_hints=(
+                "disk error",
+                "disk errors",
+                "bad block",
+                "event log",
+                "disk",
+            ),
+        ),
+        CanonicalFactDefinition(
             canonical_fact="processor model",
             aliases=(
                 "processor",
@@ -212,6 +360,13 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
             canonical_fact="network adapters",
             aliases=("network adapter", "network adapters", "nic", "nics"),
             expected_shape="collection",
+            evidence_hints=(
+                "network adapter",
+                "network interface",
+                "interface",
+                "nic",
+                "nics",
+            ),
         ),
         CanonicalFactDefinition(
             canonical_fact="logical disks",
@@ -230,6 +385,12 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "gpu",
             ),
             expected_shape="collection",
+            evidence_hints=(
+                "display adapter",
+                "video board",
+                "graphics",
+                "gpu",
+            ),
         ),
     )
 )

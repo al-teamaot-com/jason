@@ -264,14 +264,17 @@ def test_evidence_reasoner_returns_locations_not_values():
             "field": "lastUser",
             "type": "str",
         },
-        {
-            "json_pointer": "/devices",
-            "field": "devices",
-            "type": "list",
-        },
     ]
+
+    # The fact value is not exposed through evidence-index metadata. Jason
+    # deterministically dereferences it only after the model selects a pointer.
+    serialized_index = json.dumps(prompt["evidence_index"])
+    assert "AOT\\\\real.user" not in serialized_index
     system_prompt = request["messages"][0]["content"]
-    assert "never prefix a pointer with /evidence" in system_prompt
+    assert (
+        "never prefix a pointer with /evidence"
+        in system_prompt.casefold()
+    )
     assert "/resource_matches/0/resource_id" in system_prompt
 
 
@@ -465,3 +468,966 @@ def test_structured_json_retry_increases_generation_budget_after_truncated_json(
     assert result == {"status": "ok"}
     assert transport.payloads[0]["options"]["num_predict"] == 160
     assert transport.payloads[1]["options"]["num_predict"] == 320
+
+
+def test_bounded_index_scans_deep_evidence_after_large_early_noise():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "noise": {
+            f"field{number}": number
+            for number in range(1500)
+        },
+        "sections": {
+            "audit": {
+                "payload": {
+                    "systemInfo": {
+                        "totalPhysicalMemory": 68629368832,
+                    }
+                }
+            }
+        },
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("total memory",),
+    )
+
+    pointers = {
+        item["json_pointer"]
+        for item in index
+    }
+
+    assert (
+        "/sections/audit/payload/systemInfo/totalPhysicalMemory"
+        in pointers
+    )
+
+
+def test_bounded_index_understands_camel_case_and_plural_path_context():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "sections": {
+            "audit": {
+                "payload": {
+                    "processors": [
+                        {
+                            "name": "Intel Core i7-9700F",
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("processor model",),
+    )
+
+    pointers = {
+        item["json_pointer"]
+        for item in index
+    }
+
+    assert (
+        "/sections/audit/payload/processors/0/name"
+        in pointers
+    )
+
+
+def test_bounded_index_uses_sibling_context_for_software_version():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "software": [
+            {
+                "name": "Some Other Application",
+                "version": "1.0",
+            },
+            {
+                "name": "Google Chrome",
+                "version": "151.0.7922.138",
+            },
+        ]
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("Chrome version",),
+    )
+
+    chrome = next(
+        item
+        for item in index
+        if item["json_pointer"] == "/software/1/version"
+    )
+
+    assert "Google Chrome" in chrome["context"]
+    assert "151.0.7922.138" not in chrome["context"]
+
+
+def test_bounded_index_uses_sibling_context_for_zerotier_version():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "software": [
+            {
+                "name": "ZeroTier One",
+                "version": "1.14.2",
+            }
+        ]
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("ZeroTier version",),
+    )
+
+    candidate = next(
+        item
+        for item in index
+        if item["json_pointer"] == "/software/0/version"
+    )
+
+    assert "ZeroTier One" in candidate["context"]
+    assert "1.14.2" not in candidate["context"]
+
+
+def test_bounded_index_fails_closed_without_relevant_candidate():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "deviceType": {
+            "category": "Desktop",
+        },
+        "provider_documentation": {
+            "human": "https://example.test/help",
+        },
+    }
+
+    assert (
+        _bounded_evidence_index(
+            data,
+            requested_facts=("motherboard model",),
+        )
+        == ()
+    )
+
+
+def test_v3_lan_and_wan_use_generic_ip_value_shape_not_provider_field_mapping():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "device": {
+            "firstAddress": "192.168.12.33",
+            "secondAddress": "216.54.107.150",
+        }
+    }
+
+    lan = _bounded_evidence_index(
+        data,
+        requested_facts=("LAN IP",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    wan = _bounded_evidence_index(
+        data,
+        requested_facts=("WAN IP",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert lan
+    assert wan
+    assert lan[0]["json_pointer"] == "/device/firstAddress"
+    assert wan[0]["json_pointer"] == "/device/secondAddress"
+
+
+def test_v3_motherboard_fails_closed_on_generic_system_model():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "systemInfo": {
+                "manufacturer": "System manufacturer",
+                "model": "System Product Name",
+            }
+        },
+        requested_facts=("motherboard model",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index == ()
+
+
+def test_v3_free_disk_space_prefers_capacity_with_free_space_semantics():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "logicalDisks": [
+                {
+                    "diskIdentifier": "C:",
+                    "freespace": 207787356160,
+                    "size": 999192260608,
+                }
+            ]
+        },
+        requested_facts=("free disk space",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index
+    assert index[0]["json_pointer"] == "/logicalDisks/0/freespace"
+
+
+def test_v3_disk_error_does_not_rank_unrelated_connector_error():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "patches": {
+                "status": "unavailable",
+                "error_type": "ConnectorTransportError",
+                "error": "HTTP transport failed",
+            },
+            "alerts": [
+                {
+                    "source": "disk",
+                    "type": "Error",
+                    "description": "The device has a bad block.",
+                }
+            ],
+        },
+        requested_facts=("disk error evidence",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = tuple(
+        item["json_pointer"]
+        for item in index
+    )
+
+    assert "/patches/error_type" not in pointers
+    assert "/patches/error" not in pointers
+    assert "/alerts/0/description" in pointers
+
+
+def test_v3_default_model_index_is_small():
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "items": [
+            {
+                "name": f"Item {index}",
+                "version": f"{index}.0",
+            }
+            for index in range(100)
+        ]
+    }
+
+    result = _bounded_evidence_index(
+        data,
+        requested_facts=("Item 50 version",),
+    )
+
+    assert len(result) <= 10
+
+
+def test_evidence_reasoner_prompt_explicitly_allows_abstention_and_fact_contracts():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class Transport:
+        def __init__(self):
+            self.payload = None
+
+        def request(self, **kwargs):
+            self.payload = kwargs["json"]
+            return {
+                "message": {
+                    "content": '{"locations":[]}'
+                }
+            }
+
+    transport = Transport()
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        OllamaStructuredJsonClient(
+            transport=transport,
+            model="local-test",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    result = reasoner.locate(
+        requested_facts=("motherboard model",),
+        data={
+            "systemInfo": {
+                "model": "System Product Name",
+            }
+        },
+    )
+
+    assert result == ()
+
+    # No candidate means no model call is necessary.
+    assert transport.payload is None
+
+    transport = Transport()
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        OllamaStructuredJsonClient(
+            transport=transport,
+            model="local-test",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    reasoner.locate(
+        requested_facts=("total memory",),
+        data={
+            "memory": {
+                "totalPhysicalMemory": 68629368832,
+            }
+        },
+    )
+
+    user_payload = json.loads(
+        transport.payload["messages"][1]["content"]
+    )
+
+    assert (
+        user_payload["fact_contracts"]["total memory"]["expected_shape"]
+        == "capacity"
+    )
+
+    system_prompt = transport.payload["messages"][0]["content"]
+    assert "empty locations array is correct" in system_prompt
+    assert "preferred to guessing" in system_prompt
+
+
+
+def test_v31_descriptive_fact_excludes_wrong_shaped_cpu_count():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "audit": {
+                "systemInfo": {
+                    "totalCpuCores": 8,
+                },
+                "processors": [
+                    {
+                        "name": "Intel Core i7-9700F",
+                    }
+                ],
+            }
+        },
+        requested_facts=("processor model",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = tuple(
+        item["json_pointer"]
+        for item in index
+    )
+
+    assert "/audit/systemInfo/totalCpuCores" not in pointers
+    assert "/audit/processors/0/name" in pointers
+    assert index[0]["json_pointer"] == "/audit/processors/0/name"
+
+
+def test_v31_collection_shape_does_not_create_semantic_relevance():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "attachedDevices": [
+                {
+                    "deviceType": "Storage",
+                    "deviceName": "USB Device",
+                }
+            ],
+            "other": [
+                {
+                    "deviceType": "Printer",
+                    "deviceName": "DYMO LabelWriter 450",
+                }
+            ],
+        },
+        requested_facts=("printers",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = tuple(
+        item["json_pointer"]
+        for item in index
+    )
+
+    assert "/attachedDevices" not in pointers
+    assert "/other/0/deviceName" in pointers
+
+
+def test_v31_disk_primary_term_outranks_generic_event_log_hint():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "alerts": [
+                {
+                    "source": "EventLog",
+                    "type": "Error",
+                    "description": "Unexpected shutdown",
+                },
+                {
+                    "source": "disk",
+                    "type": "Error",
+                    "description": "The device has a bad block.",
+                },
+            ]
+        },
+        requested_facts=("disk error evidence",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index
+    top_pointers = tuple(
+        item["json_pointer"]
+        for item in index[:3]
+    )
+
+    assert any(
+        pointer.startswith("/alerts/1/")
+        for pointer in top_pointers
+    )
+
+
+
+def test_v32_collection_ranking_prefers_matching_resource_identity():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    data = {
+        "identity": {
+            "hostname": "AOT-50282",
+            "device_uid": "device-target",
+        },
+        "site": {
+            "devices": [
+                {
+                    "hostname": "OTHER-PC",
+                    "uid": "device-other",
+                    "nics": [
+                        {"instance": "Other NIC"},
+                    ],
+                },
+                {
+                    "hostname": "AOT-50282",
+                    "uid": "device-target",
+                    "nics": [
+                        {"instance": "Target NIC"},
+                    ],
+                },
+            ]
+        },
+    }
+
+    index = _bounded_evidence_index(
+        data,
+        requested_facts=("network adapters",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = tuple(
+        item["json_pointer"]
+        for item in index
+    )
+
+    assert "/site/devices/1/nics" in pointers
+    assert pointers.index("/site/devices/1/nics") < pointers.index(
+        "/site/devices/0/nics"
+    )
+
+
+def test_v32_open_alert_leaf_collection_outranks_pages_wrapper():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "alerts_open": {
+                "pages": [
+                    {
+                        "alerts": [
+                            {
+                                "priority": "Moderate",
+                                "resolved": False,
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        requested_facts=("open alerts",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = tuple(
+        item["json_pointer"]
+        for item in index
+    )
+
+    assert "/alerts_open/pages/0/alerts" in pointers
+
+    if "/alerts_open/pages" in pointers:
+        assert (
+            pointers.index("/alerts_open/pages/0/alerts")
+            < pointers.index("/alerts_open/pages")
+        )
+
+
+def test_v32_specific_disk_error_context_outranks_disk_identifier():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "audit": {
+                "logicalDisks": [
+                    {
+                        "diskIdentifier": "C:",
+                    }
+                ]
+            },
+            "alerts": [
+                {
+                    "source": "disk",
+                    "type": "Error",
+                    "description": "The device has a bad block.",
+                    "logName": "system",
+                }
+            ],
+        },
+        requested_facts=("disk error evidence",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index
+
+    assert index[0]["json_pointer"].startswith(
+        "/alerts/0/"
+    )
+
+
+def test_v32_motherboard_product_outranks_manufacturer():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "baseBoard": {
+                "manufacturer": "ASUSTeK COMPUTER INC.",
+                "product": "PRIME H370M-PLUS",
+            }
+        },
+        requested_facts=("motherboard model",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index
+    assert index[0]["json_pointer"] == "/baseBoard/product"
+
+
+
+def test_v33_open_alert_metadata_scalars_are_not_collection_candidates():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "alerts_open": {
+                "status": "available",
+                "method": "GET",
+                "page_count": 1,
+                "complete": True,
+                "pages": [
+                    {
+                        "alerts": [
+                            {
+                                "priority": "Moderate",
+                                "resolved": False,
+                            }
+                        ]
+                    }
+                ],
+            }
+        },
+        requested_facts=("open alerts",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = {
+        item["json_pointer"]
+        for item in index
+    }
+
+    assert "/alerts_open/status" not in pointers
+    assert "/alerts_open/method" not in pointers
+    assert "/alerts_open/page_count" not in pointers
+    assert "/alerts_open/complete" not in pointers
+    assert "/alerts_open/pages/0/alerts" in pointers
+
+
+def test_v33_network_collection_does_not_offer_boolean_probe_flags():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "identity": {
+                "hostname": "AOT-50282",
+                "device_uid": "target-device",
+            },
+            "device": {
+                "hostname": "AOT-50282",
+                "uid": "target-device",
+                "networkProbe": False,
+                "onboardedViaNetworkMonitor": False,
+                "nics": [
+                    {
+                        "instance": "Ethernet Adapter",
+                        "ipv4": "192.168.12.33",
+                    }
+                ],
+            },
+        },
+        requested_facts=("network adapters",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    pointers = {
+        item["json_pointer"]
+        for item in index
+    }
+
+    assert "/device/nics" in pointers
+    assert "/device/networkProbe" not in pointers
+    assert "/device/onboardedViaNetworkMonitor" not in pointers
+
+
+def test_v33_disk_error_description_outranks_log_metadata():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import _bounded_evidence_index
+
+    index = _bounded_evidence_index(
+        {
+            "alerts": [
+                {
+                    "alertContext": {
+                        "logName": "system",
+                        "code": "7",
+                        "type": "Error",
+                        "source": "disk",
+                        "description": (
+                            "The device, \\\\Device\\\\Harddisk1\\\\DR2, "
+                            "has a bad block."
+                        ),
+                    }
+                }
+            ]
+        },
+        requested_facts=("disk error evidence",),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    assert index
+    assert (
+        index[0]["json_pointer"]
+        == "/alerts/0/alertContext/description"
+    )
+
+
+
+def test_deterministic_identity_consensus_avoids_llm_for_target_lan_ip():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class NoModelTransport:
+        def request(self, **kwargs):
+            raise AssertionError(
+                "unambiguous identity-bound evidence must not call the model"
+            )
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        client=OllamaStructuredJsonClient(
+            transport=NoModelTransport(),
+            model="must-not-run",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    data = {
+        "identity": {
+            "discovery_record": {
+                "hostname": "AOT-50282",
+                "uid": "target-uid",
+                "intIpAddress": "192.168.12.33",
+            }
+        },
+        "device": {
+            "hostname": "AOT-50282",
+            "uid": "target-uid",
+            "intIpAddress": "192.168.12.33",
+        },
+        "site": {
+            "devices": [
+                {
+                    "hostname": "OTHER",
+                    "uid": "other-uid",
+                    "intIpAddress": "192.168.12.1",
+                }
+            ]
+        },
+    }
+
+    locations = reasoner.locate(
+        requested_facts=("LAN IP",),
+        data=data,
+    )
+
+    assert locations == (
+        {
+            "requested_fact": "LAN IP",
+            "json_pointer":
+                "/identity/discovery_record/intIpAddress",
+        },
+    )
+
+
+def test_deterministic_collection_prefers_relevant_complete_list():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class NoModelTransport:
+        def request(self, **kwargs):
+            raise AssertionError(
+                "unambiguous collection must not call the model"
+            )
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        client=OllamaStructuredJsonClient(
+            transport=NoModelTransport(),
+            model="must-not-run",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    locations = reasoner.locate(
+        requested_facts=("graphics adapter",),
+        data={
+            "audit": {
+                "videoBoards": [
+                    {
+                        "displayAdapter":
+                            "NVIDIA GeForce GT 710",
+                    }
+                ]
+            }
+        },
+    )
+
+    assert locations == (
+        {
+            "requested_fact":
+                "graphics adapter",
+            "json_pointer":
+                "/audit/videoBoards",
+        },
+    )
+
+
+def test_deterministic_filtered_collection_aggregates_matching_item_fields():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class NoModelTransport:
+        def request(self, **kwargs):
+            raise AssertionError(
+                "structurally consistent printer collection must not call model"
+            )
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        client=OllamaStructuredJsonClient(
+            transport=NoModelTransport(),
+            model="must-not-run",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    locations = reasoner.locate(
+        requested_facts=("printers",),
+        data={
+            "attachedDevices": [
+                {
+                    "deviceType": "Printer",
+                    "deviceName":
+                        "DYMO LabelWriter 450",
+                },
+                {
+                    "deviceType": "Printer",
+                    "deviceName":
+                        "Microsoft IPP Class Driver",
+                },
+                {
+                    "deviceType": "Storage",
+                    "deviceName":
+                        "USB Mass Storage Device",
+                },
+            ]
+        },
+    )
+
+    assert locations == (
+        {
+            "requested_fact": "printers",
+            "json_pointer":
+                "/attachedDevices/0/deviceName",
+        },
+        {
+            "requested_fact": "printers",
+            "json_pointer":
+                "/attachedDevices/1/deviceName",
+        },
+    )
+
+
+def test_deterministic_target_nic_collection_avoids_llm():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.ollama_reasoning import (
+        OllamaResourceEvidenceReasoner,
+        OllamaStructuredJsonClient,
+    )
+
+    class NoModelTransport:
+        def request(self, **kwargs):
+            raise AssertionError(
+                "identity-bound NIC collection must not call model"
+            )
+
+    target_nics = [
+        {
+            "instance": "Ethernet Adapter",
+            "ipv4": "192.168.12.33",
+        },
+        {
+            "instance": "ZeroTier Virtual Port",
+            "ipv4": "192.168.193.90",
+        },
+    ]
+
+    reasoner = OllamaResourceEvidenceReasoner(
+        client=OllamaStructuredJsonClient(
+            transport=NoModelTransport(),
+            model="must-not-run",
+        ),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    locations = reasoner.locate(
+        requested_facts=("network adapters",),
+        data={
+            "identity": {
+                "discovery_record": {
+                    "hostname": "AOT-50282",
+                    "uid": "target-uid",
+                }
+            },
+            "site": {
+                "devices": [
+                    {
+                        "hostname": "OTHER",
+                        "uid": "other-uid",
+                        "nics": [
+                            {
+                                "instance":
+                                    "Other Adapter",
+                            }
+                        ],
+                    },
+                    {
+                        "hostname": "AOT-50282",
+                        "uid": "target-uid",
+                        "nics": target_nics,
+                    },
+                ]
+            },
+        },
+    )
+
+    assert locations == (
+        {
+            "requested_fact":
+                "network adapters",
+            "json_pointer":
+                "/site/devices/1/nics",
+        },
+    )

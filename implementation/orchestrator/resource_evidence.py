@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
@@ -31,6 +32,7 @@ class VerifiedResourceFact:
     requested_fact: str
     value: Any
     json_pointer: str
+    json_pointers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,47 +114,147 @@ class GovernedResourceEvidenceInterpreter:
                 raise LookupError("requested facts were not located in governed provider evidence")
 
             allowed_facts = set(unresolved)
-            seen: set[str] = set()
+            grouped: dict[str, list[str]] = {}
+
             for proposal in proposals:
                 if not isinstance(proposal, Mapping):
-                    raise ValueError("resource evidence proposal must be an object")
-                requested_fact = str(proposal.get("requested_fact", "")).strip()
-                pointer = str(proposal.get("json_pointer", "")).strip()
+                    raise ValueError(
+                        "resource evidence proposal must be an object"
+                    )
+
+                requested_fact = str(
+                    proposal.get("requested_fact", "")
+                ).strip()
+                pointer = str(
+                    proposal.get("json_pointer", "")
+                ).strip()
+
                 if requested_fact not in allowed_facts:
-                    raise PermissionError("evidence reasoner attempted to assert an unrequested fact")
-                if requested_fact in seen:
-                    raise ValueError("evidence reasoner returned duplicate requested facts")
+                    raise PermissionError(
+                        "evidence reasoner attempted to assert an "
+                        "unrequested fact"
+                    )
+
                 if not pointer.startswith("/"):
-                    raise ValueError("resource evidence must use an absolute JSON Pointer")
+                    raise ValueError(
+                        "resource evidence must use an absolute JSON Pointer"
+                    )
 
-                actual = _resolve_json_pointer(data, pointer)
+                pointers = grouped.setdefault(requested_fact, [])
 
-                # Semantic context remains useful knowledge for planning and
-                # explanation, but provider field names are not required to
-                # repeat Jason's ontology terminology. The bounded reasoner
-                # selects only an allowed structural path; Jason then
-                # deterministically dereferences the sanitized provider value.
-                if self.fact_vocabulary is not None:
-                    definition = self.fact_vocabulary.resolve(requested_fact)
-                    if definition is not None and not _value_matches_expected_shape(
+                if pointer not in pointers:
+                    pointers.append(pointer)
+
+            seen: set[str] = set()
+
+            for requested_fact in unresolved:
+                pointers = tuple(grouped.get(requested_fact, ()))
+
+                if not pointers:
+                    continue
+
+                definition = (
+                    self.fact_vocabulary.resolve(requested_fact)
+                    if self.fact_vocabulary is not None
+                    else None
+                )
+                expected_shape = (
+                    definition.expected_shape
+                    if definition is not None
+                    else ""
+                )
+
+                if len(pointers) > 1 and expected_shape != "collection":
+                    raise ValueError(
+                        "evidence reasoner returned duplicate requested facts"
+                    )
+
+                resolved_values = tuple(
+                    _resolve_json_pointer(data, pointer)
+                    for pointer in pointers
+                )
+
+                if expected_shape == "collection" and len(pointers) > 1:
+                    # Multiple evidence paths are permitted only when they
+                    # represent the same structural item field. This supports
+                    # provider-neutral collections whose matching records are
+                    # distributed through a larger inventory, while preventing
+                    # unrelated fields from being combined into a fabricated
+                    # collection.
+                    leaf_fields = {
+                        pointer.rsplit("/", 1)[-1]
+                        .replace("~1", "/")
+                        .replace("~0", "~")
+                        for pointer in pointers
+                    }
+
+                    if len(leaf_fields) != 1:
+                        raise ValueError(
+                            "collection evidence items must use the same "
+                            "structural field"
+                        )
+
+                    aggregated: list[Any] = []
+
+                    for value in resolved_values:
+                        if isinstance(value, (list, tuple)):
+                            aggregated.extend(value)
+                        else:
+                            aggregated.append(value)
+
+                    actual: Any = tuple(aggregated)
+
+                else:
+                    actual = resolved_values[0]
+
+                # A single scalar cannot silently satisfy a collection
+                # contract. The model must select the collection itself, or
+                # return multiple structurally consistent item pointers.
+                if (
+                    expected_shape == "collection"
+                    and len(pointers) == 1
+                    and not isinstance(actual, (list, tuple))
+                ):
+                    raise LookupError(
+                        f"provider evidence has wrong shape for "
+                        f"{requested_fact}: expected collection"
+                    )
+
+                if (
+                    definition is not None
+                    and not _value_matches_expected_shape(
                         actual,
                         definition.expected_shape,
-                    ):
-                        raise LookupError(
-                            f"provider evidence has wrong shape for {requested_fact}: "
-                            f"expected {definition.expected_shape}"
-                        )
+                    )
+                ):
+                    raise LookupError(
+                        f"provider evidence has wrong shape for "
+                        f"{requested_fact}: expected "
+                        f"{definition.expected_shape}"
+                    )
+
                 verified_by_fact[requested_fact] = VerifiedResourceFact(
                     requested_fact=requested_fact,
                     value=actual,
-                    json_pointer=pointer,
+                    json_pointer=pointers[0],
+                    json_pointers=(
+                        pointers
+                        if len(pointers) > 1
+                        else ()
+                    ),
                 )
                 seen.add(requested_fact)
 
-            missing = tuple(fact for fact in unresolved if fact not in seen)
+            missing = tuple(
+                fact
+                for fact in unresolved
+                if fact not in seen
+            )
+
             if missing:
                 raise LookupError(
-                    "governed provider evidence did not support all requested facts: "
+                    "governed provider evidence did not support all "
+                    "requested facts: "
                     + ", ".join(missing)
                 )
 
@@ -326,21 +428,73 @@ def _evidence_matches_contexts(*, pointer: str, contexts: tuple[str, ...]) -> bo
 
 def _value_matches_expected_shape(value: Any, expected_shape: str) -> bool:
     """Validate provider evidence against the provider-neutral fact contract."""
+
     if expected_shape == "descriptive_string":
-        return isinstance(value, str) and bool(value.strip()) and not value.strip().isdigit()
+        return (
+            isinstance(value, str)
+            and bool(value.strip())
+            and not value.strip().isdigit()
+        )
+
     if expected_shape == "integer_count":
-        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        )
+
     if expected_shape == "capacity":
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
             return value >= 0
+
         if isinstance(value, str):
             text = value.strip().casefold()
             return bool(text) and any(
-                unit in text for unit in ("kb", "mb", "gb", "tb", "bytes", "byte")
+                unit in text
+                for unit in (
+                    "kb",
+                    "mb",
+                    "gb",
+                    "tb",
+                    "bytes",
+                    "byte",
+                )
             )
+
         return False
+
+    if expected_shape in (
+        "private_ip_address",
+        "public_ip_address",
+    ):
+        if not isinstance(value, str):
+            return False
+
+        try:
+            address = ipaddress.ip_address(value.strip())
+        except ValueError:
+            return False
+
+        if expected_shape == "private_ip_address":
+            return address.is_private
+
+        return address.is_global
+
     if expected_shape == "collection":
         return isinstance(value, (list, tuple))
+
+    if expected_shape == "evidence":
+        if isinstance(value, Mapping):
+            return True
+
+        if isinstance(value, (list, tuple)):
+            return True
+
+        return isinstance(value, str) and bool(value.strip())
+
     return True
 
 

@@ -1172,3 +1172,137 @@ def test_resource_reasoner_receives_sanitized_provider_evidence():
 
     assert facts[0].value == "Intel Core i7"
     assert reasoner.seen["provider_data"]["siteVariable"]["value"] == "[REDACTED]"
+
+
+def test_collection_fact_can_aggregate_multiple_structurally_consistent_item_pointers():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "printers",
+                "json_pointer": "/audit/attachedDevices/0/deviceName",
+            },
+            {
+                "requested_fact": "printers",
+                "json_pointer": "/audit/attachedDevices/1/deviceName",
+            },
+        ]
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=reasoner,
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-collection",
+        correlation_id="corr-collection",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "audit": {
+                    "attachedDevices": [
+                        {
+                            "deviceType": "Printer",
+                            "deviceName": "DYMO LabelWriter 450",
+                        },
+                        {
+                            "deviceType": "Printer",
+                            "deviceName": "Microsoft IPP Class Driver",
+                        },
+                    ]
+                }
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    facts = interpreter.interpret(
+        result=result,
+        requested_facts=("printers",),
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value == (
+        "DYMO LabelWriter 450",
+        "Microsoft IPP Class Driver",
+    )
+    assert facts[0].json_pointers == (
+        "/audit/attachedDevices/0/deviceName",
+        "/audit/attachedDevices/1/deviceName",
+    )
+
+
+def test_non_collection_fact_still_rejects_multiple_pointers():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "processor model",
+                "json_pointer": "/processors/0/name",
+            },
+            {
+                "requested_fact": "processor model",
+                "json_pointer": "/processors/1/name",
+            },
+        ]
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=reasoner,
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-duplicate",
+        correlation_id="corr-duplicate",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "processors": [
+                    {"name": "CPU A"},
+                    {"name": "CPU B"},
+                ]
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="duplicate requested facts",
+    ):
+        interpreter.interpret(
+            result=result,
+            requested_facts=("processor model",),
+        )

@@ -125,6 +125,18 @@ def _looks_like_opaque_secret(value: str) -> bool:
     if "://" in value:
         return False
 
+    # Long API and filesystem paths can have enough character variety to look
+    # statistically opaque even though their structure is plainly non-secret.
+    # Explicit secret formats are detected before this heuristic.
+    if value.startswith("/") and "/" in value[1:]:
+        return False
+
+    if re.match(r"^[A-Za-z]:[\\/]", value):
+        return False
+
+    if value.startswith("\\\\"):
+        return False
+
     classes = sum(
         bool(pattern.search(value))
         for pattern in (
