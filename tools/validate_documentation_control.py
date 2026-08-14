@@ -74,6 +74,7 @@ REQUIRED_DOC_DIRECTORIES = (
 )
 
 IMPLEMENTATION_README_ROOTS = ("implementation", "infrastructure")
+IMPLEMENTATION_README_IGNORED_PARTS = {".pytest_cache"}
 
 
 def fail(message: str) -> None:
@@ -313,7 +314,10 @@ def main() -> int:
         if not base.is_dir():
             continue
         for readme in sorted(base.rglob("README.md")):
-            relative = readme.relative_to(ROOT).as_posix()
+            relative_path = readme.relative_to(ROOT)
+            if any(part in IMPLEMENTATION_README_IGNORED_PARTS for part in relative_path.parts):
+                continue
+            relative = relative_path.as_posix()
             if relative not in implementation_index:
                 fail("Material implementation-local README is not represented in the implementation documentation index: " + relative)
 
