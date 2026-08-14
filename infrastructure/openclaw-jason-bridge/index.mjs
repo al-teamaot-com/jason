@@ -591,7 +591,6 @@ export default definePluginEntry({
       },
       {
         timeoutMs: HOOK_TIMEOUT_MS,
-        eligibleTriggers: ["user"],
       },
     );
   },
