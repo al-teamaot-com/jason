@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Mapping, Protocol
 
 from orchestrator.teams_conversation_flow import (
@@ -207,6 +208,28 @@ class GovernedOpenClawTeamsConversationIngress:
                 machine_identity=machine_identity,
             )
 
+        message_claim_key = _teams_message_claim_key(parsed)
+        if not self.replay.claim(message_claim_key):
+            self.audit.append(
+                "openclaw.teams_conversation_duplicate_suppressed",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "microsoft_tenant_id": parsed.microsoft_tenant_id,
+                    "microsoft_object_id": parsed.microsoft_object_id,
+                    "conversation_id": parsed.conversation_id,
+                    "message_id": parsed.message_id,
+                },
+            )
+            return {
+                "request_id": parsed.request_id,
+                "correlation_id": parsed.correlation_id,
+                "status": "duplicate",
+                "error_code": "duplicate_message",
+                "message_id": parsed.message_id,
+            }
+
         self.audit.append(
             "openclaw.teams_conversation_authenticated",
             {
@@ -358,6 +381,20 @@ class GovernedOpenClawTeamsConversationIngress:
             "status": "denied",
             "error_code": reason,
         }
+
+
+def _teams_message_claim_key(
+    parsed: OpenClawTeamsConversationEnvelope,
+) -> str:
+    canonical = "\x00".join(
+        (
+            parsed.microsoft_tenant_id,
+            parsed.microsoft_object_id,
+            parsed.conversation_id,
+            parsed.message_id,
+        )
+    ).encode("utf-8")
+    return "teams-message-v1:" + sha256(canonical).hexdigest()
 
 
 def _parse_utc(value: str) -> datetime:

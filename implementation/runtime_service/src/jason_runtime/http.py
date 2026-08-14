@@ -110,6 +110,8 @@ class RuntimeHttpApplication:
         error_code = str(result.get("error_code", "")).strip()
         if status == "completed":
             return 200
+        if status == "duplicate":
+            return 200
         if status == "approval_required":
             return 202
         if status == "denied":

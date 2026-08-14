@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from threading import Event, Thread
 
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
@@ -211,6 +212,148 @@ def test_replay_is_rejected_before_second_execution():
     assert second["status"] == "rejected"
     assert second["error_code"] == "replay_detected"
     assert len(flow.requests) == 1
+
+
+def test_same_authenticated_teams_message_with_new_request_id_is_suppressed():
+    flow = Flow()
+    replay = Replay()
+    audit = Audit()
+    handler = ingress(flow=flow, replay=replay, audit=audit)
+
+    first = handler.handle(
+        envelope(
+            request_id="req-message-first",
+            correlation_id="corr-message-first",
+        )
+    )
+    duplicate = handler.handle(
+        envelope(
+            request_id="req-message-duplicate",
+            correlation_id="corr-message-duplicate",
+            nonce="nonce-duplicate",
+        )
+    )
+
+    assert first["status"] == "completed"
+    assert duplicate == {
+        "request_id": "req-message-duplicate",
+        "correlation_id": "corr-message-duplicate",
+        "status": "duplicate",
+        "error_code": "duplicate_message",
+        "message_id": "teams-message-1",
+    }
+    assert len(flow.requests) == 1
+    assert audit.events[-1][0] == (
+        "openclaw.teams_conversation_duplicate_suppressed"
+    )
+    assert audit.events[-1][1]["message_id"] == "teams-message-1"
+
+
+
+def test_duplicate_is_suppressed_while_first_message_is_still_in_flight():
+    started = Event()
+    release = Event()
+    calls = []
+    first_result = []
+
+    class BlockingFlow:
+        def handle(self, request):
+            calls.append(request)
+            started.set()
+
+            if not release.wait(timeout=5):
+                raise TimeoutError("test flow was not released")
+
+            return Flow().handle(request)
+
+    replay = Replay()
+    audit = Audit()
+    handler = ingress(
+        flow=BlockingFlow(),
+        replay=replay,
+        audit=audit,
+    )
+
+    def run_first():
+        first_result.append(
+            handler.handle(
+                envelope(
+                    request_id="req-inflight-first",
+                    correlation_id="corr-inflight-first",
+                    message_id="teams-message-inflight",
+                )
+            )
+        )
+
+    worker = Thread(target=run_first)
+    worker.start()
+
+    assert started.wait(timeout=5)
+
+    duplicate = handler.handle(
+        envelope(
+            request_id="req-inflight-duplicate",
+            correlation_id="corr-inflight-duplicate",
+            nonce="nonce-inflight-duplicate",
+            message_id="teams-message-inflight",
+        )
+    )
+
+    assert duplicate == {
+        "request_id": "req-inflight-duplicate",
+        "correlation_id": "corr-inflight-duplicate",
+        "status": "duplicate",
+        "error_code": "duplicate_message",
+        "message_id": "teams-message-inflight",
+    }
+
+    assert len(calls) == 1
+
+    duplicate_events = [
+        payload
+        for event_type, payload in audit.events
+        if event_type
+        == "openclaw.teams_conversation_duplicate_suppressed"
+    ]
+
+    assert len(duplicate_events) == 1
+    assert duplicate_events[0]["message_id"] == (
+        "teams-message-inflight"
+    )
+
+    release.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(first_result) == 1
+    assert first_result[0]["status"] == "completed"
+
+
+
+def test_same_text_in_new_teams_message_is_not_suppressed():
+    flow = Flow()
+    replay = Replay()
+    handler = ingress(flow=flow, replay=replay)
+
+    first = handler.handle(
+        envelope(
+            request_id="req-new-message-1",
+            correlation_id="corr-new-message-1",
+            message_id="teams-message-new-1",
+        )
+    )
+    second = handler.handle(
+        envelope(
+            request_id="req-new-message-2",
+            correlation_id="corr-new-message-2",
+            nonce="nonce-new-message-2",
+            message_id="teams-message-new-2",
+        )
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert len(flow.requests) == 2
 
 
 def test_expired_turn_fails_before_replay_claim_and_flow():

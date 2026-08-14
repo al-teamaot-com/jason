@@ -80,6 +80,28 @@ def test_http_layer_cannot_turn_rejection_into_success():
     assert response.body["status"] == "rejected"
 
 
+def test_duplicate_authenticated_message_is_successful_idempotent_transport():
+    ingress = Ingress(
+        {
+            "request_id": "req-duplicate",
+            "correlation_id": "corr-duplicate",
+            "status": "duplicate",
+            "error_code": "duplicate_message",
+            "message_id": "teams-message-1",
+        }
+    )
+    response = RuntimeHttpApplication(ingress).dispatch(
+        method="POST",
+        path="/v1/openclaw/teams/conversation",
+        headers={"Content-Type": "application/json"},
+        body=request_body(),
+    )
+
+    assert response.status_code == 200
+    assert response.body["status"] == "duplicate"
+    assert response.body["error_code"] == "duplicate_message"
+
+
 def test_replay_rejection_is_conflict_not_success():
     ingress = Ingress(
         {
