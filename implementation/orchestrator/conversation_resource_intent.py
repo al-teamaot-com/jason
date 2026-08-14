@@ -10,6 +10,7 @@ from .resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
 from .semantic_request_bridge import SemanticRequestBridge
 from .teams_conversation_flow import (
     BoundConversationPrincipal,
+    ConversationClarificationRequiredError,
     ConversationIntent,
     ConversationIntentUnresolvedError,
 )
@@ -327,9 +328,14 @@ class MetadataFirstResourceInquiryInterpreter:
         )
 
         if qualified.status == "ambiguous":
-            raise ConversationIntentUnresolvedError(
-                "endpoint fact wording is ambiguous "
-                "between governed canonical facts"
+            raise ConversationClarificationRequiredError(
+                reason_code=
+                    "canonical_fact_ambiguous",
+                candidate_facts=tuple(
+                    definition.canonical_fact
+                    for definition
+                    in qualified.candidates
+                ),
             )
 
         requested_fact = None

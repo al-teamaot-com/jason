@@ -20,6 +20,44 @@ class ConversationIntentUnresolvedError(LookupError):
     """The human turn could not be mapped to a governed Jason capability intent."""
 
 
+class ConversationClarificationRequiredError(
+    ConversationIntentUnresolvedError
+):
+    """The human must disambiguate bounded governed facts before execution."""
+
+    def __init__(
+        self,
+        *,
+        reason_code: str,
+        candidate_facts: tuple[str, ...],
+    ) -> None:
+        reason_code = str(reason_code).strip()
+
+        if not reason_code:
+            raise ValueError(
+                "clarification reason_code is required"
+            )
+
+        normalized: list[str] = []
+
+        for raw_fact in candidate_facts:
+            fact = str(raw_fact).strip()
+
+            if fact and fact not in normalized:
+                normalized.append(fact)
+
+        if len(normalized) < 2:
+            raise ValueError(
+                "clarification requires at least two "
+                "distinct governed candidate facts"
+            )
+
+        self.reason_code = reason_code
+        self.candidate_facts = tuple(normalized)
+
+        super().__init__(reason_code)
+
+
 @dataclass(frozen=True, slots=True)
 class TeamsConversationPrincipalEvidence:
     """Authenticated transport identity evidence supplied by the Teams boundary."""

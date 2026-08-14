@@ -6,6 +6,7 @@ from threading import Event, Thread
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
 from orchestrator.teams_conversation_flow import (
+    ConversationClarificationRequiredError,
     ConversationIntentUnresolvedError,
     TeamsConversationFlowResult,
 )
@@ -423,3 +424,75 @@ def test_downstream_lookup_failure_is_reported_as_failed_not_unresolved():
         "error_code": "conversation_failed",
     }
     assert audit.events[-1][0] == "openclaw.teams_conversation_failed"
+
+
+def test_structured_clarification_is_audited_and_returned_without_rejection():
+    audit = Audit()
+
+    flow = Flow(
+        error=ConversationClarificationRequiredError(
+            reason_code=
+                "canonical_fact_ambiguous",
+            candidate_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    result = ingress(
+        flow=flow,
+        audit=audit,
+    ).handle(
+        envelope(
+            request_id=
+                "req-clarification",
+            message_id=
+                "teams-message-clarification",
+        )
+    )
+
+    assert result == {
+        "request_id":
+            "req-clarification",
+        "correlation_id":
+            "corr-conversation-1",
+        "status":
+            "clarification_required",
+        "error_code":
+            "canonical_fact_ambiguous",
+        "clarification": {
+            "text": (
+                "I need one detail before I can "
+                "continue. Do you mean LAN IP "
+                "address or WAN IP address? "
+                "Please send a complete request "
+                "naming the one you want."
+            ),
+            "candidate_facts": [
+                "LAN IP address",
+                "WAN IP address",
+            ],
+            "requires_complete_request":
+                True,
+        },
+    }
+
+    assert audit.events[-1][0] == (
+        "openclaw.teams_conversation_"
+        "clarification_required"
+    )
+
+    assert audit.events[-1][1][
+        "candidate_facts"
+    ] == [
+        "LAN IP address",
+        "WAN IP address",
+    ]
+
+    assert all(
+        event_type
+        != "openclaw.teams_conversation_rejected"
+        for event_type, _
+        in audit.events
+    )

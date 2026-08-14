@@ -130,6 +130,13 @@ export function replyForRuntimeResult(result) {
     }
     return "Jason completed the request but did not return a usable response.";
   }
+  if (payload.status === "clarification_required") {
+    const text = payload.clarification?.text;
+    if (typeof text === "string" && text.trim()) {
+      return text.trim();
+    }
+    return "Jason needs one more detail before it can continue. No action was taken.";
+  }
   if (payload.status === "approval_required") {
     return "Jason requires approval before this request can continue.";
   }

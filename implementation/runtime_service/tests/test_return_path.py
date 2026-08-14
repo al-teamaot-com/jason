@@ -96,3 +96,48 @@ def test_non_completed_result_does_not_create_reply_handoff():
 
     assert result["status"] == "rejected"
     assert "reply" not in result
+
+
+def test_clarification_result_passes_through_without_return_handoff():
+    class Clarification:
+        def handle(self, envelope):
+            return {
+                "request_id":
+                    "req-clarification",
+                "correlation_id":
+                    "corr-clarification",
+                "status":
+                    "clarification_required",
+                "error_code":
+                    "canonical_fact_ambiguous",
+                "clarification": {
+                    "text":
+                        "Do you mean LAN or WAN?",
+                    "candidate_facts": [
+                        "LAN IP address",
+                        "WAN IP address",
+                    ],
+                    "requires_complete_request":
+                        True,
+                },
+            }
+
+    transport = OpenClawReturnPathTransport()
+
+    result = (
+        OpenClawReturnPathConversationIngress(
+            ingress=Clarification(),
+            transport=transport,
+        ).handle({})
+    )
+
+    assert (
+        result["status"]
+        == "clarification_required"
+    )
+
+    assert result["clarification"]["text"] == (
+        "Do you mean LAN or WAN?"
+    )
+
+    assert "transport_message_id" not in result

@@ -12,6 +12,10 @@ class QualifiedCanonicalFactResolution:
 
     status: str
     definition: "CanonicalFactDefinition | None" = None
+    candidates: tuple[
+        "CanonicalFactDefinition",
+        ...,
+    ] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -37,6 +41,26 @@ class QualifiedCanonicalFactResolution:
         ):
             raise ValueError(
                 "unresolved qualified fact may not carry a definition"
+            )
+
+        if self.status == "ambiguous":
+            if len(self.candidates) < 2:
+                raise ValueError(
+                    "ambiguous qualified fact requires "
+                    "at least two candidates"
+                )
+
+            if len(set(self.candidates)) != len(
+                self.candidates
+            ):
+                raise ValueError(
+                    "ambiguous qualified fact candidates "
+                    "must be unique"
+                )
+        elif self.candidates:
+            raise ValueError(
+                "only ambiguous qualified facts may "
+                "carry competing candidates"
             )
 
 
@@ -212,27 +236,60 @@ class CanonicalFactVocabulary:
             human_text
         )
 
-        shared_present = any(
-            self._recognition_phrase_matches(
+        matched_shared = {
+            phrase
+            for phrase in shared
+            if self._recognition_phrase_matches(
                 normalized_text,
                 phrase,
             )
-            for phrase in shared
-        )
+        }
 
-        if not shared_present:
+        if not matched_shared:
             return QualifiedCanonicalFactResolution(
                 status="not_applicable",
             )
+
+        active_definitions = [
+            definition
+            for definition in definitions
+            if recognition[definition].intersection(
+                matched_shared
+            )
+        ]
+
+        if len(active_definitions) < 2:
+            return QualifiedCanonicalFactResolution(
+                status="not_applicable",
+            )
+
+        active_phrase_counts: dict[str, int] = {}
+
+        for definition in active_definitions:
+            for phrase in recognition[definition]:
+                active_phrase_counts[phrase] = (
+                    active_phrase_counts.get(
+                        phrase,
+                        0,
+                    )
+                    + 1
+                )
+
+        active_shared = {
+            phrase
+            for phrase, count
+            in active_phrase_counts.items()
+            if count > 1
+        }
 
         matched: list[
             CanonicalFactDefinition
         ] = []
 
-        for definition in definitions:
+        for definition in active_definitions:
             discriminators = (
                 recognition[definition]
-                - shared
+                - active_shared
             )
 
             discriminator_present = any(
@@ -254,6 +311,7 @@ class CanonicalFactVocabulary:
 
         return QualifiedCanonicalFactResolution(
             status="ambiguous",
+            candidates=tuple(active_definitions),
         )
 
     @staticmethod

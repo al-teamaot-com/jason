@@ -125,3 +125,28 @@ test("never falls back to an ungoverned answer for runtime failures", () => {
     "Datto RMM reports Al.",
   );
 });
+
+
+test("renders governed clarification without inventing an answer", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 200,
+    payload: {
+      status: "clarification_required",
+      error_code: "canonical_fact_ambiguous",
+      clarification: {
+        text:
+          "I need one detail before I can continue. Do you mean LAN IP address or WAN IP address? Please send a complete request naming the one you want.",
+        candidate_facts: [
+          "LAN IP address",
+          "WAN IP address",
+        ],
+        requires_complete_request: true,
+      },
+    },
+  });
+
+  assert.equal(
+    reply,
+    "I need one detail before I can continue. Do you mean LAN IP address or WAN IP address? Please send a complete request naming the one you want.",
+  );
+});

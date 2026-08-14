@@ -112,6 +112,8 @@ class RuntimeHttpApplication:
             return 200
         if status == "duplicate":
             return 200
+        if status == "clarification_required":
+            return 200
         if status == "approval_required":
             return 202
         if status == "denied":

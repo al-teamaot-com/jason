@@ -151,3 +151,50 @@ def test_unknown_ingress_status_fails_closed():
         body=request_body(),
     )
     assert response.status_code == 500
+
+
+def test_clarification_required_is_successful_conversation_transport():
+    ingress = Ingress(
+        {
+            "request_id":
+                "req-clarification",
+            "correlation_id":
+                "corr-clarification",
+            "status":
+                "clarification_required",
+            "error_code":
+                "canonical_fact_ambiguous",
+            "clarification": {
+                "text":
+                    "Do you mean LAN or WAN?",
+                "candidate_facts": [
+                    "LAN IP address",
+                    "WAN IP address",
+                ],
+                "requires_complete_request":
+                    True,
+            },
+        }
+    )
+
+    response = RuntimeHttpApplication(
+        ingress
+    ).dispatch(
+        method="POST",
+        path=(
+            "/v1/openclaw/teams/"
+            "conversation"
+        ),
+        headers={
+            "Content-Type":
+                "application/json"
+        },
+        body=request_body(),
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.body["status"]
+        == "clarification_required"
+    )

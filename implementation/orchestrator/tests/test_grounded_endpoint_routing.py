@@ -30,6 +30,7 @@ from orchestrator.resource_reasoner import (
 )
 from orchestrator.teams_conversation_flow import (
     BoundConversationPrincipal,
+    ConversationClarificationRequiredError,
     ConversationIntentUnresolvedError,
 )
 
@@ -394,3 +395,28 @@ def test_conflicting_endpoint_ip_is_stopped_before_explicit_alias_match():
         )
 
     assert fallback.calls == []
+
+
+def test_bare_endpoint_ip_exposes_only_governed_competing_facts():
+    with pytest.raises(
+        ConversationClarificationRequiredError
+    ) as captured:
+        qualified_interpreter().interpret(
+            text=(
+                "What IP does "
+                "AOT-50282 have?"
+            ),
+            principal=principal(),
+        )
+
+    error = captured.value
+
+    assert (
+        error.reason_code
+        == "canonical_fact_ambiguous"
+    )
+
+    assert error.candidate_facts == (
+        "LAN IP address",
+        "WAN IP address",
+    )

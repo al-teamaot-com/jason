@@ -151,3 +151,29 @@ def test_qualified_fact_unrelated_language_is_not_applicable():
 
     assert result.status == "not_applicable"
     assert result.definition is None
+
+
+def test_ambiguous_qualified_fact_returns_only_active_competing_facts():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "What IP does AOT-50282 have?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+                "last logged in user",
+            ),
+        )
+    )
+
+    assert result.status == "ambiguous"
+
+    assert tuple(
+        item.canonical_fact
+        for item in result.candidates
+    ) == (
+        "LAN IP address",
+        "WAN IP address",
+    )
