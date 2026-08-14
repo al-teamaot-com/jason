@@ -110,6 +110,34 @@ Historical proof:
 
 `docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
 
+## 2026-08-14 stateless governed ambiguity clarification
+
+Deterministic ambiguity is a governed conversational result, not permission to guess.
+
+For `What IP does AOT-50282 have?`, the active governed candidates are exactly `LAN IP address` and `WAN IP address`.
+
+When qualification returns ambiguity, Jason must preserve only the active competing canonical facts and return a structured clarification before request construction, Central Orchestrator execution, provider access, or model guessing.
+
+The current contract uses:
+
+- HTTP `200`;
+- `status=clarification_required`;
+- `error_code=canonical_fact_ambiguous`;
+- bounded `candidate_facts`; and
+- `requires_complete_request=true`.
+
+HTTP `200` means the authenticated conversational turn was handled successfully. It does not mean orchestration or provider execution succeeded.
+
+OpenClaw may render the clarification supplied by Jason. It may not choose a candidate, query a provider to resolve the ambiguity, or retain hidden execution authority.
+
+The current implementation is intentionally stateless. A reply such as `LAN` does not continue the previous request. The human must currently send a complete request such as `What is the LAN IP address of AOT-50282?`.
+
+Signed production proof established authenticated plus clarification-required audit events, no completion/rejection/failure event, no orchestration result, no provider result, and no return-path handoff.
+
+Historical proof:
+
+`docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
+
 <!-- BEGIN 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
 ## 2026-08-13 semantic capability-gap and provider-documentation discovery
 

@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-08-14  
-**Status:** Teams -> OpenClaw -> Jason governed interaction is operationally proven with processing acknowledgement, exact authenticated Teams-message idempotency, governed Datto RMM reads, provider-derived evidence, and deterministic canonical-fact qualifier resolution. The latest live-proven implementation checkpoint is durable in GitHub at `2e5db00db970a5cec4e153e54abbd3600819c313` (`Resolve qualified canonical endpoint facts`).
+**Status:** Teams -> OpenClaw -> Jason governed interaction is operationally proven with processing acknowledgement, exact authenticated Teams-message idempotency, governed Datto RMM reads, provider-derived evidence, deterministic canonical-fact qualifier resolution, and stateless governed ambiguity clarification. The latest live-proven implementation checkpoint is durable in GitHub at `9d125d8c5144ead948e2c90d9b79f7796bdb3c1c` (`Add governed ambiguity clarification`).
 **Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -25,102 +25,96 @@ Conversation memory is context only. It is not authority and must not be used to
 
 ## Last durable success
 
-The 2026-08-14 canonical-fact qualifier work closed the semantic-collapse defect for qualifier-rich endpoint facts.
+The 2026-08-14 governed ambiguity-clarification work converted deterministic canonical-fact ambiguity from a generic failure into a bounded non-execution conversational result.
 
 The motivating production request was:
 
-`What IP is AOT-50282 using internally?`
+`What IP does AOT-50282 have?`
 
-Jason already had governed `LAN IP address` and `WAN IP address` canonical facts and provider evidence. The defect was interpretation: generic language reasoning could reduce qualifier-rich wording to `ip address`, erasing the LAN/WAN distinction before capability planning.
+The qualifier layer establishes that this request is ambiguous between:
 
-Two bounded Qwen experiments were evaluated and rejected as the production solution:
+- `LAN IP address`;
+- `WAN IP address`.
 
-- one incorrectly classified `internet-facing IP` as LAN;
-- another handled qualified cases correctly but guessed LAN for the ambiguous `What IP does AOT-50282 have?`.
+Jason now returns:
 
-Jason therefore does not use a model to choose this canonical-fact contrast.
+- HTTP `200`;
+- `status=clarification_required`;
+- `error_code=canonical_fact_ambiguous`;
+- candidates exactly `LAN IP address` and `WAN IP address`;
+- bounded clarification text; and
+- `requires_complete_request=true`.
 
-The durable implementation provides deterministic tri-state qualifier analysis:
+Clarification occurs before orchestration-request construction, Central Orchestrator execution, provider access, or model guessing.
 
-- `not_applicable` — the competing-fact contrast is not activated;
-- `resolved` — a shared semantic anchor exists and exactly one candidate has discriminating language;
-- `ambiguous` — the shared anchor exists but no unique candidate can be established, including contradictory qualifiers.
+The signed live proof produced only:
 
-For LAN/WAN addressing:
+- `openclaw.teams_conversation_authenticated`;
+- `openclaw.teams_conversation_clarification_required`.
 
-- internal/private/local language resolves to `LAN IP address`;
-- public/external/internet-facing language resolves to `WAN IP address`;
-- bare IP wording is ambiguous;
-- contradictory internal/public wording is ambiguous.
+It produced no completion, rejection, or failure event, no orchestration result, no provider result, and no return-path handoff.
 
-Qualifier analysis executes before ordinary explicit-alias matching. This prevents a phrase such as `internal public IP` from being captured incorrectly by the longer alias `public IP`.
+The active OpenClaw bridge rendered the exact clarification text supplied by Jason.
 
-Ambiguity raises `ConversationIntentUnresolvedError` before generic resource-language reasoning, action reasoning, capability planning, or orchestration.
-
-Live signed production ingress proved:
-
-- internal IP -> LAN;
-- internet-facing IP -> WAN;
-- bare IP -> HTTP 400 / `conversation_unresolved`;
-- qualified requests completed with authenticated and completed audit events;
-- the ambiguous request produced authenticated and rejected audit events without a completion event;
-- runtime source parity and health passed;
-- provider configuration was unchanged;
-- no provider write occurred;
-- OpenClaw was not restarted.
+The implementation is intentionally stateless. A short reply such as `LAN` does not yet inherit the previous endpoint selector or become execution authority.
 
 Durable implementation commit:
 
-`2e5db00db970a5cec4e153e54abbd3600819c313`
+`9d125d8c5144ead948e2c90d9b79f7796bdb3c1c`
 
-Durable proof:
+Durable proof target:
 
-`docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
+`docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
 
 ## Current workstream
 
-Canonical-fact qualifier resolution is complete, live-proven, and durable.
+Stateless governed ambiguity clarification is complete, live-proven, and durable.
 
-The next conversational workstream is **governed ambiguity clarification**.
+The next conversational workstream is **governed clarification continuation**.
 
-Jason now safely refuses to guess when a request such as:
+Today, after Jason asks whether the human means LAN or WAN, a bare reply such as:
 
-`What IP does AOT-50282 have?`
+`LAN`
 
-does not distinguish LAN from WAN.
+does not inherit the previous request context.
 
-The current result is the generic governed `conversation_unresolved` rejection.
+That is intentionally safer than hidden conversational memory.
 
-The next improvement should preserve that fail-closed behavior while returning a bounded clarification such as asking whether the human means the LAN/private address or the WAN/public address.
-
-The clarification path must not execute a provider request, enter Central Orchestrator execution, or permit a model to guess before the human resolves the ambiguity.
+Any future continuation mechanism must be explicit Jason-owned state rather than model or OpenClaw memory. It must be scoped to authenticated tenant, principal, and conversation; tied to the original ambiguity; short-lived; auditable; idempotent; and unable to change the original authority or resource selector.
 
 ## Unresolved controls / risks
 
-1. **Ambiguity clarification UX:** deterministic canonical-fact ambiguity now fails closed correctly, but the current `conversation_unresolved` response is generic. A future bounded clarification path should ask the human to disambiguate without starting orchestration or allowing a model to guess.
-2. **Current runtime concurrency topology:** the production HTTP server is intentionally single-worker. In-flight exact-message suppression is concurrency-proven at the ingress/replay-store layer by deterministic test. Future multi-worker/replica scale-out must preserve an atomic shared idempotency state layer before concurrency topology changes.
-3. **Consequential-action idempotency:** exact inbound Teams-message idempotency prevents one transport activity from initiating duplicate governed work, but consequential actions may require capability/action-level idempotency keys and preconditions for safe retry.
-4. **System Registry Datto read-surface gap:** prior governance review found active Datto read operations that are not yet fully represented/verified as production capabilities in the System Registry. Do not silently hand-edit production registry state. Close this through the governed System Registry mutation/approval path when available.
-5. **OpenClaw plugin-registry metadata warning:** OpenClaw has reported stale persisted plugin-registry metadata while successfully deriving/loading the current registry. This remains a separate controlled-maintenance issue.
-6. **Pre-existing approval test debt:** known approval continuation/recovery test helpers remain unrelated to the Teams idempotency/resource-routing work. Do not attribute those failures to this work without new evidence.
+1. **Clarification continuation state:** stateless clarification is operational, but short replies such as `LAN` do not yet continue the original request. Any continuation state must be bounded, authenticated, conversation-scoped, expiring, auditable, and non-authoritative by itself.
+2. **Current runtime concurrency topology:** the production HTTP server is intentionally single-worker. Future multi-worker/replica scale-out must preserve an atomic shared idempotency state layer.
+3. **Consequential-action idempotency:** exact inbound Teams-message idempotency prevents one transport activity from initiating duplicate governed work, but consequential actions may require capability/action-level idempotency keys and preconditions.
+4. **System Registry Datto read-surface gap:** active Datto read operations are not yet fully represented/verified as production capabilities in the System Registry. Do not silently hand-edit production registry state.
+5. **OpenClaw plugin-registry metadata warning:** stale persisted plugin-registry metadata remains a separate controlled-maintenance issue.
+6. **Pre-existing approval test debt:** known approval continuation/recovery test helpers remain unrelated to this work.
 
 ## Production/runtime boundary
 
-The canonical-fact qualifier change modified the existing provider-neutral conversational interpretation/runtime only. It did not add a component, provider, capability, permission, governance gate, credential, connector operation, or OpenClaw bridge behavior.
+The ambiguity-clarification work changed existing provider-neutral conversational interpretation, governed ingress/HTTP result classification, and OpenClaw presentation behavior.
+
+It did not add a new provider, capability, permission, credential, governance gate, external integration, or provider write surface.
 
 At live proof time:
 
-- container: `jason-runtime`;
-- deployed image: `sha256:efb0ea07fb255a77e338319a09187bc69b1b72ee84fd4682a35bf508600625f8`;
+- runtime container: `jason-runtime`;
+- runtime image: `sha256:e4897ecdb45e80cac2403b00279da1205f995c2e442b578985940555e1b41724`;
+- OpenClaw container: `openclaw-openclaw-gateway-1`;
+- OpenClaw image: `sha256:6fdd46f654a1c4edf3ddc7324ebb5918738a35b3e36809c4a47292b399aa7824`;
+- active bridge host path: `/opt/jason/services/openclaw/data/config/extensions/jason-bridge/bridge-core.mjs`;
+- active bridge container path: `/home/node/.openclaw/extensions/jason-bridge/bridge-core.mjs`;
 - runtime health: healthy;
-- source parity: passed for ingress, replay-store runtime, and HTTP-layer implementation;
-- hardening: user `1000:1000`, read-only root filesystem, non-privileged, all capabilities dropped, `no-new-privileges:true`;
-- OpenClaw restart: not required; and
-- provider configuration change: none.
+- OpenClaw health: healthy;
+- runtime source parity: passed;
+- active bridge repository/host/container parity: passed;
+- runtime rollback tag: `jason-runtime:pre-clarification-20260814T161345Z`; and
+- provider configuration/write changes: none.
 
 These are point-in-time proof facts, not perpetual topology authority. Re-derive live state before future production mutation.
 
-No System Registry mutation was required for this work because no new production entity or capability was introduced. This does not resolve any separately identified pre-existing registry coverage gap.
+No System Registry mutation was required because this work introduced no new production entity or capability.
 
 ## Continuity rules now in force
 
@@ -153,14 +147,15 @@ Teams/OpenClaw remain interface/transport providers only. Transport feedback and
 
 ## Next safe actions
 
-1. Inspect the current `ConversationIntentUnresolvedError` through governed ingress and OpenClaw/Teams response path.
-2. Define a structured provider-neutral clarification result carrying only bounded competing canonical facts and safe user-facing clarification text.
-3. Ensure ambiguous requests do not invoke the Central Orchestrator, provider, connector, or action model before disambiguation.
-4. Add deterministic tests for bare-IP and conflicting-qualifier clarification while preserving qualified LAN/WAN routing.
-5. Prove clarification through signed authenticated ingress and Teams/OpenClaw presentation.
-6. Close documentation for the clarification pattern.
-7. Separately close the System Registry Datto read-surface gap and future consequential-action idempotency requirements through their governed workstreams.
+1. Inspect existing Jason-owned conversation and replay-state mechanisms before designing clarification continuation.
+2. Define the smallest bounded continuation record needed to preserve the original authenticated selector and competing canonical facts.
+3. Scope continuation state to authenticated tenant, principal, and conversation with explicit expiration and audit evidence.
+4. Permit continuation to select only one candidate from the original ambiguity.
+5. Prevent continuation from changing organization, resource selector, provider authority, or capability authority.
+6. Preserve exact-message idempotency and fail closed on stale, conflicting, cross-conversation, or cross-principal replies.
+7. Prove no provider/orchestration execution occurs until a valid human clarification is supplied.
+8. Live-prove and document the continuation path.
 
 ## Success condition
 
-A future competent human or AI can determine from durable repository records that exact Teams-message idempotency and deterministic canonical-fact qualifier resolution are operational; that internal/private/local IP language resolves to LAN while public/external/internet-facing language resolves to WAN; that bare or conflicting qualifiers fail closed before model reasoning or orchestration; that operational values remain provider-derived; and that the next safe conversational target is governed ambiguity clarification.
+A future competent human or AI can determine from durable repository records that exact Teams-message idempotency, deterministic canonical-fact qualification, and stateless governed ambiguity clarification are operational; that ambiguous canonical facts produce bounded human clarification rather than a generic failure; that clarification does not enter request construction, orchestration, provider execution, or model guessing; that OpenClaw only presents the Jason-supplied result; and that the next safe conversational target is governed clarification continuation rather than hidden conversational memory.

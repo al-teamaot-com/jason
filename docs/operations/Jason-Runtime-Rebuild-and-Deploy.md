@@ -90,6 +90,69 @@ At minimum, verify imports before treating pytest collection failures as impleme
 
 The production runtime Dockerfile is the implementation source of truth for the source roots it exposes. If packaging changes, derive/update the host validation environment accordingly rather than preserving a stale path list here.
 
+## OpenClaw bridge validation and deployment boundary
+
+Some Jason changes modify both `jason-runtime` and the OpenClaw `jason-bridge` presentation layer.
+
+Do not install Node.js on the Jason host merely to validate bridge JavaScript when the running OpenClaw image already provides the production Node runtime.
+
+Preferred validation pattern:
+
+1. derive the current OpenClaw image ID from the running gateway;
+2. start an ephemeral container from that exact image;
+3. mount the repository bridge source read-only;
+4. override the entrypoint with `node`;
+5. run syntax and bridge tests; and
+6. discard the container immediately.
+
+### Active bridge discovery
+
+The OpenClaw configuration bind may contain historical bridge backups.
+
+Do not recursively search for `bridge-core.mjs` and treat every result as a deployment candidate.
+
+Instead:
+
+1. establish the exact active bridge path inside the running container;
+2. map that exact container path backward through current Docker bind mounts;
+3. verify the mapped host path is outside backup storage;
+4. verify active host/container content parity; and
+5. verify repository source is separate from the active deployment path.
+
+At the 2026-08-14 clarification proof checkpoint, the active paths were:
+
+- container: `/home/node/.openclaw/extensions/jason-bridge/bridge-core.mjs`;
+- host: `/opt/jason/services/openclaw/data/config/extensions/jason-bridge/bridge-core.mjs`.
+
+These are historical proof values and must be re-derived before future mutation.
+
+### Dual runtime and bridge deployment
+
+When one governed workstream changes both runtime semantics and OpenClaw presentation:
+
+1. derive and validate both Compose topologies independently;
+2. create and verify a rollback image tag for the runtime;
+3. create and verify a byte-for-byte backup of the active bridge file;
+4. build and recreate only the affected runtime service;
+5. verify runtime health, image identity, and source parity;
+6. deploy only the intended active bridge artifact;
+7. recreate only the OpenClaw gateway when required to reload the extension;
+8. verify OpenClaw image identity remains expected;
+9. verify repository-to-host-to-container bridge parity;
+10. run the bounded live functional proof; and
+11. retain independent rollback capability for runtime and bridge.
+
+Historical clarification deployment:
+
+- pre-change runtime image: `sha256:efb0ea07fb255a77e338319a09187bc69b1b72ee84fd4682a35bf508600625f8`;
+- deployed runtime image: `sha256:e4897ecdb45e80cac2403b00279da1205f995c2e442b578985940555e1b41724`;
+- runtime rollback tag: `jason-runtime:pre-clarification-20260814T161345Z`;
+- OpenClaw image remained `sha256:6fdd46f654a1c4edf3ddc7324ebb5918738a35b3e36809c4a47292b399aa7824`.
+
+Reference proof:
+
+`docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
+
 ## Safe deployment sequence
 
 1. Record the current branch, HEAD, and `git status --short`.

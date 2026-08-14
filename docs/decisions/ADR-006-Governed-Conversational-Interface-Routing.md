@@ -95,11 +95,14 @@ Qualification selects only a canonical fact already permitted by governed capabi
 
 Bounded Qwen experiments were rejected as the production solution after demonstrating both qualified misclassification and ambiguous over-selection. The production qualifier contrast is deterministic.
 
-Current ambiguity behavior is the existing governed `conversation_unresolved` rejection. A future clarification response may improve user experience but must preserve no execution before disambiguation.
+Ambiguity now returns a structured stateless `clarification_required` result when Jason can identify the active competing governed canonical facts. The result remains non-executable and stops before request construction, Central Orchestrator execution, provider access, or model guessing.
 
-Historical proof:
+Current transport semantics are HTTP `200`, `error_code=canonical_fact_ambiguous`, bounded candidate facts, and `requires_complete_request=true`. OpenClaw may present Jason-supplied clarification text but may not choose a candidate or create hidden authority. A complete follow-up request is required until a separately governed continuation mechanism exists.
 
-`docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
+Historical proofs:
+
+- `docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
+- `docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
 
 ## Datto RMM example
 

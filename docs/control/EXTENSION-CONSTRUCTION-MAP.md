@@ -26,11 +26,11 @@ Working code alone is not completion.
 |---|---|---|---|
 | Provider / connector | `docs/engineering/jis/JIS-Provider-Development-Guide.md` | JIS provider template, completion checklist, provider engineering records, existing provider implementations/tests | Named capabilities/operations; governed authentication and secret references; provider-neutral shared infrastructure; authority/policy not embedded in connector; structured errors/results; audit/correlation; deterministic tests; System Registry registration/verification when production-bound |
 | Capability / resource | `docs/architecture/J-101-Capability-Registry.md` and `docs/engineering/capabilities/Capability-Registry.md` | Existing CAP records and capability registry/runtime composition/tests | Stable capability name and contract; execution/permission mode; scope; provider-resolution rules; evidence semantics; deterministic tests; registry/provider metadata; no workflow-specific bypass |
-| Natural-language resource inquiry / evidence selection | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` and `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` | Production endpoint/site inquiries, deterministic metadata interpreter, tri-state canonical-fact qualifier resolver, bounded evidence index, Ollama fallback/evidence reasoners, runtime composition, focused tests | Separate selectors from facts; separate `inquiry_hints` from returnable `fact_hints`; declare canonical `collection_fact` for collection capabilities; normalize exhaustive/count language to canonical collection evidence; propagate result intent/completeness through planning; route only through Central Orchestrator; deterministic dereference/source attribution; no bespoke question-specific script |
+| Natural-language resource inquiry / evidence selection | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` and `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` | Production endpoint/site inquiries, deterministic metadata interpreter, tri-state canonical-fact qualifier resolver, stateless bounded ambiguity clarification, bounded evidence index, Ollama fallback/evidence reasoners, runtime composition, focused tests | Separate selectors from facts; separate `inquiry_hints` from returnable `fact_hints`; declare canonical `collection_fact` for collection capabilities; normalize exhaustive/count language to canonical collection evidence; propagate result intent/completeness through planning; route only through Central Orchestrator; deterministic dereference/source attribution; no bespoke question-specific script |
 | Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
-| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs, including `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` | OpenClaw/Teams ingress records and implementation/tests; `infrastructure/openclaw-jason-bridge/`; `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py` | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable; user-visible processing feedback, when used, is bounded/non-authoritative and must not expose reasoning or alter execution authority; transport-feedback failure must not silently replace the governed result; exact authenticated transport-message retries must be durably idempotent at governed ingress before flow/orchestration using stable authenticated transport identity rather than request text; duplicate suppression must be auditable; same-text new message IDs remain distinct requests unless a deeper governed capability explicitly defines other idempotency semantics |
+| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs, including `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` | OpenClaw/Teams ingress records and implementation/tests; `infrastructure/openclaw-jason-bridge/`; `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py` | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure/clarification classification; governed return path; security audit; transport remains replaceable; user-visible processing feedback, when used, is bounded/non-authoritative and must not expose reasoning or alter execution authority; transport-feedback failure must not silently replace the governed result; exact authenticated transport-message retries must be durably idempotent at governed ingress before flow/orchestration using stable authenticated transport identity rather than request text; duplicate suppression must be auditable; same-text new message IDs remain distinct requests unless a deeper governed capability explicitly defines other idempotency semantics |
 | Identity / authority component | `docs/components/kernel/JKD-001-Identity-and-Authority-Service.md` | JKD-001 runtime foundation, grant/delegation tooling and tests | Identity before authority; narrow capability/scope grants; explicit delegation semantics; auditable mutation; fail closed on ambiguity/missing authority; no authority inferred from technical access |
 | Secret / credential integration | `docs/components/kernel/JKD-003-Secrets-Broker.md` and `docs/operations/Provider-Secret-Provisioning.md` | OpenBao provider lifecycle tooling and secret-provider records | Secret references only; no secret values in docs/System Registry/audit; least privilege; runtime access verification; rotation/revocation/recovery; provider-specific credentials remain behind broker/provider boundary |
 | Internal service / runtime component | `docs/architecture/J-100-Reference-Architecture.md`, relevant JKD/INF record, and deployment architecture | `jason-runtime`, OpenBao, OpenClaw deployment/runbook patterns; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` | Defined responsibility and dependency boundary; service identity; network/secret mounts by reference; health verification; hardened runtime controls; rollback; System Registry declared/observed/verified state; derive deployment topology/inputs from authoritative live state rather than assumption |
@@ -151,11 +151,40 @@ Current exemplar:
 - bare IP -> ambiguous;
 - contradictory internal/public IP -> ambiguous.
 
-Ambiguity currently uses `ConversationIntentUnresolvedError`. Human-friendly clarification is a separate future enhancement and must preserve no execution before disambiguation.
+Ambiguity now returns a structured stateless clarification result containing only active competing governed canonical facts while preserving no execution before disambiguation. Short-reply continuation remains a separate future governed enhancement.
 
 Reference proof:
 
 `docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`.
+
+## 2026-08-14 stateless ambiguity-clarification construction refinement
+
+A safely detected ambiguity may return a bounded human clarification without becoming executable work.
+
+Construction sequence:
+
+1. authenticate and bind the human conversation identity;
+2. resolve the resource selector independently;
+3. derive eligible canonical facts from governed capability metadata;
+4. run deterministic qualifier analysis before generic model fallback;
+5. preserve only the active competing canonical facts;
+6. return structured clarification before request-factory construction;
+7. do not enter Central Orchestrator execution or provider access;
+8. emit a dedicated clarification audit event;
+9. allow OpenClaw to present only Jason-supplied clarification text; and
+10. require a complete new request until separately governed continuation state exists.
+
+Current exemplar:
+
+`What IP does AOT-50282 have?`
+
+returns only `LAN IP address` and `WAN IP address`.
+
+Future continuation state must be explicit Jason-owned state, authenticated, conversation-scoped, expiring, auditable, and unable to change the original authority or resource selector.
+
+Reference proof:
+
+`docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`.
 
 <!-- BEGIN PROVIDER ADAPTATION FOUNDATION -->
 ## Provider Adaptation and Resource Outcome Foundation
