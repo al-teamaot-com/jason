@@ -527,9 +527,17 @@ export default definePluginEntry({
     api.on(
       "before_agent_run",
       async (event, ctx) => {
-        if (agentChannel(ctx) !== "msteams") {
+        const channel = nonBlank(
+          event.channelId ??
+          ctx.channelId ??
+          ctx.channel ??
+          ctx.messageProvider
+        )?.toLowerCase();
+
+        if (channel !== "msteams") {
           return { outcome: "pass" };
         }
+
         const text = nonBlank(
           event.prompt ??
           event.cleanedBody
