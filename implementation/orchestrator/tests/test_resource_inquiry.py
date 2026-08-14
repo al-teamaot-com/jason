@@ -170,8 +170,6 @@ def test_planner_excludes_capabilities_not_declared_read_only():
 
 
 def test_approved_semantic_mapping_guides_generic_capability_selection():
-    from datetime import datetime, timezone
-
     from orchestrator.resource_capability_catalog import (
         endpoint_alert_search,
         endpoint_device_search,
@@ -195,10 +193,7 @@ def test_approved_semantic_mapping_guides_generic_capability_selection():
         approval_basis="authoritative evidence",
         openapi_source_reference="openapi:test",
         semantic_source_reference="help:test",
-        capability_names=(
-            "endpoint.device.search",
-            "endpoint.device.read",
-        ),
+        capability_names=("endpoint.device.search", "endpoint.device.read"),
         active=True,
     )
 
@@ -223,8 +218,6 @@ def test_approved_semantic_mapping_guides_generic_capability_selection():
 
 
 def test_unrelated_approved_mapping_does_not_force_capability():
-    from datetime import datetime, timezone
-
     from orchestrator.resource_capability_catalog import (
         endpoint_alert_search,
         endpoint_device_search,
@@ -273,12 +266,6 @@ def test_unrelated_approved_mapping_does_not_force_capability():
 
 
 def test_approved_mapping_can_recover_from_overly_narrow_resource_subtype():
-    from datetime import datetime, timezone
-
-    from kernel.capabilities import (
-        CapabilityRegistryService,
-        InMemoryCapabilityRegistry,
-    )
     from orchestrator.resource_capability_catalog import (
         endpoint_alert_search,
         endpoint_device_search,
@@ -289,17 +276,11 @@ def test_approved_mapping_can_recover_from_overly_narrow_resource_subtype():
         SemanticMappingRegistry,
     )
 
-    capabilities = CapabilityRegistryService(
-        registry=InMemoryCapabilityRegistry()
-    )
-
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     now = datetime.now(timezone.utc)
 
-    for capability in (
-        endpoint_alert_search(now),
-        endpoint_device_search(now),
-    ):
-        capabilities.register(capability)
+    for definition in (endpoint_alert_search(now), endpoint_device_search(now)):
+        capabilities.register(definition)
 
     mapping = ApprovedSemanticMapping(
         mapping_id="example-display-version",
@@ -314,16 +295,12 @@ def test_approved_mapping_can_recover_from_overly_narrow_resource_subtype():
         approval_basis="authoritative evidence",
         openapi_source_reference="openapi:test",
         semantic_source_reference="help:test",
-        capability_names=(
-            "endpoint.device.search",
-            "endpoint.device.read",
-        ),
+        capability_names=("endpoint.device.search", "endpoint.device.read"),
         active=True,
     )
 
     registry = SemanticMappingRegistry((mapping,))
 
-    # Deliberately simulate an overly narrow language interpretation.
     inquiry = ResourceInquiry(
         resource_type="endpoint_alert",
         resource_selector={"hostname": "EXAMPLE-1"},
@@ -332,11 +309,91 @@ def test_approved_mapping_can_recover_from_overly_narrow_resource_subtype():
 
     plan = GovernedResourceInquiryPlanner(
         registry=capabilities,
-        reasoner=MetadataResourceCapabilityReasoner(
-            semantic_mapping_registry=registry,
-        ),
+        reasoner=MetadataResourceCapabilityReasoner(semantic_mapping_registry=registry),
         semantic_mapping_registry=registry,
     ).plan(inquiry)
 
     assert len(plan.steps) == 1
     assert plan.steps[0].capability_name == "endpoint.device.search"
+
+
+def test_multi_fact_read_is_split_only_by_governed_fact_coverage():
+    from orchestrator.resource_capability_catalog import (
+        endpoint_alert_search,
+        endpoint_device_search,
+    )
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("last logged in user", "alerts"),
+    )
+
+    selected = MetadataResourceCapabilityReasoner().select(
+        inquiry=inquiry,
+        candidates=(
+            endpoint_alert_search(NOW),
+            endpoint_device_search(NOW),
+        ),
+    )
+
+    assert [step.capability_name for step in selected] == [
+        "endpoint.device.search",
+        "endpoint.alert.search",
+    ]
+    assert selected[0].arguments["requested_facts"] == ("last logged in user",)
+    assert selected[1].arguments["requested_facts"] == ("alerts",)
+
+
+def test_multi_fact_read_prefers_one_capability_when_it_covers_all_facts():
+    from orchestrator.resource_capability_catalog import endpoint_device_search
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("last logged in user", "operating system"),
+    )
+
+    selected = MetadataResourceCapabilityReasoner().select(
+        inquiry=inquiry,
+        candidates=(endpoint_device_search(NOW),),
+    )
+
+    assert len(selected) == 1
+    assert selected[0].capability_name == "endpoint.device.search"
+    assert selected[0].arguments["requested_facts"] == (
+        "last logged in user",
+        "operating system",
+    )
+
+
+def test_multi_fact_split_preserves_only_relevant_evidence_contexts_per_step():
+    from orchestrator.resource_capability_catalog import (
+        endpoint_alert_search,
+        endpoint_device_search,
+    )
+    from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
+
+    inquiry = ResourceInquiry(
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        requested_facts=("last logged in user", "alerts"),
+        evidence_contexts={
+            "last logged in user": ("current endpoint record",),
+            "alerts": ("open endpoint alerts",),
+        },
+    )
+
+    selected = MetadataResourceCapabilityReasoner().select(
+        inquiry=inquiry,
+        candidates=(endpoint_alert_search(NOW), endpoint_device_search(NOW)),
+    )
+
+    assert selected[0].arguments["evidence_contexts"] == {
+        "last logged in user": ("current endpoint record",),
+    }
+    assert selected[1].arguments["evidence_contexts"] == {
+        "alerts": ("open endpoint alerts",),
+    }
