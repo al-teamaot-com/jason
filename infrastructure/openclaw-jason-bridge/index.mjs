@@ -525,76 +525,81 @@ export default definePluginEntry({
     // conversation is forwarded verbatim to Jason before OpenClaw's model runs.
     // No trigger phrase, capability keyword, or provider name is used here.
     api.on(
-      "before_agent_run",
+      "before_agent_reply",
       async (event, ctx) => {
-        const channel = nonBlank(
-          event.channelId ??
-          ctx.channelId ??
-          ctx.channel ??
-          ctx.messageProvider
-        )?.toLowerCase();
-
-        if (channel !== "msteams") {
-          return { outcome: "pass" };
+        if (agentChannel(ctx) !== "msteams") {
+          return undefined;
         }
 
-        const text = nonBlank(
-          event.prompt ??
-          event.cleanedBody
-        );
+        const text = nonBlank(event.cleanedBody);
+
         if (!text || text.startsWith("/")) {
-          return { outcome: "pass" };
-        }
-        if (!compatibility.pluginRoot) {
-          return { outcome: "pass" };
+          return undefined;
         }
 
-        const captured = await compatibility.lookupCapturedWithBriefRetry(ctx);
+        if (!compatibility.pluginRoot) {
+          return undefined;
+        }
+
+        const captured =
+          await compatibility.lookupCapturedWithBriefRetry(ctx);
+
         if (!captured) {
           api.logger.warn?.(
             "jason-bridge: Teams agent turn lacks captured transport evidence; unbound routing left unchanged",
           );
-          return { outcome: "pass" };
+          return undefined;
         }
 
         let current;
+
         try {
-          current = await getCurrentPluginConversationBinding({
-            pluginRoot: compatibility.pluginRoot,
-            conversation: captured.conversation,
-          });
+          current =
+            await getCurrentPluginConversationBinding({
+              pluginRoot: compatibility.pluginRoot,
+              conversation: captured.conversation,
+            });
         } catch {
           api.logger.error?.(
             "jason-bridge: governed conversation binding lookup failed; denied closed",
           );
+
           return {
-            outcome: "block",
-            reason: "governed_conversation_binding_validation_failed",
-            message:
-              "Jason could not validate the governed conversation binding. No action was taken.",
+            handled: true,
+            reply: {
+              text:
+                "Jason could not validate the governed conversation binding. No action was taken.",
+            },
           };
         }
+
         if (current?.pluginId !== "jason-bridge") {
-          return { outcome: "pass" };
+          return undefined;
         }
 
         api.logger.info?.(
-          "jason-bridge: forwarding Jason-bound Teams turn through compatibility pre-agent path",
+          "jason-bridge: claiming Jason-bound Teams turn before OpenClaw reply",
         );
+
         await forwardGovernedTeamsTurn({
           api,
           text,
-          microsoftObjectId: captured.senderId ?? ctx.senderId,
-          conversationId: captured.conversation.conversationId,
-          accountId: captured.conversation.accountId,
-          threadId: captured.conversation.threadId,
-          messageId: captured.messageId,
-          correlationId: captured.runId ?? ctx.runId,
+          microsoftObjectId:
+            captured.senderId ?? ctx.senderId,
+          conversationId:
+            captured.conversation.conversationId,
+          accountId:
+            captured.conversation.accountId,
+          threadId:
+            captured.conversation.threadId,
+          messageId:
+            captured.messageId,
+          correlationId:
+            captured.runId ?? ctx.runId,
         });
 
         return {
-          outcome: "block",
-          reason: "jason_bound_conversation_claimed",
+          handled: true,
         };
       },
       {
