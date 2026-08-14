@@ -96,6 +96,15 @@ class MetadataResourceCapabilityReasoner:
                 if item.strip()
             }
 
+            # A collection_fact is also governed capability metadata. It names
+            # the complete collection outcome that this read capability can
+            # authoritatively return (for example, "alerts" or "software").
+            # Treat it as semantic coverage for planning rather than relying on
+            # loose fact-hint token matches.
+            collection_fact = str(metadata.get("collection_fact", "")).strip()
+            if collection_fact:
+                declared_facts.add(_normalized_fact(collection_fact))
+
             governed_coverage = requested_phrases.intersection(declared_facts)
 
             searchable_text = " ".join(
@@ -166,11 +175,11 @@ class MetadataResourceCapabilityReasoner:
         )
 
         # A multi-fact read may require more than one reusable capability. Split
-        # the request only when governed canonical metadata or approved semantic
-        # mappings account for every requested fact. This keeps decomposition
-        # deterministic and evidence-based; partial semantic guesses continue
-        # through the existing single-capability path instead of silently
-        # changing the meaning of the request.
+        # the request only when governed canonical metadata, governed collection
+        # facts, or approved semantic mappings account for every requested fact.
+        # This keeps decomposition deterministic and evidence-based; partial
+        # semantic guesses continue through the existing single-capability path
+        # instead of silently changing the meaning of the request.
         if len(normalized_requested) > 1:
             requested_set = {
                 normalized
