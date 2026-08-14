@@ -30,14 +30,14 @@ Working code alone is not completion.
 | Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
-| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs | OpenClaw/Teams ingress records and implementation/tests | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable |
+| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs, including `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` | OpenClaw/Teams ingress records and implementation/tests; `infrastructure/openclaw-jason-bridge/` | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable; user-visible processing feedback, when used, is bounded/non-authoritative and must not expose reasoning or alter execution authority; transport-feedback failure must not silently replace the governed result |
 | Identity / authority component | `docs/components/kernel/JKD-001-Identity-and-Authority-Service.md` | JKD-001 runtime foundation, grant/delegation tooling and tests | Identity before authority; narrow capability/scope grants; explicit delegation semantics; auditable mutation; fail closed on ambiguity/missing authority; no authority inferred from technical access |
 | Secret / credential integration | `docs/components/kernel/JKD-003-Secrets-Broker.md` and `docs/operations/Provider-Secret-Provisioning.md` | OpenBao provider lifecycle tooling and secret-provider records | Secret references only; no secret values in docs/System Registry/audit; least privilege; runtime access verification; rotation/revocation/recovery; provider-specific credentials remain behind broker/provider boundary |
 | Internal service / runtime component | `docs/architecture/J-100-Reference-Architecture.md`, relevant JKD/INF record, and deployment architecture | `jason-runtime`, OpenBao, OpenClaw deployment/runbook patterns; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` | Defined responsibility and dependency boundary; service identity; network/secret mounts by reference; health verification; hardened runtime controls; rollback; System Registry declared/observed/verified state; derive deployment topology/inputs from authoritative live state rather than assumption |
 | System Registry entity / verification method | `docs/architecture/J-103-System-Registry.md` | `implementation/kernel/system_registry/` schemas, repository, probes, verifier, lifecycle tests | Declared versus observed versus verified separation; no secrets; append-only lifecycle evidence; bounded verification; no silent remediation; authority/governance for mutation |
 | Evidence / audit component | `docs/components/kernel/JKD-002-Evidence-and-Memory-Service.md` | Existing orchestration/security audit stores and proof/session records | Correlation/provenance; sanitization; append-only or governed history as appropriate; evidence pointer integrity; distinguish assertion from proof; no credential leakage |
 | Approval / communication action | `docs/architecture/J-102-Governed-Approval-Architecture.md` plus capability-specific records | CAP-007 and approval-request patterns | Business authority remains explicit; deterministic policy/approval state; provider action only after authorization; response/evidence retained; retries/duplicates handled safely |
-| Deployment / operational procedure | `docs/operations/README.md` and relevant INF/runbook | Existing runtime/OpenBao/provider deployment runbooks; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` | Prerequisites; authority; observation vs mutation; stop conditions; rollback; verification; evidence retention; no secret printing; no silent drift repair; deployment failure reports an error without unnecessarily terminating the operator's interactive session |
+| Deployment / operational procedure | `docs/operations/README.md` and relevant INF/runbook | Existing runtime/OpenBao/provider deployment runbooks; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` | Prerequisites; authority; observation vs mutation; stop conditions; rollback; verification; evidence retention; no secret printing; no silent drift repair; deployment failure reports an error without unnecessarily terminating the operator's interactive session; rollback success must verify restored state/content rather than merely process restart |
 
 ## Universal no-bypass checks
 
@@ -51,6 +51,7 @@ Before implementation approval, verify:
 - No production component/capability/provider is treated as operational without the required System Registry registration and verification.
 - No current runtime claim is taken from conversation memory or a stale narrative document.
 - Natural-language resource questions do not become bespoke workflow scripts merely because semantic interpretation or evidence selection failed.
+- User-facing processing feedback is not treated as authorization, evidence, completion, or reasoning output.
 
 ## Universal extension Definition of Done
 
@@ -82,6 +83,24 @@ Resource inquiry/evidence work now has a durable reusable guide at `docs/enginee
 For capability/resource extensions that answer natural-language questions, use that guide together with the existing Capability / resource construction row above. It captures selector/fact separation, capability-derived canonical fact hints, minimal requested facts, relevance-bounded evidence indexing, bounded model-selected pointers, and deterministic provider-evidence dereference.
 
 Runtime rebuild/deploy rediscovery exposed a missing operational prerequisite. Use `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` for the current deployment construction/verification pattern, including Compose-label discovery, required interpolation inputs, protected secret-path checks, and the interactive-shell no-unconditional-exit rule.
+
+## 2026-08-14 Teams processing-feedback construction refinement
+
+Jason-bound Teams conversations currently use the OpenClaw `jason-bridge` compatibility pre-agent path. Because this path can complete the Teams turn before OpenClaw's normal agent/reply lifecycle, OpenClaw's native typing lifecycle is not sufficient evidence that a governed Jason request is visibly processing.
+
+The reusable transport pattern is therefore:
+
+1. validate the required inbound Teams transport identity/conversation fields;
+2. emit a static, best-effort acknowledgement through OpenClaw's supported channel outbound adapter;
+3. continue the existing governed Jason request path unchanged;
+4. treat acknowledgement failure as a transport-feedback failure, not as authority to fail or bypass the governed request;
+5. return only the final governed Jason response/error as the authoritative outcome.
+
+The acknowledgement must not disclose chain-of-thought, model reasoning, provider evidence, secrets, authorization state, or a claim of task completion. It is a user-experience signal only.
+
+Reference proof: `docs/sessions/Teams-Processing-Feedback-Proof-2026-08-14.md`.
+
+The same work exposed a rollback-verification construction rule: a rollback is not proven merely because a service restarted. Validate the restored artifact/state (for example by hash/source parity plus service health) before declaring rollback success.
 
 <!-- BEGIN PROVIDER ADAPTATION FOUNDATION -->
 ## Provider Adaptation and Resource Outcome Foundation
@@ -129,7 +148,6 @@ Future construction:
 - provider drift detection;
 - generalized continuation-token handling;
 - rate-limit adaptation;
-- native Teams processing feedback;
 - separately governed provider write surfaces.
 <!-- END PROVIDER ADAPTATION FOUNDATION -->
 
