@@ -18,6 +18,9 @@ class OpenBaoSecretResolutionError(RuntimeError):
 
 
 DEFAULT_MAPPINGS: Mapping[str, str] = {
+    "openai.semantic_intent": (
+        "secret/data/providers/openai/production/semantic-intent"
+    ),
     "autotask.readonly": (
         "secret/data/connectors/autotask/production/read-only"
     ),
@@ -36,6 +39,11 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
+    "openai.semantic_intent": frozenset(
+        {
+            "api_key",
+        }
+    ),
     "autotask.readonly": frozenset(
         {
             "username",
