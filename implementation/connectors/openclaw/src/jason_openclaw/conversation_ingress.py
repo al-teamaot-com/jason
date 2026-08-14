@@ -272,10 +272,18 @@ class GovernedOpenClawTeamsConversationIngress:
                     "status": "approval_required",
                     "error_code": "approval_required",
                 }
+            diagnostic_message = str(error).strip()
+            if len(diagnostic_message) > 500:
+                diagnostic_message = diagnostic_message[:500] + "..."
+
             return self._deny(
                 parsed=parsed,
                 machine_identity=machine_identity,
                 reason="conversation_denied",
+                diagnostic={
+                    "error_type": type(error).__name__,
+                    "error_message": diagnostic_message,
+                },
             )
         except ConversationClarificationRequiredError as error:
             clarification_text = _clarification_text(
@@ -407,6 +415,7 @@ class GovernedOpenClawTeamsConversationIngress:
         parsed: OpenClawTeamsConversationEnvelope,
         machine_identity: str,
         reason: str,
+        diagnostic: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.audit.append(
             "openclaw.teams_conversation_denied",
@@ -415,6 +424,11 @@ class GovernedOpenClawTeamsConversationIngress:
                 "correlation_id": parsed.correlation_id,
                 "machine_identity": machine_identity,
                 "reason": reason,
+                **(
+                    dict(diagnostic)
+                    if diagnostic is not None
+                    else {}
+                ),
             },
         )
         return {

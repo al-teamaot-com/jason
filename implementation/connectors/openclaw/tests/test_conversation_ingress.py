@@ -496,3 +496,38 @@ def test_structured_clarification_is_audited_and_returned_without_rejection():
         for event_type, _
         in audit.events
     )
+
+
+def test_flow_permission_denial_records_internal_diagnostic_but_keeps_response_sanitized():
+    audit = Audit()
+    flow = Flow(
+        error=PermissionError(
+            "semantic fact reasoner selected facts outside governed candidates"
+        )
+    )
+
+    result = ingress(
+        flow=flow,
+        audit=audit,
+    ).handle(
+        envelope(request_id="req-denial-diagnostic")
+    )
+
+    assert result == {
+        "request_id": "req-denial-diagnostic",
+        "correlation_id": "corr-conversation-1",
+        "status": "denied",
+        "error_code": "conversation_denied",
+    }
+
+    event_type, payload = audit.events[-1]
+
+    assert event_type == "openclaw.teams_conversation_denied"
+    assert payload["reason"] == "conversation_denied"
+    assert payload["error_type"] == "PermissionError"
+    assert payload["error_message"] == (
+        "semantic fact reasoner selected facts outside governed candidates"
+    )
+
+    # Internal diagnostics must never escape through the transport response.
+    assert "semantic fact" not in str(result)
