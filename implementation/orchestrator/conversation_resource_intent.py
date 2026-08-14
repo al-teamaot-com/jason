@@ -339,9 +339,14 @@ class MetadataFirstResourceInquiryInterpreter:
             )
 
         if not requested_facts:
-            requested_fact = self._explicit_canonical_fact(normalized_text)
-            if requested_fact is not None:
-                requested_facts = (requested_fact,)
+            requested_facts = self._explicit_canonical_facts(
+                normalized_text,
+            )
+            if len(requested_facts) > self._MAX_BOUNDED_FACT_EXPANSION:
+                raise ConversationClarificationRequiredError(
+                    reason_code="explicit_fact_set_exceeds_safe_bound",
+                    candidate_facts=requested_facts,
+                )
 
         selector: dict[str, str] = {
             "hostname": endpoint_identifier,
@@ -468,17 +473,27 @@ class MetadataFirstResourceInquiryInterpreter:
 
         return next(iter(best))
 
-    def _explicit_canonical_fact(
+    def _explicit_canonical_facts(
         self,
         normalized_text: str,
-    ) -> str | None:
+    ) -> tuple[str, ...]:
+        """Return every explicitly requested governed fact in human-text order.
+
+        Multiple independent fact phrases are preserved rather than allowing the
+        longest phrase anywhere in the sentence to suppress the others. When a
+        specific phrase contains a broader phrase, only the more specific match
+        survives for that text span.
+        """
+
         assert self.fact_vocabulary is not None
 
-        candidates: list[tuple[int, str]] = []
+        matches: list[tuple[int, int, int, str]] = []
 
         for definition in self.fact_vocabulary.definitions:
+            canonical = definition.canonical_fact
+
             for raw in (
-                definition.canonical_fact,
+                canonical,
                 *definition.aliases,
             ):
                 normalized = self._normalize(raw)
@@ -492,38 +507,73 @@ class MetadataFirstResourceInquiryInterpreter:
                     + r"(?![a-z0-9])"
                 )
 
-                if re.search(
+                for match in re.finditer(
                     pattern,
                     normalized_text,
                 ):
-                    candidates.append(
+                    matches.append(
                         (
+                            match.start(),
+                            match.end(),
                             len(normalized),
-                            definition.canonical_fact,
+                            canonical,
                         )
                     )
 
-        if not candidates:
-            return None
+        if not matches:
+            return ()
 
-        candidates.sort(
+        # Remove duplicate aliases for the same fact/span first.
+        unique = sorted(
+            set(matches),
             key=lambda item: (
-                -item[0],
-                item[1],
-            )
+                item[0],
+                -item[2],
+                item[3],
+            ),
         )
 
-        best_length = candidates[0][0]
-        best = {
-            canonical_fact
-            for length, canonical_fact in candidates
-            if length == best_length
-        }
+        retained: list[tuple[int, int, int, str]] = []
 
-        if len(best) != 1:
-            return None
+        for candidate in unique:
+            start, end, length, canonical = candidate
 
-        return next(iter(best))
+            contained_by_more_specific = any(
+                other_canonical != canonical
+                and other_start <= start
+                and other_end >= end
+                and other_length > length
+                for (
+                    other_start,
+                    other_end,
+                    other_length,
+                    other_canonical,
+                ) in unique
+            )
+
+            if contained_by_more_specific:
+                continue
+
+            retained.append(candidate)
+
+        result: list[str] = []
+        seen: set[str] = set()
+
+        for _, _, _, canonical in sorted(
+            retained,
+            key=lambda item: (
+                item[0],
+                -item[2],
+                item[3],
+            ),
+        ):
+            if canonical in seen:
+                continue
+
+            seen.add(canonical)
+            result.append(canonical)
+
+        return tuple(result)
 
     def _eligible_canonical_facts(
         self,

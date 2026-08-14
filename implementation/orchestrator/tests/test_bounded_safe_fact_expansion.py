@@ -35,6 +35,7 @@ def interpreter() -> MetadataFirstResourceInquiryInterpreter:
                     "LAN IP address",
                     "WAN IP address",
                     "last logged in user",
+                    "operating system",
                 ),
                 "selector_required": True,
             },
@@ -79,3 +80,34 @@ def test_explicit_public_ip_question_remains_one_fact():
 
     assert inquiry is not None
     assert inquiry.requested_facts == ("WAN IP address",)
+
+
+def test_explicit_os_and_last_user_question_preserves_both_facts():
+    inquiry = interpreter().interpret(
+        text="What OS and last user does AOT-50282 show?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_selector == {
+        "hostname": "AOT-50282",
+    }
+    assert inquiry.requested_facts == (
+        "operating system",
+        "last logged in user",
+    )
+    assert inquiry.permission_mode == "observe"
+    assert inquiry.execution_mode == "deterministic"
+
+
+def test_explicit_last_user_and_os_reverse_order_preserves_both_facts():
+    inquiry = interpreter().interpret(
+        text="For AOT-50282, give me the last user and OS.",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.requested_facts == (
+        "last logged in user",
+        "operating system",
+    )
