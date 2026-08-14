@@ -2,7 +2,7 @@
 
 OpenClaw is an authenticated transport/interface provider only. This module accepts
 transport evidence, re-binds the Microsoft identity to Jason identity/organization,
-resolves provider-neutral user intent into a named Jason capability, and hands the
+resolves provider-neutral user intent into named Jason capabilities, and hands every
 request to the Central Orchestrator. It never invokes a provider, shell command,
 node, tool, or agent directly.
 """
@@ -141,6 +141,30 @@ class ConversationIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationIntentPlan:
+    """A bounded set of independent governed read intents for one human turn.
+
+    Multi-step conversation plans are intentionally limited to observe-only requests.
+    Each step is still separately resolved, authorized, provider-selected, invoked,
+    evidenced, and audited by the Central Orchestrator. This does not create a path
+    for batching mutations or bypassing normal capability governance.
+    """
+
+    intents: tuple[ConversationIntent, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.intents) < 2:
+            raise ValueError("conversation intent plan requires at least two intents")
+        if len(self.intents) > 20:
+            raise ValueError("conversation intent plan exceeds the 20-step safety bound")
+        if any(intent.permission_mode != "observe" for intent in self.intents):
+            raise PermissionError("multi-step conversation plans are read-only")
+        modes = {intent.execution_mode for intent in self.intents}
+        if len(modes) != 1:
+            raise ValueError("multi-step conversation intents must use one execution mode")
+
+
+@dataclass(frozen=True, slots=True)
 class TeamsConversationRequest:
     text: str
     identity: TeamsConversationPrincipalEvidence
@@ -160,7 +184,7 @@ class ConversationIntentResolver(Protocol):
         *,
         text: str,
         principal: BoundConversationPrincipal,
-    ) -> ConversationIntent | None: ...
+    ) -> ConversationIntent | ConversationIntentPlan | None: ...
 
 
 class ConversationOrchestrationRequestFactory(Protocol):
@@ -193,6 +217,13 @@ class TeamsConversationTransport(Protocol):
 class TeamsConversationFlowResult:
     orchestration: OrchestrationResult
     transport_message_id: str
+    orchestrations: tuple[OrchestrationResult, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.orchestrations:
+            object.__setattr__(self, "orchestrations", (self.orchestration,))
+        elif self.orchestrations[0] is not self.orchestration:
+            raise ValueError("primary orchestration must be the first orchestration result")
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,38 +242,68 @@ class TeamsConversationFlow:
         if principal is None:
             raise PermissionError("Teams identity is not bound to a governed Jason principal")
 
-        intent = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
-        if intent is None:
+        resolved = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
+        if resolved is None:
             raise ConversationIntentUnresolvedError(
                 "no governed Jason capability intent could be resolved"
             )
 
-        orchestration_request = self.request_factory.build(
-            principal=principal,
-            intent=intent,
-            identity=request.identity,
-        )
-        self._validate_bound_request(
-            orchestration_request=orchestration_request,
-            principal=principal,
-            intent=intent,
+        intents = (
+            resolved.intents
+            if isinstance(resolved, ConversationIntentPlan)
+            else (resolved,)
         )
 
-        result = self.orchestrator.execute(orchestration_request)
-        response_text = self.response_renderer.render(result, intent).strip()
-        if not response_text:
+        orchestration_requests: list[OrchestrationRequest] = []
+        for intent in intents:
+            orchestration_request = self.request_factory.build(
+                principal=principal,
+                intent=intent,
+                identity=request.identity,
+            )
+            self._validate_bound_request(
+                orchestration_request=orchestration_request,
+                principal=principal,
+                intent=intent,
+            )
+            orchestration_requests.append(orchestration_request)
+
+        correlation_ids = {
+            item.correlation_id
+            for item in orchestration_requests
+        }
+        if len(correlation_ids) != 1:
+            raise PermissionError(
+                "multi-step conversation requests must retain one correlation identity"
+            )
+
+        # Every step crosses the Central Orchestrator independently. A failed or
+        # unavailable read does not suppress independent successful facts; the
+        # response renderer preserves each step's provider provenance and status.
+        results = tuple(
+            self.orchestrator.execute(orchestration_request)
+            for orchestration_request in orchestration_requests
+        )
+
+        rendered_parts = tuple(
+            self.response_renderer.render(result, intent).strip()
+            for result, intent in zip(results, intents, strict=True)
+        )
+        if not rendered_parts or any(not part for part in rendered_parts):
             raise RuntimeError("conversation response renderer returned empty text")
+        response_text = "\n".join(rendered_parts)
 
         transport_message_id = self.transport.send(
             conversation_id=request.identity.conversation_id,
             text=response_text,
-            correlation_id=orchestration_request.correlation_id,
+            correlation_id=orchestration_requests[0].correlation_id,
         )
         if not transport_message_id.strip():
             raise RuntimeError("Teams transport did not return a message identifier")
 
         return TeamsConversationFlowResult(
-            orchestration=result,
+            orchestration=results[0],
+            orchestrations=results,
             transport_message_id=transport_message_id.strip(),
         )
 
