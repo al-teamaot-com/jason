@@ -5,47 +5,38 @@ from orchestrator.semantic_intent_translation import (
 )
 
 
-def test_translation_represents_provider_neutral_read_meaning():
+def test_translation_contains_semantic_fact_obligations_only():
     result = SemanticIntentTranslation(
-        resource_type="endpoint",
-        resource_selector={
-            "hostname": "AOT-50282",
-        },
         requested_concepts=(
             "last logged in user",
         ),
-        operation="read",
         confidence=0.98,
     )
 
-    assert result.resource_type == "endpoint"
-    assert result.resource_selector == {
-        "hostname": "AOT-50282",
-    }
     assert result.requested_concepts == (
         "last logged in user",
     )
+    assert result.operation == "read"
 
 
-def test_translation_allows_selectorless_bounded_collection_read():
-    result = SemanticIntentTranslation(
-        resource_type="alert",
-        requested_concepts=("alerts",),
-        confidence=0.99,
-    )
-
-    assert result.resource_selector == {}
-
-
-def test_translation_cannot_authorize_mutating_operation():
+def test_translation_requires_concepts():
     with pytest.raises(
-        PermissionError,
-        match="only produce read interpretation",
+        ValueError,
+        match="requested concepts",
     ):
         SemanticIntentTranslation(
-            resource_type="endpoint",
+            requested_concepts=(),
+        )
+
+
+def test_translation_cannot_authorize_mutation():
+    with pytest.raises(
+        PermissionError,
+        match="only produce read",
+    ):
+        SemanticIntentTranslation(
             requested_concepts=(
-                "last logged in user",
+                "open alerts",
             ),
             operation="execute",
         )
@@ -55,7 +46,7 @@ def test_translation_cannot_authorize_mutating_operation():
     "confidence",
     (-0.01, 1.01),
 )
-def test_translation_rejects_invalid_confidence(
+def test_invalid_confidence_is_rejected(
     confidence,
 ):
     with pytest.raises(
@@ -63,20 +54,8 @@ def test_translation_rejects_invalid_confidence(
         match="between zero and one",
     ):
         SemanticIntentTranslation(
-            resource_type="endpoint",
             requested_concepts=(
-                "last logged in user",
+                "open alerts",
             ),
             confidence=confidence,
-        )
-
-
-def test_translation_requires_bounded_concepts():
-    with pytest.raises(
-        ValueError,
-        match="requested concepts",
-    ):
-        SemanticIntentTranslation(
-            resource_type="endpoint",
-            requested_concepts=(),
         )

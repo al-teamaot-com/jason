@@ -7,21 +7,16 @@ from orchestrator.openai_semantic_intent_translation import (
 )
 
 
-CATALOG = {
-    "endpoint": (
-        "last logged in user",
-        "LAN IP address",
-        "WAN IP address",
-        "operating system",
-        "open alerts",
-    ),
-    "alert": (
-        "alerts",
-    ),
-    "management_site": (
-        "sites",
-    ),
-}
+CONCEPTS = (
+    "last logged in user",
+    "LAN IP address",
+    "WAN IP address",
+    "processor model",
+    "logical processor count",
+    "total memory",
+    "open alerts",
+    "sites",
+)
 
 
 class Transport:
@@ -34,32 +29,31 @@ class Transport:
         return self.result
 
 
-def response(value, *, input_tokens=100, output_tokens=20):
+def response(value):
     return {
         "output": [
             {
-                "type": "message",
                 "content": [
                     {
                         "type": "output_text",
                         "text": json.dumps(value),
                     }
-                ],
+                ]
             }
         ],
         "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "total_tokens": (
-                input_tokens
-                + output_tokens
-            ),
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
         },
     }
 
 
-def translator(value):
-    transport = Transport(response(value))
+def adapter(value):
+    transport = Transport(
+        response(value)
+    )
+
     return (
         OpenAISemanticIntentTranslator(
             api_key="test-secret",
@@ -70,63 +64,39 @@ def translator(value):
     )
 
 
-def test_shorthand_user_request_resolves_to_smallest_fact_set():
-    adapter, transport = translator(
+def test_user_shorthand_returns_one_concept():
+    translator, _ = adapter(
         {
             "resolved": True,
-            "resource_type": "endpoint",
             "requested_concepts": [
                 "last logged in user"
             ],
-            "confidence": 0.98,
+            "confidence": 0.99,
         }
     )
 
-    outcome = adapter.translate_with_usage(
-        text="user on aot-50282?",
-        eligible_resources=CATALOG,
-        grounded_selectors={
-            "endpoint": {
+    outcome = (
+        translator.translate_with_usage(
+            text="user on aot-50282?",
+            eligible_concepts=CONCEPTS,
+            grounded_selector={
                 "hostname": "AOT-50282",
-            }
-        },
+            },
+        )
     )
 
     assert outcome.translation is not None
-    assert outcome.translation.resource_type == "endpoint"
     assert (
         outcome.translation.requested_concepts
         == ("last logged in user",)
     )
-    assert outcome.translation.resource_selector == {
-        "hostname": "AOT-50282",
-    }
     assert outcome.usage.total_tokens == 120
 
-    sent = transport.calls[0]
-    assert (
-        sent["headers"]["Authorization"]
-        == "Bearer test-secret"
-    )
 
-    schema = (
-        sent["json"]["text"]["format"]
-    )
-    assert schema["type"] == "json_schema"
-    assert schema["strict"] is True
-
-    serialized = json.dumps(
-        sent["json"],
-        sort_keys=True,
-    )
-    assert "test-secret" not in serialized
-
-
-def test_generic_ip_can_return_complete_bounded_pair():
-    adapter, _ = translator(
+def test_generic_ip_can_require_bounded_pair():
+    translator, _ = adapter(
         {
             "resolved": True,
-            "resource_type": "endpoint",
             "requested_concepts": [
                 "LAN IP address",
                 "WAN IP address",
@@ -135,13 +105,11 @@ def test_generic_ip_can_return_complete_bounded_pair():
         }
     )
 
-    result = adapter.translate(
+    result = translator.translate(
         text="what ip does AOT-50282 have?",
-        eligible_resources=CATALOG,
-        grounded_selectors={
-            "endpoint": {
-                "hostname": "AOT-50282",
-            }
+        eligible_concepts=CONCEPTS,
+        grounded_selector={
+            "hostname": "AOT-50282",
         },
     )
 
@@ -152,51 +120,85 @@ def test_generic_ip_can_return_complete_bounded_pair():
     )
 
 
-def test_management_wide_alert_read_needs_no_selector():
-    adapter, _ = translator(
+def test_alert_meaning_is_same_with_or_without_grounded_target():
+    targeted, _ = adapter(
         {
             "resolved": True,
-            "resource_type": "alert",
             "requested_concepts": [
-                "alerts",
+                "open alerts"
             ],
-            "confidence": 0.96,
+            "confidence": 0.97,
         }
     )
 
-    result = adapter.translate(
-        text="anything actively alerting right now?",
-        eligible_resources=CATALOG,
-    )
-
-    assert result is not None
-    assert result.resource_type == "alert"
-    assert result.resource_selector == {}
-
-
-def test_unresolved_translation_returns_none():
-    adapter, _ = translator(
-        {
-            "resolved": False,
-            "resource_type": "endpoint",
-            "requested_concepts": [],
-            "confidence": 0.20,
-        }
-    )
-
-    assert adapter.translate(
-        text="something vague",
-        eligible_resources=CATALOG,
-    ) is None
-
-
-def test_provider_cannot_return_concept_from_other_resource():
-    adapter, _ = translator(
+    management, _ = adapter(
         {
             "resolved": True,
-            "resource_type": "alert",
             "requested_concepts": [
-                "last logged in user",
+                "open alerts"
+            ],
+            "confidence": 0.97,
+        }
+    )
+
+    targeted_result = targeted.translate(
+        text="alerts on AOT-50282?",
+        eligible_concepts=CONCEPTS,
+        grounded_selector={
+            "hostname": "AOT-50282",
+        },
+    )
+
+    management_result = management.translate(
+        text="anything actively alerting?",
+        eligible_concepts=CONCEPTS,
+    )
+
+    assert targeted_result is not None
+    assert management_result is not None
+
+    assert (
+        targeted_result.requested_concepts
+        == management_result.requested_concepts
+        == ("open alerts",)
+    )
+
+
+def test_transport_payload_contains_no_implementation_topology():
+    translator, transport = adapter(
+        {
+            "resolved": True,
+            "requested_concepts": [
+                "open alerts"
+            ],
+            "confidence": 0.95,
+        }
+    )
+
+    translator.translate(
+        text="show alerts",
+        eligible_concepts=CONCEPTS,
+    )
+
+    serialized = json.dumps(
+        transport.calls[0]["json"],
+        sort_keys=True,
+    )
+
+    assert "endpoint.alert.search" not in serialized
+    assert "management.alert.search" not in serialized
+    assert "datto_rmm" not in serialized
+    assert "resource_type" not in serialized
+    assert '"scope"' not in serialized
+    assert "hostname" not in serialized
+
+
+def test_provider_cannot_invent_concept():
+    translator, _ = adapter(
+        {
+            "resolved": True,
+            "requested_concepts": [
+                "invented fact"
             ],
             "confidence": 0.90,
         }
@@ -204,41 +206,24 @@ def test_provider_cannot_return_concept_from_other_resource():
 
     with pytest.raises(
         PermissionError,
-        match="outside governed resource catalog",
+        match="outside governed catalog",
     ):
-        adapter.translate(
-            text="bad provider response",
-            eligible_resources=CATALOG,
+        translator.translate(
+            text="bad response",
+            eligible_concepts=CONCEPTS,
         )
 
 
-def test_provider_cannot_invent_resource_type():
-    transport = Transport(
+def test_unresolved_returns_none():
+    translator, _ = adapter(
         {
-            "output_text": json.dumps(
-                {
-                    "resolved": True,
-                    "resource_type": "invented",
-                    "requested_concepts": [
-                        "alerts"
-                    ],
-                    "confidence": 0.9,
-                }
-            )
+            "resolved": False,
+            "requested_concepts": [],
+            "confidence": 0.1,
         }
     )
 
-    adapter = OpenAISemanticIntentTranslator(
-        api_key="test-secret",
-        transport=transport,
-        model="test-model",
-    )
-
-    with pytest.raises(
-        PermissionError,
-        match="resource type outside governed catalog",
-    ):
-        adapter.translate(
-            text="bad provider response",
-            eligible_resources=CATALOG,
-        )
+    assert translator.translate(
+        text="something unknown",
+        eligible_concepts=CONCEPTS,
+    ) is None

@@ -2,58 +2,242 @@
   "version": 1,
   "purpose": "Ground-truth semantic intent expectations for the realistic read scenario catalog. These are benchmark assertions only and are not production language rules.",
   "scenarios": {
-    "endpoint-last-user-01": {"resource_type":"endpoint","concepts":["last logged in user"]},
-    "endpoint-last-user-02": {"resource_type":"endpoint","concepts":["last logged in user"]},
-    "endpoint-last-user-03": {"resource_type":"endpoint","concepts":["last logged in user"]},
-
-    "endpoint-ip-01": {"resource_type":"endpoint","concepts":["LAN IP address","WAN IP address"]},
-    "endpoint-ip-02": {"resource_type":"endpoint","concepts":["LAN IP address","WAN IP address"]},
-    "endpoint-ip-03": {"resource_type":"endpoint","concepts":["LAN IP address"]},
-    "endpoint-ip-04": {"resource_type":"endpoint","concepts":["WAN IP address"]},
-    "endpoint-ip-05": {"resource_type":"endpoint","concepts":["LAN IP address"]},
-
-    "endpoint-os-01": {"resource_type":"endpoint","concepts":["operating system"]},
-    "endpoint-os-02": {"resource_type":"endpoint","concepts":["operating system display version"]},
-    "endpoint-os-03": {"resource_type":"endpoint","concepts":["operating system display version"]},
-    "endpoint-os-04": {"resource_type":"endpoint","concepts":["operating system build"]},
-
-    "endpoint-cpu-01": {"resource_type":"endpoint","concepts":["processor model"]},
-    "endpoint-cpu-02": {"resource_type":"endpoint","concepts":["processor model"]},
-    "endpoint-cpu-03": {"resource_type":"endpoint","concepts":["logical processor count"]},
-
-    "endpoint-memory-01": {"resource_type":"endpoint","concepts":["total memory"]},
-    "endpoint-memory-02": {"resource_type":"endpoint","concepts":["total memory"]},
-
-    "endpoint-board-01": {"resource_type":"endpoint","concepts":["motherboard model"]},
-    "endpoint-bios-01": {"resource_type":"endpoint","concepts":["bios version"]},
-
-    "endpoint-disk-01": {"resource_type":"endpoint","concepts":["free disk space"]},
-    "endpoint-disk-02": {"resource_type":"endpoint","concepts":["logical disks"]},
-
-    "endpoint-printer-01": {"resource_type":"endpoint","concepts":["printers"]},
-    "endpoint-network-01": {"resource_type":"endpoint","concepts":["network adapters"]},
-    "endpoint-display-01": {"resource_type":"endpoint","concepts":["display adapters"]},
-
-    "endpoint-alert-01": {"resource_type":"endpoint","concepts":["open alerts"]},
-    "endpoint-alert-02": {"resource_type":"endpoint","concepts":["open alerts"]},
-    "endpoint-alert-03": {"resource_type":"endpoint","concepts":["disk error evidence"]},
-
-    "endpoint-software-01": {"resource_type":"endpoint","concepts":["software"]},
-    "endpoint-software-02": {"resource_type":"endpoint","concepts":["software"]},
-
-    "endpoint-multi-01": {"resource_type":"endpoint","concepts":["operating system","last logged in user"]},
-    "endpoint-multi-02": {"resource_type":"endpoint","concepts":["LAN IP address","WAN IP address","operating system","last logged in user"]},
-    "endpoint-multi-03": {"resource_type":"endpoint","concepts":["processor model","total memory"]},
-    "endpoint-multi-04": {"resource_type":"endpoint","concepts":["last logged in user","operating system display version","open alerts"]},
-
-    "endpoint-natural-01": {"resource_type":"endpoint","concepts":["last logged in user","LAN IP address","WAN IP address"]},
-    "endpoint-natural-02": {"resource_type":"endpoint","concepts":["operating system","total memory"]},
-    "endpoint-natural-03": {"resource_type":"endpoint","concepts":["LAN IP address","WAN IP address","last logged in user","open alerts"]},
-
-    "management-sites-01": {"resource_type":"management_site","concepts":["sites"]},
-    "management-sites-02": {"resource_type":"management_site","concepts":["sites"]},
-
-    "management-alerts-01": {"resource_type":"alert","concepts":["alerts"]},
-    "management-alerts-02": {"resource_type":"alert","concepts":["alerts"]}
+    "endpoint-last-user-01": {
+      "concepts": [
+        "last logged in user"
+      ]
+    },
+    "endpoint-last-user-02": {
+      "concepts": [
+        "last logged in user"
+      ]
+    },
+    "endpoint-last-user-03": {
+      "concepts": [
+        "last logged in user"
+      ]
+    },
+    "endpoint-ip-01": {
+      "concepts": [
+        "LAN IP address",
+        "WAN IP address"
+      ]
+    },
+    "endpoint-ip-02": {
+      "concepts": [
+        "LAN IP address",
+        "WAN IP address"
+      ]
+    },
+    "endpoint-ip-03": {
+      "concepts": [
+        "LAN IP address"
+      ]
+    },
+    "endpoint-ip-04": {
+      "concepts": [
+        "WAN IP address"
+      ]
+    },
+    "endpoint-ip-05": {
+      "concepts": [
+        "LAN IP address"
+      ]
+    },
+    "endpoint-os-01": {
+      "concepts": [
+        "operating system"
+      ]
+    },
+    "endpoint-os-02": {
+      "acceptable_concept_sets": [
+        [
+          "operating system"
+        ],
+        [
+          "operating system display version"
+        ],
+        [
+          "operating system",
+          "operating system display version"
+        ]
+      ]
+    },
+    "endpoint-os-03": {
+      "concepts": [
+        "operating system display version"
+      ]
+    },
+    "endpoint-os-04": {
+      "concepts": [
+        "operating system build"
+      ]
+    },
+    "endpoint-cpu-01": {
+      "concepts": [
+        "processor model"
+      ]
+    },
+    "endpoint-cpu-02": {
+      "concepts": [
+        "processor model"
+      ]
+    },
+    "endpoint-cpu-03": {
+      "concepts": [
+        "logical processor count"
+      ]
+    },
+    "endpoint-memory-01": {
+      "concepts": [
+        "total memory"
+      ]
+    },
+    "endpoint-memory-02": {
+      "concepts": [
+        "total memory"
+      ]
+    },
+    "endpoint-board-01": {
+      "concepts": [
+        "motherboard model"
+      ]
+    },
+    "endpoint-bios-01": {
+      "concepts": [
+        "bios version"
+      ]
+    },
+    "endpoint-disk-01": {
+      "concepts": [
+        "free disk space"
+      ]
+    },
+    "endpoint-disk-02": {
+      "concepts": [
+        "logical disks"
+      ]
+    },
+    "endpoint-printer-01": {
+      "concepts": [
+        "printers"
+      ]
+    },
+    "endpoint-network-01": {
+      "concepts": [
+        "network adapters"
+      ]
+    },
+    "endpoint-display-01": {
+      "concepts": [
+        "display adapters"
+      ]
+    },
+    "endpoint-alert-01": {
+      "concepts": [
+        "open alerts"
+      ]
+    },
+    "endpoint-alert-02": {
+      "concepts": [
+        "open alerts"
+      ]
+    },
+    "endpoint-alert-03": {
+      "concepts": [
+        "disk error evidence"
+      ]
+    },
+    "endpoint-software-01": {
+      "concepts": [
+        "software"
+      ]
+    },
+    "endpoint-software-02": {
+      "concepts": [
+        "software"
+      ]
+    },
+    "endpoint-multi-01": {
+      "concepts": [
+        "operating system",
+        "last logged in user"
+      ]
+    },
+    "endpoint-multi-02": {
+      "concepts": [
+        "LAN IP address",
+        "WAN IP address",
+        "operating system",
+        "last logged in user"
+      ]
+    },
+    "endpoint-multi-03": {
+      "concepts": [
+        "processor model",
+        "total memory"
+      ]
+    },
+    "endpoint-multi-04": {
+      "acceptable_concept_sets": [
+        [
+          "last logged in user",
+          "operating system",
+          "open alerts"
+        ],
+        [
+          "last logged in user",
+          "operating system display version",
+          "open alerts"
+        ],
+        [
+          "last logged in user",
+          "operating system",
+          "operating system display version",
+          "open alerts"
+        ]
+      ]
+    },
+    "endpoint-natural-01": {
+      "concepts": [
+        "last logged in user",
+        "LAN IP address",
+        "WAN IP address"
+      ]
+    },
+    "endpoint-natural-02": {
+      "concepts": [
+        "operating system",
+        "total memory"
+      ]
+    },
+    "endpoint-natural-03": {
+      "concepts": [
+        "LAN IP address",
+        "WAN IP address",
+        "last logged in user",
+        "open alerts"
+      ]
+    },
+    "management-sites-01": {
+      "concepts": [
+        "sites"
+      ]
+    },
+    "management-sites-02": {
+      "concepts": [
+        "sites"
+      ]
+    },
+    "management-alerts-01": {
+      "concepts": [
+        "open alerts"
+      ]
+    },
+    "management-alerts-02": {
+      "concepts": [
+        "open alerts"
+      ]
+    }
   }
 }

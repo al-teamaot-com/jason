@@ -55,35 +55,28 @@ SECRET_ID = Path(
 )
 
 
-CATALOG: dict[str, tuple[str, ...]] = {
-    "endpoint": (
-        "last logged in user",
-        "LAN IP address",
-        "WAN IP address",
-        "operating system",
-        "operating system display version",
-        "operating system build",
-        "processor model",
-        "logical processor count",
-        "total memory",
-        "motherboard model",
-        "bios version",
-        "free disk space",
-        "logical disks",
-        "printers",
-        "network adapters",
-        "display adapters",
-        "open alerts",
-        "disk error evidence",
-        "software",
-    ),
-    "management_site": (
-        "sites",
-    ),
-    "alert": (
-        "alerts",
-    ),
-}
+CONCEPT_CATALOG: tuple[str, ...] = (
+    "last logged in user",
+    "LAN IP address",
+    "WAN IP address",
+    "operating system",
+    "operating system display version",
+    "operating system build",
+    "processor model",
+    "logical processor count",
+    "total memory",
+    "motherboard model",
+    "bios version",
+    "free disk space",
+    "logical disks",
+    "printers",
+    "network adapters",
+    "display adapters",
+    "open alerts",
+    "disk error evidence",
+    "software",
+    "sites",
+)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -130,33 +123,50 @@ def resolve_api_key(openbao_url: str) -> str:
 
 def classify(
     *,
-    actual_resource: str | None,
     actual_concepts: tuple[str, ...],
-    expected_resource: str,
-    expected_concepts: tuple[str, ...],
+    acceptable_concept_sets: tuple[
+        tuple[str, ...],
+        ...
+    ],
+    resolved: bool,
 ) -> tuple[str, list[str], list[str]]:
-    if actual_resource is None:
+    if not resolved:
+        expected = (
+            acceptable_concept_sets[0]
+            if acceptable_concept_sets
+            else ()
+        )
         return (
             "unresolved",
-            list(expected_concepts),
+            list(expected),
             [],
         )
 
-    if actual_resource != expected_resource:
-        return (
-            "wrong_resource",
-            list(expected_concepts),
-            list(actual_concepts),
-        )
-
-    expected = set(expected_concepts)
     actual = set(actual_concepts)
 
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected)
+    for acceptable in acceptable_concept_sets:
+        if actual == set(acceptable):
+            return "exact", [], []
 
-    if not missing and not extra:
-        return "exact", [], []
+    # Use the closest acceptable set to make diagnostics meaningful.
+    best = min(
+        acceptable_concept_sets,
+        key=lambda candidate: (
+            len(
+                set(candidate)
+                ^ actual
+            ),
+            len(candidate),
+        ),
+    )
+
+    expected = set(best)
+    missing = sorted(
+        expected - actual
+    )
+    extra = sorted(
+        actual - expected
+    )
 
     if missing and extra:
         return "mixed", missing, extra
@@ -165,7 +175,6 @@ def classify(
         return "under_selected", missing, []
 
     return "over_selected", [], extra
-
 
 
 class BenchmarkJsonHttpTransport:
@@ -329,7 +338,6 @@ def main() -> int:
         "over_selected": 0,
         "under_selected": 0,
         "mixed": 0,
-        "wrong_resource": 0,
         "unresolved": 0,
         "error": 0,
         "input_tokens": 0,
@@ -351,20 +359,34 @@ def main() -> int:
                     f"missing benchmark expectation: {scenario_id}"
                 )
 
-            expected_resource = str(
-                expected["resource_type"]
-            )
-            expected_concepts = tuple(
-                str(item)
-                for item in expected["concepts"]
+            if "acceptable_concept_sets" in expected:
+                acceptable_concept_sets = tuple(
+                    tuple(
+                        str(item)
+                        for item in candidate
+                    )
+                    for candidate
+                    in expected["acceptable_concept_sets"]
+                )
+            else:
+                acceptable_concept_sets = (
+                    tuple(
+                        str(item)
+                        for item
+                        in expected["concepts"]
+                    ),
+                )
+
+            expected_concepts = (
+                acceptable_concept_sets[0]
             )
 
-            grounded_selectors = {}
+            grounded_selector = {}
 
             # Grounding is deterministic benchmark setup,
             # not semantic interpretation.
             if "AOT-50282" in question.upper():
-                grounded_selectors["endpoint"] = {
+                grounded_selector = {
                     "hostname": "AOT-50282",
                 }
 
@@ -377,8 +399,8 @@ def main() -> int:
                 outcome = (
                     translator.translate_with_usage(
                         text=question,
-                        eligible_resources=CATALOG,
-                        grounded_selectors=grounded_selectors,
+                        eligible_concepts=CONCEPT_CATALOG,
+                        grounded_selector=grounded_selector,
                     )
                 )
 
@@ -393,13 +415,11 @@ def main() -> int:
                 )
 
                 if outcome.translation is None:
-                    actual_resource = None
+                    resolved = False
                     actual_concepts: tuple[str, ...] = ()
                     confidence = 0.0
                 else:
-                    actual_resource = (
-                        outcome.translation.resource_type
-                    )
+                    resolved = True
                     actual_concepts = (
                         outcome.translation.requested_concepts
                     )
@@ -408,10 +428,10 @@ def main() -> int:
                     )
 
                 status, missing, extra = classify(
-                    actual_resource=actual_resource,
                     actual_concepts=actual_concepts,
-                    expected_resource=expected_resource,
-                    expected_concepts=expected_concepts,
+                    acceptable_concept_sets=
+                        acceptable_concept_sets,
+                    resolved=resolved,
                 )
 
                 totals[status] += 1
@@ -425,14 +445,13 @@ def main() -> int:
                         "question": question,
                         "status": status,
                         "expected": {
-                            "resource_type":
-                                expected_resource,
-                            "concepts":
-                                list(expected_concepts),
+                            "acceptable_concept_sets": [
+                                list(candidate)
+                                for candidate
+                                in acceptable_concept_sets
+                            ],
                         },
                         "actual": {
-                            "resource_type":
-                                actual_resource,
                             "concepts":
                                 list(actual_concepts),
                             "confidence":
@@ -505,10 +524,8 @@ def main() -> int:
         "scenario_count": completed,
         "exact_accuracy": accuracy,
         "totals": totals,
-        "catalog": {
-            key: list(value)
-            for key, value in CATALOG.items()
-        },
+        "concept_catalog":
+            list(CONCEPT_CATALOG),
         "results": results,
     }
 
@@ -541,10 +558,6 @@ def main() -> int:
         f"{totals['under_selected']}"
     )
     print(f"MIXED={totals['mixed']}")
-    print(
-        "WRONG_RESOURCE="
-        f"{totals['wrong_resource']}"
-    )
     print(
         f"UNRESOLVED={totals['unresolved']}"
     )

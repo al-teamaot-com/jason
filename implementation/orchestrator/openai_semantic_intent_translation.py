@@ -37,89 +37,75 @@ class OpenAITranslationOutcome:
 
 @dataclass(frozen=True, slots=True)
 class OpenAISemanticIntentTranslator:
-    """OpenAI-backed semantic interpretation with no execution authority.
-
-    The model may choose only:
-      - one resource type from Jason's bounded catalog;
-      - concepts from Jason's bounded catalog;
-      - a confidence value.
-
-    The model cannot return selectors, providers, capabilities, credentials,
-    permissions, tools, agents, API routes, or execution instructions.
-    """
+    """OpenAI-backed semantic concept translation with no execution authority."""
 
     api_key: str
     transport: JsonHttpTransport
     model: str
     endpoint: str = "https://api.openai.com/v1/responses"
     timeout_seconds: float = 30.0
-    max_output_tokens: int = 160
+    max_output_tokens: int = 128
 
     def translate(
         self,
         *,
         text: str,
-        eligible_resources: Mapping[str, tuple[str, ...]],
-        grounded_selectors: (
-            Mapping[str, Mapping[str, str]] | None
-        ) = None,
+        eligible_concepts: tuple[str, ...],
+        grounded_selector: Mapping[str, str] | None = None,
     ) -> SemanticIntentTranslation | None:
         return self.translate_with_usage(
             text=text,
-            eligible_resources=eligible_resources,
-            grounded_selectors=grounded_selectors,
+            eligible_concepts=eligible_concepts,
+            grounded_selector=grounded_selector,
         ).translation
 
     def translate_with_usage(
         self,
         *,
         text: str,
-        eligible_resources: Mapping[str, tuple[str, ...]],
-        grounded_selectors: (
-            Mapping[str, Mapping[str, str]] | None
-        ) = None,
+        eligible_concepts: tuple[str, ...],
+        grounded_selector: Mapping[str, str] | None = None,
     ) -> OpenAITranslationOutcome:
-        catalog = self._normalize_catalog(
-            eligible_resources
+        concepts = self._normalize_concepts(
+            eligible_concepts
         )
 
-        selectors = {
-            str(resource_type): {
-                str(key): str(value)
-                for key, value in selector.items()
-            }
-            for resource_type, selector in (
-                grounded_selectors or {}
-            ).items()
-        }
-
-        schema = self._schema(catalog)
+        # Jason may tell the semantic provider only whether a grounded target
+        # exists. The provider never receives or returns the selector itself.
+        grounded_target_present = bool(
+            grounded_selector
+        )
 
         payload = {
             "model": self.model,
             "instructions": (
-                "Translate the human request into the smallest complete "
-                "provider-neutral Jason intent. Choose exactly one resource "
-                "type from the supplied catalog and only the canonical "
-                "concepts necessary to answer the request. Do not add useful "
-                "but unrequested concepts. A generic bounded request may map "
-                "to multiple concepts only when all are required for the "
-                "complete safe meaning, such as a generic endpoint IP request "
-                "mapping to both LAN IP address and WAN IP address. "
-                "You have no authority to select or describe providers, "
-                "connectors, capabilities, tools, agents, credentials, "
-                "permissions, API routes, selectors, or actions. Selectors "
-                "are grounded by Jason outside this model. If the request "
-                "cannot be represented confidently by the supplied catalog, "
-                "return resolved=false with an empty requested_concepts list."
+                "Translate the human request into the smallest complete set "
+                "of canonical semantic concepts from the supplied catalog. "
+                "Return only concepts necessary to answer what the human "
+                "actually asked. Do not add useful, adjacent, diagnostic, "
+                "or related concepts. "
+                "Examples of semantic precision: "
+                "CPU normally means processor model; do not add logical "
+                "processor count unless quantity/count was requested. "
+                "A generic request for an endpoint's IP address requires "
+                "both LAN IP address and WAN IP address because both are "
+                "needed to completely satisfy that bounded ambiguity. "
+                "A request about alerts maps to open alerts whether it refers "
+                "to a specific grounded endpoint or to the environment broadly. "
+                "Do not infer implementation topology from target presence. "
+                "You do not select target identity, scope, resource type, "
+                "provider, connector, capability, tool, agent, credential, "
+                "permission, API route, or action. "
+                "If the request cannot be represented confidently by the "
+                "supplied concepts, return resolved=false with an empty "
+                "requested_concepts array."
             ),
             "input": json.dumps(
                 {
                     "human_text": text,
-                    "eligible_resources": catalog,
-                    "grounded_resource_types": sorted(
-                        selectors
-                    ),
+                    "eligible_concepts": concepts,
+                    "grounded_target_present":
+                        grounded_target_present,
                 },
                 sort_keys=True,
             ),
@@ -128,25 +114,33 @@ class OpenAISemanticIntentTranslator:
                     "type": "json_schema",
                     "name": "jason_semantic_intent",
                     "strict": True,
-                    "schema": schema,
+                    "schema": self._schema(
+                        concepts
+                    ),
                 }
             },
-            "max_output_tokens": self.max_output_tokens,
+            "max_output_tokens":
+                self.max_output_tokens,
         }
 
         response = self.transport.request(
             method="POST",
             url=self.endpoint,
             headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
+                "Authorization":
+                    f"Bearer {self.api_key}",
+                "Content-Type":
+                    "application/json",
             },
             json=payload,
-            timeout_seconds=self.timeout_seconds,
+            timeout_seconds=
+                self.timeout_seconds,
         )
 
         usage = self._usage(response)
-        decoded = self._decode_output(response)
+        decoded = self._decode_output(
+            response
+        )
 
         if decoded.get("resolved") is not True:
             return OpenAITranslationOutcome(
@@ -154,56 +148,48 @@ class OpenAISemanticIntentTranslator:
                 usage=usage,
             )
 
-        resource_type = str(
-            decoded.get("resource_type", "")
-        ).strip()
-
-        if resource_type not in catalog:
-            raise PermissionError(
-                "semantic provider selected resource type outside governed catalog"
-            )
-
         raw_concepts = decoded.get(
             "requested_concepts"
         )
-        if not isinstance(raw_concepts, list):
+
+        if not isinstance(
+            raw_concepts,
+            list,
+        ):
             raise ValueError(
                 "semantic provider requested_concepts must be a list"
             )
 
-        allowed = set(catalog[resource_type])
-        concepts: list[str] = []
+        allowed = set(concepts)
+        selected: list[str] = []
 
         for raw in raw_concepts:
             concept = str(raw).strip()
 
             if concept not in allowed:
                 raise PermissionError(
-                    "semantic provider selected concept outside governed resource catalog"
+                    "semantic provider selected concept outside governed catalog"
                 )
 
-            if concept not in concepts:
-                concepts.append(concept)
+            if concept not in selected:
+                selected.append(concept)
 
-        if not concepts:
+        if not selected:
             return OpenAITranslationOutcome(
                 translation=None,
                 usage=usage,
             )
 
-        confidence = float(
-            decoded.get("confidence", 0.0)
-        )
-
         translation = SemanticIntentTranslation(
-            resource_type=resource_type,
-            resource_selector=selectors.get(
-                resource_type,
-                {},
-            ),
-            requested_concepts=tuple(concepts),
+            requested_concepts=
+                tuple(selected),
             operation="read",
-            confidence=confidence,
+            confidence=float(
+                decoded.get(
+                    "confidence",
+                    0.0,
+                )
+            ),
         )
 
         return OpenAITranslationOutcome(
@@ -212,65 +198,33 @@ class OpenAISemanticIntentTranslator:
         )
 
     @staticmethod
-    def _normalize_catalog(
-        eligible_resources: Mapping[
-            str,
-            tuple[str, ...],
-        ],
-    ) -> dict[str, tuple[str, ...]]:
-        result: dict[str, tuple[str, ...]] = {}
-
-        for raw_resource, raw_concepts in (
-            eligible_resources.items()
-        ):
-            resource = str(raw_resource).strip()
-
-            if not resource:
-                continue
-
-            concepts = tuple(
-                dict.fromkeys(
-                    str(item).strip()
-                    for item in raw_concepts
-                    if str(item).strip()
-                )
+    def _normalize_concepts(
+        eligible_concepts: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        concepts = tuple(
+            dict.fromkeys(
+                str(item).strip()
+                for item in eligible_concepts
+                if str(item).strip()
             )
+        )
 
-            if concepts:
-                result[resource] = concepts
-
-        if not result:
+        if not concepts:
             raise ValueError(
-                "semantic translation requires an eligible resource catalog"
+                "semantic translation requires an eligible concept catalog"
             )
 
-        if len(result) > 50:
-            raise ValueError(
-                "semantic resource catalog exceeds governed bound"
-            )
-
-        if sum(
-            len(concepts)
-            for concepts in result.values()
-        ) > 500:
+        if len(concepts) > 500:
             raise ValueError(
                 "semantic concept catalog exceeds governed bound"
             )
 
-        return result
+        return concepts
 
     @staticmethod
     def _schema(
-        catalog: Mapping[str, tuple[str, ...]],
+        concepts: tuple[str, ...],
     ) -> Mapping[str, Any]:
-        all_concepts = tuple(
-            dict.fromkeys(
-                concept
-                for concepts in catalog.values()
-                for concept in concepts
-            )
-        )
-
         return {
             "type": "object",
             "additionalProperties": False,
@@ -278,21 +232,15 @@ class OpenAISemanticIntentTranslator:
                 "resolved": {
                     "type": "boolean",
                 },
-                "resource_type": {
-                    "type": "string",
-                    "enum": list(catalog),
-                },
                 "requested_concepts": {
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": list(
-                            all_concepts
-                        ),
+                        "enum": list(concepts),
                     },
                     "maxItems": min(
                         20,
-                        len(all_concepts),
+                        len(concepts),
                     ),
                 },
                 "confidence": {
@@ -303,7 +251,6 @@ class OpenAISemanticIntentTranslator:
             },
             "required": [
                 "resolved",
-                "resource_type",
                 "requested_concepts",
                 "confidence",
             ],
@@ -313,20 +260,41 @@ class OpenAISemanticIntentTranslator:
     def _decode_output(
         response: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        top_level = response.get("output_text")
-        if isinstance(top_level, str):
-            return OpenAISemanticIntentTranslator._decode_json(
-                top_level
+        top_level = response.get(
+            "output_text"
+        )
+
+        if isinstance(
+            top_level,
+            str,
+        ):
+            return (
+                OpenAISemanticIntentTranslator
+                ._decode_json(
+                    top_level
+                )
             )
 
-        output = response.get("output")
+        output = response.get(
+            "output"
+        )
+
         if isinstance(output, list):
             for item in output:
-                if not isinstance(item, Mapping):
+                if not isinstance(
+                    item,
+                    Mapping,
+                ):
                     continue
 
-                content = item.get("content")
-                if not isinstance(content, list):
+                content = item.get(
+                    "content"
+                )
+
+                if not isinstance(
+                    content,
+                    list,
+                ):
                     continue
 
                 for part in content:
@@ -345,7 +313,8 @@ class OpenAISemanticIntentTranslator:
                         )
                     ):
                         return (
-                            OpenAISemanticIntentTranslator._decode_json(
+                            OpenAISemanticIntentTranslator
+                            ._decode_json(
                                 part["text"]
                             )
                         )
@@ -359,13 +328,18 @@ class OpenAISemanticIntentTranslator:
         raw: str,
     ) -> Mapping[str, Any]:
         try:
-            decoded = json.loads(raw)
+            decoded = json.loads(
+                raw
+            )
         except json.JSONDecodeError as error:
             raise ValueError(
                 "OpenAI semantic response was not valid JSON"
             ) from error
 
-        if not isinstance(decoded, Mapping):
+        if not isinstance(
+            decoded,
+            Mapping,
+        ):
             raise ValueError(
                 "OpenAI semantic response must be a JSON object"
             )
@@ -376,19 +350,36 @@ class OpenAISemanticIntentTranslator:
     def _usage(
         response: Mapping[str, Any],
     ) -> OpenAITranslationUsage:
-        raw = response.get("usage")
+        raw = response.get(
+            "usage"
+        )
 
-        if not isinstance(raw, Mapping):
+        if not isinstance(
+            raw,
+            Mapping,
+        ):
             return OpenAITranslationUsage()
 
         return OpenAITranslationUsage(
             input_tokens=int(
-                raw.get("input_tokens", 0) or 0
+                raw.get(
+                    "input_tokens",
+                    0,
+                )
+                or 0
             ),
             output_tokens=int(
-                raw.get("output_tokens", 0) or 0
+                raw.get(
+                    "output_tokens",
+                    0,
+                )
+                or 0
             ),
             total_tokens=int(
-                raw.get("total_tokens", 0) or 0
+                raw.get(
+                    "total_tokens",
+                    0,
+                )
+                or 0
             ),
         )
