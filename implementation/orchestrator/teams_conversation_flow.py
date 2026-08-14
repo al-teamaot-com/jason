@@ -188,7 +188,9 @@ class ConversationIntentResolver(Protocol):
 
 
 class ConversationOrchestrationRequestFactory(Protocol):
-    """Build a fully governed request, including policy/data/budget context."""
+    """Build governed requests within one conversation correlation scope."""
+
+    def new_correlation_id(self) -> str: ...
 
     def build(
         self,
@@ -196,6 +198,7 @@ class ConversationOrchestrationRequestFactory(Protocol):
         principal: BoundConversationPrincipal,
         intent: ConversationIntent,
         identity: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
     ) -> OrchestrationRequest: ...
 
 
@@ -254,12 +257,15 @@ class TeamsConversationFlow:
             else (resolved,)
         )
 
+        correlation_id = self.request_factory.new_correlation_id()
+
         orchestration_requests: list[OrchestrationRequest] = []
         for intent in intents:
             orchestration_request = self.request_factory.build(
                 principal=principal,
                 intent=intent,
                 identity=request.identity,
+                correlation_id=correlation_id,
             )
             self._validate_bound_request(
                 orchestration_request=orchestration_request,
@@ -268,13 +274,12 @@ class TeamsConversationFlow:
             )
             orchestration_requests.append(orchestration_request)
 
-        correlation_ids = {
-            item.correlation_id
+        if any(
+            item.correlation_id != correlation_id
             for item in orchestration_requests
-        }
-        if len(correlation_ids) != 1:
+        ):
             raise PermissionError(
-                "multi-step conversation requests must retain one correlation identity"
+                "conversation requests must retain the turn correlation identity"
             )
 
         # Every step crosses the Central Orchestrator independently. A failed or
@@ -296,7 +301,7 @@ class TeamsConversationFlow:
         transport_message_id = self.transport.send(
             conversation_id=request.identity.conversation_id,
             text=response_text,
-            correlation_id=orchestration_requests[0].correlation_id,
+            correlation_id=correlation_id,
         )
         if not transport_message_id.strip():
             raise RuntimeError("Teams transport did not return a message identifier")

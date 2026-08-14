@@ -73,15 +73,18 @@ class GovernedTeamsOrchestrationRequestFactory:
     approval_id_factory: Callable[[], str] = lambda: f"approval_{uuid4().hex}"
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
+    def new_correlation_id(self) -> str:
+        return self.correlation_id_factory()
+
     def build(
         self,
         *,
         principal: BoundConversationPrincipal,
         intent: ConversationIntent,
         identity: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
     ) -> OrchestrationRequest:
         execution_id = self.execution_id_factory()
-        correlation_id = self.correlation_id_factory()
 
         try:
             permission_mode = PermissionMode(intent.permission_mode)

@@ -42,10 +42,13 @@ class RequestFactory:
         self.mutate_organization = mutate_organization
         self.requester_kind = requester_kind
 
-    def build(self, *, principal, intent, identity):
+    def new_correlation_id(self):
+        return "corr-1"
+
+    def build(self, *, principal, intent, identity, correlation_id):
         return OrchestrationRequest(
             execution_id="exec-1",
-            correlation_id="corr-1",
+            correlation_id=correlation_id,
             principal_id="other-principal" if self.mutate_principal else principal.principal_id,
             organization_id="other-org" if self.mutate_organization else principal.organization_id,
             client_id=principal.client_id,
@@ -244,8 +247,13 @@ def test_intent_rejects_direct_agent_invocation_arguments():
 
 def test_request_factory_cannot_change_execution_or_permission_mode():
     class ModeChangingFactory(RequestFactory):
-        def build(self, *, principal, intent, identity):
-            request = super().build(principal=principal, intent=intent, identity=identity)
+        def build(self, *, principal, intent, identity, correlation_id):
+            request = super().build(
+                principal=principal,
+                intent=intent,
+                identity=identity,
+                correlation_id=correlation_id,
+            )
             return OrchestrationRequest(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
