@@ -182,10 +182,12 @@ class ReasonedResourceInquiryInterpreter:
 class MetadataFirstResourceInquiryInterpreter:
     """Resolve obvious read-only resource inquiries without requiring AI.
 
-    This layer is deliberately conservative. It only resolves a request when one
-    governed metadata contract produces a unique direct semantic match. Anything
-    ambiguous or requiring linguistic inference falls through to the existing
-    bounded reasoned interpreter.
+    This layer is deliberately conservative. It resolves only governed read meaning
+    that can be bounded from registered metadata. When one human phrase safely names
+    several read-only facts for the same grounded resource, the interpreter returns
+    the complete bounded fact set instead of forcing the human to pick one arbitrary
+    interpretation. Clarification remains reserved for cases that cannot be answered
+    safely without materially changing target, authority, action, risk, or meaning.
 
     Provider names in free-form text remain source context only and never become
     authority, provider selection, tenant scope, or a resource selector.
@@ -194,6 +196,8 @@ class MetadataFirstResourceInquiryInterpreter:
     contracts: tuple[Mapping[str, Any], ...]
     fallback: "ResourceInquiryInterpreter"
     fact_vocabulary: CanonicalFactVocabulary | None = None
+
+    _MAX_BOUNDED_FACT_EXPANSION = 20
 
     def interpret(
         self,
@@ -289,58 +293,61 @@ class MetadataFirstResourceInquiryInterpreter:
         text: str,
         normalized_text: str,
     ) -> ResourceInquiry | None:
-        """Interpret one human-grounded named endpoint fact request.
+        """Interpret a human-grounded named endpoint read request.
 
-        The endpoint selector and requested semantic fact are resolved
-        independently. Capability and provider selection remain downstream
-        responsibilities of the governed planner and Central Orchestrator.
+        The endpoint selector and requested semantic facts are resolved independently.
+        A shared read phrase such as ``IP address`` may expand into several governed
+        facts when returning all candidates is bounded and does not require any change
+        in resource target, authority, execution mode, or risk. Capability and provider
+        selection remain downstream responsibilities of the governed planner and
+        Central Orchestrator.
         """
 
         if self.fact_vocabulary is None:
             return None
 
-        endpoint_identifier = (
-            self._extract_endpoint_identifier(text)
-        )
+        endpoint_identifier = self._extract_endpoint_identifier(text)
 
         if endpoint_identifier is None:
             return None
 
-        qualified = (
-            self.fact_vocabulary
-            .resolve_qualified_human_text(
-                human_text=text,
-                eligible_facts=(
-                    self._eligible_canonical_facts(
-                        resource_type="endpoint",
-                    )
-                ),
-            )
+        qualified = self.fact_vocabulary.resolve_qualified_human_text(
+            human_text=text,
+            eligible_facts=self._eligible_canonical_facts(
+                resource_type="endpoint",
+            ),
         )
 
+        requested_facts: tuple[str, ...] = ()
+
         if qualified.status == "ambiguous":
-            raise ConversationClarificationRequiredError(
-                reason_code="canonical_fact_ambiguous",
-                candidate_facts=tuple(
-                    definition.canonical_fact
-                    for definition in qualified.candidates
-                ),
+            candidate_facts = tuple(
+                definition.canonical_fact
+                for definition in qualified.candidates
+            )
+            if len(candidate_facts) > self._MAX_BOUNDED_FACT_EXPANSION:
+                raise ConversationClarificationRequiredError(
+                    reason_code="canonical_fact_ambiguity_exceeds_safe_bound",
+                    candidate_facts=candidate_facts,
+                )
+            requested_facts = candidate_facts
+
+        elif qualified.status == "resolved":
+            assert qualified.definition is not None
+            requested_facts = (
+                qualified.definition.canonical_fact,
             )
 
-        requested_fact = None
-
-        if qualified.status == "resolved":
-            assert qualified.definition is not None
-            requested_fact = qualified.definition.canonical_fact
-
-        if requested_fact is None:
+        if not requested_facts:
             requested_fact = self._explicit_canonical_fact(normalized_text)
+            if requested_fact is not None:
+                requested_facts = (requested_fact,)
 
         selector: dict[str, str] = {
             "hostname": endpoint_identifier,
         }
 
-        if requested_fact is None:
+        if not requested_facts:
             product = self._extract_software_version_product(
                 text=text,
                 endpoint_identifier=endpoint_identifier,
@@ -350,7 +357,7 @@ class MetadataFirstResourceInquiryInterpreter:
                 return None
 
             selector["software"] = product
-            requested_fact = f"{product} version"
+            requested_facts = (f"{product} version",)
 
         result_intent, completeness_requirement = (
             self._result_outcome(normalized_text)
@@ -364,7 +371,7 @@ class MetadataFirstResourceInquiryInterpreter:
             human_text=text,
             resource_type="endpoint",
             resource_selector=selector,
-            requested_facts=(requested_fact,),
+            requested_facts=requested_facts,
             result_intent=result_intent,
             completeness_requirement=completeness_requirement,
             permission_mode="observe",
