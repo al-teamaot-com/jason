@@ -42,8 +42,10 @@ from orchestrator.conversation_action_intent import (
 from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
-    MetadataFirstResourceInquiryInterpreter,
     ReasonedResourceInquiryInterpreter,
+)
+from orchestrator.grounded_semantic_resource_interpreter import (
+    GroundedSemanticResourceInquiryInterpreter,
 )
 from orchestrator.conversation_response import GovernedTeamsConversationResponseRenderer
 from orchestrator.event_store import SQLiteOrchestrationEventStore
@@ -79,6 +81,7 @@ from orchestrator.resource_evidence import (
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
+from orchestrator.semantic_fact_reasoning import OllamaSemanticFactReasoner
 from orchestrator.semantic_mapping_registry import (
     JsonSemanticMappingRegistryLoader,
 )
@@ -485,7 +488,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         reasoner=OllamaActionIntentReasoner(ollama_client),
     )
     resource_intent_resolver = GovernedResourceConversationIntentResolver(
-        interpreter=MetadataFirstResourceInquiryInterpreter(
+        interpreter=GroundedSemanticResourceInquiryInterpreter(
             contracts=_deterministic_resource_contracts(capabilities),
             fallback=ReasonedResourceInquiryInterpreter(
                 reasoner=OllamaResourceInquiryReasoner(
@@ -498,6 +501,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             ),
             fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+            semantic_fact_reasoner=OllamaSemanticFactReasoner(
+                ollama_client,
+                fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+            ),
+            fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,

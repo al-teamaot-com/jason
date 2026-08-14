@@ -46,7 +46,7 @@ class GroundedSemanticResourceInquiryInterpreter(
         if endpoint_identifier is None:
             return self.fallback.interpret(text=text, principal=principal)
 
-        selector = {"hostname": endpoint_identifier}
+        selector = {"hostname": endpoint_identifier.upper()}
         eligible_facts = self._eligible_canonical_facts(
             resource_type="endpoint",
         )
