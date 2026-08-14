@@ -12,6 +12,7 @@ from .teams_conversation_flow import (
     BoundConversationPrincipal,
     ConversationClarificationRequiredError,
     ConversationIntent,
+    ConversationIntentPlan,
     ConversationIntentUnresolvedError,
 )
 
@@ -177,7 +178,6 @@ class ReasonedResourceInquiryInterpreter:
         return re.search(pattern, text, flags=re.IGNORECASE) is not None
 
 
-
 @dataclass(frozen=True, slots=True)
 class MetadataFirstResourceInquiryInterpreter:
     """Resolve obvious read-only resource inquiries without requiring AI.
@@ -241,10 +241,6 @@ class MetadataFirstResourceInquiryInterpreter:
             if matched_fact is None:
                 continue
 
-            # Deterministic foundation currently handles only requests that do
-            # not require us to infer a resource selector. Endpoint/device and
-            # other named-resource requests continue through the reasoner until
-            # selector extraction is generalized safely.
             selector_required = bool(contract.get("selector_required"))
             if selector_required:
                 continue
@@ -269,11 +265,6 @@ class MetadataFirstResourceInquiryInterpreter:
             self._result_outcome(normalized_text)
         )
 
-        # Fact hints are recognition aliases, not evidence contracts. When the
-        # human requests an exhaustive collection outcome, normalize any matched
-        # singular/plural/synonym hint to the capability's canonical collection
-        # fact. This keeps varied language from collapsing a collection into one
-        # arbitrary nested scalar.
         collection_fact = str(contract.get("collection_fact", "")).strip()
         if (
             collection_fact
@@ -329,12 +320,10 @@ class MetadataFirstResourceInquiryInterpreter:
 
         if qualified.status == "ambiguous":
             raise ConversationClarificationRequiredError(
-                reason_code=
-                    "canonical_fact_ambiguous",
+                reason_code="canonical_fact_ambiguous",
                 candidate_facts=tuple(
                     definition.canonical_fact
-                    for definition
-                    in qualified.candidates
+                    for definition in qualified.candidates
                 ),
             )
 
@@ -342,28 +331,19 @@ class MetadataFirstResourceInquiryInterpreter:
 
         if qualified.status == "resolved":
             assert qualified.definition is not None
-            requested_fact = (
-                qualified.definition.canonical_fact
-            )
+            requested_fact = qualified.definition.canonical_fact
 
         if requested_fact is None:
-            requested_fact = (
-                self._explicit_canonical_fact(
-                    normalized_text
-                )
-            )
+            requested_fact = self._explicit_canonical_fact(normalized_text)
 
         selector: dict[str, str] = {
             "hostname": endpoint_identifier,
         }
 
         if requested_fact is None:
-            product = (
-                self._extract_software_version_product(
-                    text=text,
-                    endpoint_identifier=
-                        endpoint_identifier,
-                )
+            product = self._extract_software_version_product(
+                text=text,
+                endpoint_identifier=endpoint_identifier,
             )
 
             if product is None:
@@ -376,10 +356,6 @@ class MetadataFirstResourceInquiryInterpreter:
             self._result_outcome(normalized_text)
         )
 
-        # This deterministic path already holds a canonical fact from the
-        # governed vocabulary. It deliberately does not pass through the
-        # broader semantic registry, where a generic concept such as
-        # "ip address" could erase a more specific LAN/WAN distinction.
         bridge = SemanticRequestBridge(
             fact_vocabulary=self.fact_vocabulary,
         )
@@ -390,8 +366,7 @@ class MetadataFirstResourceInquiryInterpreter:
             resource_selector=selector,
             requested_facts=(requested_fact,),
             result_intent=result_intent,
-            completeness_requirement=
-                completeness_requirement,
+            completeness_requirement=completeness_requirement,
             permission_mode="observe",
         )
 
@@ -494,9 +469,7 @@ class MetadataFirstResourceInquiryInterpreter:
 
         candidates: list[tuple[int, str]] = []
 
-        for definition in (
-            self.fact_vocabulary.definitions
-        ):
+        for definition in self.fact_vocabulary.definitions:
             for raw in (
                 definition.canonical_fact,
                 *definition.aliases,
@@ -536,8 +509,7 @@ class MetadataFirstResourceInquiryInterpreter:
         best_length = candidates[0][0]
         best = {
             canonical_fact
-            for length, canonical_fact
-            in candidates
+            for length, canonical_fact in candidates
             if length == best_length
         }
 
@@ -573,18 +545,14 @@ class MetadataFirstResourceInquiryInterpreter:
                 "canonical_facts",
                 (),
             ):
-                definition = (
-                    self.fact_vocabulary.resolve(
-                        str(raw_fact)
-                    )
+                definition = self.fact_vocabulary.resolve(
+                    str(raw_fact)
                 )
 
                 if definition is None:
                     continue
 
-                canonical = (
-                    definition.canonical_fact
-                )
+                canonical = definition.canonical_fact
 
                 if canonical in seen:
                     continue
@@ -600,9 +568,7 @@ class MetadataFirstResourceInquiryInterpreter:
         text: str,
         endpoint_identifier: str,
     ) -> str | None:
-        endpoint = re.escape(
-            endpoint_identifier
-        )
+        endpoint = re.escape(endpoint_identifier)
 
         patterns = (
             re.compile(
@@ -680,8 +646,6 @@ class MetadataFirstResourceInquiryInterpreter:
         if not candidates:
             return None
 
-        # Prefer the most specific explicit phrase: "open alerts" beats
-        # "alerts", "managed sites" beats "sites", etc.
         candidates.sort(key=lambda item: (-item[0], item[1]))
         return candidates[0][1]
 
@@ -750,12 +714,13 @@ class ResourceInquiryInterpreter(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class GovernedResourceConversationIntentResolver:
-    """Turn a human resource question into a validated provider-neutral capability.
+    """Turn a human resource question into validated provider-neutral capabilities.
 
     Language interpretation describes *what information is needed*. The resource
-    planner determines *which registered broad capability can retrieve it*. Neither
+    planner determines *which registered broad capabilities can retrieve it*. Neither
     stage chooses or invokes a provider. The Central Orchestrator remains responsible
-    for policy evaluation and provider resolution.
+    for policy evaluation, provider resolution, execution, evidence, and auditing for
+    every individual plan step.
     """
 
     interpreter: ResourceInquiryInterpreter
@@ -766,24 +731,24 @@ class GovernedResourceConversationIntentResolver:
         *,
         text: str,
         principal: BoundConversationPrincipal,
-    ) -> ConversationIntent | None:
+    ) -> ConversationIntent | ConversationIntentPlan | None:
         inquiry = self.interpreter.interpret(text=text, principal=principal)
         if inquiry is None:
             return None
 
         plan = self.planner.plan(inquiry)
-        if len(plan.steps) != 1:
-            # TeamsConversationFlow currently executes one governed capability per
-            # turn. Never discard or silently flatten a multi-step governed plan.
-            raise LookupError(
-                "resource inquiry requires multi-step orchestration that is not yet enabled"
+        intents = tuple(
+            ConversationIntent(
+                capability_name=step.capability_name,
+                arguments=dict(step.arguments),
+                execution_mode=inquiry.execution_mode,
+                permission_mode=inquiry.permission_mode,
+                risk="low",
             )
-
-        step = plan.steps[0]
-        return ConversationIntent(
-            capability_name=step.capability_name,
-            arguments=dict(step.arguments),
-            execution_mode=inquiry.execution_mode,
-            permission_mode=inquiry.permission_mode,
-            risk="low",
+            for step in plan.steps
         )
+
+        if len(intents) == 1:
+            return intents[0]
+
+        return ConversationIntentPlan(intents=intents)
