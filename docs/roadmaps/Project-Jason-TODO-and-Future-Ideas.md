@@ -216,6 +216,18 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before any production write or external communication capability is enabled.
 
+### TODO-GOV-004 — Independent credential and recovery backup
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** High
+- **Idea:** Establish an independently secured, off-host backup/recovery mechanism for critical Jason credential and trust material, including OpenBao recovery/backup material and other non-recreatable or operationally expensive identity material where appropriate. GitHub must continue to contain only non-secret configuration, references, and recovery instructions.
+- **Why it matters:** A complete loss of the Jason host should not require undocumented local state. Even when external-provider credentials can be recreated, an independent recovery package reduces recovery time and preserves continuity without weakening the rule that secrets never belong in source control.
+- **Why not now:** Current pilot credentials can be recreated from their external provider control planes if necessary, so this is not a blocker for the present pilot. The backup design should be implemented deliberately with appropriate encryption, custody, access control, rotation, and restore testing rather than copying secret material ad hoc.
+- **Prerequisites:** approved off-host secure storage; encryption-at-rest and in-transit design; named custody/authority model; backup scope classification; secret-safe inventory/references in the System Registry; rotation/revocation handling; documented total-host-loss recovery procedure; periodic restore test; evidence that backup artifacts never enter GitHub, normal documentation, logs, or chat.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Before Jason becomes materially difficult to reconstruct by reissuing credentials, before multi-host/production expansion, or during the next formal disaster-recovery review.
+
 ---
 
 ## New-item template
