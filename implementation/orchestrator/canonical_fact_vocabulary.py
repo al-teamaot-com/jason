@@ -7,6 +7,40 @@ from typing import Iterable
 
 
 @dataclass(frozen=True, slots=True)
+class QualifiedCanonicalFactResolution:
+    """Outcome of bounded qualifier analysis."""
+
+    status: str
+    definition: "CanonicalFactDefinition | None" = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {
+            "not_applicable",
+            "resolved",
+            "ambiguous",
+        }:
+            raise ValueError(
+                "qualified canonical fact status is invalid"
+            )
+
+        if (
+            self.status == "resolved"
+            and self.definition is None
+        ):
+            raise ValueError(
+                "resolved qualified fact requires a definition"
+            )
+
+        if (
+            self.status != "resolved"
+            and self.definition is not None
+        ):
+            raise ValueError(
+                "unresolved qualified fact may not carry a definition"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalFactDefinition:
     """Provider-neutral fact concept and its human recognition vocabulary.
 
@@ -89,6 +123,174 @@ class CanonicalFactVocabulary:
     def canonicalize(self, value: str) -> str:
         definition = self.resolve(value)
         return definition.canonical_fact if definition is not None else value.strip()
+
+    def resolve_qualified_human_text(
+        self,
+        *,
+        human_text: str,
+        eligible_facts: Iterable[str],
+    ) -> QualifiedCanonicalFactResolution:
+        """Resolve one governed fact contrast or report ambiguity.
+
+        The method operates only on governed canonical definitions
+        supplied through ``eligible_facts``.
+
+        Resolution requires a recognition phrase shared by multiple
+        eligible facts plus discriminating language for exactly one
+        candidate. A shared anchor without a discriminator is
+        ambiguous. Multiple discriminators are also ambiguous.
+
+        This permits contrasts such as LAN versus WAN IP without
+        making generic IP wording authoritative.
+
+        A conservative ``-ly`` variant is recognized for one-word
+        discriminators so ``internal`` can recognize ``internally``
+        and ``external`` can recognize ``externally``.
+        """
+
+        definitions: list[
+            CanonicalFactDefinition
+        ] = []
+
+        for raw_fact in eligible_facts:
+            definition = self.resolve(
+                str(raw_fact)
+            )
+
+            if (
+                definition is not None
+                and definition not in definitions
+            ):
+                definitions.append(definition)
+
+        if len(definitions) < 2:
+            return QualifiedCanonicalFactResolution(
+                status="not_applicable",
+            )
+
+        recognition: dict[
+            CanonicalFactDefinition,
+            set[str],
+        ] = {}
+
+        phrase_counts: dict[str, int] = {}
+
+        for definition in definitions:
+            phrases: set[str] = set()
+
+            for raw in (
+                definition.canonical_fact,
+                *definition.aliases,
+                *definition.evidence_hints,
+            ):
+                normalized = self.normalize_text(
+                    raw
+                )
+
+                if normalized:
+                    phrases.add(normalized)
+
+            recognition[definition] = phrases
+
+            for phrase in phrases:
+                phrase_counts[phrase] = (
+                    phrase_counts.get(
+                        phrase,
+                        0,
+                    )
+                    + 1
+                )
+
+        shared = {
+            phrase
+            for phrase, count
+            in phrase_counts.items()
+            if count > 1
+        }
+
+        normalized_text = self.normalize_text(
+            human_text
+        )
+
+        shared_present = any(
+            self._recognition_phrase_matches(
+                normalized_text,
+                phrase,
+            )
+            for phrase in shared
+        )
+
+        if not shared_present:
+            return QualifiedCanonicalFactResolution(
+                status="not_applicable",
+            )
+
+        matched: list[
+            CanonicalFactDefinition
+        ] = []
+
+        for definition in definitions:
+            discriminators = (
+                recognition[definition]
+                - shared
+            )
+
+            discriminator_present = any(
+                self._recognition_phrase_matches(
+                    normalized_text,
+                    phrase,
+                )
+                for phrase in discriminators
+            )
+
+            if discriminator_present:
+                matched.append(definition)
+
+        if len(matched) == 1:
+            return QualifiedCanonicalFactResolution(
+                status="resolved",
+                definition=matched[0],
+            )
+
+        return QualifiedCanonicalFactResolution(
+            status="ambiguous",
+        )
+
+    @staticmethod
+    def _recognition_phrase_matches(
+        normalized_text: str,
+        normalized_phrase: str,
+    ) -> bool:
+        text_tokens = normalized_text.split()
+        phrase_tokens = normalized_phrase.split()
+
+        if not phrase_tokens:
+            return False
+
+        width = len(phrase_tokens)
+
+        for index in range(
+            len(text_tokens) - width + 1
+        ):
+            if (
+                text_tokens[
+                    index:index + width
+                ]
+                == phrase_tokens
+            ):
+                return True
+
+        if (
+            width == 1
+            and phrase_tokens[0].isalpha()
+            and (
+                phrase_tokens[0] + "ly"
+                in text_tokens
+            )
+        ):
+            return True
+
+        return False
 
     def canonicalize_requested_facts(
         self,

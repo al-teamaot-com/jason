@@ -367,6 +367,14 @@ def _deterministic_resource_contracts(
             if item.strip()
         )
         collection_fact = metadata.get("collection_fact", "").strip()
+        canonical_facts = tuple(
+            item.strip()
+            for item in metadata.get(
+                "canonical_facts",
+                "",
+            ).split(",")
+            if item.strip()
+        )
 
         # A zero-selector interpretation is safe only for resource contracts
         # that have a meaningful account/environment-wide read surface.
@@ -390,6 +398,7 @@ def _deterministic_resource_contracts(
                 "resource_types": resource_types,
                 "selector_keys": selector_keys,
                 "fact_hints": fact_hints,
+                "canonical_facts": canonical_facts,
                 "collection_fact": collection_fact,
                 "selector_required": selector_required,
             }

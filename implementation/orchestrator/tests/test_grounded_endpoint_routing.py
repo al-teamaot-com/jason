@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from orchestrator.canonical_fact_vocabulary import (
     DEFAULT_CANONICAL_FACT_VOCABULARY,
 )
@@ -28,6 +30,7 @@ from orchestrator.resource_reasoner import (
 )
 from orchestrator.teams_conversation_flow import (
     BoundConversationPrincipal,
+    ConversationIntentUnresolvedError,
 )
 
 
@@ -254,3 +257,140 @@ def test_provider_registers_historical_alert_read():
         ENDPOINT_ALERT_HISTORY_SEARCH
         in provider.capabilities
     )
+
+
+def qualified_interpreter(fallback=None):
+    endpoint_metadata = (
+        endpoint_device_search(NOW).metadata
+    )
+
+    canonical_facts = tuple(
+        item.strip()
+        for item in endpoint_metadata.get(
+            "canonical_facts",
+            "",
+        ).split(",")
+        if item.strip()
+    )
+
+    return MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "resource_types":
+                    ("endpoint",),
+                "canonical_facts":
+                    canonical_facts,
+                "selector_required": True,
+            },
+        ),
+        fallback=(
+            fallback
+            or NoLanguageFallback()
+        ),
+        fact_vocabulary=
+            DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+
+def test_qualified_endpoint_ip_language_routes_without_model_fallback():
+    cases = (
+        (
+            "What IP is AOT-50282 using internally?",
+            "LAN IP address",
+        ),
+        (
+            "Which IP does AOT-50282 use on the private network?",
+            "LAN IP address",
+        ),
+        (
+            "What is the local network IP of AOT-50282?",
+            "LAN IP address",
+        ),
+        (
+            "What IP is AOT-50282 presenting externally?",
+            "WAN IP address",
+        ),
+        (
+            "What is the internet-facing IP for AOT-50282?",
+            "WAN IP address",
+        ),
+        (
+            "What public IP does AOT-50282 use?",
+            "WAN IP address",
+        ),
+    )
+
+    reasoner = MetadataResourceCapabilityReasoner()
+
+    for question, expected_fact in cases:
+        inquiry = qualified_interpreter().interpret(
+            text=question,
+            principal=principal(),
+        )
+
+        assert inquiry is not None
+        assert inquiry.requested_facts == (
+            expected_fact,
+        )
+        assert dict(
+            inquiry.resource_selector
+        ) == {
+            "hostname": "AOT-50282",
+        }
+
+        steps = tuple(
+            reasoner.select(
+                inquiry=inquiry,
+                candidates=candidates(),
+            )
+        )
+
+        assert len(steps) == 1
+        assert (
+            steps[0].capability_name
+            == ENDPOINT_DEVICE_SEARCH
+        )
+        assert (
+            steps[0].arguments[
+                "requested_facts"
+            ]
+            == (expected_fact,)
+        )
+
+
+def test_bare_endpoint_ip_is_stopped_before_language_fallback():
+    fallback = RecordingFallback()
+
+    with pytest.raises(
+        ConversationIntentUnresolvedError
+    ):
+        qualified_interpreter(
+            fallback=fallback
+        ).interpret(
+            text=(
+                "What IP does "
+                "AOT-50282 have?"
+            ),
+            principal=principal(),
+        )
+
+    assert fallback.calls == []
+
+
+def test_conflicting_endpoint_ip_is_stopped_before_explicit_alias_match():
+    fallback = RecordingFallback()
+
+    with pytest.raises(
+        ConversationIntentUnresolvedError
+    ):
+        qualified_interpreter(
+            fallback=fallback
+        ).interpret(
+            text=(
+                "What is the internal public "
+                "IP of AOT-50282?"
+            ),
+            principal=principal(),
+        )
+
+    assert fallback.calls == []

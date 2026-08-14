@@ -8,7 +8,11 @@ from .canonical_fact_vocabulary import CanonicalFactVocabulary
 from .semantic_fact_resolver import SemanticFactResolver
 from .resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
 from .semantic_request_bridge import SemanticRequestBridge
-from .teams_conversation_flow import BoundConversationPrincipal, ConversationIntent
+from .teams_conversation_flow import (
+    BoundConversationPrincipal,
+    ConversationIntent,
+    ConversationIntentUnresolvedError,
+)
 
 
 class StructuredResourceInquiryReasoner(Protocol):
@@ -310,11 +314,38 @@ class MetadataFirstResourceInquiryInterpreter:
         if endpoint_identifier is None:
             return None
 
-        requested_fact = (
-            self._explicit_canonical_fact(
-                normalized_text
+        qualified = (
+            self.fact_vocabulary
+            .resolve_qualified_human_text(
+                human_text=text,
+                eligible_facts=(
+                    self._eligible_canonical_facts(
+                        resource_type="endpoint",
+                    )
+                ),
             )
         )
+
+        if qualified.status == "ambiguous":
+            raise ConversationIntentUnresolvedError(
+                "endpoint fact wording is ambiguous "
+                "between governed canonical facts"
+            )
+
+        requested_fact = None
+
+        if qualified.status == "resolved":
+            assert qualified.definition is not None
+            requested_fact = (
+                qualified.definition.canonical_fact
+            )
+
+        if requested_fact is None:
+            requested_fact = (
+                self._explicit_canonical_fact(
+                    normalized_text
+                )
+            )
 
         selector: dict[str, str] = {
             "hostname": endpoint_identifier,
@@ -508,6 +539,54 @@ class MetadataFirstResourceInquiryInterpreter:
             return None
 
         return next(iter(best))
+
+    def _eligible_canonical_facts(
+        self,
+        *,
+        resource_type: str,
+    ) -> tuple[str, ...]:
+        """Return facts declared by governed read contracts."""
+
+        result: list[str] = []
+        seen: set[str] = set()
+
+        for contract in self.contracts:
+            resource_types = {
+                str(item).strip()
+                for item in contract.get(
+                    "resource_types",
+                    (),
+                )
+                if str(item).strip()
+            }
+
+            if resource_type not in resource_types:
+                continue
+
+            for raw_fact in contract.get(
+                "canonical_facts",
+                (),
+            ):
+                definition = (
+                    self.fact_vocabulary.resolve(
+                        str(raw_fact)
+                    )
+                )
+
+                if definition is None:
+                    continue
+
+                canonical = (
+                    definition.canonical_fact
+                )
+
+                if canonical in seen:
+                    continue
+
+                seen.add(canonical)
+                result.append(canonical)
+
+        return tuple(result)
 
     @staticmethod
     def _extract_software_version_product(

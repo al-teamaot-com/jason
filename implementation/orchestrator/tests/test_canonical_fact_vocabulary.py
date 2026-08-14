@@ -49,3 +49,105 @@ def test_fragmented_windows_display_version_is_recombined_from_human_text():
         human_text="What is the Windows Display Version for AOT-50282?",
         requested_facts=("display", "version"),
     ) == ("operating system display version",)
+
+
+def test_qualified_fact_internal_ip_resolves_lan():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "What IP is AOT-50282 "
+                "using internally?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.definition is not None
+    assert (
+        result.definition.canonical_fact
+        == "LAN IP address"
+    )
+
+
+def test_qualified_fact_internet_facing_ip_resolves_wan():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "What is the internet-facing "
+                "IP for AOT-50282?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    assert result.status == "resolved"
+    assert result.definition is not None
+    assert (
+        result.definition.canonical_fact
+        == "WAN IP address"
+    )
+
+
+def test_qualified_fact_bare_ip_is_ambiguous():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "What IP does AOT-50282 have?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    assert result.status == "ambiguous"
+    assert result.definition is None
+
+
+def test_qualified_fact_conflicting_ip_is_ambiguous():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "What is the internal public "
+                "IP of AOT-50282?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    assert result.status == "ambiguous"
+    assert result.definition is None
+
+
+def test_qualified_fact_unrelated_language_is_not_applicable():
+    result = (
+        DEFAULT_CANONICAL_FACT_VOCABULARY
+        .resolve_qualified_human_text(
+            human_text=(
+                "Which internal user is "
+                "on AOT-50282?"
+            ),
+            eligible_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    assert result.status == "not_applicable"
+    assert result.definition is None
