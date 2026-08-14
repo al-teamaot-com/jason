@@ -14,6 +14,33 @@ test("bound Teams conversations have a phrase-agnostic pre-agent compatibility r
   assert.match(source, /forwardGovernedTeamsTurn/);
 });
 
+test("governed Teams turns emit a best-effort working acknowledgement through the public outbound adapter", () => {
+  assert.match(
+    source,
+    /const WORKING_ACK_TEXT = "Received - working on that now\.\.\.";/,
+  );
+  assert.match(
+    source,
+    /api\.runtime\.channel\.outbound\.loadAdapter\("msteams"\)/,
+  );
+  assert.match(source, /await adapter\.sendText\(\{/);
+  assert.match(
+    source,
+    /Teams working acknowledgement failed; governed request continues/,
+  );
+
+  const acknowledgement = source.indexOf(
+    "await sendWorkingAcknowledgement({",
+  );
+
+  const envelope = source.indexOf(
+    "const envelope = buildConversationEnvelope({",
+  );
+
+  assert.ok(acknowledgement >= 0);
+  assert.ok(envelope > acknowledgement);
+});
+
 test("governed Teams turn timeout hierarchy leaves room for bounded Jason stages", () => {
   assert.match(source, /const DEFAULT_TIMEOUT_MS = 150_000;/);
   assert.match(source, /const MAX_TIMEOUT_MS = 170_000;/);
