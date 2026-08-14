@@ -5,6 +5,8 @@ import argparse
 import json
 import sys
 import uuid
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +167,105 @@ def classify(
     return "over_selected", [], extra
 
 
+
+class BenchmarkJsonHttpTransport:
+    """Benchmark-only JSON transport with sanitized provider diagnostics."""
+
+    def request(
+        self,
+        *,
+        method,
+        url,
+        headers,
+        params=None,
+        json=None,
+        timeout_seconds=30.0,
+    ):
+        del params
+
+        body = None
+        request_headers = {
+            str(key): str(value)
+            for key, value in headers.items()
+        }
+
+        if json is not None:
+            body = __import__("json").dumps(
+                dict(json),
+                separators=(",", ":"),
+            ).encode("utf-8")
+            request_headers.setdefault(
+                "Content-Type",
+                "application/json",
+            )
+
+        request_headers.setdefault(
+            "Accept",
+            "application/json",
+        )
+
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers=request_headers,
+            method=method.upper(),
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=timeout_seconds,
+            ) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+
+            try:
+                decoded = __import__("json").loads(
+                    raw.decode("utf-8")
+                )
+            except Exception:
+                raise RuntimeError(
+                    f"OpenAI HTTP {error.code}: "
+                    "response body was not valid JSON"
+                ) from error
+
+            provider_error = decoded.get("error", {})
+            if not isinstance(provider_error, dict):
+                provider_error = {}
+
+            error_type = str(
+                provider_error.get("type", "")
+            )[:120]
+            error_code = str(
+                provider_error.get("code", "")
+            )[:120]
+            message = str(
+                provider_error.get("message", "")
+            )[:500]
+
+            raise RuntimeError(
+                f"OpenAI HTTP {error.code}; "
+                f"type={error_type!r}; "
+                f"code={error_code!r}; "
+                f"message={message!r}"
+            ) from error
+
+        if not raw:
+            return {}
+
+        decoded = __import__("json").loads(
+            raw.decode("utf-8")
+        )
+
+        if not isinstance(decoded, dict):
+            raise RuntimeError(
+                "OpenAI response was not a JSON object"
+            )
+
+        return decoded
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -217,7 +318,7 @@ def main() -> int:
 
     translator = OpenAISemanticIntentTranslator(
         api_key=api_key,
-        transport=UrlLibJsonHttpTransport(),
+        transport=BenchmarkJsonHttpTransport(),
         model=args.model,
     )
 

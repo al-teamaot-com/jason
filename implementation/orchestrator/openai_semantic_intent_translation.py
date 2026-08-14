@@ -290,7 +290,6 @@ class OpenAISemanticIntentTranslator:
                             all_concepts
                         ),
                     },
-                    "uniqueItems": True,
                     "maxItems": min(
                         20,
                         len(all_concepts),
