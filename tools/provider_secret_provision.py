@@ -13,6 +13,19 @@ from urllib import error, parse, request
 
 
 PROVIDERS: dict[str, dict[str, object]] = {
+    "openai": {
+        "logical_name": "openai.semantic_intent",
+        "secret_path": "secret/data/providers/openai/production/semantic-intent",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-openai-semantic-intent-read",
+        "role_name": "jason-openai-semantic-intent-read",
+        "connector_identity": "openai-semantic-intent",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/"
+            "openai-semantic-intent-approle"
+        ),
+    },
     "aws_ses": {
         "logical_name": "aws_ses.sendmail",
         "secret_path": "secret/data/connectors/aws-ses/production/sendmail",
