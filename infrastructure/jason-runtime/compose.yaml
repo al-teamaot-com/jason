@@ -32,6 +32,10 @@ services:
       JASON_SES_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/aws-ses/secret_id
       JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/role_id
       JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/secret_id
+      JASON_OPENAI_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/openai/role_id
+      JASON_OPENAI_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/openai/secret_id
+      JASON_HOSTED_SEMANTICS_ENABLED: "true"
+      JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
       JASON_SES_REGION: us-east-1
       JASON_SES_DEFAULT_SENDER: jason@teamaot.com
       JASON_OLLAMA_URL: http://jason-ollama:11434
@@ -46,6 +50,8 @@ services:
       - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
       - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
       - ${JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/secret_id:ro
+      - ${JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/role_id:ro
+      - ${JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/secret_id:ro
     networks:
       - openclaw
       - core

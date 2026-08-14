@@ -51,6 +51,9 @@ from orchestrator.conversation_response import GovernedTeamsConversationResponse
 from orchestrator.event_store import SQLiteOrchestrationEventStore
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.ollama_action_reasoning import OllamaActionIntentReasoner
+from orchestrator.openai_semantic_intent_translation import (
+    OpenAISemanticIntentTranslator,
+)
 from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
 from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
 from orchestrator.planning_context_views import GovernedPlanningContextCatalog
@@ -125,6 +128,14 @@ class RuntimeSettings:
     ollama_model: str
     allowed_machine_identities: frozenset[str]
     semantic_planner_enabled: bool = False
+    hosted_semantics_enabled: bool = False
+    openai_semantic_model: str = "gpt-5.4-mini"
+    openai_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/openai/role_id"
+    )
+    openai_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/openai/secret_id"
+    )
     microsoft_boundary_db: Path | None = None
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -188,6 +199,25 @@ class RuntimeSettings:
             semantic_planner_enabled=os.getenv(
                 "JASON_SEMANTIC_PLANNER_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
+            hosted_semantics_enabled=os.getenv(
+                "JASON_HOSTED_SEMANTICS_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            openai_semantic_model=os.getenv(
+                "JASON_OPENAI_SEMANTIC_MODEL",
+                "gpt-5.4-mini",
+            ).strip(),
+            openai_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_OPENAI_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/openai/role_id",
+                )
+            ),
+            openai_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_OPENAI_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/openai/secret_id",
+                )
+            ),
             allowed_machine_identities=allowed,
             microsoft_boundary_db=Path(
                 os.getenv(
@@ -232,6 +262,13 @@ class RuntimeSettings:
     def validate(self) -> None:
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
+        if (
+            self.hosted_semantics_enabled
+            and not self.openai_semantic_model
+        ):
+            raise ValueError(
+                "JASON_OPENAI_SEMANTIC_MODEL is required when hosted semantics are enabled"
+            )
         if not self.openbao_url or not self.ollama_url:
             raise ValueError("runtime provider service URLs must be non-empty")
         if not self.allowed_machine_identities:
@@ -487,6 +524,49 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         registry=capabilities,
         reasoner=OllamaActionIntentReasoner(ollama_client),
     )
+
+    hosted_semantic_translator = None
+
+    if settings.hosted_semantics_enabled:
+        semantic_secret_resolver = OpenBaoSecretResolver(
+            base_url=settings.openbao_url,
+            role_id_path=settings.openai_openbao_role_id_path,
+            secret_id_path=settings.openai_openbao_secret_id_path,
+        )
+
+        semantic_secret_values = dict(
+            semantic_secret_resolver.resolve(
+                "openai.semantic_intent",
+                ConnectorContext(
+                    correlation_id="runtime-semantic-bootstrap",
+                    principal_id="jason-runtime",
+                    organization_id="aot",
+                    client_id=None,
+                    capability="semantic.intent.translate",
+                    mode="observe",
+                ),
+            )
+        )
+
+        try:
+            semantic_api_key = str(
+                semantic_secret_values["api_key"]
+            ).strip()
+
+            if not semantic_api_key:
+                raise ValueError(
+                    "OpenAI semantic API key resolved empty"
+                )
+
+            hosted_semantic_translator = (
+                OpenAISemanticIntentTranslator(
+                    api_key=semantic_api_key,
+                    transport=http_transport,
+                    model=settings.openai_semantic_model,
+                )
+            )
+        finally:
+            semantic_secret_values.clear()
     resource_intent_resolver = GovernedResourceConversationIntentResolver(
         interpreter=GroundedSemanticResourceInquiryInterpreter(
             contracts=_deterministic_resource_contracts(capabilities),
@@ -501,6 +581,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             ),
             fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+            semantic_intent_translator=hosted_semantic_translator,
             semantic_fact_reasoner=OllamaSemanticFactReasoner(
                 ollama_client,
                 fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,

@@ -411,6 +411,7 @@ def management_alert_search(now: datetime) -> CapabilityDefinition:
             "Use for account/site-wide alert questions rather than a question about "
             "one already identified endpoint."
         ),
+        canonical_facts="open alerts",
         collection_fact="alerts",
         inquiry_hints=(
             "alert,alerts,open alert,open alerts,monitoring alert,monitoring alerts,"
@@ -434,6 +435,7 @@ def management_site_search(now: datetime) -> CapabilityDefinition:
         planning_guidance=(
             "Use for questions about managed Datto RMM sites or site discovery."
         ),
+        canonical_facts="sites",
         collection_fact="sites",
         inquiry_hints=(
             "site,sites,client site,managed site,site name,site identifier,site details"

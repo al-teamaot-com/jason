@@ -38,6 +38,24 @@ export JASON_SES_OPENBAO_SECRET_ID_HOST_PATH="$(mount_source /run/jason-secrets/
 export JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/microsoft-graph/role_id)"
 export JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH="$(mount_source /run/jason-secrets/openbao/microsoft-graph/secret_id)"
 
+export JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH="$(
+  mount_source /run/jason-secrets/openbao/openai/role_id
+)"
+export JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH="$(
+  mount_source /run/jason-secrets/openbao/openai/secret_id
+)"
+
+if [ -z "$JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH" ]; then
+  JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH="/opt/jason/bootstrap/secrets/openbao/openai-semantic-intent-approle/role-id"
+fi
+
+if [ -z "$JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH" ]; then
+  JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH="/opt/jason/bootstrap/secrets/openbao/openai-semantic-intent-approle/secret-id"
+fi
+
+export JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH
+export JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH
+
 for name in \
   JASON_OLLAMA_MODEL \
   JASON_OPENBAO_ROLE_ID_HOST_PATH \
@@ -45,7 +63,9 @@ for name in \
   JASON_SES_OPENBAO_ROLE_ID_HOST_PATH \
   JASON_SES_OPENBAO_SECRET_ID_HOST_PATH \
   JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH \
-  JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH; do
+  JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH \
+  JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH \
+  JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH; do
   value="${!name:-}"
   if [ -z "$value" ]; then
     echo "$name = MISSING"

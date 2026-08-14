@@ -191,3 +191,167 @@ def test_semantic_fact_reasoner_schema_has_no_selector_or_execution_authority():
     assert "provider" not in request["format"]["properties"]
     assert "capability" not in request["format"]["properties"]
     assert "resource_selector" not in request["format"]["properties"]
+
+
+class FixedHostedTranslator:
+    def __init__(self, concepts):
+        self.concepts = concepts
+        self.calls = []
+
+    def translate(self, **kwargs):
+        from orchestrator.semantic_intent_translation import (
+            SemanticIntentTranslation,
+        )
+
+        self.calls.append(kwargs)
+
+        if self.concepts is None:
+            return None
+
+        return SemanticIntentTranslation(
+            requested_concepts=tuple(self.concepts),
+            confidence=0.99,
+        )
+
+
+def hosted_contracts():
+    return (
+        {
+            "capability_name": "endpoint.device.search",
+            "resource_types": ("endpoint",),
+            "selector_keys": ("hostname",),
+            "fact_hints": ("user", "ip"),
+            "canonical_facts": (
+                "LAN IP address",
+                "WAN IP address",
+                "last logged in user",
+                "operating system",
+            ),
+            "selector_required": True,
+        },
+        {
+            "capability_name": "management.alert.search",
+            "resource_types": ("alert",),
+            "selector_keys": (),
+            "fact_hints": ("alerts",),
+            "canonical_facts": (
+                "open alerts",
+            ),
+            "selector_required": False,
+        },
+        {
+            "capability_name": "management.site.search",
+            "resource_types": ("management_site",),
+            "selector_keys": (),
+            "fact_hints": ("sites",),
+            "canonical_facts": (
+                "sites",
+            ),
+            "selector_required": False,
+        },
+    )
+
+
+def hosted_interpreter(translator):
+    return GroundedSemanticResourceInquiryInterpreter(
+        contracts=hosted_contracts(),
+        fallback=ForbiddenFallback(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        semantic_intent_translator=translator,
+        semantic_fact_reasoner=None,
+        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+    )
+
+
+def test_hosted_semantics_selects_only_fact_for_grounded_endpoint():
+    translator = FixedHostedTranslator(
+        ("last logged in user",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="user on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "endpoint"
+    assert inquiry.resource_selector == {
+        "hostname": "AOT-50282",
+    }
+    assert inquiry.requested_facts == (
+        "last logged in user",
+    )
+
+    assert len(translator.calls) == 1
+    call = translator.calls[0]
+    assert call["grounded_selector"] == {
+        "hostname": "AOT-50282",
+    }
+    assert "last logged in user" in call[
+        "eligible_concepts"
+    ]
+
+
+def test_hosted_semantics_maps_broad_alert_fact_to_management_resource():
+    translator = FixedHostedTranslator(
+        ("open alerts",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="anything actively alerting right now?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "alert"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == (
+        "open alerts",
+    )
+
+
+def test_hosted_semantics_maps_sites_to_management_site_resource():
+    translator = FixedHostedTranslator(
+        ("sites",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="what sites are managed?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == (
+        "sites",
+    )
+
+
+def test_hosted_semantics_does_not_receive_selector_value_in_model_output_contract():
+    translator = FixedHostedTranslator(
+        ("last logged in user",)
+    )
+
+    hosted_interpreter(
+        translator
+    ).interpret(
+        text="user on AOT-50282?",
+        principal=principal(),
+    )
+
+    call = translator.calls[0]
+    assert call["grounded_selector"] == {
+        "hostname": "AOT-50282",
+    }
+    assert set(call) == {
+        "text",
+        "eligible_concepts",
+        "grounded_selector",
+    }
