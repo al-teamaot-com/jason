@@ -184,6 +184,9 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "logged in user",
                 "last login user",
                 "last user",
+                "last user logged in",
+                "last user logged into",
+                "last user logged on",
             ),
             expected_shape="descriptive_string",
             evidence_hints=(
@@ -382,6 +385,8 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
                 "video boards",
                 "graphics adapter",
                 "graphics adapters",
+                "video card",
+                "video cards",
                 "gpu",
             ),
             expected_shape="collection",

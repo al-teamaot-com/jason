@@ -1306,3 +1306,72 @@ def test_non_collection_fact_still_rejects_multiple_pointers():
             result=result,
             requested_facts=("processor model",),
         )
+
+
+
+def test_non_collection_fact_collapses_equivalent_duplicate_pointers():
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+
+    reasoner = Reasoner(
+        [
+            {
+                "requested_fact": "disk error evidence",
+                "json_pointer": "/alerts/0/description",
+            },
+            {
+                "requested_fact": "disk error evidence",
+                "json_pointer": "/alerts/1/description",
+            },
+        ]
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=reasoner,
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    description = (
+        "The device, \\\\Device\\\\Harddisk1\\\\DR2, "
+        "has a bad block."
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-equivalent-evidence",
+        correlation_id="corr-equivalent-evidence",
+        capability_name="endpoint.alert.history.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "alerts": [
+                    {"description": description},
+                    {"description": description},
+                ]
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    facts = interpreter.interpret(
+        result=result,
+        requested_facts=("disk error evidence",),
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value == description
+    assert facts[0].json_pointer == "/alerts/0/description"
+    assert facts[0].json_pointers == (
+        "/alerts/0/description",
+        "/alerts/1/description",
+    )

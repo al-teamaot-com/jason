@@ -28,6 +28,7 @@ from kernel.execution_providers import (
 ENDPOINT_DEVICE_SEARCH = "endpoint.device.search"
 ENDPOINT_DEVICE_READ = "endpoint.device.read"
 ENDPOINT_ALERT_SEARCH = "endpoint.alert.search"
+ENDPOINT_ALERT_HISTORY_SEARCH = "endpoint.alert.history.search"
 ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
@@ -107,6 +108,11 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
                 "online,offline,operating system,ip address,mac address,hardware,"
                 "software,device identifier,serial number,inventory"
             ),
+            "canonical_facts": (
+                "hostname,endpoint hostname,LAN IP address,WAN IP address,"
+                "last logged in user,operating system,"
+                "operating system display version,operating system build"
+            ),
             "identity_semantics": (
                 "Human-readable names, hostnames, aliases, labels, serial-like tokens, and "
                 "site labels are discovery selectors, not durable identity. Discovery must "
@@ -178,6 +184,11 @@ def endpoint_device_read(now: datetime) -> CapabilityDefinition:
                 "operating system,ip address,mac address,hardware,software,"
                 "serial number,inventory"
             ),
+            "canonical_facts": (
+                "hostname,endpoint hostname,LAN IP address,WAN IP address,"
+                "last logged in user,operating system,"
+                "operating system display version,operating system build"
+            ),
             "identity_semantics": "resource_id is a durable resolved endpoint identity",
             "planning_guidance": (
                 "Prefer this capability when a durable endpoint resource identifier is already known."
@@ -198,6 +209,7 @@ def _read_resource_capability(
     selector_keys: str,
     fact_hints: str,
     planning_guidance: str,
+    canonical_facts: str = "",
     collection_fact: str | None = None,
     inquiry_hints: str | None = None,
 ) -> CapabilityDefinition:
@@ -255,6 +267,11 @@ def _read_resource_capability(
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
             "inquiry_hints": inquiry_hints or fact_hints,
+            **(
+                {"canonical_facts": canonical_facts}
+                if canonical_facts
+                else {}
+            ),
             **({"collection_fact": collection_fact} if collection_fact else {}),
             "planning_guidance": planning_guidance,
         },
@@ -276,6 +293,7 @@ def endpoint_alert_search(now: datetime) -> CapabilityDefinition:
             "alert,alerts,open alert,open alerts,resolved alert,resolved alerts,"
             "alert status,severity,priority,message,monitor,diagnostic"
         ),
+        canonical_facts="open alerts",
         planning_guidance=(
             "Use when the human asks whether a named endpoint has alerts or asks for "
             "alert details. Resolve a human endpoint selector before invoking the "
@@ -284,6 +302,43 @@ def endpoint_alert_search(now: datetime) -> CapabilityDefinition:
         collection_fact="alerts",
     )
 
+
+
+
+def endpoint_alert_history_search(
+    now: datetime,
+) -> CapabilityDefinition:
+    """Read historical or resolved alerts for one governed endpoint."""
+
+    return _read_resource_capability(
+        now=now,
+        capability_name=
+            ENDPOINT_ALERT_HISTORY_SEARCH,
+        display_name=
+            "Read Endpoint Alert History",
+        business_purpose=(
+            "Read historical or resolved monitoring alerts associated "
+            "with one managed endpoint."
+        ),
+        resource_types=
+            "endpoint_alert,alert,endpoint",
+        operation="search",
+        selector_keys=
+            "hostname,name,resource_id,site",
+        fact_hints=(
+            "historical alert,historical alerts,alert history,"
+            "resolved alert,resolved alerts,disk error,disk errors,"
+            "bad block,event log,event logs"
+        ),
+        canonical_facts=
+            "disk error evidence",
+        planning_guidance=(
+            "Use when the human asks whether a named endpoint previously "
+            "experienced an alert condition or requests historical or "
+            "resolved alert evidence."
+        ),
+        collection_fact="resolved alerts",
+    )
 
 def endpoint_audit_read(now: datetime) -> CapabilityDefinition:
     return _read_resource_capability(
@@ -302,6 +357,11 @@ def endpoint_audit_read(now: datetime) -> CapabilityDefinition:
             "network adapter,network adapters,logical disk,logical disks,disk,disks,"
             "processor,processors,cpu,memory,ram,physical memory,display,displays,"
             "video board,video boards,graphics,attached device,attached devices,snmp"
+        ),
+        canonical_facts=(
+            "processor model,logical processor count,total memory,"
+            "motherboard model,bios version,network adapters,"
+            "logical disks,display adapters,printers,free disk space"
         ),
         planning_guidance=(
             "Use for detailed audited endpoint hardware/system facts that are not "
@@ -323,6 +383,7 @@ def endpoint_software_search(now: datetime) -> CapabilityDefinition:
             "software,installed software,application,applications,program,programs,"
             "software inventory,installed application,installed applications,version"
         ),
+        canonical_facts="software",
         planning_guidance=(
             "Use when the human asks what software/applications/programs are installed "
             "on a managed endpoint or asks whether particular software is present."
@@ -394,6 +455,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_DEVICE_SEARCH,
                 ENDPOINT_DEVICE_READ,
                 ENDPOINT_ALERT_SEARCH,
+                ENDPOINT_ALERT_HISTORY_SEARCH,
                 ENDPOINT_AUDIT_READ,
                 ENDPOINT_SOFTWARE_SEARCH,
                 MANAGEMENT_ALERT_SEARCH,
@@ -444,6 +506,7 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_device_search(now))
     capabilities.register(endpoint_device_read(now))
     capabilities.register(endpoint_alert_search(now))
+    capabilities.register(endpoint_alert_history_search(now))
     capabilities.register(endpoint_audit_read(now))
     capabilities.register(endpoint_software_search(now))
     capabilities.register(management_alert_search(now))

@@ -188,6 +188,7 @@ class MetadataFirstResourceInquiryInterpreter:
 
     contracts: tuple[Mapping[str, Any], ...]
     fallback: "ResourceInquiryInterpreter"
+    fact_vocabulary: CanonicalFactVocabulary | None = None
 
     def interpret(
         self,
@@ -211,6 +212,13 @@ class MetadataFirstResourceInquiryInterpreter:
         normalized_text = self._normalize(text)
         if not normalized_text:
             return None
+
+        named_endpoint = self._interpret_named_endpoint(
+            text=text,
+            normalized_text=normalized_text,
+        )
+        if named_endpoint is not None:
+            return named_endpoint
 
         matches: list[tuple[Mapping[str, Any], str]] = []
 
@@ -278,6 +286,289 @@ class MetadataFirstResourceInquiryInterpreter:
             result_intent=result_intent,
             completeness_requirement=completeness_requirement,
         )
+
+    def _interpret_named_endpoint(
+        self,
+        *,
+        text: str,
+        normalized_text: str,
+    ) -> ResourceInquiry | None:
+        """Interpret one human-grounded named endpoint fact request.
+
+        The endpoint selector and requested semantic fact are resolved
+        independently. Capability and provider selection remain downstream
+        responsibilities of the governed planner and Central Orchestrator.
+        """
+
+        if self.fact_vocabulary is None:
+            return None
+
+        endpoint_identifier = (
+            self._extract_endpoint_identifier(text)
+        )
+
+        if endpoint_identifier is None:
+            return None
+
+        requested_fact = (
+            self._explicit_canonical_fact(
+                normalized_text
+            )
+        )
+
+        selector: dict[str, str] = {
+            "hostname": endpoint_identifier,
+        }
+
+        if requested_fact is None:
+            product = (
+                self._extract_software_version_product(
+                    text=text,
+                    endpoint_identifier=
+                        endpoint_identifier,
+                )
+            )
+
+            if product is None:
+                return None
+
+            selector["software"] = product
+            requested_fact = f"{product} version"
+
+        result_intent, completeness_requirement = (
+            self._result_outcome(normalized_text)
+        )
+
+        # This deterministic path already holds a canonical fact from the
+        # governed vocabulary. It deliberately does not pass through the
+        # broader semantic registry, where a generic concept such as
+        # "ip address" could erase a more specific LAN/WAN distinction.
+        bridge = SemanticRequestBridge(
+            fact_vocabulary=self.fact_vocabulary,
+        )
+
+        semantic_request = bridge.build(
+            human_text=text,
+            resource_type="endpoint",
+            resource_selector=selector,
+            requested_facts=(requested_fact,),
+            result_intent=result_intent,
+            completeness_requirement=
+                completeness_requirement,
+            permission_mode="observe",
+        )
+
+        return bridge.lower(
+            semantic_request,
+            selector=selector,
+        )
+
+    @staticmethod
+    def _extract_endpoint_identifier(
+        text: str,
+    ) -> str | None:
+        """Extract one strongly machine-like identifier from human text.
+
+        The rule is structural and organization-neutral: a candidate must
+        contain letters and numbers and must resemble a machine, asset, or
+        endpoint identifier rather than ordinary prose or a numeric version.
+        """
+
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9._:/\\-])"
+            r"([A-Za-z][A-Za-z0-9._-]{2,})"
+            r"(?![A-Za-z0-9._:/\\-])"
+        )
+
+        candidates: list[tuple[int, str]] = []
+
+        for match in pattern.finditer(text):
+            value = match.group(1).strip()
+
+            if not any(
+                character.isalpha()
+                for character in value
+            ):
+                continue
+
+            if not any(
+                character.isdigit()
+                for character in value
+            ):
+                continue
+
+            structural = any(
+                marker in value
+                for marker in ("-", "_", ".")
+            )
+
+            uppercase_asset = (
+                value.upper() == value
+                and any(
+                    character.isalpha()
+                    for character in value
+                )
+            )
+
+            if not structural and not uppercase_asset:
+                continue
+
+            score = 0
+            score += 20 if "-" in value else 0
+            score += 8 if uppercase_asset else 0
+            score += min(
+                sum(
+                    character.isdigit()
+                    for character in value
+                ),
+                6,
+            )
+            score += min(len(value), 24)
+
+            candidates.append((score, value))
+
+        if not candidates:
+            return None
+
+        candidates.sort(
+            key=lambda item: (
+                -item[0],
+                item[1].casefold(),
+            )
+        )
+
+        best_score = candidates[0][0]
+        best = {
+            value
+            for score, value in candidates
+            if score == best_score
+        }
+
+        if len(best) != 1:
+            return None
+
+        return next(iter(best))
+
+    def _explicit_canonical_fact(
+        self,
+        normalized_text: str,
+    ) -> str | None:
+        assert self.fact_vocabulary is not None
+
+        candidates: list[tuple[int, str]] = []
+
+        for definition in (
+            self.fact_vocabulary.definitions
+        ):
+            for raw in (
+                definition.canonical_fact,
+                *definition.aliases,
+            ):
+                normalized = self._normalize(raw)
+
+                if not normalized:
+                    continue
+
+                pattern = (
+                    r"(?<![a-z0-9])"
+                    + re.escape(normalized)
+                    + r"(?![a-z0-9])"
+                )
+
+                if re.search(
+                    pattern,
+                    normalized_text,
+                ):
+                    candidates.append(
+                        (
+                            len(normalized),
+                            definition.canonical_fact,
+                        )
+                    )
+
+        if not candidates:
+            return None
+
+        candidates.sort(
+            key=lambda item: (
+                -item[0],
+                item[1],
+            )
+        )
+
+        best_length = candidates[0][0]
+        best = {
+            canonical_fact
+            for length, canonical_fact
+            in candidates
+            if length == best_length
+        }
+
+        if len(best) != 1:
+            return None
+
+        return next(iter(best))
+
+    @staticmethod
+    def _extract_software_version_product(
+        *,
+        text: str,
+        endpoint_identifier: str,
+    ) -> str | None:
+        endpoint = re.escape(
+            endpoint_identifier
+        )
+
+        patterns = (
+            re.compile(
+                rf"\bversion\s+of\s+"
+                rf"(?P<product>.+?)\s+"
+                rf"(?:is\s+)?installed\s+"
+                rf"(?:on|in)\s+{endpoint}\b",
+                flags=re.IGNORECASE,
+            ),
+            re.compile(
+                rf"\b(?P<product>.+?)\s+version\s+"
+                rf"(?:is\s+)?installed\s+"
+                rf"(?:on|in)\s+{endpoint}\b",
+                flags=re.IGNORECASE,
+            ),
+        )
+
+        for pattern in patterns:
+            match = pattern.search(text)
+
+            if match is None:
+                continue
+
+            product = match.group(
+                "product"
+            ).strip(
+                " \t\r\n?.,:;"
+            )
+
+            product = re.sub(
+                r"^(?:what|which|the)\s+",
+                "",
+                product,
+                flags=re.IGNORECASE,
+            ).strip()
+
+            if (
+                not product
+                or len(product) > 80
+                or product.casefold()
+                in {
+                    "windows",
+                    "operating system",
+                    "os",
+                }
+            ):
+                continue
+
+            return product
+
+        return None
 
     @classmethod
     def _best_explicit_fact_match(

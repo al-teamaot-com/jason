@@ -43,84 +43,208 @@ class MetadataResourceCapabilityReasoner:
         inquiry: ResourceInquiry,
         candidates: Sequence[CapabilityDefinition],
     ) -> Sequence[ResourcePlanStep]:
-        selector_keys = {str(key).strip() for key in inquiry.resource_selector if str(key).strip()}
-        requested_text = " ".join(inquiry.requested_facts)
-        requested_tokens = _tokens(requested_text)
+        selector_keys = {
+            str(key).strip()
+            for key in inquiry.resource_selector
+            if str(key).strip()
+        }
 
-        ranked: list[tuple[int, str, CapabilityDefinition]] = []
+        requested_text = " ".join(
+            inquiry.requested_facts
+        )
+        requested_tokens = _tokens(
+            requested_text
+        )
+        requested_phrases = {
+            " ".join(
+                _TOKEN.findall(
+                    str(fact).casefold()
+                )
+            )
+            for fact in inquiry.requested_facts
+            if str(fact).strip()
+        }
+
+        ranked: list[
+            tuple[
+                int,
+                str,
+                CapabilityDefinition,
+            ]
+        ] = []
+
         for capability in candidates:
             metadata = capability.metadata
-            supported_selectors = _csv(metadata.get("selector_keys", ""))
-            operation = metadata.get("operation", "").strip().lower()
+
+            supported_selectors = _csv(
+                metadata.get(
+                    "selector_keys",
+                    "",
+                )
+            )
+
+            # Every supplied selector must be declared by the capability.
+            # This prevents a grounded endpoint hostname from being
+            # reinterpreted as software, site, user, or unrelated scope.
+            if (
+                selector_keys
+                and not selector_keys.issubset(
+                    supported_selectors
+                )
+            ):
+                continue
+
+            operation = metadata.get(
+                "operation",
+                "",
+            ).strip().lower()
+
+            declared_facts = {
+                " ".join(
+                    _TOKEN.findall(
+                        item.casefold()
+                    )
+                )
+                for item in _csv(
+                    metadata.get(
+                        "canonical_facts",
+                        "",
+                    )
+                )
+                if item.strip()
+            }
+
+            exact_fact_coverage = len(
+                requested_phrases.intersection(
+                    declared_facts
+                )
+            )
+
             searchable_text = " ".join(
                 (
                     capability.display_name,
                     capability.business_purpose,
-                    metadata.get("fact_hints", ""),
-                    metadata.get("planning_guidance", ""),
+                    metadata.get(
+                        "fact_hints",
+                        "",
+                    ),
+                    metadata.get(
+                        "planning_guidance",
+                        "",
+                    ),
                 )
             )
-            capability_tokens = _tokens(searchable_text)
 
-            selector_overlap = len(selector_keys.intersection(supported_selectors))
-            fact_overlap = len(requested_tokens.intersection(capability_tokens))
-            score = selector_overlap * 6 + fact_overlap
+            capability_tokens = _tokens(
+                searchable_text
+            )
 
-            # Approved semantic mappings are authoritative capability coverage data.
-            # They do not select a provider or execute anything. They only tell the
-            # provider-neutral resource reasoner which governed capabilities have
-            # approved support for the requested canonical facts.
+            selector_overlap = len(
+                selector_keys.intersection(
+                    supported_selectors
+                )
+            )
+            fact_overlap = len(
+                requested_tokens.intersection(
+                    capability_tokens
+                )
+            )
+
+            score = (
+                selector_overlap * 6
+                + exact_fact_coverage * 50
+                + fact_overlap
+            )
+
+            # Approved mappings remain governed coverage evidence.
             if self.semantic_mapping_registry is not None:
                 for requested_fact in inquiry.requested_facts:
-                    approved = self.semantic_mapping_registry.find_active(
-                        canonical_fact=requested_fact,
+                    approved = (
+                        self.semantic_mapping_registry.find_active(
+                            canonical_fact=requested_fact,
+                        )
                     )
+
                     if any(
-                        capability.capability_name in mapping.capability_names
+                        capability.capability_name
+                        in mapping.capability_names
                         for mapping in approved
                     ):
                         score += 20
 
-            # Generic resource-planning preference: use direct read when a durable
-            # resource_id is already known; otherwise prefer search for selectors.
-            if "resource_id" in selector_keys and operation == "read":
+            if (
+                "resource_id" in selector_keys
+                and operation == "read"
+            ):
                 score += 8
-            elif "resource_id" not in selector_keys and operation == "search":
+
+            elif (
+                "resource_id" not in selector_keys
+                and operation == "search"
+            ):
                 score += 4
 
-            ranked.append((score, capability.capability_name, capability))
+            ranked.append(
+                (
+                    score,
+                    capability.capability_name,
+                    capability,
+                )
+            )
 
         if not ranked:
             return ()
 
-        ranked.sort(key=lambda item: (-item[0], item[1]))
+        ranked.sort(
+            key=lambda item: (
+                -item[0],
+                item[1],
+            )
+        )
+
         score, _, selected = ranked[0]
+
         if score < self.minimum_score:
             return ()
 
         arguments = {
             **dict(inquiry.resource_selector),
-            "requested_facts": inquiry.requested_facts,
-            "result_intent": inquiry.result_intent,
-            "completeness_requirement": inquiry.completeness_requirement,
+            "requested_facts":
+                inquiry.requested_facts,
+            "result_intent":
+                inquiry.result_intent,
+            "completeness_requirement":
+                inquiry.completeness_requirement,
         }
+
         if inquiry.evidence_contexts:
             arguments["evidence_contexts"] = {
                 fact: tuple(contexts)
-                for fact, contexts in inquiry.evidence_contexts.items()
+                for fact, contexts
+                in inquiry.evidence_contexts.items()
             }
+
         if inquiry.relationship_type:
-            arguments["relationship_type"] = inquiry.relationship_type
-        if inquiry.temporal_semantics != "unspecified":
-            arguments["temporal_semantics"] = inquiry.temporal_semantics
+            arguments["relationship_type"] = (
+                inquiry.relationship_type
+            )
+
+        if (
+            inquiry.temporal_semantics
+            != "unspecified"
+        ):
+            arguments["temporal_semantics"] = (
+                inquiry.temporal_semantics
+            )
 
         return (
             ResourcePlanStep(
-                capability_name=selected.capability_name,
+                capability_name=
+                    selected.capability_name,
                 arguments=arguments,
                 purpose=(
-                    "retrieve the governed resource record most likely to contain "
-                    "the requested facts"
+                    "retrieve governed evidence through the read capability "
+                    "whose declared semantic coverage satisfies the request"
                 ),
             ),
         )

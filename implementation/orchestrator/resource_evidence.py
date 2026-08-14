@@ -164,11 +164,6 @@ class GovernedResourceEvidenceInterpreter:
                     else ""
                 )
 
-                if len(pointers) > 1 and expected_shape != "collection":
-                    raise ValueError(
-                        "evidence reasoner returned duplicate requested facts"
-                    )
-
                 resolved_values = tuple(
                     _resolve_json_pointer(data, pointer)
                     for pointer in pointers
@@ -205,7 +200,27 @@ class GovernedResourceEvidenceInterpreter:
                     actual: Any = tuple(aggregated)
 
                 else:
-                    actual = resolved_values[0]
+                    first_value = resolved_values[0]
+
+                    if len(pointers) > 1:
+                        # Several provider records may independently preserve
+                        # the same scalar evidence. This is corroboration, not
+                        # conflicting assertions. Collapse only exact values of
+                        # the same runtime type and retain every pointer as
+                        # provenance. Any difference remains fail-closed.
+                        conflicting = any(
+                            type(value) is not type(first_value)
+                            or value != first_value
+                            for value in resolved_values[1:]
+                        )
+
+                        if conflicting:
+                            raise ValueError(
+                                "evidence reasoner returned conflicting "
+                                "duplicate requested facts"
+                            )
+
+                    actual = first_value
 
                 # A single scalar cannot silently satisfy a collection
                 # contract. The model must select the collection itself, or

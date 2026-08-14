@@ -64,6 +64,7 @@ from orchestrator.ollama_reasoning import (
 from orchestrator.resource_capability_catalog import (
     DATTO_RMM_PROVIDER,
     ENDPOINT_ALERT_SEARCH,
+    ENDPOINT_ALERT_HISTORY_SEARCH,
     ENDPOINT_AUDIT_READ,
     ENDPOINT_DEVICE_READ,
     ENDPOINT_DEVICE_SEARCH,
@@ -487,6 +488,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
                 fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             ),
+            fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
         ),
         planner=GovernedResourceInquiryPlanner(
             registry=capabilities,
@@ -523,6 +525,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_SEARCH): "datto_rmm.device.search",
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_READ): "datto_rmm.device.get",
             (DATTO_RMM_PROVIDER, ENDPOINT_ALERT_SEARCH): "datto_rmm.device.alerts.open",
+            (DATTO_RMM_PROVIDER, ENDPOINT_ALERT_HISTORY_SEARCH): "datto_rmm.device.alerts.resolved",
             (DATTO_RMM_PROVIDER, ENDPOINT_AUDIT_READ): "datto_rmm.device.audit.get",
             (DATTO_RMM_PROVIDER, ENDPOINT_SOFTWARE_SEARCH): "datto_rmm.device.software.list",
             (DATTO_RMM_PROVIDER, MANAGEMENT_ALERT_SEARCH): "datto_rmm.account.alerts.open",
@@ -554,6 +557,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
     invokers.register(ENDPOINT_ALERT_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_ALERT_HISTORY_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_AUDIT_READ, datto_invoker)
     invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
