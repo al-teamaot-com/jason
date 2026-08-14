@@ -8,7 +8,11 @@ const manifest = JSON.parse(
 );
 
 test("bound Teams conversations have a phrase-agnostic pre-agent compatibility route", () => {
-  assert.match(source, /"before_agent_reply"/);
+  assert.match(source, /"before_agent_run"/);
+  assert.doesNotMatch(source, /"before_agent_reply"/);
+  assert.match(source, /jason_bound_conversation_claimed/);
+  assert.match(source, /outcome:\s*"block"/);
+
   assert.match(source, /getCurrentPluginConversationBinding/);
   assert.match(source, /lookupCapturedWithBriefRetry/);
   assert.match(source, /forwardGovernedTeamsTurn/);
