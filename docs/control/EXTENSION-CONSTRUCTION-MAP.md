@@ -26,7 +26,7 @@ Working code alone is not completion.
 |---|---|---|---|
 | Provider / connector | `docs/engineering/jis/JIS-Provider-Development-Guide.md` | JIS provider template, completion checklist, provider engineering records, existing provider implementations/tests | Named capabilities/operations; governed authentication and secret references; provider-neutral shared infrastructure; authority/policy not embedded in connector; structured errors/results; audit/correlation; deterministic tests; System Registry registration/verification when production-bound |
 | Capability / resource | `docs/architecture/J-101-Capability-Registry.md` and `docs/engineering/capabilities/Capability-Registry.md` | Existing CAP records and capability registry/runtime composition/tests | Stable capability name and contract; execution/permission mode; scope; provider-resolution rules; evidence semantics; deterministic tests; registry/provider metadata; no workflow-specific bypass |
-| Natural-language resource inquiry / evidence selection | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` and `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` | Production endpoint/site inquiries, deterministic metadata interpreter, bounded evidence index, Ollama fallback/evidence reasoners, runtime composition, focused tests | Separate selectors from facts; separate `inquiry_hints` from returnable `fact_hints`; declare canonical `collection_fact` for collection capabilities; normalize exhaustive/count language to canonical collection evidence; propagate result intent/completeness through planning; route only through Central Orchestrator; deterministic dereference/source attribution; no bespoke question-specific script |
+| Natural-language resource inquiry / evidence selection | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` and `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` | Production endpoint/site inquiries, deterministic metadata interpreter, tri-state canonical-fact qualifier resolver, bounded evidence index, Ollama fallback/evidence reasoners, runtime composition, focused tests | Separate selectors from facts; separate `inquiry_hints` from returnable `fact_hints`; declare canonical `collection_fact` for collection capabilities; normalize exhaustive/count language to canonical collection evidence; propagate result intent/completeness through planning; route only through Central Orchestrator; deterministic dereference/source attribution; no bespoke question-specific script |
 | Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
@@ -126,6 +126,36 @@ The ingress concurrency regression test proves the second exact-message retry is
 Reference proof: `docs/sessions/Teams-Exact-Message-Idempotency-Proof-2026-08-14.md`.
 
 The same work exposed two reusable validation/deployment prerequisites now owned by `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`: host runtime tests must expose the same source roots as the runtime Docker image, and protected secret bind sources may require a Docker daemon bind-probe when the ordinary operator cannot traverse the host path.
+
+## 2026-08-14 canonical-fact qualifier construction refinement
+
+When governed canonical facts share a generic human anchor, natural-language resource interpretation must preserve ambiguity rather than guess.
+
+Construction sequence:
+
+1. Ground the resource selector independently.
+2. Collect eligible canonical facts from governed read capability metadata.
+3. Build bounded recognition language from canonical definitions.
+4. Identify shared recognition anchors.
+5. Require a unique candidate-specific discriminator to resolve.
+6. Treat missing or conflicting discriminators as ambiguity.
+7. Run qualifier analysis before ordinary explicit-alias recognition.
+8. Stop ambiguity before generic resource-language reasoning, action reasoning, capability planning, or orchestration.
+
+Do not use a reasoning model merely to force a choice between competing canonical facts.
+
+Current exemplar:
+
+- internal/private/local IP -> LAN;
+- public/external/internet-facing IP -> WAN;
+- bare IP -> ambiguous;
+- contradictory internal/public IP -> ambiguous.
+
+Ambiguity currently uses `ConversationIntentUnresolvedError`. Human-friendly clarification is a separate future enhancement and must preserve no execution before disambiguation.
+
+Reference proof:
+
+`docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`.
 
 <!-- BEGIN PROVIDER ADAPTATION FOUNDATION -->
 ## Provider Adaptation and Resource Outcome Foundation

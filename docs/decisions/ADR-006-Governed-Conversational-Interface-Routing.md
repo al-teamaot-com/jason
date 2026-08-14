@@ -61,6 +61,46 @@ A valid plan for the example may use a broad capability such as `endpoint.device
 
 This is intentionally different from creating `endpoint.session.read` solely because one human happened to ask about a logged-in user.
 
+## Canonical-fact qualification and ambiguity
+
+When multiple eligible canonical facts share a generic human anchor but differ by qualifiers, Jason must not allow a generic language model or longest-alias heuristic to silently choose between them.
+
+The deterministic qualification sequence is:
+
+1. derive eligible canonical facts from governed read-only capability metadata;
+2. identify recognition language shared by multiple eligible facts;
+3. require that shared anchor in the human request;
+4. identify candidate-specific discriminating language;
+5. resolve only when exactly one candidate is discriminated;
+6. classify a shared anchor without a unique discriminator as ambiguous;
+7. classify conflicting discriminators as ambiguous; and
+8. stop ambiguity before generic resource-language reasoning, action reasoning, capability planning, or orchestration.
+
+The result is tri-state:
+
+- `not_applicable`;
+- `resolved`;
+- `ambiguous`.
+
+The qualification gate must execute before ordinary explicit-alias matching. Otherwise wording such as `internal public IP` can be incorrectly captured by the longer `public IP` alias.
+
+Current examples:
+
+- internal/private/local IP -> `LAN IP address`;
+- public/external/internet-facing IP -> `WAN IP address`;
+- bare IP -> ambiguous;
+- internal + public IP -> ambiguous.
+
+Qualification selects only a canonical fact already permitted by governed capability metadata. It does not select a provider, provider field, connector, authorization result, evidence pointer, or operational value.
+
+Bounded Qwen experiments were rejected as the production solution after demonstrating both qualified misclassification and ambiguous over-selection. The production qualifier contrast is deterministic.
+
+Current ambiguity behavior is the existing governed `conversation_unresolved` rejection. A future clarification response may improve user experience but must preserve no execution before disambiguation.
+
+Historical proof:
+
+`docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
+
 ## Datto RMM example
 
 ADR-004 remains controlling for RMM-managed device existence and operational identity: Datto RMM is the authoritative external provider for that resource domain when selected through governed capability resolution.
@@ -127,6 +167,9 @@ Implementation must prove at minimum:
 - provider-specific capabilities cannot be smuggled into a resource plan;
 - unknown identity fails before orchestration;
 - unresolved intent/planning fails before orchestration;
+- ambiguous competing canonical facts fail before generic language/action reasoning or orchestration;
+- qualified facts may resolve only from governed eligible canonical facts;
+- qualifier resolution does not select provider fields or operational values;
 - the request factory cannot alter the bound principal/organization/client or change the requester to an agent;
 - direct agent-invocation arguments are rejected;
 - denied/unresolved orchestration outcomes can be rendered safely without an ungoverned provider fallback;

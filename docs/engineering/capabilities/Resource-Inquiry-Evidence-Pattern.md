@@ -2,7 +2,7 @@
 
 **Status:** Active engineering guidance  
 **Owner:** Jason Architecture Authority  
-**Updated:** 2026-08-12
+**Updated:** 2026-08-14
 
 ## Rule
 
@@ -52,6 +52,63 @@ Final Teams proof:
 Do not create a bespoke `Who is logged into X?` script. If a representable resource question fails, identify and fix the reusable layer that is actually defective: interpretation, capability metadata, evidence indexing, bounded pointer selection, deterministic dereference, or rendering.
 
 Historical proof: `docs/sessions/Teams-Datto-Resource-Semantic-Proof-2026-08-12.md`.
+
+## 2026-08-14 deterministic canonical-fact qualifier resolution
+
+Qualifier-rich language can be ambiguous even when Jason already has the necessary capabilities and evidence.
+
+The production example was:
+
+`What IP is AOT-50282 using internally?`
+
+Generic interpretation could collapse this to `ip address`, losing the governed LAN/WAN distinction.
+
+### Reusable rule
+
+When eligible canonical facts share a generic recognition anchor, use deterministic tri-state qualifier analysis before generic semantic/model fallback:
+
+- `not_applicable` — the contrast is not activated;
+- `resolved` — the shared anchor exists and exactly one eligible fact has discriminating language;
+- `ambiguous` — the shared anchor exists but no unique discriminator exists, or conflicting discriminators match.
+
+For LAN/WAN:
+
+- shared anchor: IP;
+- LAN discrimination: internal, private, local;
+- WAN discrimination: public, external, internet-facing.
+
+The qualifier gate must run before ordinary longest-alias recognition.
+
+`internal public IP` must therefore remain ambiguous rather than resolving through the longer `public IP` alias.
+
+### Model boundary
+
+Bounded Qwen experiments were rejected after one probe misclassified `internet-facing IP` and another guessed LAN for a bare IP request.
+
+A model is not used merely to force selection between competing governed canonical facts.
+
+### Execution boundary
+
+Qualifier resolution may select only a canonical fact already exposed by governed capability metadata.
+
+It does not select provider, provider field, connector, capability implementation, authorization, evidence pointer, or operational value.
+
+Ambiguous requests stop before generic resource-language reasoning, action reasoning, capability planning, and orchestration.
+
+### Live proof
+
+Signed production ingress proved:
+
+- internal IP -> LAN;
+- internet-facing IP -> WAN;
+- bare IP -> HTTP 400 / `conversation_unresolved`;
+- ambiguous requests produced rejection rather than completion audit evidence;
+- qualified requests completed normally; and
+- runtime health remained good.
+
+Historical proof:
+
+`docs/sessions/Teams-Canonical-Fact-Qualifier-Proof-2026-08-14.md`
 
 <!-- BEGIN 2026-08-13 SEMANTIC CAPABILITY DISCOVERY -->
 ## 2026-08-13 semantic capability-gap and provider-documentation discovery
