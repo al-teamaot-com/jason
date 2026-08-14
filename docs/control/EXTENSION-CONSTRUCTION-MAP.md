@@ -30,7 +30,7 @@ Working code alone is not completion.
 | Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
-| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs, including `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` | OpenClaw/Teams ingress records and implementation/tests; `infrastructure/openclaw-jason-bridge/` | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable; user-visible processing feedback, when used, is bounded/non-authoritative and must not expose reasoning or alter execution authority; transport-feedback failure must not silently replace the governed result |
+| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md` and relevant ADRs, including `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` | OpenClaw/Teams ingress records and implementation/tests; `infrastructure/openclaw-jason-bridge/`; `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py` | Establish trusted machine/user identity; preserve correlation; construct governed orchestration request; no provider bypass; deterministic rejection/failure classification; governed return path; security audit; transport remains replaceable; user-visible processing feedback, when used, is bounded/non-authoritative and must not expose reasoning or alter execution authority; transport-feedback failure must not silently replace the governed result; exact authenticated transport-message retries must be durably idempotent at governed ingress before flow/orchestration using stable authenticated transport identity rather than request text; duplicate suppression must be auditable; same-text new message IDs remain distinct requests unless a deeper governed capability explicitly defines other idempotency semantics |
 | Identity / authority component | `docs/components/kernel/JKD-001-Identity-and-Authority-Service.md` | JKD-001 runtime foundation, grant/delegation tooling and tests | Identity before authority; narrow capability/scope grants; explicit delegation semantics; auditable mutation; fail closed on ambiguity/missing authority; no authority inferred from technical access |
 | Secret / credential integration | `docs/components/kernel/JKD-003-Secrets-Broker.md` and `docs/operations/Provider-Secret-Provisioning.md` | OpenBao provider lifecycle tooling and secret-provider records | Secret references only; no secret values in docs/System Registry/audit; least privilege; runtime access verification; rotation/revocation/recovery; provider-specific credentials remain behind broker/provider boundary |
 | Internal service / runtime component | `docs/architecture/J-100-Reference-Architecture.md`, relevant JKD/INF record, and deployment architecture | `jason-runtime`, OpenBao, OpenClaw deployment/runbook patterns; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` | Defined responsibility and dependency boundary; service identity; network/secret mounts by reference; health verification; hardened runtime controls; rollback; System Registry declared/observed/verified state; derive deployment topology/inputs from authoritative live state rather than assumption |
@@ -52,6 +52,7 @@ Before implementation approval, verify:
 - No current runtime claim is taken from conversation memory or a stale narrative document.
 - Natural-language resource questions do not become bespoke workflow scripts merely because semantic interpretation or evidence selection failed.
 - User-facing processing feedback is not treated as authorization, evidence, completion, or reasoning output.
+- No exact retry of an authenticated transport activity may initiate duplicate governed work when a stable authenticated message/activity identity exists; do not substitute text-similarity heuristics for transport identity.
 
 ## Universal extension Definition of Done
 
@@ -101,6 +102,30 @@ The acknowledgement must not disclose chain-of-thought, model reasoning, provide
 Reference proof: `docs/sessions/Teams-Processing-Feedback-Proof-2026-08-14.md`.
 
 The same work exposed a rollback-verification construction rule: a rollback is not proven merely because a service restarted. Validate the restored artifact/state (for example by hash/source parity plus service health) before declaring rollback success.
+
+## 2026-08-14 Teams exact-message idempotency construction refinement
+
+The processing acknowledgement reduces uncertainty for the user but is not an idempotency control. Exact duplicate transport activities must be suppressed centrally even if OpenClaw constructs a fresh Jason request envelope for a retry.
+
+The reusable ingress pattern is:
+
+1. authenticate and validate the signed transport envelope and machine identity;
+2. validate freshness and preserve the existing request-ID replay claim;
+3. derive a stable exact-message identity only from authenticated transport identity/correlation fields, not from message text;
+4. for Teams, scope that identity by Microsoft tenant ID, Microsoft object ID, conversation ID, and message ID;
+5. hash the compound identity before using it as a persistent claim key;
+6. durably and atomically claim the exact-message key before entering the conversation flow or Central Orchestrator;
+7. if already claimed, emit an auditable duplicate-suppression event and return an idempotent duplicate transport result without starting governed execution;
+8. allow a distinct authenticated message ID to proceed even when text matches an earlier request; and
+9. treat capability/action-level side-effect idempotency as a separate deeper control when consequential operations require it.
+
+Current implementation reuses `SQLiteReplayStore` and the `teams-message-v1:` claim namespace. The duplicate transport result is HTTP `200`, `status=duplicate`, `error_code=duplicate_message`.
+
+The ingress concurrency regression test proves the second exact-message retry is suppressed while the first ingress flow is still active. The current production HTTP server remains single-worker, so future multi-worker/replica scale-out must retain an atomic shared idempotency state layer before concurrency topology changes.
+
+Reference proof: `docs/sessions/Teams-Exact-Message-Idempotency-Proof-2026-08-14.md`.
+
+The same work exposed two reusable validation/deployment prerequisites now owned by `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`: host runtime tests must expose the same source roots as the runtime Docker image, and protected secret bind sources may require a Docker daemon bind-probe when the ordinary operator cannot traverse the host path.
 
 <!-- BEGIN PROVIDER ADAPTATION FOUNDATION -->
 ## Provider Adaptation and Resource Outcome Foundation
