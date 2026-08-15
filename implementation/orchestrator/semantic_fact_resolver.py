@@ -86,6 +86,43 @@ class SemanticFactResolver:
                 return self._from_legacy(definition)
         return None
 
+    def match_explicit_facts(self, human_text: str) -> tuple[SemanticFactResolution, ...]:
+        """Return the most-specific active registry concepts explicitly named in text.
+
+        This is deterministic semantic recognition only. It grants no capability,
+        provider, credential, or execution authority. Longest matching active terms
+        win so a phrase such as ``bitlocker unlock code`` is not diluted into a more
+        generic overlapping concept.
+        """
+
+        normalized_text = self._registry.normalize_text(human_text)
+        if not normalized_text:
+            return ()
+
+        padded = f" {normalized_text} "
+        candidates: list[tuple[int, SemanticFactResolution]] = []
+        for term in self._registry.active_terms():
+            normalized_term = self._registry.normalize_text(term)
+            if not normalized_term or f" {normalized_term} " not in padded:
+                continue
+            resolution = self.resolve(term)
+            if resolution is None or resolution.source != "semantic_knowledge_registry":
+                continue
+            candidates.append((len(normalized_term), resolution))
+
+        if not candidates:
+            return ()
+
+        longest = max(length for length, _ in candidates)
+        result: list[SemanticFactResolution] = []
+        seen: set[str] = set()
+        for length, resolution in candidates:
+            if length != longest or resolution.canonical_fact in seen:
+                continue
+            seen.add(resolution.canonical_fact)
+            result.append(resolution)
+        return tuple(result)
+
     def canonicalize(self, value: str) -> str:
         resolution = self.resolve(value)
         return resolution.canonical_fact if resolution is not None else value.strip()
@@ -122,34 +159,17 @@ class SemanticFactResolver:
     ) -> tuple[str, ...]:
         requested = tuple(str(item) for item in requested_facts)
 
-        # First ask the authoritative registry whether the human text explicitly
-        # contains one of the migrated concepts. Longest explicit matching term wins.
-        normalized_text = self._registry.normalize_text(human_text)
-        candidates: list[tuple[int, SemanticFactResolution]] = []
-        for term in self._registry.active_terms():
-            normalized_term = self._registry.normalize_text(term)
-            if not normalized_term:
-                continue
-            padded = f" {normalized_text} "
-            if f" {normalized_term} " in padded:
-                resolution = self.resolve(term)
-                if resolution is not None and resolution.source == "semantic_knowledge_registry":
-                    candidates.append((len(normalized_term), resolution))
-
-        if candidates:
-            candidates.sort(key=lambda item: item[0], reverse=True)
-            best_len = candidates[0][0]
-            best = {item[1].canonical_fact: item[1] for item in candidates if item[0] == best_len}
-            if len(best) == 1:
-                resolution = next(iter(best.values()))
-                requested_words = {
-                    token
-                    for fact in requested
-                    for token in self._registry.normalize_text(fact).split()
-                }
-                concept_words = set(self._registry.normalize_text(resolution.canonical_fact).split())
-                if requested_words and requested_words.issubset(concept_words | requested_words):
-                    return (resolution.canonical_fact,)
+        matches = self.match_explicit_facts(human_text)
+        if len(matches) == 1:
+            resolution = matches[0]
+            requested_words = {
+                token
+                for fact in requested
+                for token in self._registry.normalize_text(fact).split()
+            }
+            concept_words = set(self._registry.normalize_text(resolution.canonical_fact).split())
+            if requested_words and requested_words.issubset(concept_words | requested_words):
+                return (resolution.canonical_fact,)
 
         # Compatibility path preserves existing conservative explicit-fragment
         # handling for concepts that have not yet been migrated into the registry.
