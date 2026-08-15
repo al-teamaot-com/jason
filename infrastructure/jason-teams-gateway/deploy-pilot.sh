@@ -36,7 +36,6 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-
 mkdir -p "$TMP_DIR/secrets"
 
 echo "========== BUILD DIRECT TEAMS GATEWAY =========="
