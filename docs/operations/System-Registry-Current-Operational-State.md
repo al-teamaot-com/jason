@@ -10,7 +10,7 @@
 - Registered entities: `24`
 - Effective lifecycle counts: `configured=4, registered=13, verified=7`
 
-## Verified current physical topology
+## Verified current operational entities
 
 | Registry ID | Type | Verification method | Governed evidence record |
 |---|---|---|---|
