@@ -140,17 +140,18 @@ Items in this document are not approved capabilities and must not be enabled mer
 
 ## Connector and execution backlog
 
-### TODO-CONN-001 — Production OpenClaw transport
+### TODO-CONN-001 — Production Teams conversational ingress
 
 - **Priority:** P0
-- **Status:** Planned
+- **Status:** Implemented
 - **Risk level:** High
-- **Idea:** Implement authenticated transport between OpenClaw and Jason using signed requests or mutual TLS.
-- **Why it matters:** Required for dependable identity, replay protection, authorization, and audit.
-- **Why not now:** Foundation exists, but production identity and deployment design are incomplete.
-- **Prerequisites:** certificate or key lifecycle, identity mapping, persistent replay store, health endpoint.
-- **Decision owner:** Platform Owner
-- **Review trigger:** Before production pilot.
+- **Idea:** Provide authenticated, replay/idempotency-protected, auditable Microsoft Teams conversational ingress that reaches Jason before any independent interface model/agent path.
+- **Why it matters:** Required for dependable identity, replay protection, authorization, audit, and exclusive Jason ownership of ordinary inbound Teams turns.
+- **Implemented result:** On 2026-08-15 the dedicated `jason-teams-gateway` became the production owner of ordinary inbound Teams host port `3978`. The direct gateway authenticates through the Microsoft Agents SDK, constructs the existing signed Jason conversation envelope, and hands the request to `jason-runtime`. OpenClaw remains deployed for other approved functions but no longer owns externally reachable ordinary inbound Teams ingress.
+- **Governed decision:** `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`.
+- **Production proof:** `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`.
+- **Decision owner:** Platform Owner / Jason Architecture Authority
+- **Review trigger:** Revisit only if a supported replacement transport can prove equal or stronger identity, exclusive ownership, auditability, rollback, and Central Orchestrator enforcement.
 
 ### TODO-CONN-002 — Autotask read-only production adapter and contract tests
 
@@ -175,6 +176,18 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Prerequisites:** mature audit chain, approval service, rollback patterns, connector contract tests, least-privilege credentials, sandbox testing, incident response process.
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Successful completion of the read-only shadow pilot and formal authorization to expand scope.
+
+### TODO-CONN-004 — Direct Teams gateway credential and residual OpenClaw hardening
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Complete the post-cutover security cleanup by migrating the direct Teams gateway credential from the temporary mode-0600 host file into Jason's governed secret/federated identity architecture, defining rotation/revocation, and retiring the dormant OpenClaw inbound Teams listener when outbound/proactive dependencies permit.
+- **Why it matters:** The current direct ingress is production-proven, but long-term operations should not depend on a transitional host-file client secret or leave an unnecessary alternative Teams listener configured indefinitely.
+- **Why not now:** Disabling OpenClaw Teams immediately could disrupt approved outbound/proactive functions, and credential migration should be governed/tested rather than rushed after the successful cutover.
+- **Prerequisites:** review of OpenClaw outbound/proactive dependencies; governed Microsoft credential target (OpenBao, certificate, or federated identity); rotation/revocation procedure; rollback plan; current System Registry update/verification process.
+- **Decision owner:** Technology Steward / Jason Architecture Authority
+- **Review trigger:** Begin during the next Teams/OpenClaw security-hardening window; complete before the dedicated gateway client secret reaches its first planned rotation/expiry boundary.
 
 ---
 
