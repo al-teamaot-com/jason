@@ -18,7 +18,7 @@ EOF
 
 echo
 echo "========== START TEAMS DEVELOPER CLI =========="
-echo "A Microsoft device-login prompt may appear. Sign in to the AOT tenant account that can manage the Teams app."
+echo "A Microsoft device-login prompt will appear. Sign in to the AOT tenant account that can manage the Teams app."
 echo "After login, the CLI will list apps and then open an app picker."
 echo "Select the Jason/OpenClaw app associated with the client id shown above."
 
@@ -31,7 +31,7 @@ docker run --rm -it \
 
     echo
     echo "========== TEAMS CLI LOGIN =========="
-    teams login
+    teams login --device-code
 
     echo
     echo "========== TEAMS CLI STATUS =========="
