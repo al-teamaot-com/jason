@@ -18,6 +18,7 @@ from kernel.system_registry.probes import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MANIFEST = REPO_ROOT / "implementation/kernel/system_registry/production-registry.json"
+LIFECYCLE_EVENTS = REPO_ROOT / "implementation/kernel/system_registry/production-lifecycle-events.json"
 PLAN = REPO_ROOT / "implementation/kernel/system_registry/production-verification-plan.json"
 NOW = datetime(2026, 8, 11, 15, 30, tzinfo=timezone.utc)
 HOST_VERIFICATION_METHODS = {
@@ -31,9 +32,11 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     ids = {entity.registry_id for entity in registry.list_all()}
 
     assert "component.jason-runtime" in ids
+    assert "component.jason-teams-gateway" in ids
     assert "component.openclaw-jason-bridge" in ids
     assert "component.openbao" in ids
     assert "component.central-orchestrator" in ids
+    assert "credential.microsoft-teams-gateway-client" in ids
     assert "capability.endpoint-device-search" in ids
     assert "capability.endpoint-device-read" in ids
     assert "capability.communication-email-send" in ids
@@ -48,18 +51,34 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     assert "deployment.jason-single-host-pilot" in ids
 
 
-def test_physical_configured_entities_have_bounded_host_checks() -> None:
-    registry = registry_from_manifest(MANIFEST)
-    plan = load_verification_plan(PLAN, registry=registry)
+def test_physical_configured_entities_have_bounded_host_checks_or_governed_verification() -> None:
+    baseline = registry_from_manifest(MANIFEST)
+    effective = registry_from_manifest(
+        MANIFEST,
+        lifecycle_events_path=LIFECYCLE_EVENTS,
+    )
+    plan = load_verification_plan(PLAN, registry=baseline)
     planned_ids = {check.registry_id for check in plan.checks}
 
     configured_physical = {
         entity.registry_id
-        for entity in registry.list_all()
+        for entity in baseline.list_all()
         if entity.lifecycle_status.value == "configured"
         and HOST_VERIFICATION_METHODS.intersection(entity.verification_methods)
     }
-    assert configured_physical == planned_ids
+
+    # The recurring observer plan remains deliberately bounded. A configured
+    # physical entity may be outside that recurring plan only when a separately
+    # governed production proof has already promoted the effective lifecycle to
+    # VERIFIED with retained verification evidence. This preserves the invariant
+    # that no unplanned configured physical component is silently assumed healthy.
+    assert planned_ids.issubset(configured_physical)
+    for registry_id in configured_physical - planned_ids:
+        entity = effective.get(registry_id)
+        assert entity.lifecycle_status.value == "verified"
+        verification = effective.latest_verification(registry_id)
+        assert verification is not None
+        assert verification.outcome is VerificationOutcome.VERIFIED
 
 
 def test_non_host_configured_entities_require_separate_governed_verification() -> None:
