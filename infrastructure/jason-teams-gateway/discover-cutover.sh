@@ -25,6 +25,40 @@ run_az() {
   fi
 }
 
+bot_field() {
+  local bot_id="$1"
+  local field="$2"
+  local value=""
+  local subscription=""
+  local resource_group=""
+  local bot_name=""
+
+  value="$(run_az resource show \
+    --ids "$bot_id" \
+    --query "properties.${field}" \
+    -o tsv \
+    --only-show-errors 2>/dev/null | tr -d '\r' || true)"
+  if [ -n "$value" ] && [ "$value" != "None" ]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  subscription="$(printf '%s' "$bot_id" | cut -d/ -f3)"
+  resource_group="$(printf '%s' "$bot_id" | cut -d/ -f5)"
+  bot_name="$(printf '%s' "$bot_id" | cut -d/ -f9)"
+  value="$(run_az bot show \
+    --subscription "$subscription" \
+    --resource-group "$resource_group" \
+    --name "$bot_name" \
+    --query "$field" \
+    -o tsv \
+    --only-show-errors 2>/dev/null | tr -d '\r' || true)"
+  if [ "$value" = "None" ]; then
+    value=""
+  fi
+  printf '%s' "$value"
+}
+
 echo "========== DIRECT TEAMS CUTOVER DISCOVERY =========="
 echo "APP_ID=$APP_ID"
 echo "TENANT_ID=$TENANT_ID"
@@ -45,14 +79,27 @@ trap 'rm -f "$FOUND_FILE"' EXIT
 : > "$FOUND_FILE"
 
 SUBSCRIPTIONS="$(run_az account list --all --query "[?tenantId=='$TENANT_ID' && state=='Enabled'].id" -o tsv --only-show-errors)"
+if [ -z "$SUBSCRIPTIONS" ]; then
+  echo "ERROR: no enabled Azure subscriptions are visible for tenant $TENANT_ID"
+  exit 1
+fi
 
+# Generic 'az resource list' output is not guaranteed to include provider properties.
+# Enumerate Bot Service resource IDs first, then read each resource individually.
 for SUB in $SUBSCRIPTIONS; do
-  run_az resource list \
+  BOT_IDS="$(run_az resource list \
     --subscription "$SUB" \
     --resource-type Microsoft.BotService/botServices \
-    --query "[?properties.msaAppId=='$APP_ID'].id" \
+    --query '[].id' \
     -o tsv \
-    --only-show-errors >> "$FOUND_FILE" || true
+    --only-show-errors 2>/dev/null || true)"
+
+  for BOT_ID in $BOT_IDS; do
+    CANDIDATE_APP_ID="$(bot_field "$BOT_ID" msaAppId)"
+    if [ "$CANDIDATE_APP_ID" = "$APP_ID" ]; then
+      printf '%s\n' "$BOT_ID" >> "$FOUND_FILE"
+    fi
+  done
 done
 
 BOT_COUNT="$(grep -c '^/' "$FOUND_FILE" || true)"
@@ -68,8 +115,13 @@ BOT_ID="$(head -n 1 "$FOUND_FILE" | tr -d '\r')"
 BOT_SUBSCRIPTION="$(printf '%s' "$BOT_ID" | cut -d/ -f3)"
 BOT_RESOURCE_GROUP="$(printf '%s' "$BOT_ID" | cut -d/ -f5)"
 BOT_NAME="$(printf '%s' "$BOT_ID" | cut -d/ -f9)"
-BOT_ENDPOINT="$(run_az resource show --ids "$BOT_ID" --query properties.endpoint -o tsv --only-show-errors | tr -d '\r')"
-BOT_APP_TYPE="$(run_az resource show --ids "$BOT_ID" --query properties.msaAppType -o tsv --only-show-errors | tr -d '\r')"
+BOT_ENDPOINT="$(bot_field "$BOT_ID" endpoint)"
+BOT_APP_TYPE="$(bot_field "$BOT_ID" msaAppType)"
+
+if [ -z "$BOT_ENDPOINT" ]; then
+  echo "ERROR: Azure Bot resource has no readable messaging endpoint"
+  exit 1
+fi
 
 echo "BOT_NAME=$BOT_NAME"
 echo "BOT_RESOURCE_GROUP=$BOT_RESOURCE_GROUP"
@@ -81,11 +133,29 @@ echo
 echo "========== LOCAL EDGE =========="
 echo "OPENCLAW_3978_BINDING=$(docker port "$OPENCLAW_CONTAINER" 3978/tcp 2>/dev/null | tr '\n' ' ' || true)"
 echo "JASON_PILOT_3979_BINDING=$(docker port jason-teams-gateway-pilot 3979/tcp 2>/dev/null | tr '\n' ' ' || true)"
+echo "OPENCLAW_COMPOSE_PROJECT=$(docker inspect -f '{{ index .Config.Labels \"com.docker.compose.project\" }}' "$OPENCLAW_CONTAINER" 2>/dev/null || true)"
+echo "OPENCLAW_COMPOSE_SERVICE=$(docker inspect -f '{{ index .Config.Labels \"com.docker.compose.service\" }}' "$OPENCLAW_CONTAINER" 2>/dev/null || true)"
+echo "OPENCLAW_COMPOSE_WORKDIR=$(docker inspect -f '{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}' "$OPENCLAW_CONTAINER" 2>/dev/null || true)"
+echo "OPENCLAW_COMPOSE_CONFIG_FILES=$(docker inspect -f '{{ index .Config.Labels \"com.docker.compose.project.config_files\" }}' "$OPENCLAW_CONTAINER" 2>/dev/null || true)"
+
+echo
+echo "========== RELEVANT HOST LISTENERS =========="
+if command -v ss >/dev/null 2>&1; then
+  ss -ltn 2>/dev/null | awk 'NR == 1 || $4 ~ /:(80|443|3978|3979)$/' || true
+else
+  echo "INFO: ss is unavailable"
+fi
+
+echo
+echo "========== RELEVANT DOCKER PORTS =========="
+docker ps --format '{{.Names}}\t{{.Image}}\t{{.Ports}}' 2>/dev/null \
+  | awk 'BEGIN {print "NAME\tIMAGE\tPORTS"} /(^|[,:])80->|(^|[,:])443->|3978->|3979->|:80-|:443-/ {print}' || true
 
 if [ -f "$OPENCLAW_COMPOSE_FILE" ]; then
-  echo "OPENCLAW_COMPOSE_FILE=$OPENCLAW_COMPOSE_FILE"
+  echo
+echo "OPENCLAW_COMPOSE_FILE=$OPENCLAW_COMPOSE_FILE"
   echo "--- compose lines mentioning 3978 ---"
-  grep -n -C 3 '3978' "$OPENCLAW_COMPOSE_FILE" || true
+  grep -n -C 4 '3978' "$OPENCLAW_COMPOSE_FILE" || true
 else
   echo "OPENCLAW_COMPOSE_FILE_NOT_FOUND=$OPENCLAW_COMPOSE_FILE"
 fi
