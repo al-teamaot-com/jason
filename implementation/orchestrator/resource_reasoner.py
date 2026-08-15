@@ -7,6 +7,7 @@ from typing import Sequence
 from kernel.capabilities import CapabilityDefinition
 
 from .resource_inquiry import ResourceInquiry, ResourcePlanStep
+from .semantic_fact_resolver import SemanticFactResolver
 from .semantic_mapping_registry import SemanticMappingRegistry
 
 
@@ -40,6 +41,7 @@ class MetadataResourceCapabilityReasoner:
 
     minimum_score: int = 1
     semantic_mapping_registry: SemanticMappingRegistry | None = None
+    fact_resolver: SemanticFactResolver | None = None
 
     def select(
         self,
@@ -65,6 +67,23 @@ class MetadataResourceCapabilityReasoner:
             for _, normalized in normalized_requested
             if normalized
         }
+
+        # Once a phrase is recognized as governed semantic knowledge, loose token
+        # overlap is no longer sufficient authority to route it. A registered
+        # capability must explicitly declare that canonical fact, or an approved
+        # semantic mapping must bind it. This prevents a secret-like fact such as a
+        # BitLocker recovery key from falling into a broad endpoint read merely
+        # because both requests contain generic endpoint/security words.
+        governed_semantic_requested: set[str] = set()
+        if self.fact_resolver is not None:
+            for original, normalized in normalized_requested:
+                resolution = self.fact_resolver.resolve(str(original))
+                if (
+                    resolution is not None
+                    and resolution.source == "semantic_knowledge_registry"
+                    and normalized
+                ):
+                    governed_semantic_requested.add(normalized)
 
         ranked: list[
             tuple[
@@ -166,6 +185,15 @@ class MetadataResourceCapabilityReasoner:
 
         if not ranked:
             return ()
+
+        if governed_semantic_requested:
+            available_governed_coverage: set[str] = set()
+            for _, _, _, coverage in ranked:
+                available_governed_coverage.update(coverage)
+            if not governed_semantic_requested.issubset(
+                available_governed_coverage
+            ):
+                return ()
 
         ranked.sort(
             key=lambda item: (
