@@ -109,6 +109,78 @@
       ],
       "verification_method": "docker-file-sha256-v1",
       "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-15t173800z.credential.microsoft-teams-gateway-client.configured",
+      "registry_id": "credential.microsoft-teams-gateway-client",
+      "from_lifecycle": "registered",
+      "to_lifecycle": "configured",
+      "effective_at": "2026-08-15T17:38:00+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009"],
+      "reason": "The dedicated direct Teams gateway application credential was appended to the existing Entra application and stored in the declared host-protected migration location without reading, replacing, or deleting the OpenClaw credential.",
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ]
+    },
+    {
+      "event_id": "lifecycle.2026-08-15t173900z.credential.microsoft-teams-gateway-client.verified",
+      "registry_id": "credential.microsoft-teams-gateway-client",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-15T17:39:00+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009"],
+      "reason": "Production pilot evidence established mode-0600 host protection and successful Microsoft-authenticated direct gateway operation without exposing the credential value.",
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ],
+      "verification_method": "host-file-permission-and-runtime-auth-proof",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-15t174000z.component.jason-teams-gateway.verified",
+      "registry_id": "component.jason-teams-gateway",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-15T17:40:00+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article VI", "J-002 Article XIX", "J-103", "ADR-009"],
+      "reason": "Fresh production host evidence established a healthy direct Teams gateway container, successful Teams turns through Jason Runtime, and exclusive external host-port 3978 ownership while OpenClaw remained healthy on its other published ports.",
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ],
+      "verification_method": "docker-container-inspect-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-08-15t174100z.deployment.jason-single-host-pilot.configured",
+      "registry_id": "deployment.jason-single-host-pilot",
+      "from_lifecycle": "registered",
+      "to_lifecycle": "configured",
+      "effective_at": "2026-08-15T17:41:00+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009"],
+      "reason": "The single-host production-pilot deployment declaration now assigns ordinary Teams ingress to component.jason-teams-gateway while retaining OpenClaw as a separate deployed ecosystem component.",
+      "evidence_references": [
+        "docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md",
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ]
+    },
+    {
+      "event_id": "lifecycle.2026-08-15t174200z.deployment.jason-single-host-pilot.verified",
+      "registry_id": "deployment.jason-single-host-pilot",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-08-15T17:42:00+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009"],
+      "reason": "The direct Teams production cutover and live Datto-backed Teams request verified the declared single-host topology, with direct gateway ingress, healthy Jason Runtime, healthy OpenClaw on non-Teams published ports, and a retained rollback path.",
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ],
+      "verification_method": "production-host-proof",
+      "verification_outcome": "verified"
     }
   ]
 }
