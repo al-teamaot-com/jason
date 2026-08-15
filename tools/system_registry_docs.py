@@ -80,7 +80,7 @@ def render(manifest: Path, lifecycle_events: Path) -> str:
         + ", ".join(f"{key}={lifecycle_counts[key]}" for key in sorted(lifecycle_counts))
         + "`",
         "",
-        "## Verified current physical topology",
+        "## Verified current operational entities",
         "",
         "| Registry ID | Type | Verification method | Governed evidence record |",
         "|---|---|---|---|",
