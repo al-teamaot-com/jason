@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import express from "express";
 import JSON5 from "json5";
 import {
@@ -35,9 +35,13 @@ function nonBlank(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function loadOpenClawConfig() {
+function loadOptionalOpenClawTeamsConfig() {
+  if (!existsSync(OPENCLAW_CONFIG_PATH)) {
+    return {};
+  }
   const raw = readFileSync(OPENCLAW_CONFIG_PATH, "utf8");
-  return JSON5.parse(raw);
+  const cfg = JSON5.parse(raw);
+  return cfg?.channels?.msteams ?? {};
 }
 
 function resolveEnvSecretRef(value) {
@@ -61,19 +65,29 @@ function resolveCredential(value, fallbackEnvName) {
 }
 
 function loadTeamsAuth() {
-  const cfg = loadOpenClawConfig();
-  const teams = cfg?.channels?.msteams ?? {};
+  // The direct Jason gateway owns its Microsoft credential through MSTEAMS_*.
+  // OpenClaw config is fallback-only for transitional pilots and is not needed
+  // by the production direct gateway.
+  const envClientId = nonBlank(process.env.MSTEAMS_APP_ID);
+  const envClientSecret = nonBlank(process.env.MSTEAMS_APP_PASSWORD);
+  const envTenantId = nonBlank(process.env.MSTEAMS_TENANT_ID);
 
-  const clientId = resolveCredential(teams.appId, "MSTEAMS_APP_ID");
-  const clientSecret = resolveCredential(
-    teams.appPassword,
-    "MSTEAMS_APP_PASSWORD",
-  );
-  const tenantId = resolveCredential(teams.tenantId, "MSTEAMS_TENANT_ID");
+  let clientId = envClientId;
+  let clientSecret = envClientSecret;
+  let tenantId = envTenantId;
+
+  if (!clientId || !clientSecret || !tenantId) {
+    const teams = loadOptionalOpenClawTeamsConfig();
+    clientId = clientId ?? resolveCredential(teams.appId, "MSTEAMS_APP_ID");
+    clientSecret =
+      clientSecret ??
+      resolveCredential(teams.appPassword, "MSTEAMS_APP_PASSWORD");
+    tenantId = tenantId ?? resolveCredential(teams.tenantId, "MSTEAMS_TENANT_ID");
+  }
 
   if (!clientId || !clientSecret || !tenantId) {
     throw new Error(
-      "Jason Teams gateway could not resolve the existing Microsoft Teams credentials",
+      "Jason Teams gateway could not resolve Microsoft Teams credentials",
     );
   }
   if (!isUuid(clientId) || !isUuid(tenantId)) {
@@ -103,11 +117,6 @@ const authConfiguration = {
   tenantId: auth.tenantId,
 };
 
-// AgentApplication creates its own CloudAdapter when one is not supplied, and
-// that default adapter resolves credentials from the Agents SDK environment
-// variable names. Jason deliberately stores the Teams credential under its own
-// MSTEAMS_* names, so provide the authenticated adapter explicitly instead of
-// relying on ambient environment-variable translation.
 const adapter = new CloudAdapter(authConfiguration);
 const storage = new MemoryStorage();
 const agent = new AgentApplication({
