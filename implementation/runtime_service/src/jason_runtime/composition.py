@@ -44,6 +44,7 @@ from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
     ReasonedResourceInquiryInterpreter,
 )
+from orchestrator.governed_semantic_coverage import GovernedSemanticCoverageIntentResolver
 from orchestrator.grounded_semantic_resource_interpreter import (
     GroundedSemanticResourceInquiryInterpreter,
 )
@@ -85,9 +86,7 @@ from orchestrator.resource_evidence import (
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 from orchestrator.semantic_fact_reasoning import OllamaSemanticFactReasoner
-from orchestrator.semantic_mapping_registry import (
-    JsonSemanticMappingRegistryLoader,
-)
+from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLoader
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -98,6 +97,9 @@ from orchestrator.system_registry_resource import (
     SYSTEM_REGISTRY_TRACE,
     load_production_system_registry,
     register_system_registry_resource_foundation,
+)
+from orchestrator.teams_conversation_continuation import (
+    SQLiteTeamsConversationContinuationStore,
 )
 from orchestrator.teams_conversation_flow import TeamsConversationFlow
 from orchestrator.teams_identity_binding import JasonTeamsIdentityBinder
@@ -117,6 +119,7 @@ from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPa
 class RuntimeSettings:
     authority_db: Path
     bindings_db: Path
+    continuation_db: Path
     replay_db: Path
     security_audit_db: Path
     orchestration_events_db: Path
@@ -168,6 +171,12 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/teams-identity-bindings.sqlite3",
                 )
             ),
+            continuation_db=Path(
+                os.getenv(
+                    "JASON_TEAMS_CONTINUATION_DB",
+                    "/var/lib/jason/openclaw/teams-conversation-continuation.sqlite3",
+                )
+            ),
             replay_db=Path(os.getenv("JASON_REPLAY_DB", "/var/lib/jason/openclaw/replay.sqlite3")),
             security_audit_db=Path(
                 os.getenv(
@@ -203,8 +212,7 @@ class RuntimeSettings:
                 "JASON_HOSTED_SEMANTICS_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
-                "JASON_OPENAI_SEMANTIC_MODEL",
-                "gpt-5.4-mini",
+                "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5.4-mini"
             ).strip(),
             openai_openbao_role_id_path=Path(
                 os.getenv(
@@ -262,10 +270,7 @@ class RuntimeSettings:
     def validate(self) -> None:
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
-        if (
-            self.hosted_semantics_enabled
-            and not self.openai_semantic_model
-        ):
+        if self.hosted_semantics_enabled and not self.openai_semantic_model:
             raise ValueError(
                 "JASON_OPENAI_SEMANTIC_MODEL is required when hosted semantics are enabled"
             )
@@ -289,15 +294,9 @@ def build_disabled_semantic_intent_planner(
     client: OllamaStructuredJsonClient,
     context_catalog: GovernedPlanningContextCatalog,
 ) -> BoundedSemanticIntentPlanningLoop | None:
-    """Compose the semantic planner only when explicitly enabled.
-
-    This helper intentionally performs no execution wiring. The returned planner can
-    reason only over governed context snapshots and can only propose provider-neutral
-    capability plans.
-    """
+    """Compose the semantic planner only when explicitly enabled."""
     if not settings.semantic_planner_enabled:
         return None
-
     reasoner = OllamaSemanticIntentPlanningReasoner(client=client)
     reader = GovernedPlanningContextReaderAdapter(catalog=context_catalog)
     return BoundedSemanticIntentPlanningLoop(
@@ -309,16 +308,9 @@ def build_disabled_semantic_intent_planner(
 
 @dataclass(frozen=True, slots=True)
 class ConnectorEventAudit:
-    """Record provider boundary events without credential or response-body logging."""
-
     events: SQLiteOrchestrationEventStore
 
-    def record(
-        self,
-        event_type: str,
-        context: ConnectorContext,
-        details: Mapping[str, Any],
-    ) -> None:
+    def record(self, event_type: str, context: ConnectorContext, details: Mapping[str, Any]) -> None:
         stage = "invoking" if event_type.endswith("requested") else "completed"
         self.events.append(
             event_type,
@@ -339,8 +331,6 @@ class ConnectorEventAudit:
 def _resource_language_contract(
     capabilities: CapabilityRegistryService,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
-    """Derive language-normalization vocabulary from governed capability metadata."""
-
     resource_types: set[str] = set()
     selector_keys: set[str] = set()
     fact_hints: set[str] = set()
@@ -351,87 +341,46 @@ def _resource_language_contract(
         if metadata.get("read_only", "false").lower() != "true":
             continue
         resource_types.update(
-            item.strip()
-            for item in metadata.get("resource_types", "").split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("resource_types", "").split(",") if item.strip()
         )
         selector_keys.update(
-            item.strip()
-            for item in metadata.get("selector_keys", "").split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("selector_keys", "").split(",") if item.strip()
         )
         fact_hints.update(
-            item.strip()
-            for item in metadata.get("fact_hints", "").split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("fact_hints", "").split(",") if item.strip()
         )
-    return (
-        tuple(sorted(resource_types)),
-        tuple(sorted(selector_keys)),
-        tuple(sorted(fact_hints)),
-    )
-
+    return tuple(sorted(resource_types)), tuple(sorted(selector_keys)), tuple(sorted(fact_hints))
 
 
 def _deterministic_resource_contracts(
     capabilities: CapabilityRegistryService,
 ) -> tuple[Mapping[str, Any], ...]:
-    """Build deterministic read-language contracts from governed metadata."""
-
     contracts: list[Mapping[str, Any]] = []
-
     for capability in capabilities.list_all():
         metadata = capability.metadata
-
         if metadata.get("provider_neutral", "false").lower() != "true":
             continue
         if metadata.get("read_only", "false").lower() != "true":
             continue
-
         resource_types = tuple(
-            item.strip()
-            for item in metadata.get("resource_types", "").split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("resource_types", "").split(",") if item.strip()
         )
         selector_keys = tuple(
-            item.strip()
-            for item in metadata.get("selector_keys", "").split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("selector_keys", "").split(",") if item.strip()
         )
         fact_hints = tuple(
             item.strip()
-            for item in metadata.get(
-                "inquiry_hints",
-                metadata.get("fact_hints", ""),
-            ).split(",")
+            for item in metadata.get("inquiry_hints", metadata.get("fact_hints", "")).split(",")
             if item.strip()
         )
         collection_fact = metadata.get("collection_fact", "").strip()
         canonical_facts = tuple(
-            item.strip()
-            for item in metadata.get(
-                "canonical_facts",
-                "",
-            ).split(",")
-            if item.strip()
+            item.strip() for item in metadata.get("canonical_facts", "").split(",") if item.strip()
         )
-
-        # A zero-selector interpretation is safe only for resource contracts
-        # that have a meaningful account/environment-wide read surface.
-        #
-        # Current metadata convention:
-        # management-wide search resources can be queried without a selector;
-        # endpoint/device-scoped resources require discovery/identity grounding.
         selector_required = any(
             item in resource_types
-            for item in (
-                "endpoint",
-                "endpoint_alert",
-                "endpoint_audit",
-                "endpoint_software",
-            )
+            for item in ("endpoint", "endpoint_alert", "endpoint_audit", "endpoint_software")
         )
-
         contracts.append(
             {
                 "capability_name": capability.capability_name,
@@ -443,24 +392,19 @@ def _deterministic_resource_contracts(
                 "selector_required": selector_required,
             }
         )
-
     return tuple(contracts)
 
 
 def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
-    """Compose the production conversational runtime from governed Jason primitives."""
-
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
     approval_repository = SQLiteApprovalRepository(authority_store)
     context_validator = ExecutionContextValidator(contexts=authority_store)
-
     http_transport = UrlLibJsonHttpTransport()
 
-    microsoft_boundary_db = (
-        settings.microsoft_boundary_db
-        or settings.authority_db.with_name("client-boundaries.sqlite3")
+    microsoft_boundary_db = settings.microsoft_boundary_db or settings.authority_db.with_name(
+        "client-boundaries.sqlite3"
     )
     microsoft_directory = build_microsoft_directory_runtime(
         boundary_db=microsoft_boundary_db,
@@ -480,16 +424,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
     now = datetime.now(timezone.utc)
-    register_endpoint_resource_foundation(
-        capabilities=capabilities,
-        providers=providers,
-        now=now,
-    )
-    register_system_registry_resource_foundation(
-        capabilities=capabilities,
-        providers=providers,
-        now=now,
-    )
+    register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
+    register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_email_send(capabilities=capabilities, providers=providers)
 
     identity_authority = IdentityAuthorityService(
@@ -499,8 +435,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         contexts=authority_store,
         audit=authority_store,
         capability_matcher=GovernedProviderReadAuthorityMatcher(
-            capabilities=capabilities,
-            providers=providers,
+            capabilities=capabilities, providers=providers
         ),
     )
 
@@ -510,9 +445,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         / "semantic_mappings"
         / "approved.json"
     )
-    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(
-        semantic_mapping_path
-    ).load()
+    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(semantic_mapping_path).load()
 
     resource_types, selector_keys, fact_hints = _resource_language_contract(capabilities)
     ollama_client = OllamaStructuredJsonClient(
@@ -526,14 +459,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
 
     hosted_semantic_translator = None
-
     if settings.hosted_semantics_enabled:
         semantic_secret_resolver = OpenBaoSecretResolver(
             base_url=settings.openbao_url,
             role_id_path=settings.openai_openbao_role_id_path,
             secret_id_path=settings.openai_openbao_secret_id_path,
         )
-
         semantic_secret_values = dict(
             semantic_secret_resolver.resolve(
                 "openai.semantic_intent",
@@ -547,26 +478,18 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 ),
             )
         )
-
         try:
-            semantic_api_key = str(
-                semantic_secret_values["api_key"]
-            ).strip()
-
+            semantic_api_key = str(semantic_secret_values["api_key"]).strip()
             if not semantic_api_key:
-                raise ValueError(
-                    "OpenAI semantic API key resolved empty"
-                )
-
-            hosted_semantic_translator = (
-                OpenAISemanticIntentTranslator(
-                    api_key=semantic_api_key,
-                    transport=http_transport,
-                    model=settings.openai_semantic_model,
-                )
+                raise ValueError("OpenAI semantic API key resolved empty")
+            hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                api_key=semantic_api_key,
+                transport=http_transport,
+                model=settings.openai_semantic_model,
             )
         finally:
             semantic_secret_values.clear()
+
     resource_intent_resolver = GovernedResourceConversationIntentResolver(
         interpreter=GroundedSemanticResourceInquiryInterpreter(
             contracts=_deterministic_resource_contracts(capabilities),
@@ -596,14 +519,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             semantic_mapping_registry=semantic_mapping_registry,
         ),
     )
-    # Prefer read-only resource interpretation before action interpretation. This
-    # removes an unnecessary action-model pass from ordinary questions while
-    # remaining fail-safe: any resource result is still forced to permission_mode
-    # observe and is revalidated against provider-neutral read-only capabilities.
-    # If the message is not a resource inquiry, the action resolver gets the same
-    # untouched human text and applies its normal governed action contract.
+    governed_resource_intent_resolver = GovernedSemanticCoverageIntentResolver(
+        delegate=resource_intent_resolver,
+        capabilities=capabilities,
+        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+        semantic_mapping_registry=semantic_mapping_registry,
+    )
     intent_resolver = ChainedConversationIntentResolver(
-        resolvers=(resource_intent_resolver, action_intent_resolver)
+        resolvers=(governed_resource_intent_resolver, action_intent_resolver)
     )
 
     orchestration_events = SQLiteOrchestrationEventStore(settings.orchestration_events_db)
@@ -692,6 +615,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         resource_renderer=resource_response_renderer
     )
     return_transport = OpenClawReturnPathTransport()
+    continuation_store = SQLiteTeamsConversationContinuationStore(
+        settings.continuation_db,
+        ttl_seconds=1200,
+    )
     flow = TeamsConversationFlow(
         identity_binder=identity_binder,
         intent_resolver=intent_resolver,
@@ -703,6 +630,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         orchestrator=orchestrator,
         response_renderer=response_renderer,
         transport=return_transport,
+        continuation_store=continuation_store,
     )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
