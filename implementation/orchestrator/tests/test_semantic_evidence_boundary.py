@@ -8,8 +8,6 @@ from orchestrator.contracts import (
     OrchestrationStatus,
 )
 from orchestrator.resource_evidence import GovernedResourceEvidenceInterpreter
-from orchestrator.semantic_evidence_boundary import GovernedSemanticEvidenceBoundary
-from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 
 
 class PointerReasoner:
@@ -41,20 +39,20 @@ def result(data):
     )
 
 
-def boundary(pointer: str) -> GovernedSemanticEvidenceBoundary:
-    return GovernedSemanticEvidenceBoundary(
-        inner=GovernedResourceEvidenceInterpreter(
-            reasoner=PointerReasoner(pointer),
-        ),
-        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+def interpreter(pointer: str) -> GovernedResourceEvidenceInterpreter:
+    return GovernedResourceEvidenceInterpreter(
+        reasoner=PointerReasoner(pointer),
     )
 
 
 def test_bitlocker_status_cannot_bind_to_generic_provider_status():
-    interpreter = boundary("/provider_data/status")
+    evidence = interpreter("/provider_data/status")
 
-    with pytest.raises(LookupError, match="semantic context required for bitlocker status"):
-        interpreter.interpret(
+    with pytest.raises(
+        LookupError,
+        match="did not support all requested facts: bitlocker status",
+    ):
+        evidence.interpret(
             result=result(
                 {
                     "provider_data": {
@@ -63,17 +61,20 @@ def test_bitlocker_status_cannot_bind_to_generic_provider_status():
                 }
             ),
             requested_facts=("bitlocker status",),
+            evidence_contexts={
+                "bitlocker status": ("bitlocker", "udf"),
+            },
         )
 
 
 def test_bitlocker_recovery_key_cannot_bind_to_discovery_marker():
-    interpreter = boundary("/provider_data/hostname_fragment")
+    evidence = interpreter("/provider_data/hostname_fragment")
 
     with pytest.raises(
         LookupError,
-        match="semantic context required for bitlocker recovery key",
+        match="did not support all requested facts: bitlocker recovery key",
     ):
-        interpreter.interpret(
+        evidence.interpret(
             result=result(
                 {
                     "provider_data": {
@@ -82,13 +83,16 @@ def test_bitlocker_recovery_key_cannot_bind_to_discovery_marker():
                 }
             ),
             requested_facts=("bitlocker recovery key",),
+            evidence_contexts={
+                "bitlocker recovery key": ("bitlocker", "recovery"),
+            },
         )
 
 
 def test_governed_semantic_projection_can_satisfy_bitlocker_status():
-    interpreter = boundary("/unused")
+    evidence = interpreter("/unused")
 
-    facts = interpreter.interpret(
+    facts = evidence.interpret(
         result=result(
             {
                 "provider_data": {
@@ -105,6 +109,9 @@ def test_governed_semantic_projection_can_satisfy_bitlocker_status():
             }
         ),
         requested_facts=("bitlocker status",),
+        evidence_contexts={
+            "bitlocker status": ("bitlocker", "udf"),
+        },
     )
 
     assert facts[0].value == "Encrypted"
