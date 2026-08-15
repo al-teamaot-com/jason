@@ -77,6 +77,17 @@ function commandReply(text) {
   return { text };
 }
 
+function claimReply(reply) {
+  if (reply?.handled === true) {
+    return reply;
+  }
+
+  return {
+    handled: true,
+    reply,
+  };
+}
+
 function commandChannel(ctx) {
   return nonBlank(ctx.channelId ?? ctx.channel)?.toLowerCase();
 }
@@ -488,13 +499,22 @@ export default definePluginEntry({
         }
 
         const text = nonBlank(event.content);
+
         let config;
         try {
           config = resolveConfig(api);
         } catch {
-          api.logger.error?.("jason-bridge: invalid bridge configuration; Teams turn denied closed");
-          return safeReply("Jason is not available because its governed transport configuration is invalid.");
+          api.logger.error?.(
+            "jason-bridge: invalid bridge configuration; Teams turn denied closed",
+          );
+
+          return claimReply(
+            safeReply(
+              "Jason is not available because its governed transport configuration is invalid.",
+            ),
+          );
         }
+
         if (
           config.passthroughAuthorizedCommands &&
           event.commandAuthorized === true &&
@@ -503,108 +523,29 @@ export default definePluginEntry({
           return undefined;
         }
 
-        return forwardGovernedTeamsTurn({
+        api.logger.info?.(
+          "jason-bridge: claiming Jason-bound Teams inbound before agent dispatch",
+        );
+
+        const reply = await forwardGovernedTeamsTurn({
           api,
           text,
           microsoftObjectId: event.senderId ?? ctx.senderId,
-          conversationId: event.conversationId ?? ctx.conversationId ?? event.sessionKey ?? ctx.sessionKey,
+          conversationId:
+            event.conversationId ??
+            ctx.conversationId ??
+            event.sessionKey ??
+            ctx.sessionKey,
           accountId: event.accountId ?? ctx.accountId,
           threadId: event.threadId ?? ctx.threadId,
           messageId: event.messageId ?? ctx.messageId,
           correlationId: event.runId ?? ctx.runId,
         });
+
+        return claimReply(reply);
       },
       { timeoutMs: HOOK_TIMEOUT_MS },
     );
 
-    // OpenClaw's inbound_claim hook only fires when core successfully projects
-    // a conversation binding onto the inbound turn. Microsoft Teams 2026.7.1
-    // can retain a binding that /jason status can resolve while still allowing
-    // a plain message to continue into the normal agent path. This gate closes
-    // that compatibility gap: every ordinary message in a Jason-bound Teams
-    // conversation is forwarded verbatim to Jason before OpenClaw's model runs.
-    // No trigger phrase, capability keyword, or provider name is used here.
-    api.on(
-      "before_agent_reply",
-      async (event, ctx) => {
-        if (agentChannel(ctx) !== "msteams") {
-          return undefined;
-        }
-
-        const text = nonBlank(event.cleanedBody);
-
-        if (!text || text.startsWith("/")) {
-          return undefined;
-        }
-
-        if (!compatibility.pluginRoot) {
-          return undefined;
-        }
-
-        const captured =
-          await compatibility.lookupCapturedWithBriefRetry(ctx);
-
-        if (!captured) {
-          api.logger.warn?.(
-            "jason-bridge: Teams agent turn lacks captured transport evidence; unbound routing left unchanged",
-          );
-          return undefined;
-        }
-
-        let current;
-
-        try {
-          current =
-            await getCurrentPluginConversationBinding({
-              pluginRoot: compatibility.pluginRoot,
-              conversation: captured.conversation,
-            });
-        } catch {
-          api.logger.error?.(
-            "jason-bridge: governed conversation binding lookup failed; denied closed",
-          );
-
-          return {
-            handled: true,
-            reply: {
-              text:
-                "Jason could not validate the governed conversation binding. No action was taken.",
-            },
-          };
-        }
-
-        if (current?.pluginId !== "jason-bridge") {
-          return undefined;
-        }
-
-        api.logger.info?.(
-          "jason-bridge: claiming Jason-bound Teams turn before OpenClaw reply",
-        );
-
-        await forwardGovernedTeamsTurn({
-          api,
-          text,
-          microsoftObjectId:
-            captured.senderId ?? ctx.senderId,
-          conversationId:
-            captured.conversation.conversationId,
-          accountId:
-            captured.conversation.accountId,
-          threadId:
-            captured.conversation.threadId,
-          messageId:
-            captured.messageId,
-          correlationId:
-            captured.runId ?? ctx.runId,
-        });
-
-        return {
-          handled: true,
-        };
-      },
-      {
-        timeoutMs: HOOK_TIMEOUT_MS,
-      },
-    );
   },
 });

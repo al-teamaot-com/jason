@@ -8,9 +8,10 @@ const manifest = JSON.parse(
 );
 
 test("bound Teams conversations have a phrase-agnostic pre-agent compatibility route", () => {
-  assert.match(source, /"before_agent_reply"/);
+  assert.match(source, /"inbound_claim"/);
   assert.doesNotMatch(source, /"before_agent_run"/);
-  assert.match(source, /handled:\s*true/);
+  assert.doesNotMatch(source, /"before_agent_reply"/);
+  assert.match(source, /claimReply/);
   assert.match(source, /forwardGovernedTeamsTurn/);
 
   assert.match(source, /getCurrentPluginConversationBinding/);
@@ -50,7 +51,7 @@ test("governed Teams turn timeout hierarchy leaves room for bounded Jason stages
   assert.match(source, /const MAX_TIMEOUT_MS = 170_000;/);
   assert.match(source, /const HOOK_TIMEOUT_MS = 180_000;/);
   assert.match(source, /requestTimeoutMs > MAX_TIMEOUT_MS/);
-  assert.equal((source.match(/\{ timeoutMs: HOOK_TIMEOUT_MS \}/g) ?? []).length, 2);
+  assert.equal((source.match(/\{ timeoutMs: HOOK_TIMEOUT_MS \}/g) ?? []).length, 1);
 
   const timeoutSchema = manifest.configSchema.properties.requestTimeoutMs;
   assert.equal(timeoutSchema.default, 150000);
