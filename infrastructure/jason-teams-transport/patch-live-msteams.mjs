@@ -10,7 +10,6 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-const OPENCLAW_HOME = process.env.OPENCLAW_HOME ?? "/home/node/.openclaw";
 const adapterSource = process.argv[2];
 if (!adapterSource || !existsSync(adapterSource)) {
   throw new Error("usage: node patch-live-msteams.mjs <jason-direct-transport.mjs>");
@@ -40,9 +39,21 @@ function walk(dir, out = []) {
   return out;
 }
 
-const projectsRoot = path.join(OPENCLAW_HOME, "npm", "projects");
-if (!existsSync(projectsRoot)) {
-  throw new Error(`OpenClaw npm projects directory not found: ${projectsRoot}`);
+const projectRootCandidates = [
+  process.env.OPENCLAW_HOME
+    ? path.join(process.env.OPENCLAW_HOME, "npm", "projects")
+    : undefined,
+  process.env.OPENCLAW_HOME
+    ? path.join(process.env.OPENCLAW_HOME, ".openclaw", "npm", "projects")
+    : undefined,
+  "/home/node/.openclaw/npm/projects",
+].filter(Boolean);
+
+const projectsRoot = projectRootCandidates.find((candidate) => existsSync(candidate));
+if (!projectsRoot) {
+  throw new Error(
+    `OpenClaw npm projects directory not found; checked: ${projectRootCandidates.join(", ")}`,
+  );
 }
 
 const candidates = walk(projectsRoot).filter((file) => {
@@ -94,6 +105,7 @@ if (!finalSource.includes("core.channel.inbound.run")) {
   throw new Error("OpenClaw inbound dispatch call disappeared unexpectedly");
 }
 
+console.log(`PROJECTS_ROOT=${projectsRoot}`);
 console.log(`BUNDLE=${bundle}`);
 console.log(`ADAPTER=${adapterTarget}`);
 console.log(`BACKUP=${backup}`);
