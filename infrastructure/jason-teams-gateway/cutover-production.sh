@@ -59,6 +59,7 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 LOCAL_NEXT_COMPOSE="$TMP_DIR/docker-compose.next.yml"
+PORT_BINDINGS_JSON="$TMP_DIR/port-bindings.json"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NEXT_COMPOSE="${OPENCLAW_COMPOSE_FILE}.jason-next-${TIMESTAMP}"
 BACKUP_FILE="${OPENCLAW_COMPOSE_FILE}.pre-jason-teams-${TIMESTAMP}"
@@ -78,13 +79,72 @@ rollback_now() {
   echo "ROLLBACK_ATTEMPTED=1"
 }
 
-remove_3978_mapping() {
-  python3 - "$OPENCLAW_COMPOSE_FILE" "$OPENCLAW_SERVICE" "$LOCAL_NEXT_COMPOSE" <<'PY'
+rewrite_ports_from_runtime() {
+  docker inspect "$OPENCLAW_CONTAINER" \
+    --format '{{json .HostConfig.PortBindings}}' \
+    > "$PORT_BINDINGS_JSON"
+
+  python3 - \
+    "$OPENCLAW_COMPOSE_FILE" \
+    "$OPENCLAW_SERVICE" \
+    "$LOCAL_NEXT_COMPOSE" \
+    "$PORT_BINDINGS_JSON" \
+    "$HOST_PORT" <<'PY'
+import json
 import re
 import sys
 
-src, service_name, dst = sys.argv[1:4]
+src, service_name, dst, bindings_path, release_host_port = sys.argv[1:6]
 lines = open(src, encoding="utf-8").read().splitlines(True)
+with open(bindings_path, encoding="utf-8") as handle:
+    bindings = json.load(handle) or {}
+
+kept = []
+removed = []
+for target_key, host_bindings in bindings.items():
+    if "/" in target_key:
+        target, protocol = target_key.rsplit("/", 1)
+    else:
+        target, protocol = target_key, "tcp"
+    for binding in host_bindings or []:
+        host_port = str(binding.get("HostPort") or "").strip()
+        host_ip = str(binding.get("HostIp") or "").strip()
+        if not host_port:
+            continue
+        item = {
+            "target": target,
+            "published": host_port,
+            "protocol": protocol or "tcp",
+            "host_ip": host_ip,
+        }
+        if host_port == release_host_port:
+            removed.append(item)
+        else:
+            kept.append(item)
+
+if not removed:
+    raise SystemExit(
+        f"runtime inspection found no OpenClaw binding on host port {release_host_port}"
+    )
+
+# Deduplicate equivalent runtime bindings while preserving order.
+def dedupe(items):
+    out = []
+    seen = set()
+    for item in items:
+        key = (
+            item["target"],
+            item["published"],
+            item["protocol"],
+            item["host_ip"],
+        )
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+kept = dedupe(kept)
+removed = dedupe(removed)
 
 services_idx = None
 services_indent = None
@@ -106,10 +166,10 @@ for i in range(services_idx + 1, len(lines)):
     indent = len(line) - len(line.lstrip())
     if indent <= services_indent:
         break
-    m = service_re.match(line)
-    if m:
+    match = service_re.match(line)
+    if match:
         service_idx = i
-        service_indent = len(m.group(1))
+        service_indent = len(match.group(1))
         break
 if service_idx is None:
     raise SystemExit(f"compose service not found: {service_name}")
@@ -127,11 +187,10 @@ for i in range(service_idx + 1, len(lines)):
 ports_idx = None
 ports_indent = None
 for i in range(service_idx + 1, service_end):
-    line = lines[i]
-    m = re.match(r"^(\s*)ports\s*:\s*(?:#.*)?$", line)
-    if m:
+    match = re.match(r"^(\s*)ports\s*:\s*(?:#.*)?$", lines[i])
+    if match:
         ports_idx = i
-        ports_indent = len(m.group(1))
+        ports_indent = len(match.group(1))
         break
 if ports_idx is None:
     raise SystemExit("ports section not found in OpenClaw service")
@@ -146,49 +205,42 @@ for i in range(ports_idx + 1, service_end):
         ports_end = i
         break
 
-items = []
-i = ports_idx + 1
-while i < ports_end:
-    line = lines[i]
-    m = re.match(r"^(\s*)-\s*(.*)$", line)
-    if not m:
-        i += 1
-        continue
-    item_indent = len(m.group(1))
-    start = i
-    i += 1
-    while i < ports_end:
-        next_line = lines[i]
-        m2 = re.match(r"^(\s*)-\s*(.*)$", next_line)
-        if m2 and len(m2.group(1)) == item_indent:
-            break
-        if next_line.strip() and not next_line.lstrip().startswith("#"):
-            indent = len(next_line) - len(next_line.lstrip())
-            if indent < item_indent:
-                break
-        i += 1
-    items.append((start, i))
+prefix = " " * ports_indent
+item_prefix = " " * (ports_indent + 2)
+field_prefix = " " * (ports_indent + 4)
 
-remove_ranges = []
-for start, end in items:
-    block = "".join(lines[start:end])
-    compact = re.sub(r"\s+", "", block)
-    short_match = re.search(
-        r"(?:^|[-'\"])(?:(?:\d{1,3}\.){3}\d{1,3}:)?3978:3978(?:/tcp)?(?:['\"]|$|#)",
-        compact,
-    )
-    target_match = re.search(r"(?:^|\n)\s*(?:-\s*)?target\s*:\s*['\"]?3978['\"]?\s*(?:#.*)?$", block, re.M)
-    published_match = re.search(r"(?:^|\n)\s*published\s*:\s*['\"]?3978['\"]?\s*(?:#.*)?$", block, re.M)
-    if short_match or (target_match and published_match):
-        remove_ranges.append((start, end))
+if not kept:
+    replacement = [f"{prefix}ports: []\n"]
+else:
+    replacement = [f"{prefix}ports:\n"]
+    for item in kept:
+        target = item["target"]
+        target_yaml = target if target.isdigit() else json.dumps(target)
+        replacement.append(f"{item_prefix}- target: {target_yaml}\n")
+        replacement.append(
+            f"{field_prefix}published: {json.dumps(item['published'])}\n"
+        )
+        replacement.append(
+            f"{field_prefix}protocol: {json.dumps(item['protocol'])}\n"
+        )
+        if item["host_ip"]:
+            replacement.append(
+                f"{field_prefix}host_ip: {json.dumps(item['host_ip'])}\n"
+            )
 
-if len(remove_ranges) != 1:
-    raise SystemExit(f"expected exactly one OpenClaw 3978 port mapping; found {len(remove_ranges)}")
-
-start, end = remove_ranges[0]
-out = lines[:start] + lines[end:]
+out = lines[:ports_idx] + replacement + lines[ports_end:]
 open(dst, "w", encoding="utf-8").writelines(out)
-print("REMOVED_PORT_ITEM=" + "".join(lines[start:end]).strip().replace("\n", " | "))
+
+for item in removed:
+    print(
+        "REMOVED_RUNTIME_BINDING="
+        f"{item['host_ip'] or '*'}:{item['published']}->{item['target']}/{item['protocol']}"
+    )
+for item in kept:
+    print(
+        "PRESERVED_RUNTIME_BINDING="
+        f"{item['host_ip'] or '*'}:{item['published']}->{item['target']}/{item['protocol']}"
+    )
 PY
 }
 
@@ -210,7 +262,7 @@ echo "PASS: production gateway image built"
 
 echo
 echo "========== PREPARE OPENCLAW PORT RELEASE =========="
-remove_3978_mapping
+rewrite_ports_from_runtime
 sudo install -m 0644 "$LOCAL_NEXT_COMPOSE" "$NEXT_COMPOSE"
 
 if ! (
