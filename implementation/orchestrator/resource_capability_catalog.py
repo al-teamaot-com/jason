@@ -106,12 +106,14 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
             "fact_hints": (
                 "hostname,device name,last logged in user,username,site,status,"
                 "online,offline,operating system,ip address,mac address,hardware,"
-                "software,device identifier,serial number,inventory"
+                "software,device identifier,serial number,inventory,bitlocker,"
+                "bitlocker status,bitlocker state,udf,user defined field"
             ),
             "canonical_facts": (
                 "hostname,endpoint hostname,LAN IP address,WAN IP address,"
                 "last logged in user,operating system,"
-                "operating system display version,operating system build"
+                "operating system display version,operating system build,"
+                "bitlocker status"
             ),
             "identity_semantics": (
                 "Human-readable names, hostnames, aliases, labels, serial-like tokens, and "
@@ -182,12 +184,14 @@ def endpoint_device_read(now: datetime) -> CapabilityDefinition:
             "fact_hints": (
                 "device details,hostname,last logged in user,site,status,online,offline,"
                 "operating system,ip address,mac address,hardware,software,"
-                "serial number,inventory"
+                "serial number,inventory,bitlocker,bitlocker status,bitlocker state,"
+                "udf,user defined field"
             ),
             "canonical_facts": (
                 "hostname,endpoint hostname,LAN IP address,WAN IP address,"
                 "last logged in user,operating system,"
-                "operating system display version,operating system build"
+                "operating system display version,operating system build,"
+                "bitlocker status"
             ),
             "identity_semantics": "resource_id is a durable resolved endpoint identity",
             "planning_guidance": (
