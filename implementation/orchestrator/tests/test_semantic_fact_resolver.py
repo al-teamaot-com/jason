@@ -38,6 +38,25 @@ def test_bios_uses_registry_after_broad_seed_migration():
     assert result.source == "semantic_knowledge_registry"
 
 
+def test_bitlocker_unlock_code_is_recovery_key_semantics_not_device_metadata():
+    resolver = SemanticFactResolver()
+    result = resolver.resolve("bitlocker unlock code")
+    assert result is not None
+    assert result.canonical_fact == "bitlocker recovery key"
+    assert result.concept_id == "security.bitlocker.recovery_key"
+    assert result.source == "semantic_knowledge_registry"
+    assert result.evidence_contexts == ("bitlocker", "recovery")
+
+
+def test_bitlocker_udf_status_has_bounded_evidence_context():
+    resolver = SemanticFactResolver()
+    result = resolver.resolve("bitlocker udf status")
+    assert result is not None
+    assert result.canonical_fact == "bitlocker status"
+    assert result.concept_id == "security.bitlocker.status"
+    assert result.evidence_contexts == ("bitlocker", "udf")
+
+
 def test_legacy_compatibility_fallback_remains_available_for_unmigrated_registry():
     from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
     from orchestrator.semantic_knowledge_registry import SemanticKnowledgeRegistry
