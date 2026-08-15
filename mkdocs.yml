@@ -84,6 +84,7 @@ nav:
       - CAP-001 Autotask Live-Read Command: components/capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
       - Operations Authority Map: operations/README.md
+      - Microsoft Teams Integration: operations/Runbook-Teams-Integration.md
       - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
@@ -94,6 +95,8 @@ nav:
       - INF-001 Morning Execution Checklist: operations/INF-001-Morning-Execution-Checklist.md
       - INF-010 Microsoft Cloud Deployment Checklist: operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
       - INF-015 AWS Provider Deployment Checklist: operations/INF-015-AWS-Provider-Deployment-Checklist.md
+      - Current System Registry State: operations/System-Registry-Current-Operational-State.md
+      - System Registry Production Verification: operations/System-Registry-Production-Verification-Runbook.md
       - Release and Recovery Pipeline: components/operations/J-900-Release-and-Recovery-Pipeline.md
       - Release Governance Hardening: components/operations/J-901-Release-Governance-Hardening.md
   - Standards:
@@ -111,6 +114,7 @@ nav:
       - ADR-006 Governed Conversational Routing: decisions/ADR-006-Governed-Conversational-Interface-Routing.md
       - ADR-007 Teams Proactive Messaging: decisions/ADR-007-Teams-Proactive-Messaging.md
       - ADR-008 Documentation Control Plane Consolidation: decisions/ADR-008-Documentation-Control-Plane-Consolidation.md
+      - ADR-009 Direct Microsoft Teams Ingress: decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md
   - Roadmap:
       - Capability Register: roadmaps/Jason-Capability-Register.md
       - Governed TODO and Future Ideas: roadmaps/Project-Jason-TODO-and-Future-Ideas.md
