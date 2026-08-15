@@ -91,6 +91,21 @@ class GovernedResourceEvidenceInterpreter:
         )
         verified_by_fact: dict[str, VerifiedResourceFact] = {}
         for fact in direct_facts:
+            contexts = tuple(
+                (evidence_contexts or {}).get(
+                    fact.requested_fact,
+                    (),
+                )
+            )
+            pointers = fact.json_pointers or (fact.json_pointer,)
+            if contexts and any(
+                not _evidence_matches_contexts(
+                    pointer=pointer,
+                    contexts=contexts,
+                )
+                for pointer in pointers
+            ):
+                continue
             if self.fact_vocabulary is not None:
                 definition = self.fact_vocabulary.resolve(fact.requested_fact)
                 if definition is not None and not _value_matches_expected_shape(
@@ -139,6 +154,23 @@ class GovernedResourceEvidenceInterpreter:
                     raise ValueError(
                         "resource evidence must use an absolute JSON Pointer"
                     )
+
+                contexts = tuple(
+                    (evidence_contexts or {}).get(
+                        requested_fact,
+                        (),
+                    )
+                )
+                if contexts and not _evidence_matches_contexts(
+                    pointer=pointer,
+                    contexts=contexts,
+                ):
+                    # A reasoner may identify an arbitrary provider field only as
+                    # a candidate location. Canonical semantic context remains a
+                    # deterministic release condition. An unrelated generic
+                    # status/discovery field therefore cannot become the requested
+                    # fact merely because a model selected its pointer.
+                    continue
 
                 pointers = grouped.setdefault(requested_fact, [])
 
