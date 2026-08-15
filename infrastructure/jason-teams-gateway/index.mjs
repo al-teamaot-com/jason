@@ -3,6 +3,7 @@ import express from "express";
 import JSON5 from "json5";
 import {
   AgentApplication,
+  CloudAdapter,
   MemoryStorage,
 } from "@microsoft/agents-hosting";
 import { createAgentRequestHandler } from "@microsoft/agents-hosting-express";
@@ -96,8 +97,24 @@ function activityAadObjectId(activity) {
 }
 
 const auth = loadTeamsAuth();
+const authConfiguration = {
+  clientId: auth.clientId,
+  clientSecret: auth.clientSecret,
+  tenantId: auth.tenantId,
+};
+
+// AgentApplication creates its own CloudAdapter when one is not supplied, and
+// that default adapter resolves credentials from the Agents SDK environment
+// variable names. Jason deliberately stores the Teams credential under its own
+// MSTEAMS_* names, so provide the authenticated adapter explicitly instead of
+// relying on ambient environment-variable translation.
+const adapter = new CloudAdapter(authConfiguration);
 const storage = new MemoryStorage();
-const agent = new AgentApplication({ storage });
+const agent = new AgentApplication({
+  storage,
+  adapter,
+  agentAppId: auth.clientId,
+});
 
 agent.onActivity("message", async (context) => {
   const activity = context.activity;
@@ -190,11 +207,7 @@ server.get("/healthz", (_req, res) => {
 });
 server.post(
   "/api/messages",
-  createAgentRequestHandler(agent, {
-    clientId: auth.clientId,
-    clientSecret: auth.clientSecret,
-    tenantId: auth.tenantId,
-  }),
+  createAgentRequestHandler(agent, authConfiguration),
 );
 
 server.listen(PORT, "0.0.0.0", () => {
