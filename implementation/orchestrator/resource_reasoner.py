@@ -7,7 +7,10 @@ from typing import Sequence
 from kernel.capabilities import CapabilityDefinition
 
 from .resource_inquiry import ResourceInquiry, ResourcePlanStep
-from .semantic_fact_resolver import SemanticFactResolver
+from .semantic_fact_resolver import (
+    DEFAULT_SEMANTIC_FACT_RESOLVER,
+    SemanticFactResolver,
+)
 from .semantic_mapping_registry import SemanticMappingRegistry
 
 
@@ -41,7 +44,7 @@ class MetadataResourceCapabilityReasoner:
 
     minimum_score: int = 1
     semantic_mapping_registry: SemanticMappingRegistry | None = None
-    fact_resolver: SemanticFactResolver | None = None
+    fact_resolver: SemanticFactResolver | None = DEFAULT_SEMANTIC_FACT_RESOLVER
 
     def select(
         self,
