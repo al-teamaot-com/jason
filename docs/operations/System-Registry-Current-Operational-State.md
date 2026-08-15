@@ -7,17 +7,20 @@
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
-- Registered entities: `22`
-- Effective lifecycle counts: `configured=4, registered=14, verified=4`
+- Registered entities: `24`
+- Effective lifecycle counts: `configured=4, registered=13, verified=7`
 
 ## Verified current physical topology
 
 | Registry ID | Type | Verification method | Governed evidence record |
 |---|---|---|---|
 | `component.jason-runtime` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
+| `component.jason-teams-gateway` | `component` | `docker-container-inspect-v1` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
 | `component.openbao` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openclaw-gateway` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openclaw-jason-bridge` | `component` | `docker-file-sha256-v1` | `docs/sessions/OpenClaw-Bridge-Governed-Deployment-Verification-2026-08-11.md`<br>`docs/sessions/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md` |
+| `credential.microsoft-teams-gateway-client` | `credential_reference` | `host-file-permission-and-runtime-auth-proof` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
+| `deployment.jason-single-host-pilot` | `deployment` | `production-host-proof` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
 
 ## Registered but not yet verified
 
@@ -33,7 +36,6 @@
 | `credential.openbao.aws-ses-sendmail` | `credential_reference` | `registered` | `provider-credential-status` |
 | `credential.openbao.datto-rmm-readonly` | `credential_reference` | `registered` | `provider-credential-status` |
 | `credential.openbao.microsoft-graph-directory-read` | `credential_reference` | `registered` | `provider-credential-status` |
-| `deployment.jason-single-host-pilot` | `deployment` | `registered` | `production-host-proof` |
 | `governance.jkd-001` | `governance_gate` | `registered` | `governance-contract-review` |
 | `governance.jkd-003` | `governance_gate` | `registered` | `governance-contract-review` |
 | `identity-binding.aot-microsoft-al` | `identity_binding` | `registered` | `identity-binding-and-directory-read` |
