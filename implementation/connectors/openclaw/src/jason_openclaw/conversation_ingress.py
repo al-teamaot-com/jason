@@ -7,6 +7,7 @@ from typing import Any, Mapping, Protocol
 
 from orchestrator.teams_conversation_flow import (
     ConversationClarificationRequiredError,
+    ConversationGuidanceRequiredError,
     ConversationIntentUnresolvedError,
     TeamsConversationFlowResult,
     TeamsConversationPrincipalEvidence,
@@ -286,44 +287,48 @@ class GovernedOpenClawTeamsConversationIngress:
                 },
             )
         except ConversationClarificationRequiredError as error:
-            clarification_text = _clarification_text(
-                error.candidate_facts
-            )
-
+            clarification_text = _clarification_text(error.candidate_facts)
             self.audit.append(
                 "openclaw.teams_conversation_clarification_required",
                 {
                     "request_id": parsed.request_id,
-                    "correlation_id":
-                        parsed.correlation_id,
-                    "machine_identity":
-                        machine_identity,
-                    "reason_code":
-                        error.reason_code,
-                    "candidate_facts":
-                        list(
-                            error.candidate_facts
-                        ),
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "reason_code": error.reason_code,
+                    "candidate_facts": list(error.candidate_facts),
                 },
             )
-
             return {
                 "request_id": parsed.request_id,
-                "correlation_id":
-                    parsed.correlation_id,
-                "status":
-                    "clarification_required",
-                "error_code":
-                    error.reason_code,
+                "correlation_id": parsed.correlation_id,
+                "status": "clarification_required",
+                "error_code": error.reason_code,
                 "clarification": {
-                    "text":
-                        clarification_text,
-                    "candidate_facts":
-                        list(
-                            error.candidate_facts
-                        ),
-                    "requires_complete_request":
-                        True,
+                    "text": clarification_text,
+                    "candidate_facts": list(error.candidate_facts),
+                    "requires_complete_request": True,
+                },
+            }
+        except ConversationGuidanceRequiredError as error:
+            self.audit.append(
+                "openclaw.teams_conversation_guidance_returned",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "reason_code": error.reason_code,
+                    "requested_facts": list(error.requested_facts),
+                },
+            )
+            return {
+                "request_id": parsed.request_id,
+                "correlation_id": parsed.correlation_id,
+                "status": "clarification_required",
+                "error_code": error.reason_code,
+                "clarification": {
+                    "text": error.guidance_text,
+                    "candidate_facts": list(error.requested_facts),
+                    "requires_complete_request": False,
                 },
             }
         except ConversationIntentUnresolvedError:
@@ -424,11 +429,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 "correlation_id": parsed.correlation_id,
                 "machine_identity": machine_identity,
                 "reason": reason,
-                **(
-                    dict(diagnostic)
-                    if diagnostic is not None
-                    else {}
-                ),
+                **(dict(diagnostic) if diagnostic is not None else {}),
             },
         )
         return {
@@ -439,31 +440,20 @@ class GovernedOpenClawTeamsConversationIngress:
         }
 
 
-def _clarification_text(
-    candidate_facts: tuple[str, ...],
-) -> str:
+def _clarification_text(candidate_facts: tuple[str, ...]) -> str:
     if len(candidate_facts) == 2:
-        options = (
-            f"{candidate_facts[0]} or "
-            f"{candidate_facts[1]}"
-        )
+        options = f"{candidate_facts[0]} or {candidate_facts[1]}"
     else:
-        options = (
-            ", ".join(candidate_facts[:-1])
-            + f", or {candidate_facts[-1]}"
-        )
+        options = ", ".join(candidate_facts[:-1]) + f", or {candidate_facts[-1]}"
 
     return (
         "I need one detail before I can continue. "
         f"Do you mean {options}? "
-        "Please send a complete request naming "
-        "the one you want."
+        "Please send a complete request naming the one you want."
     )
 
 
-def _teams_message_claim_key(
-    parsed: OpenClawTeamsConversationEnvelope,
-) -> str:
+def _teams_message_claim_key(parsed: OpenClawTeamsConversationEnvelope) -> str:
     canonical = "\x00".join(
         (
             parsed.microsoft_tenant_id,
