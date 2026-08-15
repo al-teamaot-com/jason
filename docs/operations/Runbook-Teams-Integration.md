@@ -1,309 +1,363 @@
-# Runbook - Jason Microsoft Teams Integration
+# Runbook — Jason Microsoft Teams Integration
 
-**Last validated:** 2026-08-10
+**Status:** Active operational runbook  
+**Owner:** Jason Architecture Authority  
+**Last validated:** 2026-08-15  
+**Governing decisions:** `ADR-006`, `ADR-007`, `ADR-009`  
+**Production proof:** `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
 
-This runbook documents the working Microsoft Teams integration, including inbound chat, outbound replies, and proactive messaging to users who have never contacted Jason.
+## Purpose
 
-## 1. Known working architecture
+Operate, verify, recover, and safely extend Jason's Microsoft Teams integration without depending on chat history or treating the interface layer as execution authority.
+
+The current architecture intentionally separates:
+
+- **ordinary inbound Teams conversation ingress** — owned by the direct `jason-teams-gateway`;
+- **Jason reasoning/governance/execution** — owned by `jason-runtime` and the Central Orchestrator;
+- **OpenClaw** — still deployed for other approved interface/transport functions and historical/proactive Teams functionality, but no longer the externally reachable owner of ordinary inbound Teams messages.
+
+This runbook does not grant execution authority. Jason identity, policy, approval, capability resolution, provider authority, and Central Orchestrator controls remain governing.
+
+## 1. Current production architecture
 
 ### Public ingress
 
-- DNS: `teams-jason.teamaot.com`
-- Public Elastic IP: `18.235.19.103`
-- AWS relay instance: `i-0b0bb56884acb565c`
-- Relay private IP at creation: `172.31.72.2`
-- Security group: `sg-0c3decf82edd65ab6`
-- Allowed inbound: TCP 80 and TCP 443
-- IAM role/profile: `Jason-Teams-Relay-SSM`
-- Caddy version validated: `v2.11.4`
+The existing public Microsoft Teams endpoint remains:
 
-### ZeroTier
+`https://teams-jason.teamaot.com/api/messages`
 
-- Network ID: `743993800f93d22f`
-- Network name: `Jason`
-- Jason/OpenClaw host ZeroTier IP: `10.87.246.157/24`
-- AWS relay ZeroTier IP: `10.87.246.16/24`
-- AWS relay successfully reached `http://10.87.246.157:3978/api/messages` and received HTTP 401, proving network reachability and OpenClaw authentication enforcement.
+Current edge topology:
 
-### OpenClaw
+- public DNS: `teams-jason.teamaot.com`;
+- public Elastic IP historically established for the Teams relay: `18.235.19.103`;
+- AWS relay instance: `i-0b0bb56884acb565c`;
+- relay ZeroTier IP: `10.87.246.16/24`;
+- Jason host ZeroTier IP: `10.87.246.157/24`;
+- relay forwards the Teams path to the Jason host on TCP `3978`.
 
-- Container: `openclaw-openclaw-gateway-1`
-- Teams/Bot listener: TCP 3978
-- OpenClaw version observed: `2026.7.1`
-- Main model: `openai/gpt-5.6-sol`
-- Tool profile: `coding`
-- Additional tools: `tools.alsoAllow = ["group:messaging"]`
+The public endpoint and Microsoft-side Teams registration were intentionally preserved during the 2026-08-15 cutover.
 
-### Teams / Entra identifiers
+### Current host/service path
 
-- Tenant ID: `f7054323-d52b-4863-8c2f-1898f0b6077c`
-- Entra app / bot App ID: `c94301b7-7194-46ab-aab7-94f9366f51a9`
-- Teams organization catalog app ID: `1b24025a-201f-439d-a4ef-e308c7f3d853`
-- Published Teams app version validated: `1.0.2`
-- App distribution method: `organization`
-- Public bot endpoint: `https://teams-jason.teamaot.com/api/messages`
-- Certificate thumbprint: `736F21058BB767E7B9BC31A65A36175C0361AAFA`
-
-### Known test users
-
-- Primary operator Entra object ID: `bee80bdc-ffb0-4c50-b453-c09d4d411f5f`
-- Lindsey Collins Entra object ID used for proactive test: `9f590a57-a07e-434b-84e9-5b698161b86a`
-
-Object IDs are identifiers, not authentication secrets, but production workflows should resolve them from authoritative identity data instead of hard-coding them.
-
-## 2. OpenClaw Teams configuration
-
-Validated shape:
-
-```json
-{
-  "appId": "c94301b7-7194-46ab-aab7-94f9366f51a9",
-  "tenantId": "f7054323-d52b-4863-8c2f-1898f0b6077c",
-  "authType": "federated",
-  "certificatePath": "/run/jason-secrets/microsoft-teams/jason-approval-bot-combined.pem",
-  "certificateThumbprint": "736F21058BB767E7B9BC31A65A36175C0361AAFA",
-  "enabled": true,
-  "allowFrom": [
-    "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
-  ],
-  "dmPolicy": "pairing",
-  "groupPolicy": "allowlist"
-}
+```text
+Microsoft Teams
+  -> teams-jason.teamaot.com/api/messages
+  -> AWS relay / ZeroTier
+  -> Jason host :3978
+  -> jason-teams-gateway container :3979
+  -> signed Jason conversation envelope
+  -> jason-runtime:8080/v1/openclaw/teams/conversation
+  -> governed conversation flow
+  -> Central Orchestrator
+  -> governed capability/provider
+  -> deterministic response
+  -> Microsoft Teams
 ```
 
-Host secret mount:
+Current production service names:
 
-`/opt/jason/bootstrap/secrets/microsoft-teams -> /run/jason-secrets/microsoft-teams`
+- direct Teams ingress: `jason-teams-gateway`;
+- governed runtime: `jason-runtime`;
+- OpenClaw: `openclaw-openclaw-gateway-1`.
 
-The combined PEM was constructed from:
+Expected published ports after successful cutover:
 
-- `jason-approval-bot.crt` - PEM certificate
-- `jason-approval-bot.pem` - PEM private key
-- `jason-approval-bot-combined.pem` - certificate followed by private key
+- `jason-teams-gateway`: host `3978` -> container `3979`;
+- OpenClaw: host `18789-18790` only;
+- `jason-runtime`: internal Docker port `8080`, not published to the host.
 
-OpenClaw outbound Teams authentication failed when `certificatePath` pointed only to the private key. The combined PEM resolved the failure.
+OpenClaw may log that its internal `msteams` provider is starting on port `3978`; this does **not** mean it owns external Teams ingress. Verify Docker host-port ownership rather than inferring topology from an internal provider startup message.
 
-## 3. Caddy behavior
+## 2. Microsoft identity
 
-Caddy terminates public TLS for `teams-jason.teamaot.com` and proxies the Teams bot endpoint to Jason over ZeroTier.
+Current non-secret identifiers:
 
-Validated public behavior:
+- tenant ID: `f7054323-d52b-4863-8c2f-1898f0b6077c`;
+- Teams/Entra application ID: `c94301b7-7194-46ab-aab7-94f9366f51a9`;
+- Teams organization catalog app ID: `1b24025a-201f-439d-a4ef-e308c7f3d853`;
+- published Teams app endpoint: `https://teams-jason.teamaot.com/api/messages`.
 
-- TLS certificate obtained automatically from Let's Encrypt.
-- Microsoft Bot Framework POST requests reached Caddy from Microsoft addresses.
-- Caddy proxied requests to OpenClaw.
-- A direct unauthenticated GET/HTTP request to `/api/messages` returned HTTP 401 from Express/OpenClaw after the proxy path was corrected. This is expected and proves the request reached the protected application.
+The direct gateway uses a dedicated application credential appended to the existing Entra application. The pre-existing OpenClaw credential was not read, replaced, or deleted during migration.
 
-Operational check:
+Current migration credential location:
+
+`/opt/jason/services/jason-teams-gateway/msteams.env`
+
+Required protection: mode `0600` or tighter, readable only by the intended host/runtime identity. Never print or commit the credential value.
+
+Long-term hardening target: migrate the dedicated gateway credential into Jason's governed secret-delivery architecture or certificate/federated authentication.
+
+## 3. Direct gateway implementation
+
+Repository package:
+
+`infrastructure/jason-teams-gateway/`
+
+Important files:
+
+| File | Purpose |
+|---|---|
+| `index.mjs` | Microsoft Agents SDK request authentication, tenant/AAD identity checks, bounded acknowledgement, signed Jason envelope, runtime call, deterministic response |
+| `Dockerfile` | production container build |
+| `bootstrap-azure-credential.sh` | one-time append-only creation of a dedicated gateway app credential |
+| `deploy-pilot.sh` | isolated loopback pilot on host port 3979 |
+| `cutover-production.sh` | controlled production transfer of host port 3978 from OpenClaw to the direct gateway |
+| `rollback-production.sh` | restores OpenClaw Compose and returns host port 3978 to OpenClaw |
+
+The gateway intentionally has no LLM/agent loop and no provider-selection or direct provider logic.
+
+## 4. One-time credential bootstrap
+
+Run only when the dedicated gateway credential does not already exist or when a governed rotation is required.
+
+The bootstrap:
+
+1. reads only the existing non-secret Teams app ID and tenant ID from OpenClaw configuration;
+2. authenticates an Azure CLI session to the AOT tenant;
+3. verifies the application registration is visible;
+4. appends a new credential with `az ad app credential reset --append`;
+5. writes the new value directly to a protected temporary file and then to `msteams.env`;
+6. never prints the credential value;
+7. leaves the existing OpenClaw credential intact.
+
+Command:
 
 ```bash
-curl -i https://teams-jason.teamaot.com/api/messages
+clear
+cd /home/al/projects/jason
+bash infrastructure/jason-teams-gateway/bootstrap-azure-credential.sh
 ```
 
-Expected diagnostic result for an unauthenticated request: HTTP 401. Do not treat that 401 as an outage.
+Expected terminal result:
 
-## 4. OpenClaw conversational messaging fixes
+```text
+PASS: dedicated Jason Teams credential created and stored with mode 0600
+PASS: existing OpenClaw Teams credential remains intact
+CREDENTIAL_BOOTSTRAP_STATUS=PASS
+```
 
-### Direct-message allowlist
+Azure authority requirement: use an identity permitted to manage the application registration, such as an application owner or an appropriate Entra application-administration role. Global Administrator is not inherently required.
 
-Inbound Teams messages initially produced pairing/drop behavior because the sender was not allowlisted. The stable Entra user ID was added:
+Do not re-run this bootstrap merely because the gateway is redeployed; doing so would create unnecessary additional credentials.
+
+## 5. Isolated pilot
+
+Before any production port cutover, prove the direct gateway independently:
 
 ```bash
-openclaw config set channels.msteams.allowFrom '["bee80bdc-ffb0-4c50-b453-c09d4d411f5f"]'
+clear
+cd /home/al/projects/jason
+bash infrastructure/jason-teams-gateway/deploy-pilot.sh
 ```
 
-### Messaging tool availability
+Expected result:
 
-`openclaw doctor` reported:
+```text
+{"status":"ok","service":"jason-teams-gateway","runtime":"http://jason-runtime:8080/v1/openclaw/teams/conversation"}
+PILOT_STATUS=PASS
+```
 
-`Agent "main" is routed from channel "msteams", but the message tool is unavailable for that agent.`
+The pilot normally publishes only:
 
-The existing global tool profile was `coding`. Messaging was added without replacing that profile:
+`127.0.0.1:3979 -> container 3979`
+
+It must not modify the public Microsoft endpoint or take host port 3978 from OpenClaw.
+
+Stop if the pilot is not healthy. Do not continue to production cutover to “see if it works.”
+
+## 6. Production cutover
+
+The governed production entry point is:
 
 ```bash
-openclaw config set tools.alsoAllow '["group:messaging"]'
+clear
+cd /home/al/projects/jason
+bash infrastructure/jason-teams-gateway/cutover-production.sh
 ```
 
-### Model validation
+The script is designed to:
 
-The model/agent path was proven independently with:
+1. require the direct gateway credential and governed ingress signing identity;
+2. require a running isolated pilot;
+3. derive the OpenClaw Compose project/service/workdir from Docker labels;
+4. inspect actual Docker runtime port bindings;
+5. reconstruct the OpenClaw `ports:` declaration while removing only host port `3978`;
+6. preserve OpenClaw's other published ports;
+7. validate the modified Compose configuration before mutation;
+8. back up the original Compose file;
+9. recreate OpenClaw without host port 3978;
+10. verify OpenClaw remains running;
+11. start `jason-teams-gateway` on host port 3978;
+12. verify gateway health and port ownership;
+13. persist rollback state; and
+14. remove the isolated pilot only after production success.
+
+Successful completion must end with:
+
+```text
+CUTOVER_STATUS=PASS
+READY_FOR_TEAMS_LIVE_TEST=1
+```
+
+Do not interpret a successful Docker build alone as a successful cutover.
+
+## 7. Post-cutover verification
+
+### Service/port verification
 
 ```bash
-openclaw agent --agent main --message "Reply with exactly: JASON TEST OK"
+clear
+
+docker ps \
+  --filter name=jason-teams-gateway \
+  --filter name=jason-runtime \
+  --filter name=openclaw-openclaw-gateway-1 \
+  --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 ```
 
-Expected output: `JASON TEST OK`.
+Expected topology:
 
-This check is useful when Teams receives a turn but no reply payload is queued.
+```text
+jason-teams-gateway           Up ...             0.0.0.0:3978->3979/tcp
+openclaw-openclaw-gateway-1   Up ... (healthy)   0.0.0.0:18789-18790->18789-18790/tcp, [::]:18789-18790->18789-18790/tcp
+jason-runtime                 Up ... (healthy)   8080/tcp
+```
 
-## 5. Outbound Teams test
-
-Once certificate handling was corrected, a direct proactive message to a user with an existing conversation reference succeeded:
+### Direct gateway completion evidence
 
 ```bash
-openclaw message send \
-  --channel msteams \
-  --target "user:<ENTRA_OBJECT_ID>" \
-  --message "Jason outbound Teams test" \
-  --json
+clear
+
+docker logs --since 10m jason-teams-gateway 2>&1 \
+  | grep -E 'jason_teams_gateway_started|jason_teams_turn_completed|jason_teams_turn_failed' \
+  | tail -n 30
 ```
 
-Success indicators:
+A successful real turn should include:
 
-- `deliveryStatus: sent`
-- A Teams `messageId`
-- A Teams `conversationId`
-
-## 6. Teams organization app publication
-
-The Teams Developer CLI downloaded the package:
-
-```powershell
-teams app package download c94301b7-7194-46ab-aab7-94f9366f51a9
+```text
+{"event":"jason_teams_turn_completed","status":"completed","httpStatus":200,...}
 ```
 
-The package was published to the AOT organization app catalog with Microsoft Graph. The resulting catalog app ID is:
+### OpenClaw bypass evidence
 
-`1b24025a-201f-439d-a4ef-e308c7f3d853`
+```bash
+clear
 
-The updated package version `1.0.2` includes `webApplicationInfo`:
-
-```json
-"webApplicationInfo": {
-  "id": "c94301b7-7194-46ab-aab7-94f9366f51a9",
-  "resource": "api://teams-jason.teamaot.com/c94301b7-7194-46ab-aab7-94f9366f51a9"
-}
+docker logs --since 10m openclaw-openclaw-gateway-1 2>&1 \
+  | grep -E 'dispatching to agent|plugin-binding|msteams' \
+  | tail -n 30 || true
 ```
 
-The Entra application's Identifier URI was set to the same resource value.
+For a direct-gateway Teams turn, do not expect a corresponding OpenClaw `dispatching to agent` event.
 
-## 7. Microsoft Graph permissions
+An internal `[msteams] starting provider (port 3978)` startup message alone is not evidence of external ownership.
 
-### Application permissions on Jason Approval Bot
+## 8. Standard live proof request
 
-Validated token roles:
+For the existing production regression endpoint, the known read-only proof request is:
 
-- `TeamsAppInstallation.ReadWriteSelfForUser.All`
-  - AppRoleId: `908de74d-f8b2-4d6b-a9ed-2a17b3b78179`
-- `TeamsAppInstallation.ReadWriteForUser.All`
-  - AppRoleId: `74ef0291-ca83-4d02-8c7e-d2391e6a444f`
+`Hey Jason, can you tell me who was last on AOT-50282 and if anything is wrong with it right now?`
 
-Important implementation finding: the self-only permission was present in the app-only token but proactive installation still returned HTTP 403. After `TeamsAppInstallation.ReadWriteForUser.All` was added and a fresh token was issued, the same install request returned HTTP 201 Created.
+The 2026-08-15 proof returned:
 
-### Administrative publication permission
+- last logged-in user `AzureAD\AlDavis`;
+- one moderate `Unhealthy` alert;
+- added users `CodexSandboxOffline` and `CodexSandboxOnline`;
+- evidence source `datto_rmm`.
 
-Updating the organization Teams app catalog from an interactive admin Graph PowerShell session required `AppCatalog.ReadWrite.All` (or another supported app-catalog write scope). This is an operator/publishing requirement and should not automatically be granted to Jason's runtime identity.
+Use this as a regression reference only when the request remains authorized and the provider data is expected to be available. Do not assume those endpoint facts are perpetually current.
 
-## 8. App-only Microsoft Graph authentication
+## 9. Rollback
 
-The proof-of-concept used the existing certificate and private key on Jason to generate a signed client assertion and request a client-credentials token from Microsoft Entra.
+Rollback command:
 
-Inputs:
-
-- Tenant ID: `f7054323-d52b-4863-8c2f-1898f0b6077c`
-- Client ID: `c94301b7-7194-46ab-aab7-94f9366f51a9`
-- Certificate: `/opt/jason/bootstrap/secrets/microsoft-teams/jason-approval-bot.crt`
-- Private key: `/opt/jason/bootstrap/secrets/microsoft-teams/jason-approval-bot.pem`
-- Scope: `https://graph.microsoft.com/.default`
-
-The access token was temporarily written to `/tmp/jason_graph_token` for testing.
-
-Production requirement: token creation must become an internal capability and the token must remain ephemeral. Do not print, persist long-term, or place Graph tokens in prompts, logs, tickets, or documentation.
-
-## 9. Proactive install / new employee bootstrap
-
-### Why it is needed
-
-Before app installation, OpenClaw returned:
-
-`No conversation reference found for user:<id>. The bot must receive a message from this conversation before it can send proactively.`
-
-### Working Graph request
-
-With a valid app-only token:
-
-```http
-POST https://graph.microsoft.com/v1.0/users/<USER_ID>/teamwork/installedApps
-Authorization: Bearer <APP_ONLY_TOKEN>
-Content-Type: application/json
-
-{
-  "teamsApp@odata.bind": "https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/1b24025a-201f-439d-a4ef-e308c7f3d853"
-}
+```bash
+clear
+cd /home/al/projects/jason
+bash infrastructure/jason-teams-gateway/rollback-production.sh
 ```
 
-Validated successful response: `HTTP/1.1 201 Created`.
+The rollback state file is:
 
-After installation, OpenClaw successfully sent directly to the previously uncontacted user with `openclaw message send --channel msteams --target "user:<id>" ...` and returned `deliveryStatus: sent` plus a new conversation ID.
+`/opt/jason/services/jason-teams-gateway/cutover-state.env`
 
-## 10. Proposed production capability
+Rollback must:
 
-Implement a governed orchestrator capability:
+1. remove the direct production gateway;
+2. restore the saved OpenClaw Compose file;
+3. recreate the OpenClaw service;
+4. verify OpenClaw is running; and
+5. verify OpenClaw again publishes host port 3978.
 
-`ensure_teams_conversation(user_id)`
+A process restart without restored port ownership is not a successful rollback.
 
-Suggested behavior:
+## 10. Stop conditions
 
-1. Validate caller/workflow authority.
-2. Resolve and validate the target Entra identity.
-3. Check central state for a known valid Teams conversation reference.
-4. If unknown, query Graph to see whether Jason is installed for the user.
-5. If absent, install the organization app.
-6. Wait/poll for conversation/bootstrap state with bounded retries.
-7. Confirm OpenClaw can resolve the user's proactive target.
-8. Return a structured result containing only non-secret identifiers and status.
-9. Emit audit events for each state transition.
+Stop and do not continue mutation when any of the following occurs:
 
-Then implement a separate capability:
+- dedicated gateway credential file is missing or improperly protected;
+- the governed ingress signing key is missing;
+- `jason-runtime` is not healthy;
+- the isolated pilot does not pass;
+- actual OpenClaw runtime port bindings cannot be resolved safely;
+- modified Compose fails validation;
+- OpenClaw does not remain running after releasing host port 3978;
+- direct gateway health fails;
+- direct gateway does not own host port 3978 after cutover;
+- a live Teams request produces competing OpenClaw/model output;
+- the direct gateway reports fail-closed errors that are not understood.
 
-`send_teams_message(user_id, message_ref_or_content, purpose, workflow_id)`
+Do not compensate with a model prompt, private OpenClaw bundle patch, or provider bypass.
 
-The orchestrator calls `ensure_teams_conversation` first, then performs delivery. Agents do not call Graph or OpenClaw directly.
+## 11. Failure classification
 
-## 11. Security cleanup required
-
-The proof-of-concept temporarily changed `jason-approval-bot-combined.pem` to mode `0644` so the OpenClaw container user could read it. Because the file contains a private key, **do not leave it world-readable as the production state**.
-
-Recommended remediation:
-
-- Determine the OpenClaw container runtime UID/GID.
-- Set the host file owner/group so only root and the required container identity can read it.
-- Use mode `0640` or tighter where the bind-mount model permits.
-- Prefer Docker secrets or the existing Jason/OpenBao secret-delivery architecture so plaintext private-key material is not broadly readable on the host.
-- Verify with an explicit least-privilege read test from the container.
-
-Additional OpenClaw doctor findings to clean up:
-
-- Configure `commands.ownerAllowFrom` for the authorized human operator.
-- Explicitly set `plugins.allow` for trusted non-bundled plugins such as `codex` and `msteams` after validation.
-- Migrate `gateway.auth.token` and other secret-bearing configuration to SecretRefs.
-- Run `openclaw secrets audit --check`.
-- Run `openclaw security audit --deep`.
-
-## 12. Troubleshooting matrix
-
-| Symptom | Observed cause | Resolution |
+| Symptom | Likely class | Response |
 |---|---|---|
-| SSM instance never appears online | IAM instance profile was newly associated after boot; agent initially lacked usable instance credentials | Reboot after profile association; SSM came online |
-| Caddy unavailable through Amazon Linux package/COPR | Caddy COPR did not publish an Amazon Linux 2023 repo | Installed official Caddy binary directly |
-| Public endpoint returned 404 | Reverse proxy route was not yet correct | Corrected Caddyfile; endpoint then reached OpenClaw |
-| Public endpoint returns 401 | Unauthenticated request reached protected OpenClaw endpoint | Expected diagnostic result, not failure |
-| Teams POST reaches OpenClaw but DM is dropped | Sender not on `channels.msteams.allowFrom` while `dmPolicy=pairing` | Add stable Entra object ID to `allowFrom` |
-| Turn dispatched but no reply payload | `coding` tool profile did not expose the messaging tool | Add `tools.alsoAllow = ["group:messaging"]` |
-| Agent suspected broken | Unknown whether model could answer | `openclaw agent ...` returned `JASON TEST OK`; model path healthy |
-| Outbound Teams send fails: PEM does not contain certificate | `certificatePath` pointed to private-key-only PEM | Create combined PEM containing certificate + private key and point OpenClaw to it |
-| Proactive send fails: no conversation reference | User has never established a bot conversation | Publish app to org catalog and install it for target user through Graph |
-| Graph proactive install returns 403 with self permission | Tenant/API behavior required broader app installation permission in this implementation | Add `TeamsAppInstallation.ReadWriteForUser.All`, refresh token, retry; HTTP 201 |
-| App catalog update returns 409 version exists | Teams manifest version unchanged | Bump manifest version, rebuild ZIP, publish new app definition |
+| Gateway fails before health with missing Microsoft identity | credential/configuration | verify protected `msteams.env`; do not print it |
+| Microsoft Agents SDK says client ID missing | gateway auth construction | use explicit SDK auth/adapter configuration; do not rely on ambient variable names |
+| Azure bootstrap cannot modify app | identity/authority | use an authorized application owner/admin; do not extract the existing OpenClaw secret |
+| Pilot healthy but live Teams still reaches OpenClaw | edge/port ownership | verify host port 3978 and relay destination; rollback if ownership is ambiguous |
+| OpenClaw logs model dispatch for the same live turn | exclusive-ingress failure | rollback and investigate topology; do not add another hook |
+| Gateway receives request but runtime call fails | Jason runtime/governed ingress | preserve fail-closed behavior and inspect runtime/audit evidence |
+| Teams receives acknowledgement but no final result | runtime/provider/return path | inspect `jason_teams_turn_failed_closed` and Jason audit; do not allow OpenClaw to answer instead |
+| Public unauthenticated probe receives 401 | protected application reached | expected for authenticated Bot Framework endpoint; not by itself an outage |
 
-## 13. Validation milestones from 2026-08-10
+## 12. Outbound/proactive Teams messaging remains separate
 
-- Microsoft Bot Framework POST observed at Caddy with HTTP 200 downstream handling.
-- OpenClaw automatic conversational reply observed in Teams.
-- Manual OpenClaw outbound Teams send returned `deliveryStatus: sent`.
-- Organization Teams app version `1.0.2` published.
-- Jason app-only Graph token contained required installation roles.
-- Proactive Graph install for Lindsey returned HTTP 201 Created.
-- OpenClaw then proactively sent the test message to Lindsey and returned `deliveryStatus: sent` with a new conversation ID.
+ADR-009 supersedes OpenClaw only for **ordinary inbound Teams ingress**.
 
-These milestones prove that Jason can both converse with existing users and bootstrap/initiate a Teams conversation with a new user.
+The existing proactive/outbound capability may still use OpenClaw and Microsoft Graph bootstrap behavior documented under ADR-005/ADR-007 and the approval messaging runbooks. Do not disable OpenClaw's Teams provider until the outbound/proactive dependency has been reviewed and either preserved through another supported path or deliberately retired.
+
+The historical proactive bootstrap facts remain:
+
+- organization catalog app ID: `1b24025a-201f-439d-a4ef-e308c7f3d853`;
+- Graph installation permission behavior required `TeamsAppInstallation.ReadWriteForUser.All` during proof;
+- proactive app installation is a governed auditable side effect;
+- agents never call Graph or OpenClaw directly.
+
+Inbound and outbound transport topology must not be conflated merely because they use the same Teams application identity.
+
+## 13. Security and hardening follow-up
+
+The routing workstream is production-proven. Remaining hardening includes:
+
+- migrate the direct gateway credential from the mode-0600 host file to Jason's governed secret-provider/federated identity model;
+- review whether the dormant OpenClaw inbound `msteams` listener can be disabled without affecting approved outbound/proactive functions;
+- retain least-privilege Microsoft application permissions and periodically review whether broader installation permissions can be reduced;
+- keep the direct gateway non-intelligent and free of provider/business-authority logic;
+- maintain System Registry topology and verification records whenever host-port/service ownership changes;
+- rotate/revoke obsolete credentials when the migration state is retired;
+- preserve the rollback path after future OpenClaw Compose changes.
+
+## 14. Documentation/evidence owners
+
+- Architecture decision: `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
+- Provider-neutral conversational routing: `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`
+- Proactive/outbound Teams decision: `docs/decisions/ADR-007-Teams-Proactive-Messaging.md`
+- Production cutover proof: `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
+- Current operational topology: `implementation/kernel/system_registry/`
+- Generated operational view: `docs/operations/System-Registry-Current-Operational-State.md`
+- Current resume point: `docs/control/CURRENT.md`
+
+If these sources conflict, the Constitution/governing ADRs and System Registry/current host evidence take precedence over this operational runbook.
