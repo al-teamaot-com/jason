@@ -33,6 +33,8 @@ Examples include:
 - `Teams-Approval-Deployment-and-Recovery.md`;
 - `Teams-Integration-Security-Cleanup-Checklist.md`.
 
+`Runbook-Teams-Integration.md` is the current operational owner for Microsoft Teams ingress deployment/verification/rollback. As of the 2026-08-15 production cutover, ordinary inbound Teams is owned by the direct `jason-teams-gateway` under ADR-009; OpenClaw remains a separate deployed component and may still support approved outbound/proactive Teams behavior. Do not infer current ingress ownership from older OpenClaw runbooks or internal provider startup logs.
+
 `OPS-ITGLUE-DATTO-LIVE-CONVERGENCE-PROOF.md` also remains here despite its historical filename because its content defines a reusable, observe-only proof procedure with prerequisites, bounded discovery, positive/negative test cases, evidence handling, and success criteria. Its embedded historical result does not change the document's primary procedural role.
 
 ### Deployment and initialization records
@@ -48,9 +50,15 @@ remain operational records when they define or preserve the governed deployment/
 
 `System-Registry-Current-Operational-State.md` is a generated human-readable view derived from System Registry structured truth. It may be used for readability and review, but the System Registry remains authoritative for operational topology and lifecycle state.
 
+After a governed production topology change, update the machine-readable System Registry/lifecycle evidence first and regenerate the human view with `python tools/system_registry_docs.py`. Do not hand-maintain a competing topology table in a runbook.
+
 ## What does not belong here
 
 Point-in-time host proofs, live-pilot evidence, reconciliation evidence, and session-specific verification outcomes belong in `docs/sessions/` when their primary purpose is to preserve what was proven at a particular time.
+
+For example, the direct Teams ingress cutover proof is preserved at:
+
+`docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
 
 A dated proof record must not be retained in `docs/operations/` merely because it concerns an operational capability. Likewise, a reusable runbook must not be moved to `docs/sessions/` merely because its filename contains the word `proof`.
 
@@ -64,6 +72,8 @@ Before asserting current production state:
 2. use current Git for source/revision facts;
 3. obtain fresh host/runtime evidence when the fact requires physical verification;
 4. treat historical proofs as evidence of what was true when proven, not as perpetual current-state claims.
+
+For Teams specifically, current external ingress ownership must be verified from current System Registry plus actual host/container port ownership when operationally material. An OpenClaw log line such as `msteams starting provider (port 3978)` does not prove that OpenClaw owns the host's externally reachable port.
 
 If an operational record contains a durable architecture, authority, security, or policy rule that is not represented in its governed owner, reconcile that rule into the appropriate canonical record rather than allowing the operations document to become hidden architecture authority.
 
