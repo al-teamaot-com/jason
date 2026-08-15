@@ -5,7 +5,6 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -26,19 +25,6 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function walk(dir, out = []) {
-  for (const name of readdirSync(dir)) {
-    const full = path.join(dir, name);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      walk(full, out);
-    } else {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
 const projectRootCandidates = [
   process.env.OPENCLAW_HOME
     ? path.join(process.env.OPENCLAW_HOME, "npm", "projects")
@@ -56,13 +42,31 @@ if (!projectsRoot) {
   );
 }
 
-const candidates = walk(projectsRoot).filter((file) => {
-  if (!/\/node_modules\/@openclaw\/msteams\/dist\/src-[^/]+\.js$/.test(file)) {
-    return false;
+// Search only installed Microsoft Teams project roots. Do not recursively walk
+// the entire OpenClaw npm tree: other projects may contain transient or broken
+// node_modules symlinks that are unrelated to the Teams transport.
+const msteamsProjects = readdirSync(projectsRoot, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && entry.name.startsWith("openclaw-msteams-"))
+  .map((entry) => path.join(projectsRoot, entry.name));
+
+const candidates = [];
+for (const projectDir of msteamsProjects) {
+  const distDir = path.join(projectDir, "node_modules", "@openclaw", "msteams", "dist");
+  if (!existsSync(distDir)) {
+    continue;
   }
-  const source = readFileSync(file, "utf8");
-  return source.includes('log.info("dispatching to agent", { sessionKey: route.sessionKey });');
-});
+
+  for (const name of readdirSync(distDir)) {
+    if (!/^src-[^/]+\.js$/.test(name)) {
+      continue;
+    }
+    const file = path.join(distDir, name);
+    const candidateSource = readFileSync(file, "utf8");
+    if (candidateSource.includes(dispatchAnchor)) {
+      candidates.push(file);
+    }
+  }
+}
 
 if (candidates.length !== 1) {
   throw new Error(
@@ -106,6 +110,7 @@ if (!finalSource.includes("core.channel.inbound.run")) {
 }
 
 console.log(`PROJECTS_ROOT=${projectsRoot}`);
+console.log(`MSTEAMS_PROJECTS=${msteamsProjects.join(",")}`);
 console.log(`BUNDLE=${bundle}`);
 console.log(`ADAPTER=${adapterTarget}`);
 console.log(`BACKUP=${backup}`);
