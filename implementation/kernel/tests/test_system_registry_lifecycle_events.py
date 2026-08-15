@@ -19,6 +19,9 @@ CURRENT_VERIFICATION_EVIDENCE = {
     "component.jason-runtime": "system-registry-verification-20260811T154530Z.json",
     "component.openclaw-gateway": "system-registry-verification-20260811T154530Z.json",
     "component.openclaw-jason-bridge": "post-openclaw-bridge-20260811T171348Z.json",
+    "credential.microsoft-teams-gateway-client": "Direct-Teams-Gateway-Production-Proof-2026-08-15.md",
+    "component.jason-teams-gateway": "Direct-Teams-Gateway-Production-Proof-2026-08-15.md",
+    "deployment.jason-single-host-pilot": "Direct-Teams-Gateway-Production-Proof-2026-08-15.md",
 }
 
 INITIAL_VERIFICATION_EVENT_IDS = {
@@ -26,6 +29,14 @@ INITIAL_VERIFICATION_EVENT_IDS = {
     "lifecycle.2026-08-11t154530z.component.jason-runtime.verified",
     "lifecycle.2026-08-11t154530z.component.openclaw-gateway.verified",
     "lifecycle.2026-08-11t154530z.component.openclaw-jason-bridge.verified",
+}
+
+DIRECT_TEAMS_EVENT_IDS = {
+    "lifecycle.2026-08-15t173800z.credential.microsoft-teams-gateway-client.configured",
+    "lifecycle.2026-08-15t173900z.credential.microsoft-teams-gateway-client.verified",
+    "lifecycle.2026-08-15t174000z.component.jason-teams-gateway.verified",
+    "lifecycle.2026-08-15t174100z.deployment.jason-single-host-pilot.configured",
+    "lifecycle.2026-08-15t174200z.deployment.jason-single-host-pilot.verified",
 }
 
 
@@ -54,7 +65,6 @@ def test_governed_lifecycle_events_preserve_current_verification_state() -> None
     assert registry.get("capability.endpoint-device-search").lifecycle_status is EntityLifecycle.REGISTERED
     assert registry.get("capability.endpoint-device-read").lifecycle_status is EntityLifecycle.REGISTERED
     assert registry.get("capability.communication-email-send").lifecycle_status is EntityLifecycle.REGISTERED
-    assert registry.get("deployment.jason-single-host-pilot").lifecycle_status is EntityLifecycle.REGISTERED
 
 
 def test_lifecycle_event_history_fails_closed_when_expected_prior_state_is_wrong(
@@ -76,6 +86,7 @@ def test_lifecycle_event_history_is_append_only_in_effect() -> None:
 
     assert len(event_ids) == len(set(event_ids))
     assert INITIAL_VERIFICATION_EVENT_IDS.issubset(set(event_ids))
+    assert DIRECT_TEAMS_EVENT_IDS.issubset(set(event_ids))
     assert {
         "lifecycle.2026-08-11t165900z.component.openclaw-jason-bridge.suspended",
         "lifecycle.2026-08-11t165901z.component.openclaw-jason-bridge.configured",
