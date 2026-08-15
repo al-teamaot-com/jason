@@ -45,13 +45,21 @@ run_az() {
 
 login_az() {
   if command -v az >/dev/null 2>&1; then
-    az login --tenant "$TENANT_ID" --use-device-code --only-show-errors >/dev/null
+    az login \
+      --tenant "$TENANT_ID" \
+      --use-device-code \
+      --only-show-errors \
+      --output none
   else
     mkdir -p "$HOME/.azure"
     docker run --rm -it \
       -v "$HOME/.azure:/root/.azure" \
       "$AZURE_CLI_IMAGE" \
-      az login --tenant "$TENANT_ID" --use-device-code --only-show-errors >/dev/null
+      az login \
+      --tenant "$TENANT_ID" \
+      --use-device-code \
+      --only-show-errors \
+      --output none
   fi
 }
 
@@ -64,7 +72,7 @@ echo "A second credential will be appended for the direct Jason Teams gateway."
 echo
 echo "========== AZURE AUTHORITY CHECK =========="
 if ! run_az account show --query tenantId -o tsv --only-show-errors >/dev/null 2>&1; then
-  echo "Azure authentication is required. Complete the Microsoft device-login prompt."
+  echo "Azure authentication is required. Complete the Microsoft device-login prompt below."
   login_az
 fi
 
