@@ -1,12 +1,12 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-14  
-**Status:** Teams -> OpenClaw -> Jason governed interaction is operationally proven with processing acknowledgement, exact authenticated Teams-message idempotency, governed Datto RMM reads, provider-derived evidence, deterministic canonical-fact qualifier resolution, and stateless governed ambiguity clarification. The latest live-proven implementation checkpoint is durable in GitHub at `9d125d8c5144ead948e2c90d9b79f7796bdb3c1c` (`Add governed ambiguity clarification`).
-**Canonical purpose:** Human-readable resume point for current work. Production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
+**Updated:** 2026-08-15  
+**Status:** Ordinary Microsoft Teams ingress is now production-proven through the dedicated `jason-teams-gateway`, with OpenClaw removed from externally reachable ordinary inbound Teams routing. The live Teams request completed through Jason Runtime/Central Orchestrator and Datto RMM with provider-derived evidence and no matching OpenClaw model dispatch.  
+**Canonical purpose:** Human-readable resume point for current work. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
 
-A future session resuming Project Jason should read, in order:
+Future sessions should read, in order:
 
 1. `docs/index.md`
 2. `docs/control/JASON-FUNDAMENTALS.md`
@@ -14,148 +14,186 @@ A future session resuming Project Jason should read, in order:
 4. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 5. `docs/control/DOCUMENTATION-REGISTER.md`
 6. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-7. `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` for natural-language resource inquiries
-8. `docs/engineering/capabilities/Provider-Adaptation-and-Resource-Outcome-Contract.md` for collection/provider adaptation
-9. `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md` before rebuilding/redeploying `jason-runtime`
-10. `docs/decisions/ADR-007-Teams-Proactive-Messaging.md` before changing Teams/OpenClaw messaging or inbound idempotency behavior
-11. `docs/sessions/Teams-Exact-Message-Idempotency-Proof-2026-08-14.md` for the latest live duplicate-protection proof
-12. current GitHub state and System Registry/host evidence before asserting live production state
+7. `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
+8. `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`
+9. `docs/operations/Runbook-Teams-Integration.md`
+10. `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
+11. current Git and System Registry/host evidence before asserting live production state
 
-Conversation memory is context only. It is not authority and must not be used to reconstruct fundamentals that already have durable owners.
+Conversation memory is context only. It is not authority.
 
 ## Last durable success
 
-The 2026-08-14 governed ambiguity-clarification work converted deterministic canonical-fact ambiguity from a generic failure into a bounded non-execution conversational result.
+On 2026-08-15, ordinary Teams ingress was cut over from OpenClaw to a dedicated non-intelligent Jason Teams Gateway.
 
-The motivating production request was:
+Current proven inbound path:
 
-`What IP does AOT-50282 have?`
+`Microsoft Teams -> teams-jason.teamaot.com/api/messages -> relay/ZeroTier -> Jason host :3978 -> jason-teams-gateway:3979 -> signed Jason ingress -> jason-runtime -> Central Orchestrator -> governed provider -> deterministic response -> Teams`
 
-The qualifier layer establishes that this request is ambiguous between:
+The live production regression request was:
 
-- `LAN IP address`;
-- `WAN IP address`.
+`Hey Jason, can you tell me who was last on AOT-50282 and if anything is wrong with it right now?`
 
-Jason now returns:
+The Teams response returned:
 
-- HTTP `200`;
-- `status=clarification_required`;
-- `error_code=canonical_fact_ambiguous`;
-- candidates exactly `LAN IP address` and `WAN IP address`;
-- bounded clarification text; and
-- `requires_complete_request=true`.
+- last logged-in user `AzureAD\AlDavis`;
+- one moderate `Unhealthy` alert;
+- added local users `CodexSandboxOffline` and `CodexSandboxOnline`;
+- evidence source `datto_rmm`.
 
-Clarification occurs before orchestration-request construction, Central Orchestrator execution, provider access, or model guessing.
+Direct gateway logs recorded completed HTTP `200` turns. The same evidence window contained no OpenClaw `dispatching to agent` event for those ordinary Teams turns.
 
-The signed live proof produced only:
+Final observed service state:
 
-- `openclaw.teams_conversation_authenticated`;
-- `openclaw.teams_conversation_clarification_required`.
+- `jason-teams-gateway` owned host `3978 -> container 3979`;
+- `openclaw-openclaw-gateway-1` remained healthy on host `18789-18790` only;
+- `jason-runtime` remained healthy on internal port `8080`.
 
-It produced no completion, rejection, or failure event, no orchestration result, no provider result, and no return-path handoff.
+Durable architecture decision:
 
-The active OpenClaw bridge rendered the exact clarification text supplied by Jason.
+`docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
 
-The implementation is intentionally stateless. A short reply such as `LAN` does not yet inherit the previous endpoint selector or become execution authority.
+Durable production proof:
 
-Durable implementation commit:
+`docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
 
-`9d125d8c5144ead948e2c90d9b79f7796bdb3c1c`
+Primary cutover implementation checkpoint:
 
-Durable proof target:
+`1e3003f74845f4af6786a6ab36d8e99b20fbcdce` — `Release Teams port from resolved OpenClaw bindings`
 
-`docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
+## Why the ingress architecture changed
+
+The prior OpenClaw-based ordinary inbound path could not prove exclusive Jason ownership before OpenClaw's model path.
+
+The following approaches were attempted and abandoned rather than accumulated indefinitely:
+
+- `before_agent_run` hook;
+- `before_agent_reply` hook;
+- plugin-owned inbound claim;
+- direct live OpenClaw Teams bundle patching.
+
+A plugin-bound Teams session was observed still entering the OpenClaw GPT-backed agent path. After repeated failures of the interception approach, Jason changed architecture instead of continuing brittle patching.
+
+The durable rule is now: **ordinary Jason-bound Teams ingress has one transport owner before any model loop.**
 
 ## Current workstream
 
-Stateless governed ambiguity clarification is complete, live-proven, and durable.
+The direct Teams ingress routing workstream is complete and production-proven.
 
-The next conversational workstream is **governed clarification continuation**.
+The next work is **hardening and lifecycle cleanup**, not more routing debugging:
 
-Today, after Jason asks whether the human means LAN or WAN, a bare reply such as:
+1. keep the System Registry/current generated operational view aligned with the direct gateway topology;
+2. review whether OpenClaw's dormant inbound `msteams` listener/provider can be disabled without breaking approved outbound/proactive Teams messaging;
+3. migrate the direct gateway's dedicated Microsoft client credential from the temporary mode-0600 host environment file into Jason's preferred governed secret-delivery/federated identity architecture;
+4. revoke/retire obsolete Microsoft application credentials when migration is complete;
+5. then return to the previously planned governed clarification-continuation workstream.
 
-`LAN`
+## Current production boundary
 
-does not inherit the previous request context.
+### Ordinary inbound Teams
 
-That is intentionally safer than hidden conversational memory.
+Owned by `jason-teams-gateway` under ADR-009.
 
-Any future continuation mechanism must be explicit Jason-owned state rather than model or OpenClaw memory. It must be scoped to authenticated tenant, principal, and conversation; tied to the original ambiguity; short-lived; auditable; idempotent; and unable to change the original authority or resource selector.
+The gateway:
+
+- authenticates through the Microsoft Agents SDK;
+- validates tenant and authenticated Entra object identity;
+- emits only bounded transport acknowledgement text;
+- signs the existing trusted Jason conversation envelope;
+- calls only the governed Jason Runtime boundary;
+- contains no LLM, agent loop, provider-selection authority, business authority, or direct provider invocation.
+
+### Jason Runtime
+
+`jason-runtime` remains the governed conversation/orchestration boundary. Existing identity binding, replay protection, exact-message idempotency, resource inquiry, policy, Central Orchestrator, provider resolution, evidence, and deterministic response controls remain in force.
+
+### OpenClaw
+
+OpenClaw remains a deployed ecosystem/interface component and may still support approved outbound/proactive Teams behavior and other functions.
+
+For ordinary inbound Teams turns it no longer owns the external host port and must not be treated as the active ingress merely because its internal `msteams` provider logs a startup message.
+
+ADR-005 remains applicable to approved outbound/proactive OpenClaw Teams transport. ADR-009 supersedes it for ordinary inbound Teams ingress.
+
+## Credential state
+
+The direct gateway uses the existing Teams/Entra application identity:
+
+- tenant ID `f7054323-d52b-4863-8c2f-1898f0b6077c`;
+- application/client ID `c94301b7-7194-46ab-aab7-94f9366f51a9`.
+
+A dedicated second application credential was appended for the direct gateway. The existing OpenClaw credential was not read, replaced, or deleted.
+
+Current migration storage:
+
+`/opt/jason/services/jason-teams-gateway/msteams.env`
+
+Protection at creation: mode `0600`.
+
+No secret value is stored in Git, documentation, or System Registry.
+
+## Rollback state
+
+Production cutover created a persistent rollback state file:
+
+`/opt/jason/services/jason-teams-gateway/cutover-state.env`
+
+The rollback entry point is:
+
+`bash infrastructure/jason-teams-gateway/rollback-production.sh`
+
+The cutover backup observed during proof was:
+
+`/opt/jason/services/openclaw/docker-compose.yml.pre-jason-teams-20260815T173328Z`
+
+These are point-in-time proof values. Verify current state before future mutation.
 
 ## Unresolved controls / risks
 
-1. **Clarification continuation state:** stateless clarification is operational, but short replies such as `LAN` do not yet continue the original request. Any continuation state must be bounded, authenticated, conversation-scoped, expiring, auditable, and non-authoritative by itself.
-2. **Current runtime concurrency topology:** the production HTTP server is intentionally single-worker. Future multi-worker/replica scale-out must preserve an atomic shared idempotency state layer.
-3. **Consequential-action idempotency:** exact inbound Teams-message idempotency prevents one transport activity from initiating duplicate governed work, but consequential actions may require capability/action-level idempotency keys and preconditions.
-4. **System Registry Datto read-surface gap:** active Datto read operations are not yet fully represented/verified as production capabilities in the System Registry. Do not silently hand-edit production registry state.
-5. **OpenClaw plugin-registry metadata warning:** stale persisted plugin-registry metadata remains a separate controlled-maintenance issue.
-6. **Pre-existing approval test debt:** known approval continuation/recovery test helpers remain unrelated to this work.
-
-## Production/runtime boundary
-
-The ambiguity-clarification work changed existing provider-neutral conversational interpretation, governed ingress/HTTP result classification, and OpenClaw presentation behavior.
-
-It did not add a new provider, capability, permission, credential, governance gate, external integration, or provider write surface.
-
-At live proof time:
-
-- runtime container: `jason-runtime`;
-- runtime image: `sha256:e4897ecdb45e80cac2403b00279da1205f995c2e442b578985940555e1b41724`;
-- OpenClaw container: `openclaw-openclaw-gateway-1`;
-- OpenClaw image: `sha256:6fdd46f654a1c4edf3ddc7324ebb5918738a35b3e36809c4a47292b399aa7824`;
-- active bridge host path: `/opt/jason/services/openclaw/data/config/extensions/jason-bridge/bridge-core.mjs`;
-- active bridge container path: `/home/node/.openclaw/extensions/jason-bridge/bridge-core.mjs`;
-- runtime health: healthy;
-- OpenClaw health: healthy;
-- runtime source parity: passed;
-- active bridge repository/host/container parity: passed;
-- runtime rollback tag: `jason-runtime:pre-clarification-20260814T161345Z`; and
-- provider configuration/write changes: none.
-
-These are point-in-time proof facts, not perpetual topology authority. Re-derive live state before future production mutation.
-
-No System Registry mutation was required because this work introduced no new production entity or capability.
+1. **Teams gateway secret delivery:** the dedicated client credential is protected but still host-file based. Preferred long-term state is governed OpenBao/secret delivery or certificate/federated identity.
+2. **Dormant OpenClaw inbound Teams configuration:** OpenClaw no longer owns host `3978`, but its internal Teams provider remains configured. Disable inbound behavior only after confirming outbound/proactive dependencies.
+3. **Clarification continuation state:** stateless ambiguity clarification remains operational; short replies such as `LAN` still require separately governed continuation state before they may inherit earlier context.
+4. **Runtime concurrency topology:** the production runtime remains intentionally single-worker; future replicas require atomic shared idempotency state.
+5. **Consequential-action idempotency:** transport message idempotency does not replace capability/action/provider side-effect idempotency.
+6. **System Registry Datto read-surface completeness:** active Datto read capabilities should continue to be reconciled with current verified registry lifecycle rather than inferred from successful conversation alone.
+7. **OpenClaw plugin-registry metadata warning and pre-existing approval-test debt:** remain separate controlled maintenance items.
 
 ## Continuity rules now in force
 
-Natural-language resource inquiry handling remains a reusable governed platform pattern, not a family of workflow-specific scripts. Future work must preserve:
+Future conversational/interface work must preserve:
 
-- provider-neutral resource interpretation;
-- selector/fact separation;
-- canonical fact vocabulary derived from governed capability metadata;
-- minimal requested facts;
-- Central Orchestrator authority and routing;
-- bounded structural evidence indexes;
-- bounded AI selection only among Jason-supplied choices where explicitly allowed;
-- deterministic provider-derived fact values and pointer dereference;
+- one exclusive ordinary inbound transport owner before any model loop;
+- authenticated transport identity as evidence, not execution authority;
+- Jason identity/organization binding before execution;
+- exact-message idempotency before governed work begins;
+- provider-neutral resource/action interpretation;
+- Central Orchestrator as sole execution coordinator;
+- no direct agent-to-agent/provider/connector bypass;
+- deterministic authority/provider/evidence boundaries outside model discretion;
+- bounded model use only where explicitly allowed;
+- provider-derived evidence before operational assertions;
 - source attribution;
-- no direct agent-to-agent or agent-to-provider bypass; and
-- failure closed when evidence or semantic support is insufficient;
-- deterministic tri-state qualifier analysis before generic semantic fallback when governed canonical facts share an ambiguous human anchor;
-- ambiguous or conflicting canonical-fact qualifiers stop before generic resource-language or action-model reasoning; and
-- models must not be used merely to force a choice between equally eligible governed canonical facts.
-
-Inbound transport idempotency now additionally requires:
-
-- exact authenticated transport activities to be keyed from stable authenticated transport identity rather than request text;
-- duplicate claims to be durable and centrally enforced before governed execution;
-- duplicate suppression to be auditable;
-- request-ID replay protection to remain independent and preserved; and
-- same-text messages with distinct authenticated message IDs to remain distinct requests unless a deeper governed capability explicitly defines other idempotency semantics.
-
-Teams/OpenClaw remain interface/transport providers only. Transport feedback and duplicate suppression must never become authority, policy, provider, or reasoning bypasses.
+- fail-closed behavior on identity, authority, planning, evidence, signature, or provider failure;
+- no bespoke one-off script merely because a new human wording appears;
+- rollback and verification before declaring transport topology changes complete.
 
 ## Next safe actions
 
-1. Inspect existing Jason-owned conversation and replay-state mechanisms before designing clarification continuation.
-2. Define the smallest bounded continuation record needed to preserve the original authenticated selector and competing canonical facts.
-3. Scope continuation state to authenticated tenant, principal, and conversation with explicit expiration and audit evidence.
-4. Permit continuation to select only one candidate from the original ambiguity.
-5. Prevent continuation from changing organization, resource selector, provider authority, or capability authority.
-6. Preserve exact-message idempotency and fail closed on stale, conflicting, cross-conversation, or cross-principal replies.
-7. Prove no provider/orchestration execution occurs until a valid human clarification is supplied.
-8. Live-prove and document the continuation path.
+1. Validate the repository System Registry and generated operational view contain `component.jason-teams-gateway` and current Teams ingress ownership.
+2. Preserve the direct-gateway production proof and ADR-009 as the canonical historical decision/evidence pair.
+3. Review outbound/proactive Teams dependence on OpenClaw before disabling its internal `msteams` provider.
+4. Design a governed credential migration for the direct gateway without printing or copying the current client credential.
+5. After hardening, resume the governed clarification-continuation design using explicit Jason-owned, authenticated, expiring, auditable state.
 
-## Success condition
+## Documentation-complete condition for this workstream
 
-A future competent human or AI can determine from durable repository records that exact Teams-message idempotency, deterministic canonical-fact qualification, and stateless governed ambiguity clarification are operational; that ambiguous canonical facts produce bounded human clarification rather than a generic failure; that clarification does not enter request construction, orchestration, provider execution, or model guessing; that OpenClaw only presents the Jason-supplied result; and that the next safe conversational target is governed clarification continuation rather than hidden conversational memory.
+The direct Teams ingress workstream is documentation-complete when durable repository records allow a future operator/AI to determine without chat history:
+
+- why OpenClaw ordinary inbound ingress was retired;
+- which ADR now governs the transport;
+- the exact current service/port ownership model;
+- how to deploy, verify, and roll back the direct gateway;
+- how the Microsoft identity/credential is handled without storing secret values;
+- what live evidence proved the Datto-backed Teams request and OpenClaw model bypass;
+- what System Registry entities represent the current topology; and
+- which remaining items are hardening/future work rather than unresolved routing defects.
