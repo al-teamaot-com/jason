@@ -98,11 +98,11 @@ then
   exit 1
 fi
 
-echo
-echo "========== CURRENT TEAMS EDGE FACTS =========="necho "DIRECT_GATEWAY_LOCAL=http://$HOST_BIND:$HOST_PORT/api/messages"
-echo "OPENCLAW_3978_BINDING=$(docker port "$OPENCLAW_CONTAINER" 3978/tcp 2>/dev/null | tr '\n' ' ' || true)"
-echo "OPENCLAW_COMPOSE_WORKDIR=$(docker inspect "$OPENCLAW_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)"
-echo "OPENCLAW_COMPOSE_FILES=$(docker inspect "$OPENCLAW_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
+printf '\n========== CURRENT TEAMS EDGE FACTS ==========\n'
+printf 'DIRECT_GATEWAY_LOCAL=http://%s:%s/api/messages\n' "$HOST_BIND" "$HOST_PORT"
+printf 'OPENCLAW_3978_BINDING=%s\n' "$(docker port "$OPENCLAW_CONTAINER" 3978/tcp 2>/dev/null | tr '\n' ' ' || true)"
+printf 'OPENCLAW_COMPOSE_WORKDIR=%s\n' "$(docker inspect "$OPENCLAW_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || true)"
+printf 'OPENCLAW_COMPOSE_FILES=%s\n' "$(docker inspect "$OPENCLAW_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)"
 
 echo
 echo "========== SERVICES =========="
