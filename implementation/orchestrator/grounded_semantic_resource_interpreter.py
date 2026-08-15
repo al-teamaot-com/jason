@@ -233,6 +233,60 @@ class GroundedSemanticResourceInquiryInterpreter(
             selector=selector,
         )
 
+    def _canonical_contract_fact(
+        self,
+        raw_fact: object,
+    ) -> str | None:
+        """Resolve contract facts through governed semantic knowledge first.
+
+        Capability metadata is still the source of eligibility. The semantic
+        registry only supplies the canonical identity of a fact already declared
+        by that governed capability; it does not add capabilities or provider
+        authority.
+        """
+
+        value = str(raw_fact).strip()
+        if not value:
+            return None
+
+        if self.fact_resolver is not None:
+            resolution = self.fact_resolver.resolve(value)
+            if resolution is not None:
+                return resolution.canonical_fact
+
+        if self.fact_vocabulary is not None:
+            definition = self.fact_vocabulary.resolve(value)
+            if definition is not None:
+                return definition.canonical_fact
+
+        return None
+
+    def _eligible_canonical_facts(
+        self,
+        *,
+        resource_type: str,
+    ) -> tuple[str, ...]:
+        result: list[str] = []
+        seen: set[str] = set()
+
+        for contract in self.contracts:
+            resource_types = {
+                str(item).strip()
+                for item in contract.get("resource_types", ())
+                if str(item).strip()
+            }
+            if resource_type not in resource_types:
+                continue
+
+            for raw_fact in contract.get("canonical_facts", ()):
+                canonical = self._canonical_contract_fact(raw_fact)
+                if canonical is None or canonical in seen:
+                    continue
+                seen.add(canonical)
+                result.append(canonical)
+
+        return tuple(result)
+
     def _eligible_unscoped_canonical_facts(
         self,
     ) -> tuple[str, ...]:
@@ -247,18 +301,9 @@ class GroundedSemanticResourceInquiryInterpreter(
                 "canonical_facts",
                 (),
             ):
-                definition = self.fact_vocabulary.resolve(
-                    str(raw_fact)
-                )
-
-                if definition is None:
+                canonical = self._canonical_contract_fact(raw_fact)
+                if canonical is None or canonical in seen:
                     continue
-
-                canonical = definition.canonical_fact
-
-                if canonical in seen:
-                    continue
-
                 seen.add(canonical)
                 result.append(canonical)
 
@@ -276,12 +321,12 @@ class GroundedSemanticResourceInquiryInterpreter(
                 continue
 
             governed = {
-                str(item).strip()
+                canonical
                 for item in contract.get(
                     "canonical_facts",
                     (),
                 )
-                if str(item).strip()
+                if (canonical := self._canonical_contract_fact(item)) is not None
             }
 
             if not requested.issubset(governed):
