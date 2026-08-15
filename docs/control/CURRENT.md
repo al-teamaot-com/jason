@@ -88,7 +88,7 @@ The next work is **hardening and lifecycle cleanup**, not more routing debugging
 4. revoke/retire obsolete Microsoft application credentials when migration is complete;
 5. then return to the previously planned governed clarification-continuation workstream.
 
-## Current production boundary
+## Production/runtime boundary
 
 ### Ordinary inbound Teams
 
