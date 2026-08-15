@@ -10,6 +10,7 @@ from orchestrator.canonical_fact_vocabulary import (
 )
 from orchestrator.semantic_knowledge_registry import SemanticConcept, SemanticKnowledgeRegistry
 from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
+from orchestrator.semantic_security_extension import extend_trusted_security_semantics
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +48,11 @@ class SemanticFactResolver:
             if legacy_vocabulary is not DEFAULT_CANONICAL_FACT_VOCABULARY:
                 raise ValueError("specify either legacy_vocabulary or vocabulary, not both")
             legacy_vocabulary = vocabulary
-        self._registry = registry if registry is not None else build_trusted_semantic_registry()
+        if registry is None:
+            registry = extend_trusted_security_semantics(
+                build_trusted_semantic_registry()
+            )
+        self._registry = registry
         self._vocabulary = legacy_vocabulary
 
     @staticmethod
