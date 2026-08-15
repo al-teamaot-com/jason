@@ -17,7 +17,8 @@ This operation is read-only. It does not update the bot endpoint or manifest.
 EOF
 
 echo
-echo "========== START TEAMS DEVELOPER CLI =========="necho "A Microsoft device-login prompt may appear. Sign in to the AOT tenant account that can manage the Teams app."
+echo "========== START TEAMS DEVELOPER CLI =========="
+echo "A Microsoft device-login prompt may appear. Sign in to the AOT tenant account that can manage the Teams app."
 echo "After login, the CLI will list apps and then open an app picker."
 echo "Select the Jason/OpenClaw app associated with the client id shown above."
 
