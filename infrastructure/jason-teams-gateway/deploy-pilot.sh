@@ -10,6 +10,8 @@ HOST_PORT="${JASON_TEAMS_HOST_PORT:-3979}"
 SERVICE_DIR="${JASON_TEAMS_SERVICE_DIR:-/opt/jason/services/jason-teams-gateway}"
 OPENCLAW_CONFIG_HOST="${OPENCLAW_CONFIG_HOST:-/opt/jason/services/openclaw/data/config/openclaw.json}"
 OPENCLAW_KEY_CONTAINER="${OPENCLAW_KEY_CONTAINER:-/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem}"
+RUN_UID="$(id -u)"
+RUN_GID="$(id -g)"
 
 if [ ! -f infrastructure/jason-teams-gateway/Dockerfile ]; then
   echo "ERROR: run this script from the Jason repository root"
@@ -58,10 +60,10 @@ docker inspect "$OPENCLAW_CONTAINER" \
   > "$TMP_DIR/msteams.env" || true
 
 sudo mkdir -p "$SERVICE_DIR/secrets"
-sudo install -m 0600 -o 1000 -g 1000 \
+sudo install -m 0600 -o "$RUN_UID" -g "$RUN_GID" \
   "$TMP_DIR/secrets/ingress.pem" \
   "$SERVICE_DIR/secrets/ingress.pem"
-sudo install -m 0600 \
+sudo install -m 0600 -o "$RUN_UID" -g "$RUN_GID" \
   "$TMP_DIR/msteams.env" \
   "$SERVICE_DIR/msteams.env"
 
@@ -74,6 +76,7 @@ docker rm -f "$GATEWAY_CONTAINER" >/dev/null 2>&1 || true
 docker run -d \
   --name "$GATEWAY_CONTAINER" \
   --restart unless-stopped \
+  --user "$RUN_UID:$RUN_GID" \
   --network "$NETWORK" \
   --env-file "$SERVICE_DIR/msteams.env" \
   -e PORT=3979 \
