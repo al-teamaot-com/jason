@@ -9,11 +9,13 @@ node, tool, or agent directly.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from .contracts import OrchestrationRequest, OrchestrationResult
 from .service import CentralOrchestrator
+from .teams_conversation_continuation import ConversationContinuationState
 
 
 class ConversationIntentUnresolvedError(LookupError):
@@ -55,6 +57,40 @@ class ConversationClarificationRequiredError(
         self.reason_code = reason_code
         self.candidate_facts = tuple(normalized)
 
+        super().__init__(reason_code)
+
+
+class ConversationGuidanceRequiredError(ConversationIntentUnresolvedError):
+    """A safe conversational answer is available without provider execution.
+
+    This is used only for bounded guidance such as explaining prior Jason output or
+    telling a human that a recognized semantic fact has no governed retrieval
+    capability. It does not authorize or perform provider work.
+    """
+
+    def __init__(
+        self,
+        *,
+        reason_code: str,
+        guidance_text: str,
+        requested_facts: tuple[str, ...] = (),
+    ) -> None:
+        reason_code = str(reason_code).strip()
+        guidance_text = str(guidance_text).strip()
+        facts = tuple(
+            dict.fromkeys(
+                str(item).strip()
+                for item in requested_facts
+                if str(item).strip()
+            )
+        )
+        if not reason_code or not guidance_text:
+            raise ValueError("conversation guidance requires reason_code and text")
+        if len(guidance_text) > 1600:
+            raise ValueError("conversation guidance exceeds safety bound")
+        self.reason_code = reason_code
+        self.guidance_text = guidance_text
+        self.requested_facts = facts
         super().__init__(reason_code)
 
 
@@ -187,6 +223,30 @@ class ConversationIntentResolver(Protocol):
     ) -> ConversationIntent | ConversationIntentPlan | None: ...
 
 
+class ConversationContinuationStore(Protocol):
+    def get(
+        self,
+        *,
+        organization_id: str,
+        principal_id: str,
+        conversation_id: str,
+    ) -> ConversationContinuationState | None: ...
+
+    def put(
+        self,
+        *,
+        principal_id: str,
+        organization_id: str,
+        conversation_id: str,
+        last_message_id: str,
+        response_kind: str,
+        last_response_text: str,
+        last_capability_name: str | None,
+        requested_facts: tuple[str, ...],
+        resource_selector: Mapping[str, str],
+    ) -> ConversationContinuationState: ...
+
+
 class ConversationOrchestrationRequestFactory(Protocol):
     """Build governed requests within one conversation correlation scope."""
 
@@ -239,13 +299,35 @@ class TeamsConversationFlow:
     orchestrator: CentralOrchestrator
     response_renderer: TeamsConversationResponseRenderer
     transport: TeamsConversationTransport
+    continuation_store: ConversationContinuationStore | None = None
 
     def handle(self, request: TeamsConversationRequest) -> TeamsConversationFlowResult:
         principal = self.identity_binder.bind(request.identity)
         if principal is None:
             raise PermissionError("Teams identity is not bound to a governed Jason principal")
 
-        resolved = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
+        continuation = self._load_continuation(
+            principal=principal,
+            identity=request.identity,
+        )
+        if continuation is not None and _is_reference_explanation(request.text):
+            raise ConversationGuidanceRequiredError(
+                reason_code="conversation_reference_explained",
+                guidance_text=_reference_explanation(continuation),
+                requested_facts=continuation.requested_facts,
+            )
+
+        try:
+            resolved = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
+        except ConversationGuidanceRequiredError as error:
+            self._record_guidance(
+                principal=principal,
+                identity=request.identity,
+                guidance=error,
+                previous=continuation,
+            )
+            raise
+
         if resolved is None:
             raise ConversationIntentUnresolvedError(
                 "no governed Jason capability intent could be resolved"
@@ -306,10 +388,110 @@ class TeamsConversationFlow:
         if not transport_message_id.strip():
             raise RuntimeError("Teams transport did not return a message identifier")
 
+        self._record_result(
+            principal=principal,
+            identity=request.identity,
+            intents=intents,
+            response_text=response_text,
+        )
+
         return TeamsConversationFlowResult(
             orchestration=results[0],
             orchestrations=results,
             transport_message_id=transport_message_id.strip(),
+        )
+
+    def _load_continuation(
+        self,
+        *,
+        principal: BoundConversationPrincipal,
+        identity: TeamsConversationPrincipalEvidence,
+    ) -> ConversationContinuationState | None:
+        if self.continuation_store is None:
+            return None
+        return self.continuation_store.get(
+            organization_id=principal.organization_id,
+            principal_id=principal.principal_id,
+            conversation_id=identity.conversation_id,
+        )
+
+    def _record_guidance(
+        self,
+        *,
+        principal: BoundConversationPrincipal,
+        identity: TeamsConversationPrincipalEvidence,
+        guidance: ConversationGuidanceRequiredError,
+        previous: ConversationContinuationState | None,
+    ) -> None:
+        if self.continuation_store is None:
+            return
+        self.continuation_store.put(
+            principal_id=principal.principal_id,
+            organization_id=principal.organization_id,
+            conversation_id=identity.conversation_id,
+            last_message_id=identity.message_id,
+            response_kind="guidance",
+            last_response_text=guidance.guidance_text,
+            last_capability_name=(
+                None if previous is None else previous.last_capability_name
+            ),
+            requested_facts=(
+                guidance.requested_facts
+                or (() if previous is None else previous.requested_facts)
+            ),
+            resource_selector=(
+                {} if previous is None else previous.resource_selector
+            ),
+        )
+
+    def _record_result(
+        self,
+        *,
+        principal: BoundConversationPrincipal,
+        identity: TeamsConversationPrincipalEvidence,
+        intents: tuple[ConversationIntent, ...],
+        response_text: str,
+    ) -> None:
+        if self.continuation_store is None:
+            return
+
+        facts: list[str] = []
+        selector: dict[str, str] = {}
+        excluded_argument_keys = {
+            "requested_facts",
+            "evidence_contexts",
+            "result_intent",
+            "completeness_requirement",
+            "relationship_type",
+            "temporal_semantics",
+        }
+        for intent in intents:
+            raw_facts = intent.arguments.get("requested_facts", ())
+            if isinstance(raw_facts, (list, tuple)):
+                for fact in raw_facts:
+                    normalized = str(fact).strip()
+                    if normalized and normalized not in facts:
+                        facts.append(normalized)
+            for key, value in intent.arguments.items():
+                if key in excluded_argument_keys or not isinstance(value, str):
+                    continue
+                clean_key = str(key).strip()
+                clean_value = value.strip()
+                if clean_key and clean_value:
+                    selector.setdefault(clean_key, clean_value)
+
+        self.continuation_store.put(
+            principal_id=principal.principal_id,
+            organization_id=principal.organization_id,
+            conversation_id=identity.conversation_id,
+            last_message_id=identity.message_id,
+            response_kind="result",
+            last_response_text=response_text,
+            last_capability_name=(
+                intents[0].capability_name if len(intents) == 1 else "conversation.plan"
+            ),
+            requested_facts=tuple(facts),
+            resource_selector=selector,
         )
 
     @staticmethod
@@ -333,3 +515,25 @@ class TeamsConversationFlow:
             raise PermissionError("request factory changed the governed permission mode")
         if orchestration_request.requester_kind != "human":
             raise PermissionError("Teams conversational requests must retain human requester identity")
+
+
+def _normalized_words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", text.casefold()))
+
+
+def _is_reference_explanation(text: str) -> bool:
+    """Recognize grammar-level deictic explanation requests, not sentence variants."""
+
+    words = _normalized_words(text)
+    reference_words = {"that", "this", "it", "those", "these", "them"}
+    explanation_words = {"mean", "means", "explain", "clarify", "understand"}
+    return bool(words.intersection(reference_words)) and bool(
+        words.intersection(explanation_words)
+    )
+
+
+def _reference_explanation(state: ConversationContinuationState) -> str:
+    topic = ", ".join(state.requested_facts) or "the previous Jason result"
+    if state.response_kind == "guidance":
+        return f"That refers to my previous guidance about {topic}. {state.last_response_text}"
+    return f"That refers to my previous result about {topic}: {state.last_response_text}"
