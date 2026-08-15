@@ -40,6 +40,14 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/secrets"
 
+has_complete_teams_env() {
+  file="$1"
+  [ -f "$file" ] &&
+    grep -q '^MSTEAMS_APP_ID=.' "$file" &&
+    grep -q '^MSTEAMS_TENANT_ID=.' "$file" &&
+    grep -q '^MSTEAMS_APP_PASSWORD=.' "$file"
+}
+
 echo "========== BUILD DIRECT TEAMS GATEWAY =========="
 docker build \
   -f infrastructure/jason-teams-gateway/Dockerfile \
@@ -52,20 +60,32 @@ docker cp \
   "$OPENCLAW_CONTAINER:$OPENCLAW_KEY_CONTAINER" \
   "$TMP_DIR/secrets/ingress.pem"
 
-# Carry only the existing Microsoft Teams credential environment, if OpenClaw
-# uses env-backed credentials. Nothing is printed to stdout.
+# Reuse env-backed OpenClaw credentials only when all required values are
+# actually present. Otherwise preserve the dedicated Jason credential file
+# created by bootstrap-azure-credential.sh. Never print secret values.
 docker inspect "$OPENCLAW_CONTAINER" \
   --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -E '^MSTEAMS_(APP_ID|APP_PASSWORD|TENANT_ID)=' \
-  > "$TMP_DIR/msteams.env" || true
+  > "$TMP_DIR/openclaw-msteams.env" || true
 
 sudo mkdir -p "$SERVICE_DIR/secrets"
 sudo install -m 0600 -o "$RUN_UID" -g "$RUN_GID" \
   "$TMP_DIR/secrets/ingress.pem" \
   "$SERVICE_DIR/secrets/ingress.pem"
-sudo install -m 0600 -o "$RUN_UID" -g "$RUN_GID" \
-  "$TMP_DIR/msteams.env" \
-  "$SERVICE_DIR/msteams.env"
+
+if has_complete_teams_env "$TMP_DIR/openclaw-msteams.env"; then
+  sudo install -m 0600 -o "$RUN_UID" -g "$RUN_GID" \
+    "$TMP_DIR/openclaw-msteams.env" \
+    "$SERVICE_DIR/msteams.env"
+  echo "PASS: complete env-backed Teams credentials copied from OpenClaw"
+elif has_complete_teams_env "$SERVICE_DIR/msteams.env"; then
+  echo "PASS: using existing dedicated Jason Teams credential"
+else
+  echo "CREDENTIAL_BOOTSTRAP_REQUIRED=1"
+  echo "ERROR: OpenClaw does not expose complete Teams credentials through its container environment."
+  echo "Run infrastructure/jason-teams-gateway/bootstrap-azure-credential.sh once, then rerun this pilot."
+  exit 3
+fi
 
 echo "PASS: governed signing identity staged without printing secret material"
 
