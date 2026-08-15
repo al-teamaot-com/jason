@@ -58,8 +58,9 @@ fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
-NEXT_COMPOSE="$TMP_DIR/docker-compose.next.yml"
+LOCAL_NEXT_COMPOSE="$TMP_DIR/docker-compose.next.yml"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+NEXT_COMPOSE="${OPENCLAW_COMPOSE_FILE}.jason-next-${TIMESTAMP}"
 BACKUP_FILE="${OPENCLAW_COMPOSE_FILE}.pre-jason-teams-${TIMESTAMP}"
 
 rollback_now() {
@@ -73,18 +74,18 @@ rollback_now() {
       docker compose -p "$OPENCLAW_PROJECT" -f "$OPENCLAW_COMPOSE_FILE" up -d "$OPENCLAW_SERVICE"
     ) >/dev/null 2>&1 || true
   fi
+  sudo rm -f "$NEXT_COMPOSE" >/dev/null 2>&1 || true
   echo "ROLLBACK_ATTEMPTED=1"
 }
 
 remove_3978_mapping() {
-  python3 - "$OPENCLAW_COMPOSE_FILE" "$OPENCLAW_SERVICE" "$NEXT_COMPOSE" <<'PY'
+  python3 - "$OPENCLAW_COMPOSE_FILE" "$OPENCLAW_SERVICE" "$LOCAL_NEXT_COMPOSE" <<'PY'
 import re
 import sys
 
 src, service_name, dst = sys.argv[1:4]
 lines = open(src, encoding="utf-8").read().splitlines(True)
 
-# Locate the requested service within the top-level services mapping.
 services_idx = None
 services_indent = None
 for i, line in enumerate(lines):
@@ -145,8 +146,6 @@ for i in range(ports_idx + 1, service_end):
         ports_end = i
         break
 
-# Split the ports list into item blocks. This handles both Compose short syntax
-# and long syntax without needing a YAML dependency on the host.
 items = []
 i = ports_idx + 1
 while i < ports_end:
@@ -174,18 +173,12 @@ remove_ranges = []
 for start, end in items:
     block = "".join(lines[start:end])
     compact = re.sub(r"\s+", "", block)
-
-    # Short syntax examples: "3978:3978", "0.0.0.0:3978:3978/tcp".
     short_match = re.search(
         r"(?:^|[-'\"])(?:(?:\d{1,3}\.){3}\d{1,3}:)?3978:3978(?:/tcp)?(?:['\"]|$|#)",
         compact,
     )
-
-    # Long syntax item must explicitly target container port 3978 and publish
-    # host port 3978.
     target_match = re.search(r"(?:^|\n)\s*(?:-\s*)?target\s*:\s*['\"]?3978['\"]?\s*(?:#.*)?$", block, re.M)
     published_match = re.search(r"(?:^|\n)\s*published\s*:\s*['\"]?3978['\"]?\s*(?:#.*)?$", block, re.M)
-
     if short_match or (target_match and published_match):
         remove_ranges.append((start, end))
 
@@ -218,15 +211,20 @@ echo "PASS: production gateway image built"
 echo
 echo "========== PREPARE OPENCLAW PORT RELEASE =========="
 remove_3978_mapping
+sudo install -m 0644 "$LOCAL_NEXT_COMPOSE" "$NEXT_COMPOSE"
 
-(
+if ! (
   cd "$OPENCLAW_WORKDIR"
   docker compose -p "$OPENCLAW_PROJECT" -f "$NEXT_COMPOSE" config >/dev/null
-)
+); then
+  sudo rm -f "$NEXT_COMPOSE" >/dev/null 2>&1 || true
+  fail "modified OpenClaw compose did not validate"
+fi
 echo "PASS: modified compose validates"
 
 sudo cp "$OPENCLAW_COMPOSE_FILE" "$BACKUP_FILE"
 sudo cp "$NEXT_COMPOSE" "$OPENCLAW_COMPOSE_FILE"
+sudo rm -f "$NEXT_COMPOSE"
 echo "BACKUP_FILE=$BACKUP_FILE"
 
 echo
