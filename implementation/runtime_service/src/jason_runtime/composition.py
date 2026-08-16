@@ -110,6 +110,10 @@ from orchestrator.teams_identity_binding_sqlite import (
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
 from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
+from .dynamic_conversation_cutover import (
+    DynamicConversationCutoverSettings,
+    select_teams_conversation_flow,
+)
 from .http import RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
@@ -150,6 +154,11 @@ class RuntimeSettings:
     ses_openbao_secret_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/secret_id")
     ses_region: str = "us-east-1"
     ses_default_sender: str = "jason@teamaot.com"
+    dynamic_conversation_enabled: bool = False
+    dynamic_conversation_context_db: Path = Path(
+        "/var/lib/jason/openclaw/dynamic-conversation-context.sqlite3"
+    )
+    dynamic_conversation_context_ttl_seconds: int = 3600
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -261,6 +270,18 @@ class RuntimeSettings:
             ses_default_sender=os.getenv(
                 "JASON_SES_DEFAULT_SENDER", "jason@teamaot.com"
             ).strip(),
+            dynamic_conversation_enabled=os.getenv(
+                "JASON_DYNAMIC_CONVERSATION_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            dynamic_conversation_context_db=Path(
+                os.getenv(
+                    "JASON_DYNAMIC_CONVERSATION_CONTEXT_DB",
+                    "/var/lib/jason/openclaw/dynamic-conversation-context.sqlite3",
+                )
+            ),
+            dynamic_conversation_context_ttl_seconds=int(
+                os.getenv("JASON_DYNAMIC_CONVERSATION_CONTEXT_TTL_SECONDS", "3600")
+            ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -282,6 +303,12 @@ class RuntimeSettings:
             raise ValueError("JASON_SES_REGION is required")
         if not self.ses_default_sender:
             raise ValueError("JASON_SES_DEFAULT_SENDER is required")
+        if self.dynamic_conversation_context_ttl_seconds < 60 or self.dynamic_conversation_context_ttl_seconds > 86400:
+            raise ValueError(
+                "dynamic conversation context ttl must be between 60 and 86400 seconds"
+            )
+        if not str(self.dynamic_conversation_context_db).strip():
+            raise ValueError("dynamic conversation context db path is required")
         if not self.host:
             raise ValueError("runtime host is required")
         if not (0 < self.port < 65536):
@@ -439,95 +466,98 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ),
     )
 
-    semantic_mapping_path = (
-        Path(__file__).resolve().parents[4]
-        / "config"
-        / "semantic_mappings"
-        / "approved.json"
-    )
-    semantic_mapping_registry = JsonSemanticMappingRegistryLoader(semantic_mapping_path).load()
-
-    resource_types, selector_keys, fact_hints = _resource_language_contract(capabilities)
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
         model=settings.ollama_model,
         base_url=settings.ollama_url,
     )
-    action_intent_resolver = GovernedActionConversationIntentResolver(
-        registry=capabilities,
-        reasoner=OllamaActionIntentReasoner(ollama_client),
-    )
 
-    hosted_semantic_translator = None
-    if settings.hosted_semantics_enabled:
-        semantic_secret_resolver = OpenBaoSecretResolver(
-            base_url=settings.openbao_url,
-            role_id_path=settings.openai_openbao_role_id_path,
-            secret_id_path=settings.openai_openbao_secret_id_path,
+    intent_resolver = None
+    if not settings.dynamic_conversation_enabled:
+        semantic_mapping_path = (
+            Path(__file__).resolve().parents[4]
+            / "config"
+            / "semantic_mappings"
+            / "approved.json"
         )
-        semantic_secret_values = dict(
-            semantic_secret_resolver.resolve(
-                "openai.semantic_intent",
-                ConnectorContext(
-                    correlation_id="runtime-semantic-bootstrap",
-                    principal_id="jason-runtime",
-                    organization_id="aot",
-                    client_id=None,
-                    capability="semantic.intent.translate",
-                    mode="observe",
-                ),
-            )
-        )
-        try:
-            semantic_api_key = str(semantic_secret_values["api_key"]).strip()
-            if not semantic_api_key:
-                raise ValueError("OpenAI semantic API key resolved empty")
-            hosted_semantic_translator = OpenAISemanticIntentTranslator(
-                api_key=semantic_api_key,
-                transport=http_transport,
-                model=settings.openai_semantic_model,
-            )
-        finally:
-            semantic_secret_values.clear()
+        semantic_mapping_registry = JsonSemanticMappingRegistryLoader(semantic_mapping_path).load()
 
-    resource_intent_resolver = GovernedResourceConversationIntentResolver(
-        interpreter=GroundedSemanticResourceInquiryInterpreter(
-            contracts=_deterministic_resource_contracts(capabilities),
-            fallback=ReasonedResourceInquiryInterpreter(
-                reasoner=OllamaResourceInquiryReasoner(
-                    ollama_client,
-                    resource_types=resource_types,
-                    selector_keys=selector_keys,
-                    fact_hints=fact_hints,
+        resource_types, selector_keys, fact_hints = _resource_language_contract(capabilities)
+        action_intent_resolver = GovernedActionConversationIntentResolver(
+            registry=capabilities,
+            reasoner=OllamaActionIntentReasoner(ollama_client),
+        )
+
+        hosted_semantic_translator = None
+        if settings.hosted_semantics_enabled:
+            semantic_secret_resolver = OpenBaoSecretResolver(
+                base_url=settings.openbao_url,
+                role_id_path=settings.openai_openbao_role_id_path,
+                secret_id_path=settings.openai_openbao_secret_id_path,
+            )
+            semantic_secret_values = dict(
+                semantic_secret_resolver.resolve(
+                    "openai.semantic_intent",
+                    ConnectorContext(
+                        correlation_id="runtime-semantic-bootstrap",
+                        principal_id="jason-runtime",
+                        organization_id="aot",
+                        client_id=None,
+                        capability="semantic.intent.translate",
+                        mode="observe",
+                    ),
+                )
+            )
+            try:
+                semantic_api_key = str(semantic_secret_values["api_key"]).strip()
+                if not semantic_api_key:
+                    raise ValueError("OpenAI semantic API key resolved empty")
+                hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                    api_key=semantic_api_key,
+                    transport=http_transport,
+                    model=settings.openai_semantic_model,
+                )
+            finally:
+                semantic_secret_values.clear()
+
+        resource_intent_resolver = GovernedResourceConversationIntentResolver(
+            interpreter=GroundedSemanticResourceInquiryInterpreter(
+                contracts=_deterministic_resource_contracts(capabilities),
+                fallback=ReasonedResourceInquiryInterpreter(
+                    reasoner=OllamaResourceInquiryReasoner(
+                        ollama_client,
+                        resource_types=resource_types,
+                        selector_keys=selector_keys,
+                        fact_hints=fact_hints,
+                    ),
+                    fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+                    fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
                 ),
                 fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+                semantic_intent_translator=hosted_semantic_translator,
+                semantic_fact_reasoner=OllamaSemanticFactReasoner(
+                    ollama_client,
+                    fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+                ),
                 fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             ),
-            fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
-            semantic_intent_translator=hosted_semantic_translator,
-            semantic_fact_reasoner=OllamaSemanticFactReasoner(
-                ollama_client,
-                fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
-            ),
-            fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
-        ),
-        planner=GovernedResourceInquiryPlanner(
-            registry=capabilities,
-            reasoner=MetadataResourceCapabilityReasoner(
+            planner=GovernedResourceInquiryPlanner(
+                registry=capabilities,
+                reasoner=MetadataResourceCapabilityReasoner(
+                    semantic_mapping_registry=semantic_mapping_registry,
+                ),
                 semantic_mapping_registry=semantic_mapping_registry,
             ),
+        )
+        governed_resource_intent_resolver = GovernedSemanticCoverageIntentResolver(
+            delegate=resource_intent_resolver,
+            capabilities=capabilities,
+            fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
             semantic_mapping_registry=semantic_mapping_registry,
-        ),
-    )
-    governed_resource_intent_resolver = GovernedSemanticCoverageIntentResolver(
-        delegate=resource_intent_resolver,
-        capabilities=capabilities,
-        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
-        semantic_mapping_registry=semantic_mapping_registry,
-    )
-    intent_resolver = ChainedConversationIntentResolver(
-        resolvers=(governed_resource_intent_resolver, action_intent_resolver)
-    )
+        )
+        intent_resolver = ChainedConversationIntentResolver(
+            resolvers=(governed_resource_intent_resolver, action_intent_resolver)
+        )
 
     orchestration_events = SQLiteOrchestrationEventStore(settings.orchestration_events_db)
     openbao = OpenBaoSecretResolver(
@@ -619,14 +649,37 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         settings.continuation_db,
         ttl_seconds=1200,
     )
-    flow = TeamsConversationFlow(
-        identity_binder=identity_binder,
-        intent_resolver=intent_resolver,
-        request_factory=GovernedTeamsOrchestrationRequestFactory(
-            authority=identity_authority,
-            capabilities=capabilities,
-            approvals=approval_repository,
+    request_factory = GovernedTeamsOrchestrationRequestFactory(
+        authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approval_repository,
+    )
+
+    legacy_flow = None
+    if not settings.dynamic_conversation_enabled:
+        if intent_resolver is None:
+            raise RuntimeError("legacy conversation resolver was not composed")
+        legacy_flow = TeamsConversationFlow(
+            identity_binder=identity_binder,
+            intent_resolver=intent_resolver,
+            request_factory=request_factory,
+            orchestrator=orchestrator,
+            response_renderer=response_renderer,
+            transport=return_transport,
+            continuation_store=continuation_store,
+        )
+
+    flow = select_teams_conversation_flow(
+        settings=DynamicConversationCutoverSettings(
+            enabled=settings.dynamic_conversation_enabled,
+            context_db=settings.dynamic_conversation_context_db,
+            context_ttl_seconds=settings.dynamic_conversation_context_ttl_seconds,
         ),
+        legacy_flow=legacy_flow,
+        capabilities=capabilities,
+        structured_client=ollama_client,
+        identity_binder=identity_binder,
+        request_factory=request_factory,
         orchestrator=orchestrator,
         response_renderer=response_renderer,
         transport=return_transport,
