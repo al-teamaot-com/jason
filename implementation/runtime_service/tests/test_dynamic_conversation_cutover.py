@@ -58,6 +58,7 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
     deps = dependencies(tmp_path)
     context_db = deps.pop("context_db")
     coordinator = Marker()
+    dynamic_response_renderer = Marker()
     observed = {}
 
     def build_coordinator(*, capabilities, structured_client, context_db, ttl_seconds):
@@ -71,9 +72,23 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
         )
         return coordinator
 
+    def select_response(*, dynamic_enabled, legacy_renderer, structured_client):
+        observed.update(
+            {
+                "dynamic_enabled": dynamic_enabled,
+                "legacy_renderer": legacy_renderer,
+                "response_structured_client": structured_client,
+            }
+        )
+        return dynamic_response_renderer
+
     monkeypatch.setattr(
         "jason_runtime.dynamic_conversation_cutover.build_dynamic_teams_conversation_coordinator",
         build_coordinator,
+    )
+    monkeypatch.setattr(
+        "jason_runtime.dynamic_conversation_cutover.select_conversation_response_renderer",
+        select_response,
     )
 
     selected = select_teams_conversation_flow(
@@ -91,7 +106,7 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
     assert selected.identity_binder is deps["identity_binder"]
     assert selected.request_factory is deps["request_factory"]
     assert selected.orchestrator is deps["orchestrator"]
-    assert selected.response_renderer is deps["response_renderer"]
+    assert selected.response_renderer is dynamic_response_renderer
     assert selected.transport is deps["transport"]
     assert selected.continuation_store is deps["continuation_store"]
     assert observed == {
@@ -99,6 +114,9 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
         "structured_client": deps["structured_client"],
         "context_db": context_db,
         "ttl_seconds": 2700,
+        "dynamic_enabled": True,
+        "legacy_renderer": deps["response_renderer"],
+        "response_structured_client": deps["structured_client"],
     }
 
 
