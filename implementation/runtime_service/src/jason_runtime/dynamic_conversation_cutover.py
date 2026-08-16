@@ -8,15 +8,17 @@ from orchestrator.dynamic_conversation_composition import (
 )
 from orchestrator.dynamic_teams_flow_bridge import DynamicTeamsFlowBridge
 
+from .dynamic_response_cutover import select_conversation_response_renderer
+
 
 @dataclass(frozen=True, slots=True)
 class DynamicConversationCutoverSettings:
     """Runtime-owned rollout controls for the dynamic conversation path.
 
-    The flag changes only conversational interpretation. Identity binding, JKD-001
-    authority, request construction, Central Orchestrator execution, provider
-    resolution, evidence handling, response rendering, and transport remain the
-    existing governed runtime components.
+    The flag changes only conversational interpretation and read-response evidence
+    interpretation. Identity binding, JKD-001 authority, request construction,
+    Central Orchestrator execution, provider resolution, transport, and governed
+    action rendering remain the existing runtime components.
     """
 
     enabled: bool = False
@@ -48,10 +50,10 @@ def select_teams_conversation_flow(
     """Return legacy or dynamic Teams flow without changing governance boundaries.
 
     Rollback is a single configuration decision. When disabled, the exact supplied
-    legacy flow is returned unchanged. When enabled, only the conversational resolver
-    is replaced by the dynamic provider-independent coordinator; the same governed
-    identity, authority, orchestrator, renderer, continuation, and transport objects
-    are reused.
+    legacy flow is returned unchanged. When enabled, conversational planning and
+    observe-mode evidence rendering use the provider-independent dynamic path; the
+    same governed identity, authority, orchestrator, action renderer, continuation,
+    and transport objects remain in force.
     """
 
     if not settings.enabled:
@@ -63,12 +65,17 @@ def select_teams_conversation_flow(
         context_db=settings.context_db,
         ttl_seconds=settings.context_ttl_seconds,
     )
+    dynamic_response_renderer = select_conversation_response_renderer(
+        dynamic_enabled=True,
+        legacy_renderer=response_renderer,
+        structured_client=structured_client,
+    )
     return DynamicTeamsFlowBridge(
         identity_binder=identity_binder,
         coordinator=coordinator,
         request_factory=request_factory,
         orchestrator=orchestrator,
-        response_renderer=response_renderer,
+        response_renderer=dynamic_response_renderer,
         transport=transport,
         continuation_store=continuation_store,
     )
