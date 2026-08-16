@@ -1,7 +1,7 @@
 """Provider-neutral contracts for governed evidence interpretation.
 
 The reasoner may identify where an answer appears to exist, but it never supplies
-an operational value.  The verifier deterministically dereferences sanitized
+an operational value. The verifier deterministically dereferences sanitized
 provider evidence, rejects request/selector metadata, and fails closed when a
 selection cannot be proven from the evidence bundle.
 """
@@ -32,13 +32,10 @@ class EvidenceReasoningPlan:
     def __post_init__(self) -> None:
         if self.answer_type not in {"direct", "derived", "unavailable"}:
             raise ValueError(f"unsupported answer_type: {self.answer_type}")
-
         if len(self.evidence_paths) > 64:
             raise ValueError("evidence selection exceeds the maximum path count")
-
         if len(set(self.evidence_paths)) != len(self.evidence_paths):
             raise ValueError("evidence paths must be unique")
-
         for path in self.evidence_paths:
             if not isinstance(path, str) or not path.startswith("/"):
                 raise ValueError("evidence paths must be absolute JSON pointers")
@@ -52,10 +49,8 @@ class EvidenceReasoningPlan:
 
         if not self.evidence_paths:
             raise ValueError("supported answers require at least one evidence path")
-
         if self.answer_type == "direct" and self.derivation_required is not None:
             raise ValueError("direct answers cannot request a derivation")
-
         if self.answer_type == "derived" and not self.derivation_required:
             raise ValueError("derived answers require a named derivation")
 
@@ -93,15 +88,31 @@ class VerifiedEvidenceSelection:
 class EvidenceVerifier:
     """Deterministically prove model-selected paths against sanitized evidence.
 
-    Only data below configured evidence roots is dereferenceable.  This prevents
-    selector arguments, request metadata, prompt text, and other orchestration
-    internals from being mistaken for provider evidence.
+    Only data below configured evidence roots is dereferenceable. Orchestration
+    metadata segments are never exposed as candidate facts and cannot be selected
+    directly. Derived answers additionally require an explicitly approved named
+    derivation.
     """
+
+    _NON_FACT_SEGMENTS = frozenset(
+        {
+            "arguments",
+            "evidence_contexts",
+            "metadata",
+            "prompt",
+            "provenance",
+            "request",
+            "requested_facts",
+            "resource_selector",
+            "selector",
+        }
+    )
 
     def __init__(
         self,
         *,
         evidence_roots: Sequence[str] = ("/sections", "/references"),
+        approved_derivations: Sequence[str] = (),
         max_selected_paths: int = 64,
     ) -> None:
         normalized = tuple(self._normalize_root(root) for root in evidence_roots)
@@ -110,6 +121,9 @@ class EvidenceVerifier:
         if max_selected_paths < 1:
             raise ValueError("max_selected_paths must be positive")
         self._evidence_roots = normalized
+        self._approved_derivations = frozenset(
+            item.strip() for item in approved_derivations if item.strip()
+        )
         self._max_selected_paths = max_selected_paths
 
     def verify(
@@ -130,10 +144,18 @@ class EvidenceVerifier:
                 "reasoner selected more evidence paths than verifier permits"
             )
 
+        if plan.answer_type == "derived":
+            derivation = plan.derivation_required or ""
+            if derivation not in self._approved_derivations:
+                raise EvidenceVerificationError(
+                    f"derivation is not approved: {derivation}"
+                )
+
         verified: list[VerifiedEvidence] = []
         for path in plan.evidence_paths:
             normalized = self._normalize_pointer(path)
             self._require_evidence_root(normalized)
+            self._require_fact_path(normalized)
             value = self._resolve_pointer(evidence_bundle, normalized)
             self._require_usable_value(value, normalized)
             provenance = self._nearest_provenance(evidence_bundle, normalized)
@@ -159,9 +181,9 @@ class EvidenceVerifier:
     ) -> tuple[Mapping[str, Any], ...]:
         """Create a model-readable path catalog without inventing semantics.
 
-        Catalog entries expose path, structural type, and nearby provenance.  The
-        raw value is deliberately omitted: an AI reasoner chooses locations while
-        deterministic verification performs the actual dereference afterwards.
+        Entries expose path, structural type, availability, and nearby provenance.
+        Raw operational values are deliberately omitted: an AI reasoner chooses
+        locations while deterministic verification performs dereferencing later.
         """
 
         entries: list[Mapping[str, Any]] = []
@@ -188,6 +210,9 @@ class EvidenceVerifier:
         entries: list[Mapping[str, Any]],
         include_containers: bool,
     ) -> None:
+        if not self._is_fact_path(path):
+            return
+
         if isinstance(value, Mapping):
             if include_containers:
                 entries.append(
@@ -247,6 +272,18 @@ class EvidenceVerifier:
                 return
         raise EvidenceVerificationError(
             f"selected path is outside governed evidence roots: {path}"
+        )
+
+    def _require_fact_path(self, path: str) -> None:
+        if not self._is_fact_path(path):
+            raise EvidenceVerificationError(
+                f"selected path is orchestration metadata, not evidence: {path}"
+            )
+
+    def _is_fact_path(self, path: str) -> bool:
+        return not any(
+            token.casefold() in self._NON_FACT_SEGMENTS
+            for token in self._pointer_tokens(path)
         )
 
     @staticmethod
@@ -336,7 +373,10 @@ class EvidenceVerifier:
         normalized = cls._normalize_pointer(pointer)
         if normalized == "":
             return ()
-        return tuple(cls._unescape_pointer_token(token) for token in normalized[1:].split("/"))
+        return tuple(
+            cls._unescape_pointer_token(token)
+            for token in normalized[1:].split("/")
+        )
 
     @staticmethod
     def _normalize_pointer(pointer: str) -> str:
@@ -361,14 +401,15 @@ class EvidenceVerifier:
 
     @staticmethod
     def _unescape_pointer_token(token: str) -> str:
-        # RFC 6901 requires ~1 to be decoded before ~0.
         return token.replace("~1", "/").replace("~0", "~")
 
     @classmethod
     def _pointer_from_tokens(cls, tokens: Sequence[str]) -> str:
         if not tokens:
             return ""
-        return "/" + "/".join(cls._escape_pointer_token(token) for token in tokens)
+        return "/" + "/".join(
+            cls._escape_pointer_token(token) for token in tokens
+        )
 
     @staticmethod
     def _scalar_type(value: Any) -> str:
