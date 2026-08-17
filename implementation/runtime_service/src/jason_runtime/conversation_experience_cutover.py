@@ -165,8 +165,4 @@ def select_conversation_experience_flow(
         orchestrator=orchestrator,
         text_quality=text_quality,
         transport=transport,
-        # Response-text observation from the transitional dynamic path is deliberately
-        # not composed here. New context persistence will be grounded in verified
-        # resource/evidence identity rather than model extraction from rendered prose.
-        observer=None,
     )
