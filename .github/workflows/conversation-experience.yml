@@ -23,6 +23,7 @@ jobs:
         run: |
           python -m compileall -q \
             implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/conversation_interpretation_quality.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
@@ -39,6 +40,7 @@ jobs:
             implementation/runtime_service/src/jason_runtime/conversation_experience_application.py \
             implementation/runtime_service/src/jason_runtime/main.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -57,6 +59,7 @@ jobs:
         run: |
           python -m pytest \
             implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -78,6 +81,7 @@ jobs:
           ! grep -RInE \
             'AOT-50107|lastLoggedInUser|question.?to.?field|phrase.?to.?provider' \
             implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/conversation_interpretation_quality.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
