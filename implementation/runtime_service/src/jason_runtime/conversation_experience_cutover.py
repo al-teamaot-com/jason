@@ -140,6 +140,7 @@ def select_conversation_experience_flow(
         kernel=ReviewedConversationKernel(
             proposing=experience_pool,
             reviewing=experience_pool,
+            resource_kinds=lambda: _primary_resource_kinds(catalog),
         ),
         fulfillment=GovernedInitialFulfillmentPlanner(catalog=catalog),
         catalog=catalog,
@@ -177,6 +178,23 @@ def select_conversation_experience_flow(
         orchestrator=orchestrator,
         text_quality=text_quality,
         transport=transport,
+    )
+
+
+def _primary_resource_kinds(
+    catalog: RegistryBackedFulfillmentCatalog,
+) -> tuple[str, ...]:
+    """Return runtime-declared structural targets without execution identifiers."""
+
+    return tuple(
+        sorted(
+            {
+                resource_type
+                for capability in catalog.list_available()
+                if capability.role == "primary"
+                for resource_type in capability.resource_types
+            }
+        )
     )
 
 
