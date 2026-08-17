@@ -30,6 +30,7 @@ jobs:
             implementation/orchestrator/evidence_reference.py \
             implementation/orchestrator/conversation_evidence_reasoning.py \
             implementation/orchestrator/conversation_evidence_support.py \
+            implementation/orchestrator/conversation_resource_observation.py \
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
             implementation/orchestrator/progressive_conversation_read.py \
@@ -44,9 +45,11 @@ jobs:
             implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
             implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
+            implementation/orchestrator/tests/test_conversation_resource_observation.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
             implementation/orchestrator/tests/test_teams_conversation_experience.py \
             implementation/runtime_service/tests/test_conversation_experience_cutover.py \
             implementation/runtime_service/tests/test_conversation_experience_application.py
@@ -60,9 +63,11 @@ jobs:
             implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
             implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
+            implementation/orchestrator/tests/test_conversation_resource_observation.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
             implementation/orchestrator/tests/test_teams_conversation_experience.py \
             implementation/runtime_service/tests/test_conversation_experience_cutover.py \
             implementation/runtime_service/tests/test_conversation_experience_application.py \
@@ -79,6 +84,7 @@ jobs:
             implementation/orchestrator/evidence_gap_fulfillment.py \
             implementation/orchestrator/conversation_evidence_reasoning.py \
             implementation/orchestrator/conversation_evidence_support.py \
+            implementation/orchestrator/conversation_resource_observation.py \
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
             implementation/orchestrator/progressive_conversation_read.py \
