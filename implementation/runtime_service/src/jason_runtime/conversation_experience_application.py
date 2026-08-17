@@ -98,14 +98,24 @@ def _settings_from_env(*, runtime_settings, environ) -> ConversationExperienceCu
         "JASON_CONVERSATION_EXPERIENCE_ENABLED",
         default=False,
     )
-    raw_models = str(environ.get("JASON_CONVERSATION_REASONING_MODELS", ""))
-    models = tuple(
-        dict.fromkeys(
-            item.strip()
-            for item in raw_models.split(",")
-            if item.strip()
-        )
+
+    # The short-lived generic variable remains a migration alias. When role-specific
+    # variables are absent it applies to both roles; new deployments should use the
+    # explicit Experience/Work variables so backend cost changes cannot silently alter
+    # the conversational quality tier.
+    legacy_models = _models_env(
+        environ,
+        "JASON_CONVERSATION_REASONING_MODELS",
     )
+    experience_models = _models_env(
+        environ,
+        "JASON_CONVERSATION_EXPERIENCE_MODELS",
+    ) or legacy_models
+    work_models = _models_env(
+        environ,
+        "JASON_CONVERSATION_WORK_MODELS",
+    ) or legacy_models
+
     timeout = _float_env(
         environ,
         "JASON_CONVERSATION_REASONING_TIMEOUT_SECONDS",
@@ -120,10 +130,18 @@ def _settings_from_env(*, runtime_settings, environ) -> ConversationExperienceCu
         enabled=enabled,
         context_db=runtime_settings.dynamic_conversation_context_db,
         context_ttl_seconds=runtime_settings.dynamic_conversation_context_ttl_seconds,
-        reasoning_models=models,
+        experience_models=experience_models,
+        work_models=work_models,
         reasoning_timeout_seconds=timeout,
         max_specialized_reads_per_need=specialized_budget,
     )
+
+
+def _models_env(environ, name: str) -> tuple[str, ...]:
+    raw = str(environ.get(name, ""))
+    if not raw.strip():
+        return ()
+    return tuple(item.strip() for item in raw.split(","))
 
 
 def _bool_env(environ, name: str, *, default: bool) -> bool:
