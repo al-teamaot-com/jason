@@ -49,6 +49,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
             implementation/orchestrator/tests/test_conversation_resource_observation.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
+            implementation/orchestrator/tests/test_conversation_answer_review_contract.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
             implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
@@ -68,6 +69,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
             implementation/orchestrator/tests/test_conversation_resource_observation.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
+            implementation/orchestrator/tests/test_conversation_answer_review_contract.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
             implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
