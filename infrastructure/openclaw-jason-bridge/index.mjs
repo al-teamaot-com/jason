@@ -25,7 +25,6 @@ const HOOK_TIMEOUT_MS = 180_000;
 const BINDING_CONTEXT_TTL_MS = 10 * 60_000;
 const BINDING_APPROVAL_TTL_MS = 5 * 60_000;
 const MAX_BINDING_CONTEXTS = 256;
-const WORKING_ACK_TEXT = "Received - working on that now...";
 
 function asObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -94,40 +93,6 @@ function commandChannel(ctx) {
 
 function agentChannel(ctx) {
   return nonBlank(ctx.channel ?? ctx.messageProvider)?.toLowerCase();
-}
-
-async function sendWorkingAcknowledgement({
-  api,
-  conversationId,
-  accountId,
-  threadId,
-}) {
-  try {
-    const adapter = await api.runtime.channel.outbound.loadAdapter("msteams");
-    if (!adapter?.sendText) {
-      api.logger.warn?.(
-        "jason-bridge: Teams working acknowledgement unavailable; governed request continues",
-      );
-      return false;
-    }
-
-    const cleanAccountId = nonBlank(accountId);
-
-    await adapter.sendText({
-      cfg: api.config,
-      to: conversationId,
-      text: WORKING_ACK_TEXT,
-      ...(cleanAccountId ? { accountId: cleanAccountId } : {}),
-      ...(threadId !== undefined && threadId !== null ? { threadId } : {}),
-    });
-
-    return true;
-  } catch {
-    api.logger.warn?.(
-      "jason-bridge: Teams working acknowledgement failed; governed request continues",
-    );
-    return false;
-  }
 }
 
 function resolvePluginRoot(api) {
@@ -283,8 +248,6 @@ async function forwardGovernedTeamsTurn({
   text,
   microsoftObjectId,
   conversationId,
-  accountId,
-  threadId,
   messageId,
   correlationId,
 }) {
@@ -319,13 +282,6 @@ async function forwardGovernedTeamsTurn({
     api.logger.warn?.("jason-bridge: Teams turn lacks required conversation correlation; denied closed");
     return safeReply("Jason could not validate the conversation context for this request.");
   }
-
-  await sendWorkingAcknowledgement({
-    api,
-    conversationId: cleanConversationId,
-    accountId,
-    threadId,
-  });
 
   try {
     const envelope = buildConversationEnvelope({
@@ -536,8 +492,6 @@ export default definePluginEntry({
             ctx.conversationId ??
             event.sessionKey ??
             ctx.sessionKey,
-          accountId: event.accountId ?? ctx.accountId,
-          threadId: event.threadId ?? ctx.threadId,
           messageId: event.messageId ?? ctx.messageId,
           correlationId: event.runId ?? ctx.runId,
         });
