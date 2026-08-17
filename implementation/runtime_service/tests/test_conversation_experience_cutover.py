@@ -68,12 +68,18 @@ def test_enabled_cutover_keeps_experience_models_separate_from_backend_work_mode
     assert not hasattr(selected, "observer")
     assert (tmp_path / "context.sqlite3").exists()
 
-    experience_backends = selected.experience.kernel.reasoning.backends
+    experience_backends = selected.experience.kernel.proposing.backends
     assert [item.name for item in experience_backends] == [
         "experience:quality-local",
         "experience:quality-fallback",
     ]
     assert [item.client.timeout_seconds for item in experience_backends] == [120, 120]
+    assert [
+        item.name for item in selected.experience.kernel.reviewing.backends
+    ] == [
+        "experience:quality-local",
+        "experience:quality-fallback",
+    ]
 
     work_backends = selected.progressive_reads.gaps.reasoning.backends
     assert [item.name for item in work_backends] == [
@@ -106,7 +112,7 @@ def test_enabled_cutover_defaults_both_roles_to_existing_ollama_model_without_lo
     )
 
     assert [
-        item.name for item in selected.experience.kernel.reasoning.backends
+        item.name for item in selected.experience.kernel.proposing.backends
     ] == ["experience:current-runtime-model"]
     assert [
         item.name for item in selected.progressive_reads.gaps.reasoning.backends
