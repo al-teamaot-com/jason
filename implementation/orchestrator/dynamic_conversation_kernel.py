@@ -405,6 +405,17 @@ def _validate_plan(
         None if clarification_value is None else str(clarification_value).strip() or None
     )
 
+    # Clarification is a stop decision. A structured model can occasionally
+    # emit capability requirements while also declaring that clarification is
+    # required. Requirements must never execute in that state. Discard them
+    # and preserve the clarification so the conversational layer can ask the
+    # human naturally instead of turning a safe stop into a runtime failure.
+    #
+    # This normalization does not choose a provider, capability, target, or
+    # fact. It removes execution requests from a non-executable outcome.
+    if outcome == "clarify" and requirements:
+        requirements = []
+
     # A structured model can occasionally emit the conversational label while
     # simultaneously selecting one or more governed capabilities. Those two
     # fields are contradictory: by contract, "conversation" means that no
