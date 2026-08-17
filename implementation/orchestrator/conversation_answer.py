@@ -304,15 +304,24 @@ def _validate_review(proposal: Mapping[str, Any]) -> ConversationQualityReview:
     }
     if set(proposal) != required:
         raise ConversationAnswerError("quality review shape is invalid")
+    boolean_fields = (
+        "approved",
+        "answers_request",
+        "supported",
+        "natural",
+        "exposes_internal_plumbing",
+    )
+    if any(not isinstance(proposal.get(field), bool) for field in boolean_fields):
+        raise ConversationAnswerError("quality review booleans must be actual booleans")
     raw_claims = proposal.get("unsupported_claims", ())
     if not isinstance(raw_claims, Sequence) or isinstance(raw_claims, (str, bytes)):
         raise ConversationAnswerError("unsupported_claims must be an array")
     return ConversationQualityReview(
-        approved=bool(proposal.get("approved")),
-        answers_request=bool(proposal.get("answers_request")),
-        supported=bool(proposal.get("supported")),
-        natural=bool(proposal.get("natural")),
-        exposes_internal_plumbing=bool(proposal.get("exposes_internal_plumbing")),
+        approved=proposal["approved"],
+        answers_request=proposal["answers_request"],
+        supported=proposal["supported"],
+        natural=proposal["natural"],
+        exposes_internal_plumbing=proposal["exposes_internal_plumbing"],
         unsupported_claims=tuple(
             str(item).strip() for item in raw_claims if str(item).strip()
         ),
