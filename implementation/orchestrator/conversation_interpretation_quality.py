@@ -54,18 +54,18 @@ _EXPERIENCE_INSTRUCTIONS = (
     "to the current subject without naming it again and exactly one relevant active "
     "entity resolves that subject, use that verified entity instead of asking the human "
     "to repeat the target. For target_source verified_entity, copy target_entity_ref "
-    "exactly from entity_ref and target_reference exactly from canonical_id or "
-    "display_name. Clarification is only for a specific missing human choice or input "
-    "that cannot be resolved from verified conversation context or discovered through "
-    "governed evidence and whose value would materially change target, authority, "
-    "action, risk, or meaning. Broad or open-ended read scope is not itself material "
-    "ambiguity. Never ask the human a question whose answer Jason is expected to "
-    "discover from governed evidence, never ask the human to repeat a target already "
+    "exactly from entity_ref, target_kind exactly from kind, and target_reference exactly "
+    "from canonical_id or display_name. Clarification is only for a specific missing "
+    "human choice or input that cannot be resolved from verified conversation context or "
+    "discovered through governed evidence and whose value would materially change target, "
+    "authority, action, risk, or meaning. Broad or open-ended read scope is not itself "
+    "material ambiguity. Never ask the human a question whose answer Jason is expected "
+    "to discover from governed evidence, never ask the human to repeat a target already "
     "resolved by verified context, and never merely restate the human's information "
     "request as a clarification."
 )
 
-_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. The supplied active_entity_refs and active_entities are verified Jason-owned conversational focus; reject a clarification that asks the human to repeat a target already resolved by exactly one relevant active entity. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For a clarification outcome, evaluate captures_human_request, targets_are_relevant, and complete_bounded_request against the clarification's purpose rather than pretending the final information answer should already exist: captures_human_request is true when the question asks for the exact missing discriminator needed to continue; targets_are_relevant is true when the question is correctly aimed at selecting an otherwise unresolved target; complete_bounded_request is true when answering the one bounded question would resolve the material ambiguity. If the missing human input selects among possible targets, clarification_material_choice must be true because the choice changes the target. For non-clarification outcomes, set the two clarification-specific review dimensions to true because they are not applicable. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
+_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. The supplied active_entity_refs and active_entities are verified Jason-owned conversational focus; reject a clarification that asks the human to repeat a target already resolved by exactly one relevant active entity. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For a clarification outcome, evaluate captures_human_request, targets_are_relevant, and complete_bounded_request against the clarification's purpose rather than pretending the final information answer should already exist: captures_human_request is true when the question asks for the exact missing discriminator needed to continue; targets_are_relevant is true when the question is correctly aimed at selecting an otherwise unresolved target; complete_bounded_request is true when answering the one bounded question would resolve the material ambiguity. If the missing human input selects among possible targets, clarification_material_choice must be true because the choice changes the target. For non-clarification outcomes, clarification_requires_missing_human_input and clarification_material_choice are not applicable; Jason does not require either value to be true. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +108,6 @@ class ReviewedConversationKernel:
         information_properties = schema["properties"]["information_needs"]["items"][
             "properties"
         ]
-        # Generation schemas are advisory, but do not ask a model to choose authority
-        # Jason already owns. Canonical validation below remains the authority boundary.
         information_properties["authority"]["enum"] = ["observe"]
         if self.resource_kinds is not None and runtime_resource_kinds:
             information_properties["target_kind"]["enum"] = list(runtime_resource_kinds)
@@ -141,7 +139,7 @@ class ReviewedConversationKernel:
         context_payload: Mapping[str, Any],
         allowed_resource_kinds: tuple[str, ...] | None,
     ) -> ConversationKernelDecision:
-        normalized = _normalize_experience_proposal(proposal)
+        normalized = _normalize_experience_proposal(proposal, context=context)
         decision = _validate_decision(
             proposal=normalized,
             text=text,
@@ -168,11 +166,7 @@ class ReviewedConversationKernel:
         }
         review, _ = self.reviewing.complete_validated(
             system=_REVIEW_INSTRUCTIONS,
-            user=json.dumps(
-                review_payload,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ),
+            user=json.dumps(review_payload, ensure_ascii=False, separators=(",", ":")),
             schema=_review_schema(),
             max_output_tokens=256,
             validator=_validate_review,
@@ -181,13 +175,19 @@ class ReviewedConversationKernel:
             raise ConversationInterpretationQualityError(
                 "conversation interpretation did not pass independent quality review"
             )
+        clarification_quality_failed = (
+            decision.outcome == "clarify"
+            and (
+                not review.clarification_requires_missing_human_input
+                or not review.clarification_material_choice
+            )
+        )
         if (
             not review.captures_human_request
             or not review.targets_are_relevant
             or not review.complete_bounded_request
             or not review.clarification_policy_ok
-            or not review.clarification_requires_missing_human_input
-            or not review.clarification_material_choice
+            or clarification_quality_failed
             or not review.no_internal_routing
             or review.unsupported_operational_claim_risk
         ):
@@ -199,26 +199,26 @@ class ReviewedConversationKernel:
 
 def _normalize_experience_proposal(
     proposal: Mapping[str, Any],
+    *,
+    context: DynamicConversationContext | None = None,
 ) -> Mapping[str, Any]:
     """Project advisory model output onto Jason's mutually exclusive turn contract.
 
-    Some structured-generation runtimes cannot express a true discriminated union, so a
-    model can correctly choose an outcome while also filling fields belonging to another
-    branch. The selected outcome is the structural discriminator; incompatible branch
-    fields are non-authoritative generation noise. Semantic correctness is still judged
-    independently after projection, and wrong discriminators remain invalid.
-
-    Information authority is also not model-owned in this read-only Experience slice.
-    It is fixed to ``observe`` before canonical validation and fulfillment.
+    Outcome-exclusive fields are projected before validation. Information read authority
+    is Jason-owned. When a model selects a verified entity, the entity's resource kind is
+    also Jason-owned metadata and is projected from verified conversation state.
     """
-
     if not isinstance(proposal, Mapping):
         return proposal
 
     _reject_internal_routing_even_if_discarded(proposal)
-
     normalized: dict[str, Any] = dict(proposal)
     outcome = str(normalized.get("outcome", "")).strip().casefold()
+    verified_entities = (
+        {entity.ref: entity for entity in context.entities}
+        if context is not None
+        else {}
+    )
 
     if outcome == "information":
         normalized["clarification_question"] = None
@@ -230,6 +230,15 @@ def _normalize_experience_proposal(
                 if isinstance(raw, Mapping):
                     item = dict(raw)
                     item["authority"] = "observe"
+                    source = str(item.get("target_source", "")).strip().casefold()
+                    raw_entity_ref = item.get("target_entity_ref")
+                    entity_ref = (
+                        None
+                        if raw_entity_ref is None
+                        else str(raw_entity_ref).strip() or None
+                    )
+                    if source == "verified_entity" and entity_ref in verified_entities:
+                        item["target_kind"] = verified_entities[entity_ref].kind
                     needs.append(item)
                 else:
                     needs.append(raw)
@@ -245,25 +254,18 @@ def _normalize_experience_proposal(
 
 
 def _reject_internal_routing_even_if_discarded(proposal: Mapping[str, Any]) -> None:
-    """Do not let outcome projection hide an attempted internal-routing selection."""
-
-    forbidden = sorted(
-        _FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in proposal)
-    )
+    forbidden = sorted(_FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in proposal))
     if forbidden:
         raise ConversationInterpretationQualityError(
             "conversation interpretation attempted internal execution selection"
         )
-
     raw_needs = proposal.get("information_needs", ())
     if not isinstance(raw_needs, Sequence) or isinstance(raw_needs, (str, bytes)):
         return
     for raw in raw_needs:
         if not isinstance(raw, Mapping):
             continue
-        forbidden = sorted(
-            _FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in raw)
-        )
+        forbidden = sorted(_FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in raw))
         if forbidden:
             raise ConversationInterpretationQualityError(
                 "conversation interpretation attempted internal execution selection"
@@ -281,13 +283,7 @@ def _normalize_resource_kinds(
             "runtime resource vocabulary must be a collection"
         )
     normalized = tuple(
-        sorted(
-            {
-                str(item).strip()
-                for item in raw
-                if str(item).strip()
-            }
-        )
+        sorted({str(item).strip() for item in raw if str(item).strip()})
     )
     if len(normalized) > 256:
         raise ConversationInterpretationQualityError(
@@ -297,10 +293,7 @@ def _normalize_resource_kinds(
 
 
 def _context_payload(context: DynamicConversationContext) -> Mapping[str, Any]:
-    entities = {
-        item.ref: item
-        for item in context.entities
-    }
+    entities = {item.ref: item for item in context.entities}
     active_entities = []
     for kind, ref in sorted(context.active_entity_refs.items()):
         entity = entities[ref]
