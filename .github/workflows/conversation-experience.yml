@@ -1,0 +1,41 @@
+name: Validate Conversation Experience Foundation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conversation-experience:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile conversation foundation
+        run: |
+          python -m compileall -q \
+            implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/information_fulfillment.py \
+            implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_information_fulfillment.py
+      - name: Test model-independent conversation and progressive fulfillment
+        run: |
+          python -m pytest \
+            implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_information_fulfillment.py \
+            -q
+      - name: Reject triggering-example production mappings
+        shell: bash
+        run: |
+          ! grep -RInE \
+            'AOT-50107|lastLoggedInUser|question.?to.?field|phrase.?to.?provider' \
+            implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/information_fulfillment.py
