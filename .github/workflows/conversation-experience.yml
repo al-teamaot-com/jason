@@ -25,6 +25,7 @@ jobs:
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/conversation_interpretation_quality.py \
             implementation/orchestrator/model_runtime_adapter.py \
+            implementation/orchestrator/openai_reasoning.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
@@ -44,6 +45,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
             implementation/orchestrator/tests/test_model_runtime_adapter.py \
+            implementation/orchestrator/tests/test_openai_reasoning.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -67,6 +69,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
             implementation/orchestrator/tests/test_model_runtime_adapter.py \
+            implementation/orchestrator/tests/test_openai_reasoning.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -92,6 +95,7 @@ jobs:
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/conversation_interpretation_quality.py \
             implementation/orchestrator/model_runtime_adapter.py \
+            implementation/orchestrator/openai_reasoning.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
