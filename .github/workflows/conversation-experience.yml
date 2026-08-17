@@ -28,6 +28,7 @@ jobs:
             implementation/orchestrator/conversation_experience.py \
             implementation/orchestrator/evidence_gap_fulfillment.py \
             implementation/orchestrator/evidence_reference.py \
+            implementation/orchestrator/conversation_evidence_reasoning.py \
             implementation/orchestrator/conversation_evidence_support.py \
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
@@ -38,6 +39,7 @@ jobs:
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
             implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
+            implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
@@ -51,6 +53,7 @@ jobs:
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
             implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
+            implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
@@ -67,6 +70,7 @@ jobs:
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
             implementation/orchestrator/evidence_gap_fulfillment.py \
+            implementation/orchestrator/conversation_evidence_reasoning.py \
             implementation/orchestrator/conversation_evidence_support.py \
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
