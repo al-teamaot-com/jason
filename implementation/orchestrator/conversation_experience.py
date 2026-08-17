@@ -9,16 +9,14 @@ provider resolution, execution, evidence, approvals, and audit remain unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 from .conversation_kernel import (
     ConversationKernel,
     ConversationKernelDecision,
-    DynamicConversationContext,
     ReasoningAttempt,
 )
+from .dynamic_conversation_kernel import DynamicConversationContext
 from .information_fulfillment import (
-    FulfillmentCapability,
     GovernedInitialFulfillmentPlanner,
     RegistryBackedFulfillmentCatalog,
 )
