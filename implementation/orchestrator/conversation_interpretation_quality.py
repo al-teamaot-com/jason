@@ -48,15 +48,24 @@ _EXPERIENCE_INSTRUCTIONS = (
     + " The Conversation Experience information path is read-only. Jason owns read "
     "authority deterministically, so every information need uses observe authority. "
     "Do not use information needs to encode a requested action or higher authority. "
-    "Clarification is only for a specific missing human choice or input that cannot be "
-    "resolved from verified conversation context or discovered through governed evidence "
-    "and whose value would materially change target, authority, action, risk, or meaning. "
-    "Broad or open-ended read scope is not itself material ambiguity. Never ask the human "
-    "a question whose answer Jason is expected to discover from governed evidence, and "
-    "never merely restate the human's information request as a clarification."
+    "Verified conversation context is authoritative for reference resolution. "
+    "The supplied active_entity_refs and active_entities identify Jason's current "
+    "verified conversational focus by resource kind. When the human naturally refers "
+    "to the current subject without naming it again and exactly one relevant active "
+    "entity resolves that subject, use that verified entity instead of asking the human "
+    "to repeat the target. For target_source verified_entity, copy target_entity_ref "
+    "exactly from entity_ref and target_reference exactly from canonical_id or "
+    "display_name. Clarification is only for a specific missing human choice or input "
+    "that cannot be resolved from verified conversation context or discovered through "
+    "governed evidence and whose value would materially change target, authority, "
+    "action, risk, or meaning. Broad or open-ended read scope is not itself material "
+    "ambiguity. Never ask the human a question whose answer Jason is expected to "
+    "discover from governed evidence, never ask the human to repeat a target already "
+    "resolved by verified context, and never merely restate the human's information "
+    "request as a clarification."
 )
 
-_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For non-clarification outcomes, set the two clarification-specific review dimensions to true because they are not applicable. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
+_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. The supplied active_entity_refs and active_entities are verified Jason-owned conversational focus; reject a clarification that asks the human to repeat a target already resolved by exactly one relevant active entity. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For a clarification outcome, evaluate captures_human_request, targets_are_relevant, and complete_bounded_request against the clarification's purpose rather than pretending the final information answer should already exist: captures_human_request is true when the question asks for the exact missing discriminator needed to continue; targets_are_relevant is true when the question is correctly aimed at selecting an otherwise unresolved target; complete_bounded_request is true when answering the one bounded question would resolve the material ambiguity. If the missing human input selects among possible targets, clarification_material_choice must be true because the choice changes the target. For non-clarification outcomes, set the two clarification-specific review dimensions to true because they are not applicable. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,11 +297,27 @@ def _normalize_resource_kinds(
 
 
 def _context_payload(context: DynamicConversationContext) -> Mapping[str, Any]:
+    entities = {
+        item.ref: item
+        for item in context.entities
+    }
+    active_entities = []
+    for kind, ref in sorted(context.active_entity_refs.items()):
+        entity = entities[ref]
+        active_entities.append(
+            {
+                "kind": kind,
+                "entity_ref": entity.ref,
+                "canonical_id": entity.canonical_id,
+                "display_name": entity.display_name,
+            }
+        )
     return {
         "conversation_id": context.conversation_id,
         "organization_id": context.organization_id,
         "active_topic": context.active_topic,
         "active_entity_refs": dict(context.active_entity_refs),
+        "active_entities": active_entities,
         "entities": [
             {
                 "ref": item.ref,
