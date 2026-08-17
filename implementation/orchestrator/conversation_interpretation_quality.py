@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from .conversation_kernel import (
     ConversationKernelDecision,
     DynamicConversationContext,
     ReasoningAttempt,
     ValidatedReasoningPool,
+    _FORBIDDEN_INTERNAL_KEYS,
     _MAX_TEXT_CHARS,
     _SYSTEM_INSTRUCTIONS,
     _decision_schema,
@@ -40,7 +41,14 @@ class ConversationInterpretationReview:
     unsupported_operational_claim_risk: bool
 
 
-_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. Reject clarification about internal evidence sources or implementation choices. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
+_EXPERIENCE_INSTRUCTIONS = (
+    _SYSTEM_INSTRUCTIONS
+    + " The Conversation Experience information path is read-only. Jason owns read "
+    "authority deterministically, so every information need uses observe authority. "
+    "Do not use information needs to encode a requested action or higher authority."
+)
+
+_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. Reject clarification about internal evidence sources or implementation choices. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,14 +88,17 @@ class ReviewedConversationKernel:
             payload["available_resource_kinds"] = list(runtime_resource_kinds)
 
         schema = _decision_schema(known_refs)
+        information_properties = schema["properties"]["information_needs"]["items"][
+            "properties"
+        ]
+        # Generation schemas are advisory, but do not ask a model to choose authority
+        # Jason already owns. Canonical validation below remains the authority boundary.
+        information_properties["authority"]["enum"] = ["observe"]
         if self.resource_kinds is not None and runtime_resource_kinds:
-            target_kind_schema = schema["properties"]["information_needs"]["items"][
-                "properties"
-            ]["target_kind"]
-            target_kind_schema["enum"] = list(runtime_resource_kinds)
+            information_properties["target_kind"]["enum"] = list(runtime_resource_kinds)
 
         return self.proposing.complete_validated(
-            system=_SYSTEM_INSTRUCTIONS,
+            system=_EXPERIENCE_INSTRUCTIONS,
             user=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             schema=schema,
             max_output_tokens=768,
@@ -113,8 +124,9 @@ class ReviewedConversationKernel:
         context_payload: Mapping[str, Any],
         allowed_resource_kinds: tuple[str, ...] | None,
     ) -> ConversationKernelDecision:
+        normalized = _normalize_experience_proposal(proposal)
         decision = _validate_decision(
-            proposal=proposal,
+            proposal=normalized,
             text=text,
             context=context,
         )
@@ -164,6 +176,79 @@ class ReviewedConversationKernel:
                 "conversation interpretation failed a required quality dimension"
             )
         return decision
+
+
+def _normalize_experience_proposal(
+    proposal: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Project advisory model output onto Jason's mutually exclusive turn contract.
+
+    Some structured-generation runtimes cannot express a true discriminated union, so a
+    model can correctly choose an outcome while also filling fields belonging to another
+    branch. The selected outcome is the structural discriminator; incompatible branch
+    fields are non-authoritative generation noise. Semantic correctness is still judged
+    independently after projection, and wrong discriminators remain invalid.
+
+    Information authority is also not model-owned in this read-only Experience slice.
+    It is fixed to ``observe`` before canonical validation and fulfillment.
+    """
+
+    if not isinstance(proposal, Mapping):
+        return proposal
+
+    _reject_internal_routing_even_if_discarded(proposal)
+
+    normalized: dict[str, Any] = dict(proposal)
+    outcome = str(normalized.get("outcome", "")).strip().casefold()
+
+    if outcome == "information":
+        normalized["clarification_question"] = None
+        normalized["conversational_response"] = None
+        raw_needs = normalized.get("information_needs", ())
+        if isinstance(raw_needs, Sequence) and not isinstance(raw_needs, (str, bytes)):
+            needs: list[Any] = []
+            for raw in raw_needs:
+                if isinstance(raw, Mapping):
+                    item = dict(raw)
+                    item["authority"] = "observe"
+                    needs.append(item)
+                else:
+                    needs.append(raw)
+            normalized["information_needs"] = needs
+    elif outcome == "clarify":
+        normalized["information_needs"] = []
+        normalized["conversational_response"] = None
+    elif outcome == "conversation":
+        normalized["information_needs"] = []
+        normalized["clarification_question"] = None
+
+    return normalized
+
+
+def _reject_internal_routing_even_if_discarded(proposal: Mapping[str, Any]) -> None:
+    """Do not let outcome projection hide an attempted internal-routing selection."""
+
+    forbidden = sorted(
+        _FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in proposal)
+    )
+    if forbidden:
+        raise ConversationInterpretationQualityError(
+            "conversation interpretation attempted internal execution selection"
+        )
+
+    raw_needs = proposal.get("information_needs", ())
+    if not isinstance(raw_needs, Sequence) or isinstance(raw_needs, (str, bytes)):
+        return
+    for raw in raw_needs:
+        if not isinstance(raw, Mapping):
+            continue
+        forbidden = sorted(
+            _FORBIDDEN_INTERNAL_KEYS.intersection(str(key) for key in raw)
+        )
+        if forbidden:
+            raise ConversationInterpretationQualityError(
+                "conversation interpretation attempted internal execution selection"
+            )
 
 
 def _normalize_resource_kinds(
