@@ -123,7 +123,7 @@ def test_bad_cheap_rewrite_can_fall_back_to_stronger_rewriter():
 
 
 def test_reviewer_boolean_contract_is_deterministically_validated():
-    rewriting = FakeClient({"text": "You're welcome."})
+    rewriting = FakeClient()
     malformed_reviewer = FakeClient(
         {
             "approved": "true",
@@ -131,12 +131,12 @@ def test_reviewer_boolean_contract_is_deterministically_validated():
             "natural": True,
             "exposes_internal_plumbing": False,
             "adds_unsupported_operational_claims": False,
-        },
-        review(),
+        }
     )
+    stronger_reviewer = FakeClient(review())
     gate = ConversationTextQualityGate(
         rewriting=pool(rewriting),
-        reviewing=pool(malformed_reviewer),
+        reviewing=pool(malformed_reviewer, stronger_reviewer),
     )
 
     text = gate.finalize(
@@ -146,4 +146,6 @@ def test_reviewer_boolean_contract_is_deterministically_validated():
     )
 
     assert text == "You're welcome."
-    assert len(malformed_reviewer.calls) == 2
+    assert rewriting.calls == []
+    assert len(malformed_reviewer.calls) == 1
+    assert len(stronger_reviewer.calls) == 1
