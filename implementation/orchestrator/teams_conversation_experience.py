@@ -11,11 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from .conversation_answer import ConversationAnswer
-from .conversation_experience import (
-    ConversationExperienceCoordinator,
-    ConversationExperienceResolution,
-)
+from .conversation_experience import ConversationExperienceCoordinator
 from .conversation_text_quality import ConversationTextQualityGate
 from .contracts import OrchestrationRequest, OrchestrationResult
 from .dynamic_conversation_kernel import DynamicConversationContext
@@ -74,6 +70,18 @@ class TeamsConversationExperienceResult:
             raise ValueError("Teams transport message id is required")
         if not self.correlation_id.strip():
             raise ValueError("Teams conversation correlation id is required")
+
+    @property
+    def orchestration_status(self) -> str:
+        """Summarize backend execution without inventing an orchestration for chat-only turns."""
+        if not self.orchestrations:
+            return "not_required"
+        statuses = tuple(item.status.value for item in self.orchestrations)
+        if len(set(statuses)) == 1:
+            return statuses[0]
+        if "succeeded" in statuses:
+            return "partial"
+        return statuses[-1]
 
 
 class BoundTeamsConversationIntentExecutor:
