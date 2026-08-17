@@ -9,7 +9,6 @@ from orchestrator.teams_conversation_flow import (
     ConversationClarificationRequiredError,
     ConversationGuidanceRequiredError,
     ConversationIntentUnresolvedError,
-    TeamsConversationFlowResult,
     TeamsConversationPrincipalEvidence,
     TeamsConversationRequest,
 )
@@ -27,8 +26,12 @@ class ConversationAuditSink(Protocol):
     def append(self, event_type: str, payload: Mapping[str, Any]) -> None: ...
 
 
+class GovernedConversationFlowResult(Protocol):
+    transport_message_id: str
+
+
 class GovernedConversationFlow(Protocol):
-    def handle(self, request: TeamsConversationRequest) -> TeamsConversationFlowResult: ...
+    def handle(self, request: TeamsConversationRequest) -> GovernedConversationFlowResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +362,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 "error_code": "conversation_failed",
             }
 
+        orchestration_status = _conversation_orchestration_status(result)
         self.audit.append(
             "openclaw.teams_conversation_completed",
             {
@@ -366,7 +370,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 "correlation_id": parsed.correlation_id,
                 "machine_identity": machine_identity,
                 "transport_message_id": result.transport_message_id,
-                "orchestration_status": result.orchestration.status.value,
+                "orchestration_status": orchestration_status,
             },
         )
         return {
@@ -374,7 +378,7 @@ class GovernedOpenClawTeamsConversationIngress:
             "correlation_id": parsed.correlation_id,
             "status": "completed",
             "transport_message_id": result.transport_message_id,
-            "orchestration_status": result.orchestration.status.value,
+            "orchestration_status": orchestration_status,
         }
 
     def _freshness_error(
@@ -438,6 +442,22 @@ class GovernedOpenClawTeamsConversationIngress:
             "status": "denied",
             "error_code": reason,
         }
+
+
+def _conversation_orchestration_status(result: GovernedConversationFlowResult) -> str:
+    explicit = getattr(result, "orchestration_status", None)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    orchestration = getattr(result, "orchestration", None)
+    status = getattr(orchestration, "status", None)
+    value = getattr(status, "value", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
+    raise RuntimeError(
+        "governed conversation flow result did not declare orchestration status"
+    )
 
 
 def _clarification_text(candidate_facts: tuple[str, ...]) -> str:
