@@ -113,6 +113,8 @@ Persistent resource context requires provider-governed durable identity resoluti
 
 Jason may present that verified state to a reasoning backend through a provider-neutral active-focus projection. The projection is derived deterministically from Jason-owned `active_entity_refs` and verified entity records; it is not created from model text and does not grant provider or execution authority. When exactly one relevant active entity resolves the current subject, the Conversation Kernel should use that verified entity rather than asking the human to repeat the target. When no verified target resolves the reference, or more than one materially plausible verified target remains, normal clarification policy applies.
 
+Once a reasoning proposal selects a verified `entity_ref`, the identity metadata attached to that entity remains authoritative. The model may not relabel the verified resource kind. At the reviewed Experience boundary Jason may project the canonical verified kind onto the proposal before validation; canonical validation must reject a verified-entity target whose kind conflicts with the verified entity when that projection is not present. Resource discovery may later use other governed resources to satisfy the need, but that does not change what human target the Conversation Kernel identified.
+
 The active-focus projection must remain resource-generic. Adding a future resource kind must not require a phrase table, pronoun table, provider rule, or question-specific mapping.
 
 ### Clarification policy
@@ -126,6 +128,8 @@ Jason must not merely restate the human's requested information as a question, a
 For a clarification that exists solely because the target itself is unresolved, choosing among possible targets is a material target choice. Review logic must not reject a valid target clarification merely because no target has yet been selected; instead it must judge whether one bounded human answer would resolve the material ambiguity.
 
 The Conversation Experience reviewer must explicitly distinguish genuine missing human input from self-answerable uncertainty. A clarification that does not require new human input or whose missing choice would not materially change target, authority, action, risk, or meaning must be rejected and retried or escalated behind the interface boundary.
+
+Review dimensions are outcome-applicable rather than synthetic truth values. Dimensions that specifically ask whether a clarification requires missing human input or represents a material choice are enforced only when the selected outcome is `clarify`. An information or ordinary-conversation review is not rejected merely because a reviewer naturally marks those clarification-only dimensions false as not applicable. Safety, completeness, target relevance where applicable, internal-routing, and unsupported-claim checks remain enforced independently.
 
 ### Human-facing response behavior
 
@@ -185,7 +189,9 @@ The Conversation Experience must not rely on:
 - model-selected authority for read-only information needs;
 - action execution authority smuggled through an information-read contract;
 - clarification that simply returns a self-answerable factual question to the human;
-- asking a human to repeat a target that Jason has already resolved into verified active conversation state.
+- asking a human to repeat a target that Jason has already resolved into verified active conversation state;
+- allowing model text to relabel the kind of an already-verified entity;
+- requiring arbitrary truth values for review dimensions that are not applicable to the selected outcome.
 
 ## Acceptance criteria
 
@@ -197,8 +203,10 @@ Conversation Experience acceptance should cover behavioral classes across unrela
 - cross-resource or cross-provider inquiry;
 - verified follow-up reference;
 - verified active-focus resolution across unrelated resource kinds;
+- deterministic preservation of verified entity metadata;
 - material ambiguity;
 - non-material broad or open-ended read scope that must not cause clarification;
+- outcome-applicable semantic review dimensions;
 - unavailable evidence;
 - permission denial;
 - approval-required action;
