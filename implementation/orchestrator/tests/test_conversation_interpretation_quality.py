@@ -8,6 +8,7 @@ from orchestrator.conversation_kernel import (
     ReasoningBackend,
     ValidatedReasoningPool,
 )
+from orchestrator.dynamic_conversation_kernel import ConversationEntity
 
 
 class FakeClient:
@@ -37,6 +38,25 @@ def context():
         conversation_id="conv-1",
         principal_id="person-al",
         organization_id="aot",
+    )
+
+
+def verified_endpoint_context():
+    return DynamicConversationContext(
+        conversation_id="conv-verified",
+        principal_id="person-al",
+        organization_id="aot",
+        entities=(
+            ConversationEntity(
+                ref="verified-endpoint-1",
+                kind="endpoint",
+                canonical_id="resource-9",
+                display_name="DEVICE-9",
+                provenance="verified synthetic evidence",
+            ),
+        ),
+        active_entity_refs={"endpoint": "verified-endpoint-1"},
+        active_topic="endpoint condition",
     )
 
 
@@ -78,13 +98,23 @@ def proposal(*, need="current requested value", outcome="information"):
     }
 
 
-def review(*, approved=True, complete=True, clarification_ok=True, claims=False):
+def review(
+    *,
+    approved=True,
+    complete=True,
+    clarification_ok=True,
+    missing_human_input=True,
+    material_choice=True,
+    claims=False,
+):
     return {
         "approved": approved,
         "captures_human_request": approved,
         "targets_are_relevant": approved,
         "complete_bounded_request": complete,
         "clarification_policy_ok": clarification_ok,
+        "clarification_requires_missing_human_input": missing_human_input,
+        "clarification_material_choice": material_choice,
         "no_internal_routing": approved,
         "unsupported_operational_claim_risk": claims,
     }
@@ -165,7 +195,13 @@ def test_internal_evidence_source_clarification_can_be_rejected_as_policy_violat
     )
     good = FakeClient(proposal())
     reviewer = FakeClient(
-        {**review(), "approved": False, "clarification_policy_ok": False},
+        {
+            **review(),
+            "approved": False,
+            "clarification_policy_ok": False,
+            "clarification_requires_missing_human_input": False,
+            "clarification_material_choice": False,
+        },
         review(),
     )
     kernel = ReviewedConversationKernel(proposing=pool(bad, good), reviewing=pool(reviewer))
@@ -188,6 +224,73 @@ def test_material_clarification_can_pass_review_without_execution_plan():
     assert decision.information_needs == ()
 
 
+def test_self_answerable_clarification_is_rejected_and_bounded_read_can_replace_it():
+    bad = FakeClient(
+        {
+            "outcome": "clarify",
+            "information_needs": [],
+            "clarification_question": "What additional current problems are present on this endpoint?",
+            "conversational_response": None,
+            "topic": "endpoint condition",
+        }
+    )
+    good = FakeClient(
+        {
+            "outcome": "information",
+            "information_needs": [
+                {
+                    "target_kind": "endpoint",
+                    "target_source": "verified_entity",
+                    "target_reference": "DEVICE-9",
+                    "target_entity_ref": "verified-endpoint-1",
+                    "need": "additional current problems or abnormal conditions",
+                    "authority": "observe",
+                    "temporal_scope": "current",
+                    "completeness": "sufficient",
+                    "relationship": "same verified endpoint",
+                }
+            ],
+            "clarification_question": None,
+            "conversational_response": None,
+            "topic": "endpoint condition",
+        }
+    )
+    reviewer = FakeClient(
+        review(
+            approved=False,
+            clarification_ok=False,
+            missing_human_input=False,
+            material_choice=False,
+        ),
+        review(),
+    )
+    kernel = ReviewedConversationKernel(proposing=pool(bad, good), reviewing=pool(reviewer))
+
+    decision, attempts = kernel.interpret(
+        text="Are there any additional current problems with it?",
+        context=verified_endpoint_context(),
+    )
+
+    assert decision.outcome == "information"
+    assert decision.information_needs[0].target.entity_ref == "verified-endpoint-1"
+    assert [item.outcome for item in attempts] == ["rejected", "accepted"]
+
+
+def test_clarification_review_contract_requires_missing_human_input_and_material_choice():
+    proposing = FakeClient(proposal(outcome="clarify"))
+    reviewer = FakeClient(review())
+    kernel = ReviewedConversationKernel(proposing=pool(proposing), reviewing=pool(reviewer))
+
+    kernel.interpret(text="Check that customer.", context=context())
+
+    system, _, schema, _ = reviewer.calls[0]
+    required = set(schema["required"])
+    assert "clarification_requires_missing_human_input" in required
+    assert "clarification_material_choice" in required
+    assert "specific human-supplied discriminator" in system.casefold()
+    assert "broad, open-ended" in system.casefold()
+
+
 def test_malformed_reviewer_boolean_falls_back_to_stronger_reviewer_backend():
     proposing = FakeClient(proposal())
     malformed = FakeClient(
@@ -197,6 +300,8 @@ def test_malformed_reviewer_boolean_falls_back_to_stronger_reviewer_backend():
             "targets_are_relevant": True,
             "complete_bounded_request": True,
             "clarification_policy_ok": True,
+            "clarification_requires_missing_human_input": True,
+            "clarification_material_choice": True,
             "no_internal_routing": True,
             "unsupported_operational_claim_risk": False,
         }
