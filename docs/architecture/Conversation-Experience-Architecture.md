@@ -47,11 +47,27 @@ The Conversation Kernel operates at the provider-independent information-need le
 - relationships;
 - temporal scope;
 - completeness;
-- requested authority such as observe versus action;
 - verified conversation references;
-- whether material ambiguity requires clarification.
+- whether material ambiguity requires clarification;
+- whether the human is asking for read-only information, ordinary conversation, or a separately governed action path.
 
-It must not select or expose providers, connectors, capability IDs, API operations, shell commands, agents, or internal evidence locations.
+It must not select or expose providers, connectors, capability IDs, API operations, shell commands, agents, internal evidence locations, or operational authority.
+
+### Information-read authority is deterministic
+
+A provider-independent information need in the Conversation Experience is read-only. Its operational authority is `observe` and is owned by Jason deterministically; a reasoning model does not choose, raise, or transform that authority.
+
+A human request for a consequential action must use Jason's separately governed action contract and normal Central Orchestrator authorization, policy, approval, execution, evidence, and audit controls. An action request must never gain execution authority by being represented as an information need.
+
+This separation keeps the conversational contract smaller while strengthening identity-first authorization: the model describes human meaning, while Jason decides what authority the selected governed path can possess.
+
+### Structured outcome projection
+
+Structured-generation backends may be unable to express Jason's conversational outcome contract as a perfect discriminated union. A model can therefore correctly select `information`, `clarify`, or `conversation` while also populating fields belonging to another mutually exclusive branch.
+
+At the reviewed Conversation Experience boundary, the selected outcome is the structural discriminator. Incompatible branch fields may be discarded as non-authoritative generation noise before canonical validation. This projection does not repair a wrong outcome and does not bypass semantic review.
+
+Before any incompatible branch is discarded, Jason must still reject attempted internal-routing or execution selections hidden in that branch. After projection, the independent Conversation Experience reviewer must still verify that the selected outcome captures the human request, uses relevant targets, preserves completeness, follows clarification policy, and introduces no unsupported operational claim.
 
 ### Central Orchestrator remains the sole operational authority
 
@@ -155,7 +171,9 @@ The Conversation Experience must not rely on:
 - direct provider calls that bypass the Central Orchestrator;
 - raw model output sent directly to Teams;
 - response-text parsing used to manufacture durable resource identity;
-- multi-agent conversational chains that bypass central orchestration.
+- multi-agent conversational chains that bypass central orchestration;
+- model-selected authority for read-only information needs;
+- action execution authority smuggled through an information-read contract.
 
 ## Acceptance criteria
 
@@ -172,6 +190,7 @@ Conversation Experience acceptance should cover behavioral classes across unrela
 - approval-required action;
 - provider failure;
 - malformed or low-quality model output;
+- contradictory mutually exclusive structured-output branches;
 - incorrect cheap-model evidence/resource ordering;
 - runtime/model retry or escalation;
 - duplicate Teams delivery;
