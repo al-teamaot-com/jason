@@ -15,7 +15,6 @@ from .conversation_experience import ConversationExperienceCoordinator
 from .conversation_text_quality import ConversationTextQualityGate
 from .contracts import OrchestrationRequest, OrchestrationResult
 from .dynamic_conversation_kernel import DynamicConversationContext
-from .dynamic_conversation_observer import DynamicConversationEntityObserver
 from .progressive_conversation_read import ProgressiveConversationReadEngine
 from .teams_conversation_flow import (
     BoundConversationPrincipal,
@@ -159,7 +158,6 @@ class TeamsConversationExperienceFlow:
     orchestrator: ConversationOrchestrator
     text_quality: ConversationTextQualityGate
     transport: TeamsConversationTransport
-    observer: DynamicConversationEntityObserver | None = None
 
     def handle(self, request: TeamsConversationRequest) -> TeamsConversationExperienceResult:
         principal = self.identity_binder.bind(request.identity)
@@ -177,6 +175,7 @@ class TeamsConversationExperienceFlow:
 
         correlation_id = self.request_factory.new_correlation_id()
         orchestrations: tuple[OrchestrationResult, ...] = ()
+        verified_resources = ()
 
         if resolution.decision.outcome == "information":
             executor = BoundTeamsConversationIntentExecutor(
@@ -186,12 +185,13 @@ class TeamsConversationExperienceFlow:
                 identity=request.identity,
                 correlation_id=correlation_id,
             )
-            answer = self.progressive_reads.fulfill(
+            read_result = self.progressive_reads.fulfill_result(
                 question=request.text.strip(),
                 resolution=resolution,
                 executor=executor,
             )
-            response_text = answer.text.strip()
+            response_text = read_result.answer.text.strip()
+            verified_resources = read_result.verified_resources
             orchestrations = tuple(executor.results)
             if not orchestrations:
                 raise RuntimeError(
@@ -223,16 +223,21 @@ class TeamsConversationExperienceFlow:
         if not transport_message_id.strip():
             raise RuntimeError("Teams transport did not return a message identifier")
 
-        if orchestrations and self.observer is not None:
-            observed = self.observer.observe(
-                context=resolution.context,
-                response_text=response_text,
-                provenance=(
-                    "verified Jason Conversation Experience response:"
-                    f"{request.identity.message_id}"
+        # Advance durable entity context only after the human-facing response was
+        # successfully delivered. Identity comes from provider-verified durable resource
+        # resolution, never from parsing rendered prose or promoting a human selector.
+        if verified_resources:
+            resolved_context = resolution.context.with_verified_entities(
+                tuple(item.entity for item in verified_resources),
+                active_kinds={
+                    item.active_kind: item.entity.ref
+                    for item in verified_resources
+                },
+                resolutions=tuple(
+                    item.resolution for item in verified_resources
                 ),
             )
-            self.context_store.put(observed)
+            self.context_store.put(resolved_context)
 
         return TeamsConversationExperienceResult(
             response_text=response_text,
