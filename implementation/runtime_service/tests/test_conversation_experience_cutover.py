@@ -64,7 +64,7 @@ def test_enabled_cutover_composes_one_teams_experience_around_existing_governed_
     assert selected.request_factory is factory
     assert selected.orchestrator is orchestrator
     assert selected.transport is transport
-    assert selected.observer is None
+    assert not hasattr(selected, "observer")
     assert (tmp_path / "context.sqlite3").exists()
 
     backends = selected.experience.kernel.reasoning.backends
