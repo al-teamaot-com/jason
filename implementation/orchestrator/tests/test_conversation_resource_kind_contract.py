@@ -69,6 +69,8 @@ def approved_review():
         "targets_are_relevant": True,
         "complete_bounded_request": True,
         "clarification_policy_ok": True,
+        "clarification_requires_missing_human_input": True,
+        "clarification_material_choice": True,
         "no_internal_routing": True,
         "unsupported_operational_claim_risk": False,
     }
@@ -91,7 +93,6 @@ def test_unregistered_kind_is_rejected_before_review_and_next_backend_can_use_ru
 
     assert decision.information_needs[0].target.kind == "endpoint"
     assert [item.outcome for item in attempts] == ["rejected", "accepted"]
-    # The invalid resource vocabulary never reaches the semantic reviewer.
     assert len(reviewer.calls) == 1
 
 
