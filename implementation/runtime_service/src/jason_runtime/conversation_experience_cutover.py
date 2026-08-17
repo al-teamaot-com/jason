@@ -20,8 +20,8 @@ from orchestrator.conversation_evidence_support import (
     ConversationEvidenceSupportExtractor,
 )
 from orchestrator.conversation_experience import ConversationExperienceCoordinator
+from orchestrator.conversation_interpretation_quality import ReviewedConversationKernel
 from orchestrator.conversation_kernel import (
-    ConversationKernel,
     ReasoningBackend,
     ValidatedReasoningPool,
 )
@@ -137,7 +137,10 @@ def select_conversation_experience_flow(
     catalog = RegistryBackedFulfillmentCatalog(registry=capabilities)
     intent_builder = InformationNeedIntentBuilder(reasoning=work_pool)
     experience = ConversationExperienceCoordinator(
-        kernel=ConversationKernel(reasoning=experience_pool),
+        kernel=ReviewedConversationKernel(
+            proposing=experience_pool,
+            reviewing=experience_pool,
+        ),
         fulfillment=GovernedInitialFulfillmentPlanner(catalog=catalog),
         catalog=catalog,
         intent_builder=intent_builder,
