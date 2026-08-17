@@ -81,9 +81,10 @@ class ReviewedConversationKernel:
 
         schema = _decision_schema(known_refs)
         if self.resource_kinds is not None and runtime_resource_kinds:
-            schema["properties"]["information_needs"]["items"]["properties"]{
-                "target_kind"
-            }["enum"] = list(runtime_resource_kinds)
+            target_kind_schema = schema["properties"]["information_needs"]["items"][
+                "properties"
+            ]["target_kind"]
+            target_kind_schema["enum"] = list(runtime_resource_kinds)
 
         return self.proposing.complete_validated(
             system=_SYSTEM_INSTRUCTIONS,
