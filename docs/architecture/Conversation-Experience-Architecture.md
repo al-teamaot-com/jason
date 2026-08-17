@@ -111,13 +111,19 @@ Conversation continuity is Jason-owned state, not model memory. A literal name o
 
 Persistent resource context requires provider-governed durable identity resolution and corroborating evidence. Context such as `it`, `that endpoint`, `he`, `the ticket`, or similar references must resolve from verified state or trigger material clarification.
 
+Jason may present that verified state to a reasoning backend through a provider-neutral active-focus projection. The projection is derived deterministically from Jason-owned `active_entity_refs` and verified entity records; it is not created from model text and does not grant provider or execution authority. When exactly one relevant active entity resolves the current subject, the Conversation Kernel should use that verified entity rather than asking the human to repeat the target. When no verified target resolves the reference, or more than one materially plausible verified target remains, normal clarification policy applies.
+
+The active-focus projection must remain resource-generic. Adding a future resource kind must not require a phrase table, pronoun table, provider rule, or question-specific mapping.
+
 ### Clarification policy
 
 Jason asks for clarification only when choosing without the human would materially change target, authority, action, risk, or meaning.
 
 A valid clarification must obtain a specific human-supplied discriminator, choice, or input that is genuinely missing after considering verified conversation context and that Jason is not expected to discover from governed evidence. Broad, open-ended, comprehensive, or diagnostic read scope is not by itself material ambiguity.
 
-Jason must not merely restate the human's requested information as a question, ask the human to answer a factual lookup that Jason is expected to perform, or ask the human to choose an internal provider, connector, registry, log, evidence source, API, or implementation path merely because Jason has not yet discovered how to fulfill the information need.
+Jason must not merely restate the human's requested information as a question, ask the human to answer a factual lookup that Jason is expected to perform, ask the human to repeat a target already resolved by verified conversation state, or ask the human to choose an internal provider, connector, registry, log, evidence source, API, or implementation path merely because Jason has not yet discovered how to fulfill the information need.
+
+For a clarification that exists solely because the target itself is unresolved, choosing among possible targets is a material target choice. Review logic must not reject a valid target clarification merely because no target has yet been selected; instead it must judge whether one bounded human answer would resolve the material ambiguity.
 
 The Conversation Experience reviewer must explicitly distinguish genuine missing human input from self-answerable uncertainty. A clarification that does not require new human input or whose missing choice would not materially change target, authority, action, risk, or meaning must be rejected and retried or escalated behind the interface boundary.
 
@@ -178,7 +184,8 @@ The Conversation Experience must not rely on:
 - multi-agent conversational chains that bypass central orchestration;
 - model-selected authority for read-only information needs;
 - action execution authority smuggled through an information-read contract;
-- clarification that simply returns a self-answerable factual question to the human.
+- clarification that simply returns a self-answerable factual question to the human;
+- asking a human to repeat a target that Jason has already resolved into verified active conversation state.
 
 ## Acceptance criteria
 
@@ -189,6 +196,7 @@ Conversation Experience acceptance should cover behavioral classes across unrela
 - multiple information needs for one resource;
 - cross-resource or cross-provider inquiry;
 - verified follow-up reference;
+- verified active-focus resolution across unrelated resource kinds;
 - material ambiguity;
 - non-material broad or open-ended read scope that must not cause clarification;
 - unavailable evidence;
