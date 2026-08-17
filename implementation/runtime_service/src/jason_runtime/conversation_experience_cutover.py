@@ -42,14 +42,22 @@ from orchestrator.teams_conversation_experience import TeamsConversationExperien
 
 @dataclass(frozen=True, slots=True)
 class ConversationExperienceCutoverSettings:
-    """Runtime-owned rollout and cost/latency controls for the Conversation Experience."""
+    """Runtime-owned rollout, model-role, cost, and latency controls.
+
+    ``experience_models`` protect the human interaction: interpretation, quality review,
+    and final wording. ``work_models`` perform cheaper backend search/selection work.
+    Changing backend work models therefore does not require changing the model tier used
+    to preserve the Teams experience. Either role may still use a list ordered from lower
+    cost to stronger fallback.
+    """
 
     enabled: bool = False
     context_db: Path = Path(
         "/var/lib/jason/openclaw/dynamic-conversation-context.sqlite3"
     )
     context_ttl_seconds: int = 3600
-    reasoning_models: tuple[str, ...] = ()
+    experience_models: tuple[str, ...] = ()
+    work_models: tuple[str, ...] = ()
     reasoning_timeout_seconds: float = 90.0
     max_specialized_reads_per_need: int = 8
 
@@ -58,13 +66,8 @@ class ConversationExperienceCutoverSettings:
             raise ValueError(
                 "Conversation Experience context ttl must be between 60 and 86400 seconds"
             )
-        cleaned = tuple(model.strip() for model in self.reasoning_models if model.strip())
-        if len(cleaned) != len(set(cleaned)):
-            raise ValueError("Conversation Experience reasoning models must be unique")
-        if self.enabled and self.reasoning_models and cleaned != self.reasoning_models:
-            raise ValueError(
-                "Conversation Experience reasoning models must be non-empty normalized names"
-            )
+        _validate_models("experience", self.experience_models)
+        _validate_models("work", self.work_models)
         if self.reasoning_timeout_seconds < 15 or self.reasoning_timeout_seconds > 300:
             raise ValueError(
                 "Conversation Experience reasoning timeout must be between 15 and 300 seconds"
@@ -98,62 +101,68 @@ def select_conversation_experience_flow(
     if not settings.enabled:
         return fallback_flow
 
-    models = settings.reasoning_models or (default_ollama_model.strip(),)
-    if not models or any(not model.strip() for model in models):
-        raise ValueError(
-            "Conversation Experience requires at least one configured reasoning model"
-        )
+    default_model = default_ollama_model.strip()
+    if not default_model:
+        raise ValueError("Conversation Experience requires a default reasoning model")
     if not ollama_url.strip():
         raise ValueError("Conversation Experience Ollama URL is required")
 
+    experience_models = settings.experience_models or (default_model,)
+    work_models = settings.work_models or (default_model,)
     transport_client = http_transport or UrlLibJsonHttpTransport()
-    backends = tuple(
-        ReasoningBackend(
-            name=model,
-            client=OllamaStructuredJsonClient(
-                transport=transport_client,
-                model=model,
-                base_url=ollama_url.strip(),
-                timeout_seconds=settings.reasoning_timeout_seconds,
-            ),
-        )
-        for model in models
+
+    experience_pool = _ollama_pool(
+        models=experience_models,
+        transport=transport_client,
+        ollama_url=ollama_url.strip(),
+        timeout_seconds=settings.reasoning_timeout_seconds,
+        role_prefix="experience",
     )
-    reasoning = ValidatedReasoningPool(backends=backends)
+    work_pool = _ollama_pool(
+        models=work_models,
+        transport=transport_client,
+        ollama_url=ollama_url.strip(),
+        timeout_seconds=settings.reasoning_timeout_seconds,
+        role_prefix="work",
+    )
+    drafting_pool = _combined_pool(
+        work_pool=work_pool,
+        experience_pool=experience_pool,
+    )
 
     context_store = SQLiteDynamicConversationContextStore(
         settings.context_db,
         ttl_seconds=settings.context_ttl_seconds,
     )
     catalog = RegistryBackedFulfillmentCatalog(registry=capabilities)
-    intent_builder = InformationNeedIntentBuilder(reasoning=reasoning)
+    intent_builder = InformationNeedIntentBuilder(reasoning=work_pool)
     experience = ConversationExperienceCoordinator(
-        kernel=ConversationKernel(reasoning=reasoning),
+        kernel=ConversationKernel(reasoning=experience_pool),
         fulfillment=GovernedInitialFulfillmentPlanner(catalog=catalog),
         catalog=catalog,
         intent_builder=intent_builder,
     )
     evidence_reasoner = ValidatedConversationEvidenceReasoner(
-        selecting=reasoning,
-        reviewing=reasoning,
+        selecting=work_pool,
+        reviewing=experience_pool,
     )
     progressive_reads = ProgressiveConversationReadEngine(
         evidence=ConversationEvidenceSupportExtractor(reasoner=evidence_reasoner),
         gaps=EvidenceGapFulfillmentPlanner(
             catalog=catalog,
-            reasoning=reasoning,
+            reasoning=work_pool,
         ),
         catalog=catalog,
         intent_builder=intent_builder,
         answerer=GroundedConversationAnswerer(
-            drafting=reasoning,
-            reviewing=reasoning,
+            drafting=drafting_pool,
+            reviewing=experience_pool,
         ),
         max_specialized_reads_per_need=settings.max_specialized_reads_per_need,
     )
     text_quality = ConversationTextQualityGate(
-        rewriting=reasoning,
-        reviewing=reasoning,
+        rewriting=drafting_pool,
+        reviewing=experience_pool,
     )
 
     return TeamsConversationExperienceFlow(
@@ -166,3 +175,57 @@ def select_conversation_experience_flow(
         text_quality=text_quality,
         transport=transport,
     )
+
+
+def _ollama_pool(
+    *,
+    models: tuple[str, ...],
+    transport: UrlLibJsonHttpTransport,
+    ollama_url: str,
+    timeout_seconds: float,
+    role_prefix: str,
+) -> ValidatedReasoningPool:
+    return ValidatedReasoningPool(
+        backends=tuple(
+            ReasoningBackend(
+                name=f"{role_prefix}:{model}",
+                client=OllamaStructuredJsonClient(
+                    transport=transport,
+                    model=model,
+                    base_url=ollama_url,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            for model in models
+        )
+    )
+
+
+def _combined_pool(
+    *,
+    work_pool: ValidatedReasoningPool,
+    experience_pool: ValidatedReasoningPool,
+) -> ValidatedReasoningPool:
+    backends: list[ReasoningBackend] = []
+    seen_clients: set[tuple[str, str]] = set()
+    for backend in (*work_pool.backends, *experience_pool.backends):
+        model = str(getattr(backend.client, "model", "")).strip()
+        base_url = str(getattr(backend.client, "base_url", "")).strip()
+        key = (base_url, model)
+        if key in seen_clients:
+            continue
+        seen_clients.add(key)
+        backends.append(backend)
+    return ValidatedReasoningPool(backends=tuple(backends))
+
+
+def _validate_models(role: str, models: tuple[str, ...]) -> None:
+    cleaned = tuple(model.strip() for model in models if model.strip())
+    if cleaned != models:
+        raise ValueError(
+            f"Conversation Experience {role} models must be non-empty normalized names"
+        )
+    if len(cleaned) != len(set(cleaned)):
+        raise ValueError(
+            f"Conversation Experience {role} models must be unique"
+        )
