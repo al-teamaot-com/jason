@@ -24,6 +24,7 @@ jobs:
           python -m compileall -q \
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/conversation_interpretation_quality.py \
+            implementation/orchestrator/model_runtime_adapter.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
@@ -42,6 +43,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
+            implementation/orchestrator/tests/test_model_runtime_adapter.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -56,6 +58,7 @@ jobs:
             implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
             implementation/orchestrator/tests/test_teams_conversation_experience.py \
             implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_model_adapter.py \
             implementation/runtime_service/tests/test_conversation_experience_application.py
       - name: Test model-independent conversation and progressive fulfillment
         run: |
@@ -63,6 +66,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
+            implementation/orchestrator/tests/test_model_runtime_adapter.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
@@ -77,6 +81,7 @@ jobs:
             implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
             implementation/orchestrator/tests/test_teams_conversation_experience.py \
             implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_model_adapter.py \
             implementation/runtime_service/tests/test_conversation_experience_application.py \
             -q
       - name: Reject triggering-example production mappings
@@ -86,6 +91,7 @@ jobs:
             'AOT-50107|lastLoggedInUser|question.?to.?field|phrase.?to.?provider' \
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/conversation_interpretation_quality.py \
+            implementation/orchestrator/model_runtime_adapter.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
