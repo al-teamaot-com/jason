@@ -26,10 +26,12 @@ jobs:
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/conversation_experience.py \
+            implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
-            implementation/orchestrator/tests/test_conversation_experience.py
+            implementation/orchestrator/tests/test_conversation_experience.py \
+            implementation/orchestrator/tests/test_conversation_answer.py
       - name: Test model-independent conversation and progressive fulfillment
         run: |
           python -m pytest \
@@ -37,6 +39,7 @@ jobs:
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_experience.py \
+            implementation/orchestrator/tests/test_conversation_answer.py \
             -q
       - name: Reject triggering-example production mappings
         shell: bash
@@ -46,4 +49,5 @@ jobs:
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/information_fulfillment.py \
             implementation/orchestrator/information_need_intent.py \
-            implementation/orchestrator/conversation_experience.py
+            implementation/orchestrator/conversation_experience.py \
+            implementation/orchestrator/conversation_answer.py
