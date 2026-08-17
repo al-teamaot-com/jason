@@ -325,3 +325,45 @@ def test_clarify_outcome_discards_model_requirements_and_remains_non_executable(
     assert plan.requirements == ()
     assert plan.clarification_question == "Which workstation do you mean?"
 
+
+def test_planner_contract_prefers_governed_read_over_evidence_source_clarification():
+    """Evidence-location uncertainty is not material human ambiguity."""
+
+    client = FakeStructuredClient(
+        {
+            "outcome": "plan",
+            "requirements": [
+                {
+                    "capability_id": "endpoint.read.runtime-generated-id",
+                    "purpose": "Read the clearly targeted resource for the requested observation.",
+                    "entity_refs": [],
+                }
+            ],
+            "resolved_references": [],
+            "topic": "resource observation",
+            "clarification_question": None,
+        }
+    )
+
+    DynamicConversationResolver(client=client).resolve(
+        text="What is the current cooling mode for NODE-77?",
+        context=context(),
+        capabilities=capabilities(),
+    )
+
+    system = client.calls[0]["system"]
+
+    assert (
+        "Uncertainty about whether a requested fact exists in returned evidence "
+        "is not material ambiguity."
+    ) in system
+
+    assert (
+        "Do not ask the human to choose or provide an internal provider, registry, "
+        "log, evidence source, or evidence location"
+    ) in system
+
+    # The production rule remains provider/fact independent.
+    assert "Datto" not in system
+    assert "lastLoggedInUser" not in system
+    assert "last logged in" not in system.lower()
