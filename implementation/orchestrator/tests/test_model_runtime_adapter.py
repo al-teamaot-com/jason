@@ -60,22 +60,20 @@ def test_ollama_adapter_recursively_converts_type_unions_without_mutating_canoni
 
     assert canonical == original
     assert adapted["properties"]["label"] == {
-        "maxLength": 80,
         "anyOf": [
-            {"type": "string"},
+            {"type": "string", "maxLength": 80},
             {"type": "null"},
         ],
     }
     assert adapted["properties"]["items"]["items"]["properties"]["count"] == {
-        "minimum": 0,
         "anyOf": [
-            {"type": "integer"},
+            {"type": "integer", "minimum": 0},
             {"type": "null"},
         ],
     }
 
 
-def test_ollama_adapter_preserves_closed_enums_and_unrelated_schema_constraints():
+def test_ollama_adapter_moves_closed_enum_values_into_compatible_union_branches():
     canonical = {
         "type": "object",
         "required": ["mode", "target"],
@@ -95,18 +93,61 @@ def test_ollama_adapter_preserves_closed_enums_and_unrelated_schema_constraints(
 
     assert adapted["required"] == ["mode", "target"]
     assert adapted["properties"]["mode"] == canonical["properties"]["mode"]
-    assert adapted["properties"]["target"]["enum"] == [
-        "resource-a",
-        "resource-b",
-        None,
-    ]
-    assert adapted["properties"]["target"]["anyOf"] == [
-        {"type": "string"},
-        {"type": "null"},
-    ]
+    assert adapted["properties"]["target"] == {
+        "anyOf": [
+            {
+                "type": "string",
+                "enum": ["resource-a", "resource-b"],
+            },
+            {
+                "type": "null",
+                "enum": [None],
+            },
+        ]
+    }
 
 
-def test_ollama_adapter_fails_closed_when_union_rewrite_would_collide_with_existing_anyof():
+def test_ollama_adapter_removes_union_branches_that_cannot_satisfy_enum():
+    canonical = {
+        "type": ["string", "null"],
+        "enum": [None],
+        "maxLength": 80,
+    }
+
+    adapted = ollama_grammar_compatible_schema(canonical)
+
+    assert adapted == {
+        "type": "null",
+        "enum": [None],
+    }
+
+
+def test_ollama_adapter_moves_type_specific_constraints_only_to_applicable_branch():
+    canonical = {
+        "type": ["string", "null"],
+        "minLength": 1,
+        "maxLength": 3,
+        "pattern": "^[A-Z]+$",
+    }
+
+    adapted = ollama_grammar_compatible_schema(canonical)
+
+    assert adapted == {
+        "anyOf": [
+            {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3,
+                "pattern": "^[A-Z]+$",
+            },
+            {
+                "type": "null",
+            },
+        ]
+    }
+
+
+def test_ollama_adapter_fails_closed_when_union_rewrite_would_collide_with_composition():
     with pytest.raises(ValueError, match="cannot safely adapt"):
         ollama_grammar_compatible_schema(
             {
@@ -115,6 +156,16 @@ def test_ollama_adapter_fails_closed_when_union_rewrite_would_collide_with_exist
                     {"const": "alpha"},
                     {"const": None},
                 ],
+            }
+        )
+
+
+def test_ollama_adapter_fails_closed_for_unknown_union_sibling_keyword():
+    with pytest.raises(ValueError, match="unsupported sibling keyword"):
+        ollama_grammar_compatible_schema(
+            {
+                "type": ["string", "null"],
+                "vendorExtension": "unsafe-to-assume",
             }
         )
 
@@ -155,7 +206,7 @@ def test_model_runtime_adapter_changes_only_schema_representation_sent_to_backen
     assert canonical["properties"]["value"]["type"] == ["string", "null"]
 
 
-def test_conversation_contract_remains_canonical_while_runtime_view_removes_type_unions():
+def test_conversation_contract_remains_canonical_while_runtime_view_bounds_known_entity_refs():
     canonical = _decision_schema(("verified-resource-1",))
     adapted = ollama_grammar_compatible_schema(canonical)
 
@@ -171,14 +222,24 @@ def test_conversation_contract_remains_canonical_while_runtime_view_removes_type
     assert canonical_clarification["type"] == ["string", "null"]
     assert canonical_entity_ref["type"] == ["string", "null"]
     assert adapted_clarification["anyOf"] == [
-        {"type": "string"},
+        {
+            "type": "string",
+            "maxLength": 2400,
+        },
         {"type": "null"},
     ]
-    assert adapted_entity_ref["anyOf"] == [
-        {"type": "string"},
-        {"type": "null"},
-    ]
-    assert adapted_entity_ref["enum"] == ["verified-resource-1", None]
+    assert adapted_entity_ref == {
+        "anyOf": [
+            {
+                "type": "string",
+                "enum": ["verified-resource-1"],
+            },
+            {
+                "type": "null",
+                "enum": [None],
+            },
+        ]
+    }
 
     def type_union_count(value):
         if isinstance(value, dict):
@@ -193,3 +254,17 @@ def test_conversation_contract_remains_canonical_while_runtime_view_removes_type
 
     assert type_union_count(canonical) > 0
     assert type_union_count(adapted) == 0
+
+
+def test_conversation_contract_runtime_view_allows_only_null_entity_ref_without_verified_context():
+    canonical = _decision_schema(())
+    adapted = ollama_grammar_compatible_schema(canonical)
+
+    adapted_entity_ref = adapted["properties"]["information_needs"]["items"][
+        "properties"
+    ]["target_entity_ref"]
+
+    assert adapted_entity_ref == {
+        "type": "null",
+        "enum": [None],
+    }
