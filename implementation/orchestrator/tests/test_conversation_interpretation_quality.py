@@ -60,6 +60,25 @@ def verified_endpoint_context():
     )
 
 
+def verified_printer_context():
+    return DynamicConversationContext(
+        conversation_id="conv-printer",
+        principal_id="person-al",
+        organization_id="aot",
+        entities=(
+            ConversationEntity(
+                ref="verified-printer-1",
+                kind="printer",
+                canonical_id="printer-resource-44",
+                display_name="PRINTER-44",
+                provenance="verified synthetic printer evidence",
+            ),
+        ),
+        active_entity_refs={"printer": "verified-printer-1"},
+        active_topic="printer condition",
+    )
+
+
 def proposal(*, need="current requested value", outcome="information"):
     if outcome == "clarify":
         return {
@@ -95,6 +114,35 @@ def proposal(*, need="current requested value", outcome="information"):
         "clarification_question": None,
         "conversational_response": None,
         "topic": "endpoint state",
+    }
+
+
+def verified_proposal(
+    *,
+    kind: str,
+    reference: str,
+    entity_ref: str,
+    need: str,
+    topic: str,
+):
+    return {
+        "outcome": "information",
+        "information_needs": [
+            {
+                "target_kind": kind,
+                "target_source": "verified_entity",
+                "target_reference": reference,
+                "target_entity_ref": entity_ref,
+                "need": need,
+                "authority": "observe",
+                "temporal_scope": "current",
+                "completeness": "sufficient",
+                "relationship": "same verified resource",
+            }
+        ],
+        "clarification_question": None,
+        "conversational_response": None,
+        "topic": topic,
     }
 
 
@@ -235,25 +283,13 @@ def test_self_answerable_clarification_is_rejected_and_bounded_read_can_replace_
         }
     )
     good = FakeClient(
-        {
-            "outcome": "information",
-            "information_needs": [
-                {
-                    "target_kind": "endpoint",
-                    "target_source": "verified_entity",
-                    "target_reference": "DEVICE-9",
-                    "target_entity_ref": "verified-endpoint-1",
-                    "need": "additional current problems or abnormal conditions",
-                    "authority": "observe",
-                    "temporal_scope": "current",
-                    "completeness": "sufficient",
-                    "relationship": "same verified endpoint",
-                }
-            ],
-            "clarification_question": None,
-            "conversational_response": None,
-            "topic": "endpoint condition",
-        }
+        verified_proposal(
+            kind="endpoint",
+            reference="DEVICE-9",
+            entity_ref="verified-endpoint-1",
+            need="additional current problems or abnormal conditions",
+            topic="endpoint condition",
+        )
     )
     reviewer = FakeClient(
         review(
@@ -274,6 +310,71 @@ def test_self_answerable_clarification_is_rejected_and_bounded_read_can_replace_
     assert decision.outcome == "information"
     assert decision.information_needs[0].target.entity_ref == "verified-endpoint-1"
     assert [item.outcome for item in attempts] == ["rejected", "accepted"]
+
+
+def test_verified_active_focus_is_projected_for_unrelated_resource_without_static_mapping():
+    proposing = FakeClient(
+        verified_proposal(
+            kind="printer",
+            reference="PRINTER-44",
+            entity_ref="verified-printer-1",
+            need="current abnormal conditions",
+            topic="printer condition",
+        )
+    )
+    reviewer = FakeClient(review())
+    kernel = ReviewedConversationKernel(
+        proposing=pool(proposing),
+        reviewing=pool(reviewer),
+        resource_kinds=lambda: ("printer",),
+    )
+
+    decision, _ = kernel.interpret(
+        text="What else is wrong with it?",
+        context=verified_printer_context(),
+    )
+
+    system, user, _, _ = proposing.calls[0]
+    payload = json.loads(user)
+    active = payload["context"]["active_entities"]
+    assert active == [
+        {
+            "kind": "printer",
+            "entity_ref": "verified-printer-1",
+            "canonical_id": "printer-resource-44",
+            "display_name": "PRINTER-44",
+        }
+    ]
+    assert "active_entity_refs and active_entities" in system
+    assert "repeat a target already resolved by verified context" in system
+    assert decision.information_needs[0].target.kind == "printer"
+    assert decision.information_needs[0].target.entity_ref == "verified-printer-1"
+    serialized = json.dumps(payload)
+    assert "capability_name" not in serialized
+    assert "provider_id" not in serialized
+    assert "connector_id" not in serialized
+
+
+def test_clarification_review_contract_defines_unresolved_target_as_material_choice():
+    proposing = FakeClient(
+        {
+            "outcome": "clarify",
+            "information_needs": [],
+            "clarification_question": "Which printer do you mean?",
+            "conversational_response": None,
+            "topic": "printer selection",
+        }
+    )
+    reviewer = FakeClient(review())
+    kernel = ReviewedConversationKernel(proposing=pool(proposing), reviewing=pool(reviewer))
+
+    decision, _ = kernel.interpret(text="Check that printer.", context=context())
+
+    system, _, _, _ = reviewer.calls[0]
+    assert decision.outcome == "clarify"
+    assert "selecting an otherwise unresolved target" in system
+    assert "selects among possible targets" in system
+    assert "choice changes the target" in system
 
 
 def test_clarification_review_contract_requires_missing_human_input_and_material_choice():
