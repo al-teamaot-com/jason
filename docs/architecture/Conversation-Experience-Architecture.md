@@ -115,7 +115,11 @@ Persistent resource context requires provider-governed durable identity resoluti
 
 Jason asks for clarification only when choosing without the human would materially change target, authority, action, risk, or meaning.
 
-Jason must not ask the human to choose an internal provider, connector, registry, log, evidence source, API, or implementation path merely because Jason has not yet discovered how to fulfill the information need.
+A valid clarification must obtain a specific human-supplied discriminator, choice, or input that is genuinely missing after considering verified conversation context and that Jason is not expected to discover from governed evidence. Broad, open-ended, comprehensive, or diagnostic read scope is not by itself material ambiguity.
+
+Jason must not merely restate the human's requested information as a question, ask the human to answer a factual lookup that Jason is expected to perform, or ask the human to choose an internal provider, connector, registry, log, evidence source, API, or implementation path merely because Jason has not yet discovered how to fulfill the information need.
+
+The Conversation Experience reviewer must explicitly distinguish genuine missing human input from self-answerable uncertainty. A clarification that does not require new human input or whose missing choice would not materially change target, authority, action, risk, or meaning must be rejected and retried or escalated behind the interface boundary.
 
 ### Human-facing response behavior
 
@@ -173,7 +177,8 @@ The Conversation Experience must not rely on:
 - response-text parsing used to manufacture durable resource identity;
 - multi-agent conversational chains that bypass central orchestration;
 - model-selected authority for read-only information needs;
-- action execution authority smuggled through an information-read contract.
+- action execution authority smuggled through an information-read contract;
+- clarification that simply returns a self-answerable factual question to the human.
 
 ## Acceptance criteria
 
@@ -185,6 +190,7 @@ Conversation Experience acceptance should cover behavioral classes across unrela
 - cross-resource or cross-provider inquiry;
 - verified follow-up reference;
 - material ambiguity;
+- non-material broad or open-ended read scope that must not cause clarification;
 - unavailable evidence;
 - permission denial;
 - approval-required action;
