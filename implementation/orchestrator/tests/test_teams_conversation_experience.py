@@ -17,7 +17,11 @@ from orchestrator.contracts import (
     OrchestrationResult,
     OrchestrationStatus,
 )
-from orchestrator.dynamic_conversation_kernel import DynamicConversationContext
+from orchestrator.dynamic_conversation_kernel import (
+    ConversationEntity,
+    ConversationReferenceResolution,
+    DynamicConversationContext,
+)
 from orchestrator.information_fulfillment import FulfillmentCapability, FulfillmentStep
 from orchestrator.information_need_intent import PlannedInformationNeed
 from orchestrator.teams_conversation_experience import TeamsConversationExperienceFlow
@@ -120,11 +124,12 @@ class FakeOrchestrator:
 
 
 class FakeProgressiveReads:
-    def __init__(self, *, execute_twice=False):
+    def __init__(self, *, execute_twice=False, verified_resources=()):
         self.execute_twice = execute_twice
+        self.verified_resources = tuple(verified_resources)
         self.calls = []
 
-    def fulfill(self, *, question, resolution, executor):
+    def fulfill_result(self, *, question, resolution, executor):
         self.calls.append((question, resolution))
         primary = (
             resolution.intent.intents[0]
@@ -141,9 +146,12 @@ class FakeProgressiveReads:
                     risk="low",
                 )
             )
-        return ConversationAnswer(
-            text="Here is the natural governed answer.",
-            support_ids=("support-1",),
+        return SimpleNamespace(
+            answer=ConversationAnswer(
+                text="Here is the natural governed answer.",
+                support_ids=("support-1",),
+            ),
+            verified_resources=self.verified_resources,
         )
 
 
@@ -343,6 +351,48 @@ def test_progressive_backend_reads_share_one_turn_correlation_identity():
     assert len(transport.sends) == 1
 
 
+def test_verified_resource_identity_is_persisted_only_after_successful_delivery():
+    entity = ConversationEntity(
+        ref="resource-endpoint-verified",
+        kind="endpoint",
+        canonical_id="durable-node-77",
+        display_name="NODE-77",
+        provenance="governed resource resolution:exec-1",
+    )
+    reference = ConversationReferenceResolution(
+        mention="NODE-77",
+        entity_ref=entity.ref,
+        basis="governed resource resolved to durable identity",
+    )
+    progressive = FakeProgressiveReads(
+        verified_resources=(
+            SimpleNamespace(
+                entity=entity,
+                resolution=reference,
+                active_kind="endpoint",
+            ),
+        )
+    )
+    flow, store, _, _, _, _, transport = make_flow(
+        info_resolution(),
+        progressive=progressive,
+    )
+
+    flow.handle(
+        TeamsConversationRequest(
+            text="Tell me about NODE-77.",
+            identity=identity(),
+        )
+    )
+
+    assert len(transport.sends) == 1
+    assert len(store.puts) == 2
+    persisted = store.puts[-1]
+    assert persisted.entity(entity.ref).canonical_id == "durable-node-77"
+    assert persisted.active_entity_refs["endpoint"] == entity.ref
+    assert persisted.recent_resolutions[-1] == reference
+
+
 def test_clarification_is_quality_gated_and_never_executes_a_provider():
     flow, _, _, orchestrator, reads, quality, transport = make_flow(
         non_info_resolution("clarify")
@@ -384,8 +434,6 @@ def test_unbound_identity_stops_before_conversation_reasoning_or_transport():
         resolution,
         binder_principal=False,
     )
-    # Fake binder returns False, which is not None; construct an explicit binder for
-    # the actual unbound contract instead.
     flow = TeamsConversationExperienceFlow(
         identity_binder=FakeIdentityBinder(None),
         context_store=FakeContextStore(),
