@@ -110,7 +110,11 @@ def test_runtime_resource_kinds_are_visible_without_capability_or_provider_ids()
     )
 
     payload = json.loads(proposer.calls[0][1])
+    schema = proposer.calls[0][2]
     assert payload["available_resource_kinds"] == ["printer"]
+    assert schema["properties"]["information_needs"]["items"]["properties"][
+        "target_kind"
+    ]["enum"] == ["printer"]
     serialized = json.dumps(payload)
     assert "capability_name" not in serialized
     assert "provider_id" not in serialized
