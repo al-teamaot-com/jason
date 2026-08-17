@@ -37,6 +37,8 @@ class ConversationInterpretationReview:
     targets_are_relevant: bool
     complete_bounded_request: bool
     clarification_policy_ok: bool
+    clarification_requires_missing_human_input: bool
+    clarification_material_choice: bool
     no_internal_routing: bool
     unsupported_operational_claim_risk: bool
 
@@ -45,10 +47,16 @@ _EXPERIENCE_INSTRUCTIONS = (
     _SYSTEM_INSTRUCTIONS
     + " The Conversation Experience information path is read-only. Jason owns read "
     "authority deterministically, so every information need uses observe authority. "
-    "Do not use information needs to encode a requested action or higher authority."
+    "Do not use information needs to encode a requested action or higher authority. "
+    "Clarification is only for a specific missing human choice or input that cannot be "
+    "resolved from verified conversation context or discovered through governed evidence "
+    "and whose value would materially change target, authority, action, risk, or meaning. "
+    "Broad or open-ended read scope is not itself material ambiguity. Never ask the human "
+    "a question whose answer Jason is expected to discover from governed evidence, and "
+    "never merely restate the human's information request as a clarification."
 )
 
-_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. Reject clarification about internal evidence sources or implementation choices. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
+_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For non-clarification outcomes, set the two clarification-specific review dimensions to true because they are not applicable. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +177,8 @@ class ReviewedConversationKernel:
             or not review.targets_are_relevant
             or not review.complete_bounded_request
             or not review.clarification_policy_ok
+            or not review.clarification_requires_missing_human_input
+            or not review.clarification_material_choice
             or not review.no_internal_routing
             or review.unsupported_operational_claim_risk
         ):
@@ -336,6 +346,8 @@ def _review_schema() -> Mapping[str, Any]:
         "targets_are_relevant": {"type": "boolean"},
         "complete_bounded_request": {"type": "boolean"},
         "clarification_policy_ok": {"type": "boolean"},
+        "clarification_requires_missing_human_input": {"type": "boolean"},
+        "clarification_material_choice": {"type": "boolean"},
         "no_internal_routing": {"type": "boolean"},
         "unsupported_operational_claim_risk": {"type": "boolean"},
     }
@@ -354,6 +366,8 @@ def _validate_review(proposal: Mapping[str, Any]) -> ConversationInterpretationR
         "targets_are_relevant",
         "complete_bounded_request",
         "clarification_policy_ok",
+        "clarification_requires_missing_human_input",
+        "clarification_material_choice",
         "no_internal_routing",
         "unsupported_operational_claim_risk",
     }
@@ -372,6 +386,10 @@ def _validate_review(proposal: Mapping[str, Any]) -> ConversationInterpretationR
         targets_are_relevant=proposal["targets_are_relevant"],
         complete_bounded_request=proposal["complete_bounded_request"],
         clarification_policy_ok=proposal["clarification_policy_ok"],
+        clarification_requires_missing_human_input=proposal[
+            "clarification_requires_missing_human_input"
+        ],
+        clarification_material_choice=proposal["clarification_material_choice"],
         no_internal_routing=proposal["no_internal_routing"],
         unsupported_operational_claim_risk=proposal[
             "unsupported_operational_claim_risk"
