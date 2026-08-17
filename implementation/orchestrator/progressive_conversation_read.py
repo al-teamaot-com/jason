@@ -23,9 +23,16 @@ from .conversation_evidence_support import (
     ConversationEvidenceSupportExtractor,
 )
 from .conversation_experience import ConversationExperienceResolution
+from .conversation_resource_observation import (
+    VerifiedConversationResourceObservation,
+    observe_verified_resource,
+)
 from .contracts import OrchestrationResult
 from .evidence_gap_fulfillment import EvidenceGapFulfillmentPlanner
-from .information_fulfillment import RegistryBackedFulfillmentCatalog
+from .information_fulfillment import (
+    FulfillmentCapability,
+    RegistryBackedFulfillmentCatalog,
+)
 from .information_need_intent import (
     InformationNeedIntentBuilder,
     PlannedInformationNeed,
@@ -41,6 +48,14 @@ class GovernedConversationIntentExecutor(Protocol):
 
 class ConversationAnswerer(Protocol):
     def answer(self, request: ConversationAnswerInput) -> ConversationAnswer: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressiveConversationReadResult:
+    """Human answer plus resource identities established by the governed read itself."""
+
+    answer: ConversationAnswer
+    verified_resources: tuple[VerifiedConversationResourceObservation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +82,20 @@ class ProgressiveConversationReadEngine:
         resolution: ConversationExperienceResolution,
         executor: GovernedConversationIntentExecutor,
     ) -> ConversationAnswer:
+        """Backward-compatible answer-only entrypoint."""
+        return self.fulfill_result(
+            question=question,
+            resolution=resolution,
+            executor=executor,
+        ).answer
+
+    def fulfill_result(
+        self,
+        *,
+        question: str,
+        resolution: ConversationExperienceResolution,
+        executor: GovernedConversationIntentExecutor,
+    ) -> ProgressiveConversationReadResult:
         if resolution.decision.outcome != "information":
             raise ValueError("progressive read engine requires an information outcome")
         if not resolution.planned_information or resolution.intent is None:
@@ -82,7 +111,8 @@ class ProgressiveConversationReadEngine:
         supports: list[ConversationSupport] = []
         limitations: list[ConversationLimitation] = []
         internal_identifiers: list[str] = []
-        available = {
+        observations: list[VerifiedConversationResourceObservation] = []
+        available: dict[str, FulfillmentCapability] = {
             item.capability_name: item
             for item in self.catalog.list_available()
         }
@@ -94,6 +124,13 @@ class ProgressiveConversationReadEngine:
                 intent=intent,
                 result=result,
             )
+            primary_observation = observe_verified_resource(
+                planned=group[0],
+                result=result,
+            )
+            if primary_observation is not None:
+                observations.append(primary_observation)
+
             for need_index, planned in enumerate(group, start=1):
                 assessment = self.evidence.assess(
                     need=planned.need,
@@ -104,7 +141,7 @@ class ProgressiveConversationReadEngine:
                     supports.extend(assessment.supports)
                     continue
 
-                recovered = self._expand_need(
+                recovered, expansion_observations = self._expand_need(
                     question=question,
                     planned=planned,
                     first_assessment=assessment,
@@ -113,6 +150,7 @@ class ProgressiveConversationReadEngine:
                     internal_identifiers=internal_identifiers,
                     support_prefix=f"g{group_index}n{need_index}x",
                 )
+                observations.extend(expansion_observations)
                 if recovered.status == "supported":
                     supports.extend(recovered.supports)
                 else:
@@ -124,13 +162,21 @@ class ProgressiveConversationReadEngine:
                         )
                     )
 
-        return self.answerer.answer(
+        answer = self.answerer.answer(
             ConversationAnswerInput(
                 question=question.strip(),
                 supports=tuple(supports),
                 limitations=tuple(limitations),
                 internal_identifiers=tuple(dict.fromkeys(internal_identifiers)),
             )
+        )
+        by_ref = {
+            item.entity.ref: item
+            for item in observations
+        }
+        return ProgressiveConversationReadResult(
+            answer=answer,
+            verified_resources=tuple(by_ref.values()),
         )
 
     def _expand_need(
@@ -140,12 +186,16 @@ class ProgressiveConversationReadEngine:
         planned: PlannedInformationNeed,
         first_assessment: ConversationEvidenceAssessment,
         executor: GovernedConversationIntentExecutor,
-        available: dict[str, object],
+        available: dict[str, FulfillmentCapability],
         internal_identifiers: list[str],
         support_prefix: str,
-    ) -> ConversationEvidenceAssessment:
+    ) -> tuple[
+        ConversationEvidenceAssessment,
+        tuple[VerifiedConversationResourceObservation, ...],
+    ]:
         attempted = [planned.capability.capability_name]
         last_assessment = first_assessment
+        observations: list[VerifiedConversationResourceObservation] = []
         for expansion_index in range(1, self.max_specialized_reads_per_need + 1):
             step = self.gaps.next_step(
                 need=planned.need,
@@ -162,7 +212,7 @@ class ProgressiveConversationReadEngine:
             specialized = PlannedInformationNeed(
                 need=planned.need,
                 step=step,
-                capability=capability,  # type: ignore[arg-type]
+                capability=capability,
             )
             intent = self.intent_builder.build(
                 human_text=question.strip(),
@@ -178,14 +228,20 @@ class ProgressiveConversationReadEngine:
                 intent=intent,
                 result=result,
             )
+            observation = observe_verified_resource(
+                planned=specialized,
+                result=result,
+            )
+            if observation is not None:
+                observations.append(observation)
             last_assessment = self.evidence.assess(
                 need=planned.need,
                 result=result,
                 support_prefix=f"{support_prefix}{expansion_index}",
             )
             if last_assessment.status == "supported":
-                return last_assessment
-        return last_assessment
+                return last_assessment, tuple(observations)
+        return last_assessment, tuple(observations)
 
 
 def _planned_groups(
