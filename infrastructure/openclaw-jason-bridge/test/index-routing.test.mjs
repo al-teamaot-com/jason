@@ -19,31 +19,14 @@ test("bound Teams conversations have a phrase-agnostic pre-agent compatibility r
   assert.match(source, /forwardGovernedTeamsTurn/);
 });
 
-test("governed Teams turns emit a best-effort working acknowledgement through the public outbound adapter", () => {
-  assert.match(
-    source,
-    /const WORKING_ACK_TEXT = "Received - working on that now\.\.\.";/,
-  );
-  assert.match(
-    source,
-    /api\.runtime\.channel\.outbound\.loadAdapter\("msteams"\)/,
-  );
-  assert.match(source, /await adapter\.sendText\(\{/);
-  assert.match(
-    source,
-    /Teams working acknowledgement failed; governed request continues/,
-  );
-
-  const acknowledgement = source.indexOf(
-    "await sendWorkingAcknowledgement({",
-  );
-
-  const envelope = source.indexOf(
-    "const envelope = buildConversationEnvelope({",
-  );
-
-  assert.ok(acknowledgement >= 0);
-  assert.ok(envelope > acknowledgement);
+test("governed Teams turns remain silent until the governed final response", () => {
+  assert.doesNotMatch(source, /WORKING_ACK_TEXT/);
+  assert.doesNotMatch(source, /sendWorkingAcknowledgement/);
+  assert.doesNotMatch(source, /Received - working on that now/);
+  assert.doesNotMatch(source, /channel\.outbound\.loadAdapter\("msteams"\)/);
+  assert.doesNotMatch(source, /await adapter\.sendText\(\{/);
+  assert.match(source, /const envelope = buildConversationEnvelope\(\{/);
+  assert.match(source, /return safeReply\(replyForRuntimeResult\(result\)\);/);
 });
 
 test("governed Teams turn timeout hierarchy leaves room for bounded Jason stages", () => {
