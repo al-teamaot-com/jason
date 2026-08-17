@@ -24,13 +24,16 @@ jobs:
           python -m compileall -q \
             implementation/orchestrator/conversation_kernel.py \
             implementation/orchestrator/information_fulfillment.py \
+            implementation/orchestrator/information_need_intent.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
-            implementation/orchestrator/tests/test_information_fulfillment.py
+            implementation/orchestrator/tests/test_information_fulfillment.py \
+            implementation/orchestrator/tests/test_information_need_intent.py
       - name: Test model-independent conversation and progressive fulfillment
         run: |
           python -m pytest \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
+            implementation/orchestrator/tests/test_information_need_intent.py \
             -q
       - name: Reject triggering-example production mappings
         shell: bash
@@ -38,4 +41,5 @@ jobs:
           ! grep -RInE \
             'AOT-50107|lastLoggedInUser|question.?to.?field|phrase.?to.?provider' \
             implementation/orchestrator/conversation_kernel.py \
-            implementation/orchestrator/information_fulfillment.py
+            implementation/orchestrator/information_fulfillment.py \
+            implementation/orchestrator/information_need_intent.py
