@@ -110,7 +110,11 @@ def test_enabled_application_cutover_replaces_only_conversation_flow(tmp_path):
     assert flow.request_factory is fallback.request_factory
     assert flow.orchestrator is fallback.orchestrator
     assert flow.transport is transport
-    assert [item.name for item in flow.experience.kernel.reasoning.backends] == [
+    assert [item.name for item in flow.experience.kernel.proposing.backends] == [
+        "experience:quality-local",
+        "experience:quality-fallback",
+    ]
+    assert [item.name for item in flow.experience.kernel.reviewing.backends] == [
         "experience:quality-local",
         "experience:quality-fallback",
     ]
@@ -132,7 +136,7 @@ def test_enabled_cutover_uses_current_runtime_model_when_no_model_list_is_config
     )
 
     flow = selected.ingress.ingress.flow
-    assert [item.name for item in flow.experience.kernel.reasoning.backends] == [
+    assert [item.name for item in flow.experience.kernel.proposing.backends] == [
         "experience:current-local-model"
     ]
     assert [item.name for item in flow.progressive_reads.gaps.reasoning.backends] == [
@@ -153,7 +157,7 @@ def test_legacy_reasoning_model_variable_applies_to_both_roles_during_migration(
     )
 
     flow = selected.ingress.ingress.flow
-    assert [item.name for item in flow.experience.kernel.reasoning.backends] == [
+    assert [item.name for item in flow.experience.kernel.proposing.backends] == [
         "experience:first",
         "experience:second",
     ]
@@ -177,7 +181,7 @@ def test_role_specific_model_variable_overrides_legacy_alias_for_that_role(tmp_p
     )
 
     flow = selected.ingress.ingress.flow
-    assert [item.name for item in flow.experience.kernel.reasoning.backends] == [
+    assert [item.name for item in flow.experience.kernel.proposing.backends] == [
         "experience:quality"
     ]
     assert [item.name for item in flow.progressive_reads.gaps.reasoning.backends] == [
