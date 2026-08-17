@@ -43,6 +43,7 @@ jobs:
             implementation/runtime_service/src/jason_runtime/main.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_applicability.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
             implementation/orchestrator/tests/test_model_runtime_adapter.py \
             implementation/orchestrator/tests/test_openai_reasoning.py \
@@ -67,6 +68,7 @@ jobs:
           python -m pytest \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_applicability.py \
             implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
             implementation/orchestrator/tests/test_model_runtime_adapter.py \
             implementation/orchestrator/tests/test_openai_reasoning.py \
