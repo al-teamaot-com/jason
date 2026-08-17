@@ -35,6 +35,10 @@ from orchestrator.information_fulfillment import (
     RegistryBackedFulfillmentCatalog,
 )
 from orchestrator.information_need_intent import InformationNeedIntentBuilder
+from orchestrator.model_runtime_adapter import (
+    ModelRuntimeAdapter,
+    ollama_grammar_compatible_schema,
+)
 from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
 from orchestrator.progressive_conversation_read import ProgressiveConversationReadEngine
 from orchestrator.teams_conversation_experience import TeamsConversationExperienceFlow
@@ -210,11 +214,14 @@ def _ollama_pool(
         backends=tuple(
             ReasoningBackend(
                 name=f"{role_prefix}:{model}",
-                client=OllamaStructuredJsonClient(
-                    transport=transport,
-                    model=model,
-                    base_url=ollama_url,
-                    timeout_seconds=timeout_seconds,
+                client=ModelRuntimeAdapter(
+                    client=OllamaStructuredJsonClient(
+                        transport=transport,
+                        model=model,
+                        base_url=ollama_url,
+                        timeout_seconds=timeout_seconds,
+                    ),
+                    schema_adapter=ollama_grammar_compatible_schema,
                 ),
             )
             for model in models
