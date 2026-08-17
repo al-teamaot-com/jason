@@ -404,6 +404,21 @@ def _validate_plan(
     clarification = (
         None if clarification_value is None else str(clarification_value).strip() or None
     )
+
+    # A structured model can occasionally emit the conversational label while
+    # simultaneously selecting one or more governed capabilities. Those two
+    # fields are contradictory: by contract, "conversation" means that no
+    # capability invocation is required. When concrete requirements are
+    # present, treat them as the stronger structural signal and normalize the
+    # outcome to "plan". This does not choose a capability, provider, target,
+    # or fact; every requirement has already been bounded to the runtime-
+    # offered catalog and remains subject to Central Orchestrator governance.
+    #
+    # Never perform this normalization for "clarify": ambiguity must continue
+    # to block execution even if a model also emitted capability requirements.
+    if outcome == "conversation" and requirements:
+        outcome = "plan"
+
     return DynamicConversationPlan(
         outcome=outcome,
         requirements=tuple(requirements),

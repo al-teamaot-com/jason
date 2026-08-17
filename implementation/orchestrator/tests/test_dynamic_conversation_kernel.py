@@ -289,3 +289,60 @@ def test_non_plan_outcome_cannot_smuggle_capability_execution():
             context=context(),
             capabilities=capabilities(),
         )
+
+
+def test_conversation_label_with_governed_requirements_normalizes_to_plan():
+    """Repair structural model contradiction without introducing semantic mapping."""
+
+    client = FakeStructuredClient(
+        {
+            "outcome": "conversation",
+            "requirements": [
+                {
+                    "capability_id": "endpoint.read.runtime-generated-id",
+                    "purpose": "Read the endpoint observations requested by the human.",
+                    "entity_refs": ["entity-device-1"],
+                }
+            ],
+            "resolved_references": [],
+            "topic": "endpoint investigation",
+            "clarification_question": None,
+        }
+    )
+
+    plan = DynamicConversationResolver(client=client).resolve(
+        text="Read the requested endpoint information.",
+        context=context(),
+        capabilities=capabilities(),
+    )
+
+    assert plan.outcome == "plan"
+    assert len(plan.requirements) == 1
+    assert plan.requirements[0].capability_id == "endpoint.read.runtime-generated-id"
+
+
+def test_clarify_label_with_requirements_still_fails_closed():
+    """Ambiguity may never be normalized into execution."""
+
+    client = FakeStructuredClient(
+        {
+            "outcome": "clarify",
+            "requirements": [
+                {
+                    "capability_id": "endpoint.read.runtime-generated-id",
+                    "purpose": "Do not execute this ambiguous request.",
+                    "entity_refs": ["entity-device-1"],
+                }
+            ],
+            "resolved_references": [],
+            "topic": "ambiguous endpoint investigation",
+            "clarification_question": "Which endpoint do you mean?",
+        }
+    )
+
+    with pytest.raises(DynamicConversationPlanError, match="non-plan"):
+        DynamicConversationResolver(client=client).resolve(
+            text="Check that one.",
+            context=context(),
+            capabilities=capabilities(),
+        )
