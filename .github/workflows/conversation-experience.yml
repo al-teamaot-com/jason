@@ -32,6 +32,7 @@ jobs:
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
             implementation/orchestrator/progressive_conversation_read.py \
+            implementation/orchestrator/teams_conversation_experience.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
@@ -40,7 +41,8 @@ jobs:
             implementation/orchestrator/tests/test_conversation_evidence_support.py \
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
-            implementation/orchestrator/tests/test_progressive_conversation_read.py
+            implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_teams_conversation_experience.py
       - name: Test model-independent conversation and progressive fulfillment
         run: |
           python -m pytest \
@@ -53,6 +55,7 @@ jobs:
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_teams_conversation_experience.py \
             -q
       - name: Reject triggering-example production mappings
         shell: bash
@@ -67,4 +70,5 @@ jobs:
             implementation/orchestrator/conversation_evidence_support.py \
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
-            implementation/orchestrator/progressive_conversation_read.py
+            implementation/orchestrator/progressive_conversation_read.py \
+            implementation/orchestrator/teams_conversation_experience.py
