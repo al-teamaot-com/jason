@@ -132,7 +132,7 @@ class ValidatedReasoningPool:
                         max_output_tokens=max_output_tokens,
                     )
                     validated = validator(proposal)
-                except Exception as error:  # bounded backend/validation fallback
+                except Exception as error:
                     last_error = error
                     attempts.append(
                         ReasoningAttempt(
@@ -413,6 +413,7 @@ def _validate_decision(
         if forbidden:
             raise ConversationKernelError("information need attempted internal execution selection")
 
+        kind = str(raw.get("target_kind", "")).strip()
         source = str(raw.get("target_source", "")).strip().casefold()
         reference = str(raw.get("target_reference", "")).strip()
         raw_entity_ref = raw.get("target_entity_ref")
@@ -428,6 +429,10 @@ def _validate_decision(
             if entity_ref not in known:
                 raise ConversationKernelError("target_entity_ref is not a verified context entity")
             entity = known[entity_ref]
+            if kind != entity.kind:
+                raise ConversationKernelError(
+                    "verified entity target kind must match verified entity data"
+                )
             if reference not in {entity.canonical_id, entity.display_name}:
                 raise ConversationKernelError(
                     "verified entity target reference must use verified entity data"
@@ -436,7 +441,7 @@ def _validate_decision(
             raise ConversationKernelError("information target source is invalid")
 
         target = InformationTarget(
-            kind=str(raw.get("target_kind", "")).strip(),
+            kind=kind,
             source=source,
             reference=reference,
             entity_ref=entity_ref,
