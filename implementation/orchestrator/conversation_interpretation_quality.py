@@ -65,7 +65,7 @@ _EXPERIENCE_INSTRUCTIONS = (
     "request as a clarification."
 )
 
-_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Approve only when the interpretation captures what the human actually wants, uses relevant grounded targets, includes the complete bounded request, and asks clarification only when choosing would materially change target, authority, action, risk, or meaning. The supplied active_entity_refs and active_entities are verified Jason-owned conversational focus; reject a clarification that asks the human to repeat a target already resolved by exactly one relevant active entity. A clarification is valid only when Jason genuinely needs a specific human-supplied discriminator or choice that is not already resolved by verified context and is not something Jason should discover from governed evidence. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. Reject a clarification that merely restates or paraphrases the human's requested information, asks the human to answer Jason's own factual lookup question, or requests an internal evidence source or implementation choice. For a clarification outcome, evaluate captures_human_request, targets_are_relevant, and complete_bounded_request against the clarification's purpose rather than pretending the final information answer should already exist: captures_human_request is true when the question asks for the exact missing discriminator needed to continue; targets_are_relevant is true when the question is correctly aimed at selecting an otherwise unresolved target; complete_bounded_request is true when answering the one bounded question would resolve the material ambiguity. If the missing human input selects among possible targets, clarification_material_choice must be true because the choice changes the target. For non-clarification outcomes, clarification_requires_missing_human_input and clarification_material_choice are not applicable; Jason does not require either value to be true. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
+_REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interpretation reviewer. Review a provider-independent interpretation against the human message and verified conversation context. Do not choose providers, connectors, capabilities, APIs, tools, evidence locations, or implementation paths. Assess each requested dimension independently; the approved field is advisory only because Jason deterministically owns the final review verdict. For information outcomes, assess whether the interpretation captures what the human actually wants, uses relevant grounded targets, and includes the complete bounded request. For ordinary conversation outcomes, assess whether the response captures the human turn without unsupported operational claims. For clarification outcomes, determine whether a specific human-supplied discriminator or choice is genuinely missing after considering verified conversation context and governed discoverability, and whether choosing without it would materially change target, authority, action, risk, or meaning. The supplied active_entity_refs and active_entities are verified Jason-owned conversational focus; a clarification must not ask the human to repeat a target already resolved by exactly one relevant active entity. Broad, open-ended, or comprehensive read scope is not itself material ambiguity. A clarification must not merely restate or paraphrase the human's requested information, ask the human to answer Jason's own factual lookup question, or request an internal evidence source or implementation choice. If the missing human input selects among possible targets, clarification_material_choice is true because the choice changes the target. For non-clarification outcomes, clarification_requires_missing_human_input and clarification_material_choice are not applicable. Generic target/completeness fields may be not applicable before a target has been selected and do not override the two clarification-specific dimensions. Information outcomes are read-only; reject any requested action represented as an information outcome. Conversation-only outcomes must not assert unverified operational state or claim that an action occurred. Do not repair the interpretation. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,30 +171,45 @@ class ReviewedConversationKernel:
             max_output_tokens=256,
             validator=_validate_review,
         )
-        if not review.approved:
-            raise ConversationInterpretationQualityError(
-                "conversation interpretation did not pass independent quality review"
-            )
-        clarification_quality_failed = (
-            decision.outcome == "clarify"
-            and (
-                not review.clarification_requires_missing_human_input
-                or not review.clarification_material_choice
-            )
-        )
-        if (
-            not review.captures_human_request
-            or not review.targets_are_relevant
-            or not review.complete_bounded_request
-            or not review.clarification_policy_ok
-            or clarification_quality_failed
-            or not review.no_internal_routing
-            or review.unsupported_operational_claim_risk
-        ):
+        if _review_failed_for_outcome(review=review, outcome=decision.outcome):
             raise ConversationInterpretationQualityError(
                 "conversation interpretation failed a required quality dimension"
             )
         return decision
+
+
+def _review_failed_for_outcome(
+    *,
+    review: ConversationInterpretationReview,
+    outcome: str,
+) -> bool:
+    """Apply semantic review dimensions only where they are meaningful.
+
+    The reviewer returns bounded semantic observations, not Jason's final governance
+    verdict. Jason derives pass/fail deterministically so an aggregate model opinion
+    cannot override outcome-specific policy dimensions.
+    """
+
+    if not review.no_internal_routing or review.unsupported_operational_claim_risk:
+        return True
+
+    if outcome == "clarify":
+        return (
+            not review.clarification_requires_missing_human_input
+            or not review.clarification_material_choice
+        )
+
+    if outcome == "information":
+        return (
+            not review.captures_human_request
+            or not review.targets_are_relevant
+            or not review.complete_bounded_request
+        )
+
+    if outcome == "conversation":
+        return not review.captures_human_request
+
+    return True
 
 
 def _normalize_experience_proposal(
