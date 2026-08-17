@@ -80,6 +80,7 @@ def test_enabled_cutover_keeps_experience_models_separate_from_backend_work_mode
         "experience:quality-local",
         "experience:quality-fallback",
     ]
+    assert selected.experience.kernel.resource_kinds is not None
 
     work_backends = selected.progressive_reads.gaps.reasoning.backends
     assert [item.name for item in work_backends] == [
