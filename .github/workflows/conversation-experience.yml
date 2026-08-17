@@ -11,7 +11,7 @@ jobs:
   conversation-experience:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/cap-007/src
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/runtime_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +34,9 @@ jobs:
             implementation/orchestrator/conversation_text_quality.py \
             implementation/orchestrator/progressive_conversation_read.py \
             implementation/orchestrator/teams_conversation_experience.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_application.py \
+            implementation/runtime_service/src/jason_runtime/main.py \
             implementation/orchestrator/tests/test_conversation_kernel.py \
             implementation/orchestrator/tests/test_information_fulfillment.py \
             implementation/orchestrator/tests/test_information_need_intent.py \
@@ -44,7 +47,9 @@ jobs:
             implementation/orchestrator/tests/test_conversation_answer.py \
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
-            implementation/orchestrator/tests/test_teams_conversation_experience.py
+            implementation/orchestrator/tests/test_teams_conversation_experience.py \
+            implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_application.py
       - name: Test model-independent conversation and progressive fulfillment
         run: |
           python -m pytest \
@@ -59,6 +64,8 @@ jobs:
             implementation/orchestrator/tests/test_conversation_text_quality.py \
             implementation/orchestrator/tests/test_progressive_conversation_read.py \
             implementation/orchestrator/tests/test_teams_conversation_experience.py \
+            implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_application.py \
             -q
       - name: Reject triggering-example production mappings
         shell: bash
@@ -75,4 +82,6 @@ jobs:
             implementation/orchestrator/conversation_answer.py \
             implementation/orchestrator/conversation_text_quality.py \
             implementation/orchestrator/progressive_conversation_read.py \
-            implementation/orchestrator/teams_conversation_experience.py
+            implementation/orchestrator/teams_conversation_experience.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_application.py
