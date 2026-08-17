@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .conversation_kernel import (
     ConversationKernelDecision,
@@ -45,10 +45,18 @@ _REVIEW_INSTRUCTIONS = """You are Jason's independent Conversation Kernel interp
 
 @dataclass(frozen=True, slots=True)
 class ReviewedConversationKernel:
-    """Conversation Kernel boundary with independent semantic quality review."""
+    """Conversation Kernel boundary with independent semantic quality review.
+
+    ``resource_kinds`` is a runtime-owned provider-neutral vocabulary source. It exposes
+    only structural resource kinds that the governed fulfillment catalog can actually
+    start from. Capability IDs, providers, connectors, and execution details remain
+    outside the Conversation Kernel. The callable is evaluated on every turn so future
+    registered resources become available without prompt patches or static mappings.
+    """
 
     proposing: ValidatedReasoningPool
     reviewing: ValidatedReasoningPool
+    resource_kinds: Callable[[], tuple[str, ...]] | None = None
 
     def interpret(
         self,
@@ -63,20 +71,35 @@ class ReviewedConversationKernel:
             raise ValueError("conversation text exceeds safety bound")
 
         known_refs = tuple(entity.ref for entity in context.entities)
-        payload = {
+        runtime_resource_kinds = _normalize_resource_kinds(self.resource_kinds)
+        payload: dict[str, Any] = {
             "message": clean_text,
             "context": _context_payload(context),
         }
+        if self.resource_kinds is not None:
+            payload["available_resource_kinds"] = list(runtime_resource_kinds)
+
+        schema = _decision_schema(known_refs)
+        if self.resource_kinds is not None and runtime_resource_kinds:
+            schema["properties"]["information_needs"]["items"]["properties"]{
+                "target_kind"
+            }["enum"] = list(runtime_resource_kinds)
+
         return self.proposing.complete_validated(
             system=_SYSTEM_INSTRUCTIONS,
             user=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            schema=_decision_schema(known_refs),
+            schema=schema,
             max_output_tokens=768,
             validator=lambda proposal: self._validate_and_review(
                 proposal=proposal,
                 text=clean_text,
                 context=context,
                 context_payload=payload["context"],
+                allowed_resource_kinds=(
+                    runtime_resource_kinds
+                    if self.resource_kinds is not None
+                    else None
+                ),
             ),
         )
 
@@ -87,12 +110,27 @@ class ReviewedConversationKernel:
         text: str,
         context: DynamicConversationContext,
         context_payload: Mapping[str, Any],
+        allowed_resource_kinds: tuple[str, ...] | None,
     ) -> ConversationKernelDecision:
         decision = _validate_decision(
             proposal=proposal,
             text=text,
             context=context,
         )
+        if allowed_resource_kinds is not None and decision.outcome == "information":
+            allowed = set(allowed_resource_kinds)
+            unknown = sorted(
+                {
+                    item.target.kind
+                    for item in decision.information_needs
+                    if item.target.kind not in allowed
+                }
+            )
+            if unknown:
+                raise ConversationInterpretationQualityError(
+                    "conversation interpretation selected an unregistered resource kind"
+                )
+
         review_payload = {
             "human_message": text,
             "verified_context": context_payload,
@@ -125,6 +163,32 @@ class ReviewedConversationKernel:
                 "conversation interpretation failed a required quality dimension"
             )
         return decision
+
+
+def _normalize_resource_kinds(
+    source: Callable[[], tuple[str, ...]] | None,
+) -> tuple[str, ...]:
+    if source is None:
+        return ()
+    raw = source()
+    if isinstance(raw, (str, bytes)):
+        raise ConversationInterpretationQualityError(
+            "runtime resource vocabulary must be a collection"
+        )
+    normalized = tuple(
+        sorted(
+            {
+                str(item).strip()
+                for item in raw
+                if str(item).strip()
+            }
+        )
+    )
+    if len(normalized) > 256:
+        raise ConversationInterpretationQualityError(
+            "runtime resource vocabulary exceeds safety bound"
+        )
+    return normalized
 
 
 def _context_payload(context: DynamicConversationContext) -> Mapping[str, Any]:
