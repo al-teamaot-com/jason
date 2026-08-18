@@ -1,7 +1,7 @@
 """Mapping-free governed response rendering for dynamic conversational reads.
 
 The language model may select only existing paths from sanitized provider evidence.
-Jason deterministically dereferences those paths and renders the actual values.  This
+Jason deterministically dereferences those paths and renders the actual values. This
 module contains no canonical fact vocabulary, provider field map, synonym table, or
 question-specific routing rule.
 """
@@ -14,7 +14,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from .contracts import OrchestrationResult, OrchestrationStatus
 from .evidence_sanitization import REDACTED, sanitize_evidence_tree
-from .teams_conversation_flow import ConversationIntent
+from .teams_conversation_flow import ConversationIntent, ConversationRenderDecision
 
 
 _MAX_CATALOG_ENTRIES = 4000
@@ -123,10 +123,25 @@ class GovernedDynamicTeamsResourceResponseRenderer:
 
     reasoner: DynamicEvidenceReasoner
 
-    def render(self, result: OrchestrationResult, intent: ConversationIntent) -> str:
+    def render_decision(
+        self,
+        result: OrchestrationResult,
+        intent: ConversationIntent,
+    ) -> ConversationRenderDecision:
+        """Return user text plus whether this evidence fully satisfies the request.
+
+        The fulfillment bit is derived only from the bounded evidence-selection result.
+        It does not encode provider, field, question, or vocabulary mappings. This lets
+        the conversation flow stop acquiring additional evidence once the current
+        governed result already establishes the requested answer.
+        """
+
         source = result.provider_id or "governed provider"
         if result.status is not OrchestrationStatus.SUCCEEDED:
-            return f"I couldn't complete that governed read. Source: {source}."
+            return ConversationRenderDecision(
+                text=f"I couldn't complete that governed read. Source: {source}.",
+                satisfies_request=False,
+            )
         provider = str(result.output.get("provider", "")).strip()
         if not provider or not result.provider_id or provider != result.provider_id:
             raise RuntimeError("resource result provider provenance is missing or inconsistent")
@@ -144,9 +159,12 @@ class GovernedDynamicTeamsResourceResponseRenderer:
         sanitized = sanitize_evidence_tree(result.output["data"])
         selection = self.reasoner.select(question=question, sanitized_data=sanitized)
         if selection.answer_type == "unavailable":
-            return (
-                "I couldn't establish that from the current governed provider evidence. "
-                f"Source: {source}."
+            return ConversationRenderDecision(
+                text=(
+                    "I couldn't establish that from the current governed provider evidence. "
+                    f"Source: {source}."
+                ),
+                satisfies_request=False,
             )
 
         values = tuple(_resolve_pointer(sanitized, path) for path in selection.evidence_paths)
@@ -154,9 +172,14 @@ class GovernedDynamicTeamsResourceResponseRenderer:
             raise PermissionError("redacted evidence cannot be rendered")
         rendered = tuple(_render_value(value) for value in values)
         if len(rendered) == 1:
-            return f"{rendered[0]} Source: {source}."
-        body = "; ".join(rendered)
-        return f"{body}. Source: {source}."
+            text = f"{rendered[0]} Source: {source}."
+        else:
+            body = "; ".join(rendered)
+            text = f"{body}. Source: {source}."
+        return ConversationRenderDecision(text=text, satisfies_request=True)
+
+    def render(self, result: OrchestrationResult, intent: ConversationIntent) -> str:
+        return self.render_decision(result, intent).text
 
 
 def _catalog(value: Any) -> tuple[Mapping[str, Any], ...]:
