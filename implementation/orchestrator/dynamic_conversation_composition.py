@@ -14,7 +14,7 @@ from .dynamic_teams_conversation import DynamicTeamsConversationCoordinator
 from .stage_reasoning_client import StageReasoningClient
 
 
-_DYNAMIC_PLANNING_OUTPUT_TOKENS = 256
+_DYNAMIC_PLANNING_OUTPUT_TOKENS = 384
 
 
 def build_dynamic_teams_conversation_coordinator(
@@ -35,10 +35,11 @@ def build_dynamic_teams_conversation_coordinator(
     governed Teams flow. That avoids a post-response model pass whose only job was to
     rediscover structured state Jason already owns.
 
-    Semantic planning has its own bounded structured-output budget. A stage whose
-    schema can legitimately require more output than the generic client default must
-    not retry an impossible generation bound. Binding and later evidence reasoning
-    retain their own independent budgets.
+    Semantic planning has its own bounded structured-output budget. The planning
+    contract includes capability requirements, resolved references, topic, and an
+    optional clarification, so its fixed ceiling must be large enough for a complete
+    schema-conforming object while remaining independent from binding and evidence
+    budgets. Retries may repair malformed output but may not expand this stage budget.
     """
 
     planning_client = StageReasoningClient(
