@@ -20,30 +20,31 @@ test("runtime result path sends one final Teams response", () => {
 });
 
 test("failed runtime responses log only bounded correlation metadata", () => {
-  assert.match(source, /event: "jason_teams_runtime_failure"/);
-  for (const key of [
-    "status",
-    "httpStatus",
-    "errorCode",
-    "requestId",
-    "correlationId",
-    "conversationId",
-    "messageId",
-  ]) {
-    assert.match(source, new RegExp(`${key}:`));
-  }
   const failureBlock = source.match(
     /event: "jason_teams_runtime_failure"[\s\S]*?\}\),\n  \);/,
   );
   assert.ok(failureBlock, "bounded runtime failure log block is required");
-  for (const forbidden of [
-    "text,",
-    "envelope",
-    "signed",
-    "api_key",
-    "clientSecret",
-    "PRIVATE_KEY_PATH",
+
+  for (const field of [
+    /status:/,
+    /httpStatus:/,
+    /errorCode:/,
+    /requestId:/,
+    /correlationId:/,
+    /conversationId,/, 
+    /messageId,/, 
   ]) {
-    assert.doesNotMatch(failureBlock[0], new RegExp(forbidden));
+    assert.match(failureBlock[0], field);
+  }
+
+  for (const forbidden of [
+    /\btext\b/,
+    /\benvelope\b/,
+    /\bsigned\b/,
+    /api_key/,
+    /clientSecret/,
+    /PRIVATE_KEY_PATH/,
+  ]) {
+    assert.doesNotMatch(failureBlock[0], forbidden);
   }
 });
