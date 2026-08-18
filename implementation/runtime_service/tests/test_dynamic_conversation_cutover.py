@@ -61,13 +61,16 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
     dynamic_response_renderer = Marker()
     observed = {}
 
-    def build_coordinator(*, capabilities, structured_client, context_db, ttl_seconds):
+    def build_coordinator(
+        *, capabilities, structured_client, context_db, ttl_seconds, continuation_store
+    ):
         observed.update(
             {
                 "capabilities": capabilities,
                 "structured_client": structured_client,
                 "context_db": context_db,
                 "ttl_seconds": ttl_seconds,
+                "continuation_store": continuation_store,
             }
         )
         return coordinator
@@ -114,6 +117,7 @@ def test_enabled_cutover_builds_dynamic_bridge_and_reuses_governed_dependencies(
         "structured_client": deps["structured_client"],
         "context_db": context_db,
         "ttl_seconds": 2700,
+        "continuation_store": deps["continuation_store"],
         "dynamic_enabled": True,
         "legacy_renderer": deps["response_renderer"],
         "response_structured_client": deps["structured_client"],
