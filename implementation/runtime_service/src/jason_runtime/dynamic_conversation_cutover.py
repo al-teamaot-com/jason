@@ -64,6 +64,7 @@ def select_teams_conversation_flow(
         structured_client=structured_client,
         context_db=settings.context_db,
         ttl_seconds=settings.context_ttl_seconds,
+        continuation_store=continuation_store,
     )
     dynamic_response_renderer = select_conversation_response_renderer(
         dynamic_enabled=True,
