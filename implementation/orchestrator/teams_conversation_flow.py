@@ -210,6 +210,23 @@ class TeamsConversationRequest:
             raise ValueError("Teams conversation text is required")
 
 
+@dataclass(frozen=True, slots=True)
+class ConversationRenderDecision:
+    """User-facing text plus a bounded evidence-fulfillment decision.
+
+    ``satisfies_request`` means the renderer established that the current governed
+    result fully answers the bounded request represented by the intent. It is not a
+    provider-routing or semantic-mapping decision.
+    """
+
+    text: str
+    satisfies_request: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("conversation render decision text is required")
+
+
 class TeamsConversationIdentityBinder(Protocol):
     def bind(self, evidence: TeamsConversationPrincipalEvidence) -> BoundConversationPrincipal | None: ...
 
@@ -364,18 +381,29 @@ class TeamsConversationFlow:
                 "conversation requests must retain the turn correlation identity"
             )
 
-        # Every step crosses the Central Orchestrator independently. A failed or
-        # unavailable read does not suppress independent successful facts; the
-        # response renderer preserves each step's provider provenance and status.
-        results = tuple(
-            self.orchestrator.execute(orchestration_request)
-            for orchestration_request in orchestration_requests
-        )
+        # Read plans acquire evidence progressively. Each step still crosses the
+        # Central Orchestrator independently, but later steps are not invoked once a
+        # renderer has established that the current governed evidence fully satisfies
+        # the bounded request. Renderers without a fulfillment-decision surface retain
+        # the legacy execute-all behavior.
+        results: list[OrchestrationResult] = []
+        executed_intents: list[ConversationIntent] = []
+        rendered_parts: list[str] = []
+        progressive = len(intents) > 1
+        for orchestration_request, intent in zip(
+            orchestration_requests,
+            intents,
+            strict=True,
+        ):
+            result = self.orchestrator.execute(orchestration_request)
+            decision = self._render_decision(result=result, intent=intent)
+            results.append(result)
+            executed_intents.append(intent)
+            rendered_parts.append(decision.text.strip())
+            if progressive and decision.satisfies_request:
+                rendered_parts = [decision.text.strip()]
+                break
 
-        rendered_parts = tuple(
-            self.response_renderer.render(result, intent).strip()
-            for result, intent in zip(results, intents, strict=True)
-        )
         if not rendered_parts or any(not part for part in rendered_parts):
             raise RuntimeError("conversation response renderer returned empty text")
         response_text = "\n".join(rendered_parts)
@@ -391,14 +419,31 @@ class TeamsConversationFlow:
         self._record_result(
             principal=principal,
             identity=request.identity,
-            intents=intents,
+            intents=tuple(executed_intents),
             response_text=response_text,
         )
 
         return TeamsConversationFlowResult(
             orchestration=results[0],
-            orchestrations=results,
+            orchestrations=tuple(results),
             transport_message_id=transport_message_id.strip(),
+        )
+
+    def _render_decision(
+        self,
+        *,
+        result: OrchestrationResult,
+        intent: ConversationIntent,
+    ) -> ConversationRenderDecision:
+        decision_renderer = getattr(self.response_renderer, "render_decision", None)
+        if callable(decision_renderer):
+            decision = decision_renderer(result, intent)
+            if not isinstance(decision, ConversationRenderDecision):
+                raise TypeError("response render_decision returned an invalid decision")
+            return decision
+        return ConversationRenderDecision(
+            text=self.response_renderer.render(result, intent),
+            satisfies_request=False,
         )
 
     def _load_continuation(
