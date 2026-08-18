@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from orchestrator.dynamic_conversation_kernel import (
     DynamicConversationContext,
     DynamicConversationPlan,
@@ -24,6 +26,16 @@ class MemoryStore:
     def put(self, context):
         self.items[(context.organization_id, context.principal_id, context.conversation_id)] = context
         return context
+
+
+class ContinuationStore:
+    def __init__(self, state=None):
+        self.state = state
+        self.calls = []
+
+    def get(self, *, organization_id, principal_id, conversation_id):
+        self.calls.append((organization_id, principal_id, conversation_id))
+        return self.state
 
 
 class Catalog:
@@ -149,7 +161,42 @@ def test_dynamic_clarification_never_builds_or_executes_an_intent():
     assert builder.calls == []
 
 
-def test_verified_response_observation_persists_entities_for_later_turns():
+def test_governed_continuation_selector_is_available_to_next_turn_without_observer():
+    continuation = ContinuationStore(
+        SimpleNamespace(
+            response_kind="result",
+            resource_selector={"resource_label": "NODE-77"},
+            last_message_id="previous-message",
+        )
+    )
+    resolver = Resolver(DynamicConversationPlan(outcome="conversation"))
+    coordinator = DynamicTeamsConversationCoordinator(
+        context_store=MemoryStore(),
+        capability_catalog=Catalog(()),
+        resolver=resolver,
+        intent_builder=Builder(),
+        observer=None,
+        continuation_store=continuation,
+    )
+
+    result = coordinator.resolve_turn(
+        text="Check it again.",
+        principal=principal(),
+        identity=identity("next-message"),
+    )
+
+    assert result is None
+    context = resolver.calls[0][1]
+    assert len(context.entities) == 1
+    entity = context.entities[0]
+    assert entity.kind == "selector.resource_label"
+    assert entity.canonical_id == "NODE-77"
+    assert entity.display_name == "NODE-77"
+    assert context.active_entity_refs[entity.kind] == entity.ref
+    assert "previous-message" in entity.provenance
+
+
+def test_verified_response_observation_remains_available_as_optional_compatibility_path():
     store = MemoryStore()
     initial = DynamicConversationContext(
         conversation_id="conv-1",
@@ -176,7 +223,7 @@ def test_verified_response_observation_persists_entities_for_later_turns():
     result = coordinator.observe_verified_response(
         principal=principal(),
         identity=identity("m2"),
-        response_text="AOT-50107 — last logged in user: AzureAD\\ArnoldHeath.",
+        response_text="NODE-77 is online.",
     )
 
     assert result.active_topic == "identity investigation"
