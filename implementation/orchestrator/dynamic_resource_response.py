@@ -18,7 +18,7 @@ from .teams_conversation_flow import ConversationIntent
 
 
 _MAX_CATALOG_ENTRIES = 4000
-_MAX_PREVIEW_CHARS = 240
+_MAX_PREVIEW_CHARS = 120
 _MAX_SELECTED_PATHS = 32
 
 
@@ -160,24 +160,33 @@ class GovernedDynamicTeamsResourceResponseRenderer:
 
 
 def _catalog(value: Any) -> tuple[Mapping[str, Any], ...]:
+    """Build only model-actionable evidence entries.
+
+    Object-container rows were previously included even though they were never
+    selectable. They increased prompt size without granting any additional evidence
+    authority. JSON Pointer paths on selectable descendants already preserve the full
+    hierarchy, so omitting those rows is lossless for bounded path selection.
+    """
+
     entries: list[Mapping[str, Any]] = []
 
     def walk(current: Any, pointer: str) -> None:
         if len(entries) >= _MAX_CATALOG_ENTRIES:
             return
         if isinstance(current, Mapping):
-            entries.append({"path": pointer or "/", "type": "object", "selectable": False})
             for raw_key, child in current.items():
                 key = str(raw_key).replace("~", "~0").replace("/", "~1")
                 walk(child, f"{pointer}/{key}")
             return
         if isinstance(current, (list, tuple)):
+            if not current:
+                return
             entries.append(
                 {
                     "path": pointer or "/",
                     "type": "array",
                     "length": len(current),
-                    "selectable": bool(current),
+                    "selectable": True,
                 }
             )
             for index, child in enumerate(current):
