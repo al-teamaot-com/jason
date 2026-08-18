@@ -8,25 +8,37 @@ COMPOSE_FILE="$REPO_ROOT/infrastructure/jason-runtime/compose.yaml"
 RUNTIME_CONTAINER="jason-runtime"
 GATEWAY_CONTAINER="jason-teams-gateway"
 OLLAMA_CONTAINER="jason-ollama"
+JASON_COMPOSE_OVERRIDE_FILE=""
 
 usage() {
     cat <<'EOF'
 Usage:
   bash infrastructure/jason-runtime/jason-ops.sh status
   bash infrastructure/jason-runtime/jason-ops.sh deploy
+  bash infrastructure/jason-runtime/jason-ops.sh baseline-deploy
   bash infrastructure/jason-runtime/jason-ops.sh capture [minutes]
 
 Commands:
-  status   Show runtime/gateway/Ollama container state.
-  deploy   Recover current live mount inputs, validate Compose, capture a rollback image,
-           rebuild only jason-runtime, redeploy it, and wait for health.
-  capture  Capture recent Teams gateway, Ollama, security-audit, and orchestration evidence.
-           Default window: 5 minutes.
+  status           Show runtime/gateway/Ollama container state.
+  deploy           Recover current live mount inputs, validate Compose, capture a rollback image,
+                   rebuild only jason-runtime, redeploy it, and wait for health.
+  baseline-deploy  Deploy the same runtime with dynamic conversation disabled through a temporary
+                   Compose override. The repository/local Compose file is not modified.
+  capture          Capture recent Teams gateway, Ollama, security-audit, and orchestration evidence.
+                   Default window: 5 minutes.
 EOF
 }
 
 container_exists() {
     docker inspect "$1" >/dev/null 2>&1
+}
+
+compose_runtime() {
+    if [ -n "$JASON_COMPOSE_OVERRIDE_FILE" ]; then
+        docker compose -f "$COMPOSE_FILE" -f "$JASON_COMPOSE_OVERRIDE_FILE" "$@"
+    else
+        docker compose -f "$COMPOSE_FILE" "$@"
+    fi
 }
 
 status() {
@@ -119,7 +131,7 @@ JASON_OLLAMA_MODEL
         return 1
     fi
 
-    if ! docker compose -f "$COMPOSE_FILE" config --quiet; then
+    if ! compose_runtime config --quiet; then
         echo "DEPLOY_RESULT=FAIL"
         echo "REASON=compose validation failed"
         return 1
@@ -134,13 +146,13 @@ JASON_OLLAMA_MODEL
         echo "ROLLBACK_IMAGE=$rollback_tag"
     fi
 
-    if ! docker compose -f "$COMPOSE_FILE" build jason-runtime; then
+    if ! compose_runtime build jason-runtime; then
         echo "DEPLOY_RESULT=FAIL"
         echo "REASON=runtime build failed"
         return 1
     fi
 
-    if ! docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate jason-runtime; then
+    if ! compose_runtime up -d --no-deps --force-recreate jason-runtime; then
         echo "DEPLOY_RESULT=FAIL"
         echo "REASON=runtime deployment failed"
         [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
@@ -170,6 +182,36 @@ JASON_OLLAMA_MODEL
     echo "READY_FOR_LIVE_TEST=0"
     [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
     return 1
+}
+
+baseline_deploy() {
+    echo "========== JASON TEAMS WORKING BASELINE =========="
+    override_file="$(mktemp)"
+    cat > "$override_file" <<'EOF'
+services:
+  jason-runtime:
+    environment:
+      JASON_DYNAMIC_CONVERSATION_ENABLED: "false"
+EOF
+    JASON_COMPOSE_OVERRIDE_FILE="$override_file"
+    deploy
+    deploy_rc=$?
+
+    if [ "$deploy_rc" -eq 0 ] && container_exists "$RUNTIME_CONTAINER"; then
+        dynamic_value="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$RUNTIME_CONTAINER" 2>/dev/null | grep '^JASON_DYNAMIC_CONVERSATION_ENABLED=' | tail -n 1 | cut -d= -f2-)"
+        if [ "${dynamic_value:-false}" = "false" ]; then
+            echo "BASELINE_MODE=PASS"
+            echo "JASON_DYNAMIC_CONVERSATION_ENABLED=false"
+        else
+            echo "BASELINE_MODE=FAIL"
+            echo "REASON=runtime did not start with dynamic conversation disabled"
+            deploy_rc=1
+        fi
+    fi
+
+    rm -f "$override_file"
+    JASON_COMPOSE_OVERRIDE_FILE=""
+    return "$deploy_rc"
 }
 
 capture() {
@@ -318,6 +360,9 @@ case "$command" in
         ;;
     deploy)
         deploy
+        ;;
+    baseline-deploy)
+        baseline_deploy
         ;;
     capture)
         capture "${2:-5}"
