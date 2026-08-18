@@ -6,9 +6,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from socket import timeout as SocketTimeout
 from typing import Any, Callable, Mapping
 
-from connectors.core.contracts import ConnectorConfigurationError, ConnectorTransportError
+from connectors.core.contracts import (
+    ConnectorConfigurationError,
+    ConnectorExecutionDeadlineExceeded,
+    ConnectorTransportError,
+    bounded_transport_timeout,
+)
 
 
 @dataclass(frozen=True)
@@ -58,14 +64,28 @@ def acquire_access_token(
         },
         method="POST",
     )
+    effective_timeout = bounded_transport_timeout(30.0)
+    deadline_limited = effective_timeout < 30.0
     try:
-        with opener(request, timeout=30.0) as response:
+        with opener(request, timeout=effective_timeout) as response:
             raw = response.read()
     except urllib.error.HTTPError as exc:
         raise ConnectorTransportError(
             f"Datto RMM token exchange failed with HTTP {exc.code}."
         ) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (TimeoutError, SocketTimeout) as exc:
+        if deadline_limited:
+            raise ConnectorExecutionDeadlineExceeded(
+                "governed provider execution deadline exceeded during token exchange"
+            ) from exc
+        raise ConnectorTransportError("Datto RMM token exchange failed.") from exc
+    except urllib.error.URLError as exc:
+        if deadline_limited and isinstance(exc.reason, (TimeoutError, SocketTimeout)):
+            raise ConnectorExecutionDeadlineExceeded(
+                "governed provider execution deadline exceeded during token exchange"
+            ) from exc
+        raise ConnectorTransportError("Datto RMM token exchange failed.") from exc
+    except OSError as exc:
         raise ConnectorTransportError("Datto RMM token exchange failed.") from exc
 
     try:
