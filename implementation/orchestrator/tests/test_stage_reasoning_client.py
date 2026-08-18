@@ -34,13 +34,13 @@ def test_stage_budget_replaces_generic_caller_default_without_expanding_itself()
 
 def test_independent_stages_can_hold_different_bounded_generation_contracts():
     client = RecordingClient()
-    planning = StageReasoningClient(client=client, output_tokens=256)
+    planning = StageReasoningClient(client=client, output_tokens=384)
     compact = StageReasoningClient(client=client, output_tokens=96)
 
     planning.complete(system="plan", user="one", schema={"type": "object"})
     compact.complete(system="select", user="two", schema={"type": "object"})
 
-    assert [call["max_output_tokens"] for call in client.calls] == [256, 96]
+    assert [call["max_output_tokens"] for call in client.calls] == [384, 96]
 
 
 @pytest.mark.parametrize("tokens", [0, 15, 1025])
