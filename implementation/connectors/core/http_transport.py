@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json as json_module
+from socket import timeout as SocketTimeout
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from .contracts import ConnectorTransportError
+from .contracts import (
+    ConnectorExecutionDeadlineExceeded,
+    ConnectorTransportError,
+    bounded_transport_timeout,
+)
 
 
 class UrlLibJsonHttpTransport:
@@ -47,12 +52,26 @@ class UrlLibJsonHttpTransport:
             headers=request_headers,
             method=method.upper().strip(),
         )
+        effective_timeout = bounded_transport_timeout(timeout_seconds)
+        deadline_limited = effective_timeout < timeout_seconds
         try:
-            with urlopen(request, timeout=timeout_seconds) as response:
+            with urlopen(request, timeout=effective_timeout) as response:
                 raw = response.read()
         except HTTPError as exc:
             raise ConnectorTransportError(f"HTTP transport failed with status {exc.code}") from exc
-        except (URLError, TimeoutError, OSError) as exc:
+        except (TimeoutError, SocketTimeout) as exc:
+            if deadline_limited:
+                raise ConnectorExecutionDeadlineExceeded(
+                    "governed provider execution deadline exceeded"
+                ) from exc
+            raise ConnectorTransportError("HTTP transport failed") from exc
+        except URLError as exc:
+            if deadline_limited and isinstance(exc.reason, (TimeoutError, SocketTimeout)):
+                raise ConnectorExecutionDeadlineExceeded(
+                    "governed provider execution deadline exceeded"
+                ) from exc
+            raise ConnectorTransportError("HTTP transport failed") from exc
+        except OSError as exc:
             raise ConnectorTransportError("HTTP transport failed") from exc
 
         if not raw:
