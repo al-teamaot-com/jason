@@ -27,7 +27,6 @@ const PRIVATE_KEY_PATH =
 const REQUEST_TIMEOUT_MS = Number(
   process.env.JASON_TEAMS_REQUEST_TIMEOUT_MS ?? 150000,
 );
-const WORKING_ACK_TEXT = "Received - working on that now...";
 const SAFE_FAILURE_TEXT =
   "Jason could not safely process that request. No action was taken.";
 
@@ -110,6 +109,25 @@ function activityAadObjectId(activity) {
   return nonBlank(activity?.from?.aadObjectId);
 }
 
+function logRuntimeFailure(result, { conversationId, messageId }) {
+  if (Number(result?.httpStatus ?? 0) < 400) {
+    return;
+  }
+  const payload = result?.payload ?? {};
+  console.error(
+    JSON.stringify({
+      event: "jason_teams_runtime_failure",
+      status: payload.status ?? "unknown",
+      httpStatus: result.httpStatus,
+      errorCode: payload.error_code ?? null,
+      requestId: payload.request_id ?? null,
+      correlationId: payload.correlation_id ?? null,
+      conversationId,
+      messageId,
+    }),
+  );
+}
+
 const auth = loadTeamsAuth();
 const authConfiguration = {
   clientId: auth.clientId,
@@ -159,8 +177,6 @@ agent.onActivity("message", async (context) => {
     return;
   }
 
-  await context.sendActivity(WORKING_ACK_TEXT);
-
   try {
     const envelope = buildConversationEnvelope({
       text,
@@ -180,6 +196,7 @@ agent.onActivity("message", async (context) => {
       timeoutMs: REQUEST_TIMEOUT_MS,
     });
 
+    logRuntimeFailure(result, { conversationId, messageId });
     await context.sendActivity(replyForRuntimeResult(result));
 
     console.log(
