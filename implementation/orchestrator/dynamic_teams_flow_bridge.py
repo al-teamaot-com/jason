@@ -10,7 +10,6 @@ catalog; it does not invoke providers or grant authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
 from .dynamic_teams_conversation import DynamicTeamsConversationCoordinator
 from .teams_conversation_flow import (
@@ -39,23 +38,15 @@ class _ResolvedIntentResolver:
         return self._resolved
 
 
-class _CapturingTransport:
-    def __init__(self, delegate) -> None:
-        self._delegate = delegate
-        self.last_text: str | None = None
-
-    def send(self, *, conversation_id: str, text: str, correlation_id: str) -> str:
-        self.last_text = text
-        return self._delegate.send(
-            conversation_id=conversation_id,
-            text=text,
-            correlation_id=correlation_id,
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class DynamicTeamsFlowBridge:
-    """Use dynamic context/capability reasoning while preserving Jason governance."""
+    """Use dynamic context/capability reasoning while preserving Jason governance.
+
+    Successful TeamsConversationFlow execution already persists bounded continuation
+    state after the governed result is rendered.  Dynamic context consumes that state
+    on the next turn, so the bridge intentionally does not perform an additional
+    model-based response observation after transport delivery.
+    """
 
     identity_binder: object
     coordinator: DynamicTeamsConversationCoordinator
@@ -81,22 +72,13 @@ class DynamicTeamsFlowBridge:
             # path is wired, fail closed without provider execution.
             raise LookupError("dynamic conversation turn did not require a governed capability")
 
-        capture = _CapturingTransport(self.transport)
         governed_flow = TeamsConversationFlow(
             identity_binder=_BoundIdentityBinder(principal),
             intent_resolver=_ResolvedIntentResolver(resolved),
             request_factory=self.request_factory,
             orchestrator=self.orchestrator,
             response_renderer=self.response_renderer,
-            transport=capture,
+            transport=self.transport,
             continuation_store=self.continuation_store,
         )
-        result = governed_flow.handle(request)
-
-        if capture.last_text:
-            self.coordinator.observe_verified_response(
-                principal=principal,
-                identity=request.identity,
-                response_text=capture.last_text,
-            )
-        return result
+        return governed_flow.handle(request)
