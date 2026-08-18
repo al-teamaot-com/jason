@@ -11,6 +11,10 @@ from .dynamic_conversation_context_store import SQLiteDynamicConversationContext
 from .dynamic_conversation_intent import GroundedConversationIntentBuilder
 from .dynamic_conversation_kernel import DynamicConversationResolver
 from .dynamic_teams_conversation import DynamicTeamsConversationCoordinator
+from .stage_reasoning_client import StageReasoningClient
+
+
+_DYNAMIC_PLANNING_OUTPUT_TOKENS = 256
 
 
 def build_dynamic_teams_conversation_coordinator(
@@ -24,14 +28,23 @@ def build_dynamic_teams_conversation_coordinator(
     """Compose the dynamic conversation kernel from existing governed runtime resources.
 
     The structured client is reasoning-only: it has no connector handles, provider
-    credentials, authority grants, or direct execution surface.  Capabilities are read
+    credentials, authority grants, or direct execution surface. Capabilities are read
     from current registry truth each turn, and execution remains outside this helper.
 
     Conversation continuity reuses bounded selector state already persisted by the
-    governed Teams flow.  That avoids a post-response model pass whose only job was to
+    governed Teams flow. That avoids a post-response model pass whose only job was to
     rediscover structured state Jason already owns.
+
+    Semantic planning has its own bounded structured-output budget. A stage whose
+    schema can legitimately require more output than the generic client default must
+    not retry an impossible generation bound. Binding and later evidence reasoning
+    retain their own independent budgets.
     """
 
+    planning_client = StageReasoningClient(
+        client=structured_client,
+        output_tokens=_DYNAMIC_PLANNING_OUTPUT_TOKENS,
+    )
     return DynamicTeamsConversationCoordinator(
         context_store=SQLiteDynamicConversationContextStore(
             context_db,
@@ -41,7 +54,7 @@ def build_dynamic_teams_conversation_coordinator(
             registry=capabilities,
             include_pilot=True,
         ),
-        resolver=DynamicConversationResolver(client=structured_client),
+        resolver=DynamicConversationResolver(client=planning_client),
         intent_builder=GroundedConversationIntentBuilder(client=structured_client),
         observer=None,
         continuation_store=continuation_store,
