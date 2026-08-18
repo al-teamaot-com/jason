@@ -70,6 +70,30 @@ def test_renders_only_dereferenced_selected_provider_value() -> None:
     assert "/lastBoot" in payload
 
 
+def test_evidence_prompt_omits_unselectable_object_scaffolding_and_bounds_previews() -> None:
+    client = FakeClient(
+        {"answer_type": "direct", "evidence_paths": ["/outer/inner/value"]}
+    )
+    renderer = GovernedDynamicTeamsResourceResponseRenderer(
+        reasoner=DynamicEvidenceReasoner(client)
+    )
+    long_value = "x" * 300
+
+    text = renderer.render(
+        result({"outer": {"inner": {"value": long_value}}}),
+        intent("Read the nested value."),
+    )
+
+    payload = client.calls[0]["user"]
+    assert '"selectable":false' not in payload
+    assert '"path":"/outer"' not in payload
+    assert '"path":"/outer/inner"' not in payload
+    assert '"path":"/outer/inner/value"' in payload
+    assert "x" * 120 in payload
+    assert "x" * 121 not in payload
+    assert text.startswith(long_value)
+
+
 def test_wrong_adjacent_value_is_not_hard_coded_or_substituted() -> None:
     client = FakeClient({"answer_type": "unavailable", "evidence_paths": []})
     renderer = GovernedDynamicTeamsResourceResponseRenderer(
