@@ -35,7 +35,7 @@ class Coordinator:
         self.resolve_calls.append((text, principal, identity))
         return ConversationIntent(
             capability_name="endpoint.device.search",
-            arguments={"hostname": "AOT-50107", "requested_facts": [text]},
+            arguments={"resource_label": "NODE-77", "requested_facts": [text]},
             permission_mode="observe",
             risk="low",
         )
@@ -88,15 +88,15 @@ class Orchestrator:
             stage=ExecutionStage.COMPLETED,
             reason_codes=("capability_completed",),
             resolution=None,
-            output={"provider": "datto_rmm", "data": {"hostname": "AOT-50107"}},
+            output={"provider": "synthetic", "data": {"resource_label": "NODE-77"}},
             attempts=1,
-            provider_id="datto_rmm",
+            provider_id="synthetic",
         )
 
 
 class Renderer:
     def render(self, result, intent):
-        return "AOT-50107 is online. Source: datto_rmm."
+        return "NODE-77 is online. Source: synthetic."
 
 
 class Transport:
@@ -118,7 +118,7 @@ def identity():
     )
 
 
-def test_dynamic_bridge_preserves_governed_flow_and_observes_only_rendered_response():
+def test_dynamic_bridge_preserves_governed_flow_without_post_response_observation():
     coordinator = Coordinator()
     orchestrator = Orchestrator()
     transport = Transport()
@@ -133,7 +133,7 @@ def test_dynamic_bridge_preserves_governed_flow_and_observes_only_rendered_respo
 
     result = bridge.handle(
         TeamsConversationRequest(
-            text="Is AOT-50107 online?",
+            text="Is NODE-77 online?",
             identity=identity(),
         )
     )
@@ -144,9 +144,9 @@ def test_dynamic_bridge_preserves_governed_flow_and_observes_only_rendered_respo
     assert orchestrator.requests[0].principal_id == "person-al"
     assert orchestrator.requests[0].organization_id == "aot"
     assert transport.sent == [
-        ("conv-1", "AOT-50107 is online. Source: datto_rmm.", "corr-1")
+        ("conv-1", "NODE-77 is online. Source: synthetic.", "corr-1")
     ]
-    assert coordinator.observed[0][2] == "AOT-50107 is online. Source: datto_rmm."
+    assert coordinator.observed == []
 
 
 def test_unknown_identity_fails_before_dynamic_resolution_or_orchestration():
