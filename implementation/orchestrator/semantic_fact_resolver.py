@@ -75,8 +75,38 @@ class SemanticFactResolver:
             concept_id=None,
         )
 
+    def _resolve_canonical_label(self, value: str) -> SemanticConcept | None:
+        """Resolve an ACTIVE concept by its canonical label without alias tables.
+
+        Canonical labels are Jason's provider-neutral semantic identifiers once a
+        human request has been normalized. Downstream consumers must therefore be
+        able to resolve those labels even when the seed registry does not repeat the
+        canonical label as an explicit term binding. Only ACTIVE terms can expose an
+        ACTIVE concept here, preserving the registry lifecycle gate. Conflicting
+        canonical labels fail closed rather than selecting an arbitrary concept.
+        """
+
+        normalized = self._registry.normalize_text(value)
+        if not normalized:
+            return None
+
+        matches: dict[str, SemanticConcept] = {}
+        for term in self._registry.active_terms():
+            concept = self._registry.resolve_term(term)
+            if concept is None:
+                continue
+            if self._registry.normalize_text(concept.canonical_label) != normalized:
+                continue
+            matches[concept.concept_id] = concept
+
+        if len(matches) > 1:
+            raise LookupError(f"active semantic canonical label is ambiguous: {value!r}")
+        return next(iter(matches.values())) if matches else None
+
     def resolve(self, value: str) -> SemanticFactResolution | None:
         concept = self._registry.resolve_term(value)
+        if concept is None:
+            concept = self._resolve_canonical_label(value)
         if concept is not None:
             return self._from_registry(concept)
 
