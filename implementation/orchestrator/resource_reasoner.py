@@ -7,6 +7,7 @@ from typing import Sequence
 from kernel.capabilities import CapabilityDefinition
 
 from .resource_inquiry import ResourceInquiry, ResourcePlanStep
+from .semantic_capability_coverage import semantic_resolution_matches_resource_contract
 from .semantic_fact_resolver import (
     DEFAULT_SEMANTIC_FACT_RESOLVER,
     SemanticFactResolver,
@@ -37,9 +38,11 @@ class MetadataResourceCapabilityReasoner:
     authority. It compares the resource selector and requested facts with capability
     metadata. The planner revalidates its selection before orchestration.
 
-    It is deliberately generic: adding a new field to a provider does not require a
-    new script. Technology stewardship updates capability metadata when provider
-    coverage changes, and the same reasoner can select the broader capability.
+    Governed Semantic Knowledge Registry concepts may establish resource-domain
+    coverage structurally through concept namespace/evidence context plus capability
+    ``resource_types``. This is not phrase-to-provider mapping and does not authorize
+    execution; it only prevents a growing static list of fact labels from becoming the
+    capability-selection contract.
     """
 
     minimum_score: int = 1
@@ -71,19 +74,16 @@ class MetadataResourceCapabilityReasoner:
             if normalized
         }
 
-        # Once a phrase is recognized as governed semantic knowledge, loose token
-        # overlap is no longer sufficient authority to route it. A registered
-        # capability must explicitly declare that canonical fact, or an approved
-        # semantic mapping must bind it. This prevents a secret-like fact such as a
-        # BitLocker recovery key from falling into a broad endpoint read merely
-        # because both requests contain generic endpoint/security words.
+        semantic_resolutions = []
         governed_semantic_requested: set[str] = set()
         if self.fact_resolver is not None:
             for original, normalized in normalized_requested:
                 resolution = self.fact_resolver.resolve(str(original))
+                if resolution is None:
+                    continue
+                semantic_resolutions.append((original, normalized, resolution))
                 if (
-                    resolution is not None
-                    and resolution.source == "semantic_knowledge_registry"
+                    resolution.source == "semantic_knowledge_registry"
                     and normalized
                 ):
                     governed_semantic_requested.add(normalized)
@@ -118,16 +118,27 @@ class MetadataResourceCapabilityReasoner:
                 if item.strip()
             }
 
-            # A collection_fact is also governed capability metadata. It names
-            # the complete collection outcome that this read capability can
-            # authoritatively return (for example, "alerts" or "software").
-            # Treat it as semantic coverage for planning rather than relying on
-            # loose fact-hint token matches.
+            # Transitional collection metadata remains governed coverage for
+            # collection-oriented capabilities while semantic resource contracts
+            # replace fact-by-fact canonical lists.
             collection_fact = str(metadata.get("collection_fact", "")).strip()
             if collection_fact:
                 declared_facts.add(_normalized_fact(collection_fact))
 
-            governed_coverage = requested_phrases.intersection(declared_facts)
+            governed_coverage = set(
+                requested_phrases.intersection(declared_facts)
+            )
+
+            # Structural semantic coverage is derived from governed concept/resource
+            # metadata rather than from a manually maintained phrase or fact mapping.
+            for _, normalized_fact, resolution in semantic_resolutions:
+                if not normalized_fact:
+                    continue
+                if semantic_resolution_matches_resource_contract(
+                    resolution=resolution,
+                    metadata=metadata,
+                ):
+                    governed_coverage.add(normalized_fact)
 
             searchable_text = " ".join(
                 (
@@ -149,7 +160,8 @@ class MetadataResourceCapabilityReasoner:
 
             mapped_coverage: set[str] = set()
 
-            # Approved mappings remain governed coverage evidence.
+            # Approved mappings remain a transitional governed compatibility path.
+            # New semantic coverage must use structural semantic/resource contracts.
             if self.semantic_mapping_registry is not None:
                 for requested_fact, normalized_fact in normalized_requested:
                     approved = self.semantic_mapping_registry.find_active(
@@ -162,13 +174,12 @@ class MetadataResourceCapabilityReasoner:
                     ):
                         mapped_coverage.add(normalized_fact)
 
-            governed_coverage = frozenset(
-                set(governed_coverage).union(mapped_coverage)
-            )
+            governed_coverage.update(mapped_coverage)
+            frozen_coverage = frozenset(governed_coverage)
 
             score = (
                 selector_overlap * 6
-                + len(governed_coverage) * 50
+                + len(frozen_coverage) * 50
                 + fact_overlap
             )
 
@@ -182,7 +193,7 @@ class MetadataResourceCapabilityReasoner:
                     score,
                     capability.capability_name,
                     capability,
-                    governed_coverage,
+                    frozen_coverage,
                 )
             )
 
@@ -206,11 +217,9 @@ class MetadataResourceCapabilityReasoner:
         )
 
         # A multi-fact read may require more than one reusable capability. Split
-        # the request only when governed canonical metadata, governed collection
-        # facts, or approved semantic mappings account for every requested fact.
-        # This keeps decomposition deterministic and evidence-based; partial
-        # semantic guesses continue through the existing single-capability path
-        # instead of silently changing the meaning of the request.
+        # the request only when governed structural semantics, transitional canonical
+        # metadata, governed collection facts, or approved mappings account for every
+        # requested fact. Partial semantic guesses remain fail-closed.
         if len(normalized_requested) > 1:
             requested_set = {
                 normalized
@@ -309,6 +318,6 @@ class MetadataResourceCapabilityReasoner:
             arguments=arguments,
             purpose=(
                 "retrieve governed evidence through the read capability "
-                "whose declared semantic coverage satisfies the request"
+                "whose governed semantic/resource coverage satisfies the request"
             ),
         )
