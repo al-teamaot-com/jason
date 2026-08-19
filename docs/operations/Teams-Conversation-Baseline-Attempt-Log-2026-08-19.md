@@ -38,6 +38,26 @@ Record baseline attempts separately from application changes so deployment-tooli
 - **Lesson:** configuration-only baseline transitions and source-code baseline refreshes are two different operations. The former must avoid rebuilding; the latter must produce a new image and prove which source revision that image contains before live conclusions are accepted.
 - **Do not repeat:** never treat `git pull` plus `--no-build` container recreation as deployment of new application code.
 
+## Attempt 4 — Timestamp presentation smoke exposed canonical-label resolution gap
+
+- **Hypothesis:** the verified timestamp presentation code was deployed but not reached by the Teams response path.
+- **Change:** strengthened `jason-baseline-refresh.sh` to prove the running image ID, source revision, and execute the semantic timestamp presentation function inside the live runtime container.
+- **Observed result:** running image and revision both matched the freshly built source, but the in-container smoke test returned the raw numeric timestamp unchanged.
+- **Failure class:** semantic contract continuity failure. The semantic registry could resolve human aliases such as `last seen` but could not resolve its own already-canonical label `endpoint last seen` back to the same active concept metadata.
+- **Application conclusion:** deployment and Teams routing were not the cause of the raw timestamp presentation at this stage.
+- **Lesson:** canonicalization is only safe when canonical labels are stable, round-trippable identifiers throughout downstream semantic processing.
+- **Do not repeat:** do not patch the timestamp formatter or add duplicate aliases when an already-canonical semantic label loses its concept metadata downstream.
+
+## Attempt 5 — Live Teams request blocked by upstream throttling before orchestration
+
+- **Hypothesis:** after canonical-label resolution was corrected, a repeated Teams `last seen` request would exercise the verified retrieval and presentation path.
+- **Observed result:** Teams returned `Jason could not safely process that request. No action was taken.` The 10-minute capture showed three authenticated conversation attempts failing with `ConnectorTransportError: HTTP transport failed with status 429`. No new orchestration events were created for those attempts.
+- **Failure class:** transient upstream identity-enrichment throttling before Central Orchestrator execution, not semantic resolution, capability planning, Datto retrieval, or response rendering.
+- **Evidence boundary:** the failure occurs after OpenClaw/Teams authentication but before orchestration. The legacy composition performs governed Microsoft directory enrichment during identity binding in that interval, making Microsoft Graph directory read the bounded external dependency implicated by the observed 429.
+- **Application conclusion:** the live 429 result cannot be used to judge the canonical-label or timestamp-presentation fix because no governed resource orchestration occurred.
+- **Lesson:** authenticated conversational ingress must distinguish transient provider throttling from semantic/application failures, preserve safe provider retry metadata, and retry only within an explicit bounded policy.
+- **Do not repeat:** do not change semantic mappings, capability routing, Datto code, or presentation logic in response to a pre-orchestration HTTP 429.
+
 ## Baseline Deployment Modes
 
 ### Configuration-only baseline transition
@@ -76,3 +96,5 @@ When source code has changed, the baseline must first refresh `jason-runtime:loc
 ## Governing Lesson
 
 > A working-baseline experiment must minimize simultaneous variables, but it must also prove deployment provenance. Configuration-only recreation proves configuration; it does not prove that newly pulled source is running. Any live conclusion about a code change requires a provenance-verified image built from that revision.
+
+> An observed transport failure must remain classified at the layer where it occurred. A pre-orchestration provider throttle is not evidence of a semantic, capability, Datto, or rendering defect.
