@@ -39,16 +39,19 @@ def registry():
     return service
 
 
-def test_bitlocker_recovery_key_fails_before_delegate_or_provider_planning():
-    delegate = Delegate()
-    resolver = GovernedSemanticCoverageIntentResolver(
+def resolver(delegate):
+    return GovernedSemanticCoverageIntentResolver(
         delegate=delegate,
         capabilities=registry(),
         fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
     )
 
+
+def test_bitlocker_recovery_key_fails_before_delegate_or_provider_planning():
+    delegate = Delegate()
+
     with pytest.raises(ConversationGuidanceRequiredError) as caught:
-        resolver.resolve(
+        resolver(delegate).resolve(
             text="Can you give me the bitlocker unlock code",
             principal=principal(),
         )
@@ -61,14 +64,23 @@ def test_bitlocker_recovery_key_fails_before_delegate_or_provider_planning():
 
 def test_bitlocker_status_has_declared_coverage_and_reaches_delegate():
     delegate = Delegate()
-    resolver = GovernedSemanticCoverageIntentResolver(
-        delegate=delegate,
-        capabilities=registry(),
-        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
-    )
 
-    assert resolver.resolve(
+    assert resolver(delegate).resolve(
         text="What is the bitlocker status for AOT-50107?",
         principal=principal(),
     ) is None
+    assert len(delegate.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "What is the IP address of AOT-50107?",
+        "When was AOT-50107 last seen?",
+    ),
+)
+def test_endpoint_semantic_facts_use_structural_resource_coverage(text):
+    delegate = Delegate()
+
+    assert resolver(delegate).resolve(text=text, principal=principal()) is None
     assert len(delegate.calls) == 1
