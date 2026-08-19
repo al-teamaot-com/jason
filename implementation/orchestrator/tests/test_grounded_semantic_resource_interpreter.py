@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from connectors.core.contracts import ConnectorTransportError
 from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
 from orchestrator.grounded_semantic_resource_interpreter import (
     GroundedSemanticResourceInquiryInterpreter,
@@ -214,6 +215,16 @@ class FixedHostedTranslator:
         )
 
 
+class RaisingHostedTranslator:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    def translate(self, **kwargs):
+        self.calls.append(kwargs)
+        raise self.error
+
+
 def hosted_contracts():
     return (
         {
@@ -252,13 +263,13 @@ def hosted_contracts():
     )
 
 
-def hosted_interpreter(translator):
+def hosted_interpreter(translator, *, reasoner=None, fallback=None):
     return GroundedSemanticResourceInquiryInterpreter(
         contracts=hosted_contracts(),
-        fallback=ForbiddenFallback(),
+        fallback=fallback or ForbiddenFallback(),
         fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
         semantic_intent_translator=translator,
-        semantic_fact_reasoner=None,
+        semantic_fact_reasoner=reasoner,
         fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
     )
 
@@ -355,3 +366,45 @@ def test_hosted_semantics_does_not_receive_selector_value_in_model_output_contra
         "eligible_concepts",
         "grounded_selector",
     }
+
+
+def test_hosted_transport_failure_falls_back_to_local_semantic_reasoner():
+    translator = RaisingHostedTranslator(
+        ConnectorTransportError(
+            "HTTP transport failed with status 429",
+            status_code=429,
+        )
+    )
+    reasoner = FixedSemanticReasoner(("last logged in user",))
+
+    inquiry = hosted_interpreter(
+        translator,
+        reasoner=reasoner,
+    ).interpret(
+        text="recent person for AOT-50282",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_selector == {"hostname": "AOT-50282"}
+    assert inquiry.requested_facts == ("last logged in user",)
+    assert len(translator.calls) == 1
+    assert len(reasoner.calls) == 1
+
+
+def test_hosted_semantic_contract_failure_still_fails_closed():
+    translator = RaisingHostedTranslator(
+        PermissionError("semantic provider selected concept outside governed catalog")
+    )
+    reasoner = FixedSemanticReasoner(("last logged in user",))
+
+    with pytest.raises(PermissionError, match="outside governed catalog"):
+        hosted_interpreter(
+            translator,
+            reasoner=reasoner,
+        ).interpret(
+            text="recent person for AOT-50282",
+            principal=principal(),
+        )
+
+    assert reasoner.calls == []
