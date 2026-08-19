@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from connectors.core.contracts import ConnectorTransportError
 from kernel.identity_authority import IdentityRecord
 
 from .teams_conversation_flow import (
@@ -73,10 +74,12 @@ class MicrosoftIdentityBindingReader(Protocol):
 class JasonTeamsIdentityBinder:
     """Bind authenticated Teams evidence to pre-existing Jason identity authority.
 
-    When a Microsoft directory reader is configured, mutable profile attributes such
-    as email are resolved live from the authenticated tenant/object identity. A cached
-    binding address remains only a backwards-compatible fallback for runtimes that do
-    not yet have governed directory resolution configured.
+    The authoritative binding is the authenticated Microsoft tenant/object pair mapped
+    to an active Jason identity record. Microsoft Graph directory data is optional
+    mutable profile enrichment only; a transport outage or provider throttle may remove
+    that enrichment from the turn, but it must not invalidate an already verified Jason
+    identity binding. Semantic/authorization failures returned by the directory itself
+    remain fail-closed.
     """
 
     bindings: MicrosoftIdentityBindingReader
@@ -104,10 +107,17 @@ class JasonTeamsIdentityBinder:
 
         email_address = binding.email_address
         if self.directory is not None:
-            email_address = self.directory.resolve_email(
-                microsoft_tenant_id=evidence.microsoft_tenant_id,
-                microsoft_object_id=evidence.microsoft_object_id,
-            )
+            try:
+                email_address = self.directory.resolve_email(
+                    microsoft_tenant_id=evidence.microsoft_tenant_id,
+                    microsoft_object_id=evidence.microsoft_object_id,
+                )
+            except ConnectorTransportError:
+                # Directory email is enrichment, not identity authority. Do not fall
+                # back to potentially stale cached profile data when live enrichment
+                # is unavailable; omit the mutable attribute and continue with the
+                # already authenticated and Jason-bound principal.
+                email_address = None
             if email_address is not None:
                 email_address = email_address.strip()
                 if not _valid_email(email_address):
