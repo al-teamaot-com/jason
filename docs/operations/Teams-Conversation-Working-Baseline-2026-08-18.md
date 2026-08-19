@@ -126,6 +126,17 @@ Increasing output token ceilings fixed one specific structured-output failure cl
 
 Further budget tuning should not be treated as the primary architecture strategy.
 
+## Baseline Attempt Record
+
+### Attempt 1 — 2026-08-19 — baseline runtime did not start
+
+- **Hypothesis** — disabling the dynamic conversation path through the operator helper would allow the existing conversation flow to be tested independently.
+- **Change** — pulled baseline tooling through commit `80a938e` and invoked `jason-ops.sh baseline-deploy`.
+- **Observed result** — Compose validation passed and a rollback image was captured, but Docker failed while exporting/importing the rebuilt runtime image with `unexpected digest ... copied`. The runtime was not recreated and baseline mode was never reached.
+- **Failure class** — local container build/export infrastructure failure before Jason runtime startup; this is not evidence for or against either conversation implementation.
+- **Lesson** — distinguish deployment-tooling failures from application/runtime failures. A failed image import must not be counted as a failed conversational baseline attempt.
+- **Do not repeat** — do not alter conversation code in response to a failure that occurred before the runtime started.
+
 ## Lessons From Failed Iterations
 
 1. A fast provider cannot compensate for a model-heavy synchronous conversation pipeline.
@@ -134,6 +145,7 @@ Further budget tuning should not be treated as the primary architecture strategy
 4. The Central Orchestrator, identity boundary, and Datto execution path are not the current bottleneck and should remain stable while the conversation layer is simplified.
 5. A working baseline must exist after every architectural step so a regression can be attributed to one change.
 6. The original triggering question is a regression fixture, not the specification.
+7. Deployment-tooling failures must be isolated from conversational-runtime failures before changing application architecture.
 
 ## Failed-Approach Record Format
 
