@@ -69,6 +69,17 @@ Record baseline attempts separately from application changes so deployment-tooli
 - **Lesson:** external profile freshness and identity authority are separate contracts. A provider-neutral principal must be able to exist without mutable enrichment fields unless a later capability explicitly requires them.
 - **Do not repeat:** do not make ordinary Teams reads depend synchronously on external mutable-profile enrichment when that enrichment is not an authority input for the requested operation.
 
+## Attempt 7 — Live provenance proved the remaining 429 came from optional hosted semantics
+
+- **Hypothesis:** the post-authentication 429 was still escaping the Microsoft identity binder.
+- **Observed result:** the live runtime revision was confirmed as `08beb26`; `JASON_DYNAMIC_CONVERSATION_ENABLED=false`; `JASON_HOSTED_SEMANTICS_ENABLED=true`; and an in-container synthetic Microsoft directory 429 produced `IDENTITY_BINDER_SMOKE=PASS` with the email omitted. The real Teams turn still failed before orchestration with HTTP 429 and no Ollama activity.
+- **Failure class:** backend semantic-provider availability was incorrectly coupled to the human-facing conversation path. Hosted semantic translation is interpretation assistance, not identity, authority, evidence, or execution authority, yet its transport failure escaped instead of degrading to the next governed interpretation path.
+- **Violated invariant:** Teams conversational availability and quality must not depend on one backend reasoning provider when another governed path can safely interpret the same read request.
+- **General correction:** catch only `ConnectorTransportError` from hosted semantic translation and continue to the existing local semantic reasoner or normal governed fallback. Permission, schema, catalog-boundary, and other semantic-contract violations still fail closed and are never converted into fallback success.
+- **Application conclusion:** the 429 no longer justifies any identity, Datto, capability, or presentation change. It is a semantic backend availability concern and should remain behind the interface-quality boundary.
+- **Lesson:** provider outage and provider semantic violation are different failure classes. Availability failure may degrade to an alternate governed backend; safety/contract failure must not.
+- **Do not repeat:** do not make a hosted model/provider a synchronous single point of failure for ordinary governed reads when Jason already has a bounded local interpretation path.
+
 ## Baseline Deployment Modes
 
 ### Configuration-only baseline transition
@@ -111,3 +122,5 @@ When source code has changed, the baseline must first refresh `jason-runtime:loc
 > An observed transport failure must remain classified at the layer where it occurred. A pre-orchestration provider throttle is not evidence of a semantic, capability, Datto, or rendering defect.
 
 > Identity authority and mutable profile enrichment are separate contracts. Once authenticated Teams tenant/object evidence has been bound to an active Jason identity, failure of non-authoritative profile enrichment may remove the enrichment but must not invalidate that principal unless the failed provider result itself carries an authority-relevant denial.
+
+> Backend semantic-provider availability is not a user-facing authority boundary. Transport failure may fall through to another governed semantic path; semantic-contract or authorization violations must still fail closed.
