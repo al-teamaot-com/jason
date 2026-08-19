@@ -22,8 +22,9 @@ Commands:
   status           Show runtime/gateway/Ollama container state.
   deploy           Recover current live mount inputs, validate Compose, capture a rollback image,
                    rebuild only jason-runtime, redeploy it, and wait for health.
-  baseline-deploy  Deploy the same runtime with dynamic conversation disabled through a temporary
-                   Compose override. The repository/local Compose file is not modified.
+  baseline-deploy  Recreate the current runtime from the already-installed jason-runtime:local image
+                   with dynamic conversation disabled. No image build is performed and the repository/local
+                   Compose file is not modified.
   capture          Capture recent Teams gateway, Ollama, security-audit, and orchestration evidence.
                    Default window: 5 minutes.
 EOF
@@ -91,6 +92,48 @@ if model:
     )"
 }
 
+validate_live_inputs() {
+    required_names="
+JASON_OPENBAO_ROLE_ID_HOST_PATH
+JASON_OPENBAO_SECRET_ID_HOST_PATH
+JASON_SES_OPENBAO_ROLE_ID_HOST_PATH
+JASON_SES_OPENBAO_SECRET_ID_HOST_PATH
+JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH
+JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH
+JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH
+JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH
+JASON_OLLAMA_MODEL
+"
+
+    input_rc=0
+    for name in $required_names; do
+        eval "value=\${$name:-}"
+        if [ -n "$value" ]; then
+            echo "$name=SET"
+        else
+            echo "$name=MISSING"
+            input_rc=1
+        fi
+    done
+    return "$input_rc"
+}
+
+wait_for_runtime_health() {
+    health_rc=1
+    attempt=1
+    while [ "$attempt" -le 30 ]; do
+        state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
+        echo "HEALTH_ATTEMPT=$attempt STATE=$state"
+        if [ "$state" = "healthy" ]; then
+            health_rc=0
+            break
+        fi
+        sleep 2
+        attempt=$((attempt + 1))
+    done
+    return "$health_rc"
+}
+
 build_runtime_image() {
     attempt=1
     while [ "$attempt" -le 2 ]; do
@@ -118,31 +161,7 @@ deploy() {
     fi
 
     recover_live_inputs
-
-    required_names="
-JASON_OPENBAO_ROLE_ID_HOST_PATH
-JASON_OPENBAO_SECRET_ID_HOST_PATH
-JASON_SES_OPENBAO_ROLE_ID_HOST_PATH
-JASON_SES_OPENBAO_SECRET_ID_HOST_PATH
-JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH
-JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH
-JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH
-JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH
-JASON_OLLAMA_MODEL
-"
-
-    input_rc=0
-    for name in $required_names; do
-        eval "value=\${$name:-}"
-        if [ -n "$value" ]; then
-            echo "$name=SET"
-        else
-            echo "$name=MISSING"
-            input_rc=1
-        fi
-    done
-
-    if [ "$input_rc" -ne 0 ]; then
+    if ! validate_live_inputs; then
         echo "DEPLOY_RESULT=FAIL"
         echo "REASON=required live deployment input missing"
         return 1
@@ -176,20 +195,7 @@ JASON_OLLAMA_MODEL
         return 1
     fi
 
-    health_rc=1
-    attempt=1
-    while [ "$attempt" -le 30 ]; do
-        state="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
-        echo "HEALTH_ATTEMPT=$attempt STATE=$state"
-        if [ "$state" = "healthy" ]; then
-            health_rc=0
-            break
-        fi
-        sleep 2
-        attempt=$((attempt + 1))
-    done
-
-    if [ "$health_rc" -eq 0 ]; then
+    if wait_for_runtime_health; then
         echo "DEPLOY_RESULT=PASS"
         echo "READY_FOR_LIVE_TEST=1"
         return 0
@@ -203,6 +209,28 @@ JASON_OLLAMA_MODEL
 
 baseline_deploy() {
     echo "========== JASON TEAMS WORKING BASELINE =========="
+
+    if ! container_exists "$RUNTIME_CONTAINER"; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=jason-runtime container not found"
+        return 1
+    fi
+
+    recover_live_inputs
+    if ! validate_live_inputs; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=required live deployment input missing"
+        return 1
+    fi
+
+    if ! docker image inspect jason-runtime:local >/dev/null 2>&1; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=existing jason-runtime:local image not found"
+        return 1
+    fi
+    echo "BASELINE_IMAGE=jason-runtime:local"
+    echo "BASELINE_BUILD=SKIPPED"
+
     override_file="$(mktemp)"
     cat > "$override_file" <<'EOF'
 services:
@@ -211,24 +239,55 @@ services:
       JASON_DYNAMIC_CONVERSATION_ENABLED: "false"
 EOF
     JASON_COMPOSE_OVERRIDE_FILE="$override_file"
-    deploy
-    deploy_rc=$?
 
-    if [ "$deploy_rc" -eq 0 ] && container_exists "$RUNTIME_CONTAINER"; then
+    if ! compose_runtime config --quiet; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=baseline compose validation failed"
+        rm -f "$override_file"
+        JASON_COMPOSE_OVERRIDE_FILE=""
+        return 1
+    fi
+    echo "COMPOSE_VALIDATION=PASS"
+
+    old_image_id="$(docker inspect --format '{{.Image}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
+    rollback_tag=""
+    if [ -n "$old_image_id" ]; then
+        rollback_tag="jason-runtime:rollback-$(date +%Y%m%d-%H%M%S)"
+        docker image tag "$old_image_id" "$rollback_tag"
+        echo "ROLLBACK_IMAGE=$rollback_tag"
+    fi
+
+    if ! compose_runtime up -d --no-build --no-deps --force-recreate jason-runtime; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=baseline runtime recreation failed"
+        [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
+        rm -f "$override_file"
+        JASON_COMPOSE_OVERRIDE_FILE=""
+        return 1
+    fi
+
+    baseline_rc=0
+    if ! wait_for_runtime_health; then
+        echo "BASELINE_MODE=FAIL"
+        echo "REASON=baseline runtime did not become healthy"
+        [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
+        baseline_rc=1
+    else
         dynamic_value="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$RUNTIME_CONTAINER" 2>/dev/null | grep '^JASON_DYNAMIC_CONVERSATION_ENABLED=' | tail -n 1 | cut -d= -f2-)"
         if [ "${dynamic_value:-false}" = "false" ]; then
             echo "BASELINE_MODE=PASS"
             echo "JASON_DYNAMIC_CONVERSATION_ENABLED=false"
+            echo "READY_FOR_LIVE_TEST=1"
         else
             echo "BASELINE_MODE=FAIL"
             echo "REASON=runtime did not start with dynamic conversation disabled"
-            deploy_rc=1
+            baseline_rc=1
         fi
     fi
 
     rm -f "$override_file"
     JASON_COMPOSE_OVERRIDE_FILE=""
-    return "$deploy_rc"
+    return "$baseline_rc"
 }
 
 capture() {
