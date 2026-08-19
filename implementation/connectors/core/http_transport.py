@@ -58,7 +58,11 @@ class UrlLibJsonHttpTransport:
             with urlopen(request, timeout=effective_timeout) as response:
                 raw = response.read()
         except HTTPError as exc:
-            raise ConnectorTransportError(f"HTTP transport failed with status {exc.code}") from exc
+            raise ConnectorTransportError(
+                f"HTTP transport failed with status {exc.code}",
+                status_code=int(exc.code),
+                retry_after_seconds=_retry_after_seconds(exc.headers),
+            ) from exc
         except (TimeoutError, SocketTimeout) as exc:
             if deadline_limited:
                 raise ConnectorExecutionDeadlineExceeded(
@@ -83,3 +87,21 @@ class UrlLibJsonHttpTransport:
         if not isinstance(decoded, Mapping):
             raise ConnectorTransportError("HTTP response must be a JSON object")
         return dict(decoded)
+
+
+def _retry_after_seconds(headers: Any) -> float | None:
+    """Return a numeric Retry-After delay without retaining provider headers."""
+
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("Retry-After")
+    except AttributeError:
+        return None
+    if raw is None:
+        return None
+    try:
+        value = float(str(raw).strip())
+    except ValueError:
+        return None
+    return value if value >= 0 else None
