@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 from kernel.capabilities import CapabilityRegistryService
 
-from .semantic_fact_resolver import SemanticFactResolver
+from .semantic_capability_coverage import semantic_resolution_matches_resource_contract
+from .semantic_fact_resolver import SemanticFactResolution, SemanticFactResolver
 from .semantic_mapping_registry import SemanticMappingRegistry
 from .teams_conversation_flow import (
     BoundConversationPrincipal,
@@ -21,12 +22,18 @@ def _normalized(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class GovernedSemanticCoverageIntentResolver:
-    """Require explicit governed coverage for semantic facts Jason recognizes.
+    """Require governed coverage for semantic facts Jason recognizes.
 
     Semantic recognition answers only *what the human means*. It must not silently
     create retrieval authority. Before delegating to normal resource planning, this
-    boundary checks that every explicitly recognized registry fact is declared by an
-    active provider-neutral read capability or an approved semantic mapping.
+    boundary checks that every explicitly recognized registry fact is covered by
+    provider-neutral read capability structure, legacy declared canonical coverage,
+    or an approved semantic mapping.
+
+    Structural coverage is intentionally resource-based rather than phrase-based:
+    active semantic concepts are compared with governed capability ``resource_types``
+    by semantic namespace/evidence context. This allows Jason to evolve endpoint facts
+    without adding one static question-to-fact mapping for every new observation.
     """
 
     delegate: ConversationIntentResolver
@@ -43,9 +50,8 @@ class GovernedSemanticCoverageIntentResolver:
         explicit = self.fact_resolver.match_explicit_facts(text)
         uncovered: list[str] = []
         for resolution in explicit:
-            canonical = resolution.canonical_fact
-            if not self._has_coverage(canonical):
-                uncovered.append(canonical)
+            if not self._has_coverage(resolution):
+                uncovered.append(resolution.canonical_fact)
 
         if uncovered:
             unique = tuple(dict.fromkeys(uncovered))
@@ -65,7 +71,8 @@ class GovernedSemanticCoverageIntentResolver:
 
         return self.delegate.resolve(text=text, principal=principal)
 
-    def _has_coverage(self, canonical_fact: str) -> bool:
+    def _has_coverage(self, resolution: SemanticFactResolution) -> bool:
+        canonical_fact = resolution.canonical_fact
         wanted = _normalized(canonical_fact)
 
         if self.semantic_mapping_registry is not None:
@@ -78,6 +85,16 @@ class GovernedSemanticCoverageIntentResolver:
                 continue
             if metadata.get("read_only", "false").casefold() != "true":
                 continue
+
+            if semantic_resolution_matches_resource_contract(
+                resolution=resolution,
+                metadata=metadata,
+            ):
+                return True
+
+            # Transitional compatibility for governed facts not yet represented by
+            # structural Semantic Knowledge Registry concepts. This is deliberately
+            # not expanded for new facts; the target architecture is structural.
             declared = {
                 _normalized(item)
                 for item in metadata.get("canonical_facts", "").split(",")
