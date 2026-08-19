@@ -58,6 +58,17 @@ Record baseline attempts separately from application changes so deployment-tooli
 - **Lesson:** authenticated conversational ingress must distinguish transient provider throttling from semantic/application failures, preserve safe provider retry metadata, and retry only within an explicit bounded policy.
 - **Do not repeat:** do not change semantic mappings, capability routing, Datto code, or presentation logic in response to a pre-orchestration HTTP 429.
 
+## Attempt 6 — Retry policy exposed a deeper authority/enrichment coupling defect
+
+- **Hypothesis:** bounded Microsoft Graph retry would allow transient 429 throttling to clear without changing the authenticated Teams identity model.
+- **Observed result:** after deploying the bounded 429 retry, a new Teams turn still authenticated successfully and failed before orchestration with `ConnectorTransportError: HTTP transport failed with status 429`. The turn lasted only a few seconds and again created no new orchestration events.
+- **Failure class:** authority-boundary coupling defect. A mutable profile enrichment read (`mail`/`userPrincipalName`) was being treated as a mandatory prerequisite for a principal whose authoritative tenant/object binding and Jason identity record had already been verified.
+- **Violated invariant:** non-authoritative enrichment must not invalidate an already authenticated and Jason-bound principal when the enrichment provider is unavailable or throttled.
+- **General correction:** keep the authoritative identity path as authenticated Teams tenant/object evidence -> active Microsoft binding -> active Jason identity. Directory email remains optional live enrichment. Transport failure omits the mutable email attribute for that turn rather than substituting stale profile data or rejecting the verified principal. Semantic/authorization failures from the directory itself remain fail-closed.
+- **Application conclusion:** the repeated 429 still says nothing about Datto retrieval or timestamp rendering. It instead revealed that profile enrichment was positioned too high in the authority path.
+- **Lesson:** external profile freshness and identity authority are separate contracts. A provider-neutral principal must be able to exist without mutable enrichment fields unless a later capability explicitly requires them.
+- **Do not repeat:** do not make ordinary Teams reads depend synchronously on external mutable-profile enrichment when that enrichment is not an authority input for the requested operation.
+
 ## Baseline Deployment Modes
 
 ### Configuration-only baseline transition
@@ -98,3 +109,5 @@ When source code has changed, the baseline must first refresh `jason-runtime:loc
 > A working-baseline experiment must minimize simultaneous variables, but it must also prove deployment provenance. Configuration-only recreation proves configuration; it does not prove that newly pulled source is running. Any live conclusion about a code change requires a provenance-verified image built from that revision.
 
 > An observed transport failure must remain classified at the layer where it occurred. A pre-orchestration provider throttle is not evidence of a semantic, capability, Datto, or rendering defect.
+
+> Identity authority and mutable profile enrichment are separate contracts. Once authenticated Teams tenant/object evidence has been bound to an active Jason identity, failure of non-authoritative profile enrichment may remove the enrichment but must not invalidate that principal unless the failed provider result itself carries an authority-relevant denial.
