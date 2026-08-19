@@ -57,6 +57,26 @@ def test_bitlocker_udf_status_has_bounded_evidence_context():
     assert result.evidence_contexts == ("bitlocker", "udf")
 
 
+def test_canonical_label_resolves_without_duplicate_term_binding():
+    resolver = SemanticFactResolver()
+    result = resolver.resolve("endpoint last seen")
+    assert result is not None
+    assert result.canonical_fact == "endpoint last seen"
+    assert result.concept_id == "endpoint.last_seen"
+    assert result.expected_shape == "timestamp"
+    assert result.source == "semantic_knowledge_registry"
+
+
+def test_canonical_label_resolution_is_not_specific_to_endpoint_last_seen():
+    resolver = SemanticFactResolver()
+    result = resolver.resolve("microsoft 365 license assignment")
+    assert result is not None
+    assert result.canonical_fact == "microsoft 365 license assignment"
+    assert result.concept_id == "microsoft365.license.assignment"
+    assert result.expected_shape == "collection"
+    assert result.source == "semantic_knowledge_registry"
+
+
 def test_legacy_compatibility_fallback_remains_available_for_unmigrated_registry():
     from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
     from orchestrator.semantic_knowledge_registry import SemanticKnowledgeRegistry
