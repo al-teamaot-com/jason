@@ -33,7 +33,7 @@ from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from orchestrator import OrchestrationMode, OrchestrationRequest
 
 DEFAULT_DEPLOYMENT_RECORD = Path(
-    "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+    "docs/operations/Jason-Secret-Provider-Deployment-Record.md"
 )
 DEFAULT_EVIDENCE_ROOT = Path.home() / "Jason-Evidence" / "Autotask-Business-Context"
 DEFAULT_EVENT_STORE = (

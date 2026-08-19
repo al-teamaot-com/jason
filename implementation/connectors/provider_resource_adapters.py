@@ -83,12 +83,21 @@ def translate_datto_rmm_resource(query: ResourceQuery) -> ConnectorInvocation:
             )
         if query.operation is ResourceOperation.QUERY:
             filters = query.filters or {}
-            arguments: dict[str, Any] = {
-                "search": filters.get("search", ""),
-                "page": 1,
-            }
+            arguments: dict[str, Any] = {"page": 1}
+            hostname = (
+                filters.get("hostname")
+                or filters.get("name")
+                or filters.get("search")
+            )
+            site = filters.get("site") or filters.get("site_name")
+            if hostname is not None and str(hostname).strip():
+                arguments["hostname"] = str(hostname).strip()
+            if site is not None and str(site).strip():
+                arguments["site"] = str(site).strip()
             if query.page_size is not None:
-                arguments["max"] = query.page_size
+                # Discovery must preserve at least two candidates so ambiguity is
+                # observable. The provider connector enforces the same invariant.
+                arguments["max"] = max(int(query.page_size), 2)
             return ConnectorInvocation(
                 capability="datto_rmm.device.search",
                 arguments=arguments,

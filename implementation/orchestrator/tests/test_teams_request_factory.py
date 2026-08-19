@@ -114,6 +114,7 @@ def test_factory_requires_jason_authority_and_preserves_execution_context():
         principal=principal(),
         intent=intent(),
         identity=identity_evidence(),
+            correlation_id="corr-teams-1",
     )
 
     assert request.principal_id == "person-al"
@@ -139,6 +140,7 @@ def test_factory_fails_closed_without_matching_authority_grant():
             principal=principal(),
             intent=intent(),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "AUTHORITY_DENIED"
@@ -153,6 +155,7 @@ def test_factory_surfaces_approval_requirement_without_execution_context():
             principal=principal(),
             intent=intent(),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "APPROVAL_REQUIRED"
@@ -167,6 +170,7 @@ def test_factory_refuses_silent_authority_downgrade():
             principal=principal(),
             intent=intent(permission_mode="execute"),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "AUTHORITY_DENIED"

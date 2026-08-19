@@ -12,6 +12,7 @@ from orchestrator.contracts import (
 )
 from orchestrator.teams_conversation_flow import (
     BoundConversationPrincipal,
+    ConversationClarificationRequiredError,
     ConversationIntent,
     TeamsConversationFlow,
     TeamsConversationPrincipalEvidence,
@@ -41,10 +42,13 @@ class RequestFactory:
         self.mutate_organization = mutate_organization
         self.requester_kind = requester_kind
 
-    def build(self, *, principal, intent, identity):
+    def new_correlation_id(self):
+        return "corr-1"
+
+    def build(self, *, principal, intent, identity, correlation_id):
         return OrchestrationRequest(
             execution_id="exec-1",
-            correlation_id="corr-1",
+            correlation_id=correlation_id,
             principal_id="other-principal" if self.mutate_principal else principal.principal_id,
             organization_id="other-org" if self.mutate_organization else principal.organization_id,
             client_id=principal.client_id,
@@ -243,8 +247,13 @@ def test_intent_rejects_direct_agent_invocation_arguments():
 
 def test_request_factory_cannot_change_execution_or_permission_mode():
     class ModeChangingFactory(RequestFactory):
-        def build(self, *, principal, intent, identity):
-            request = super().build(principal=principal, intent=intent, identity=identity)
+        def build(self, *, principal, intent, identity, correlation_id):
+            request = super().build(
+                principal=principal,
+                intent=intent,
+                identity=identity,
+                correlation_id=correlation_id,
+            )
             return OrchestrationRequest(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
@@ -268,5 +277,60 @@ def test_request_factory_cannot_change_execution_or_permission_mode():
     flow, orchestrator, transport = build_flow(request_factory=ModeChangingFactory())
     with pytest.raises(PermissionError, match="execution mode"):
         flow.handle(TeamsConversationRequest(text="Who is logged into AOT-50282?", identity=identity()))
+    assert orchestrator.requests == []
+    assert transport.sent == []
+
+
+def test_clarification_required_stops_before_request_factory_and_orchestration():
+    class ClarificationResolver:
+        def resolve(
+            self,
+            *,
+            text,
+            principal,
+        ):
+            raise (
+                ConversationClarificationRequiredError(
+                    reason_code=
+                        "canonical_fact_ambiguous",
+                    candidate_facts=(
+                        "LAN IP address",
+                        "WAN IP address",
+                    ),
+                )
+            )
+
+    class FailingFactory:
+        def build(self, **kwargs):
+            raise AssertionError(
+                "clarification reached request factory"
+            )
+
+    orchestrator = Orchestrator()
+    transport = Transport()
+
+    flow = TeamsConversationFlow(
+        identity_binder=Binder(principal()),
+        intent_resolver=
+            ClarificationResolver(),
+        request_factory=FailingFactory(),
+        orchestrator=orchestrator,
+        response_renderer=Renderer(),
+        transport=transport,
+    )
+
+    with pytest.raises(
+        ConversationClarificationRequiredError
+    ):
+        flow.handle(
+            TeamsConversationRequest(
+                text=(
+                    "What IP does "
+                    "AOT-50282 have?"
+                ),
+                identity=identity(),
+            )
+        )
+
     assert orchestrator.requests == []
     assert transport.sent == []

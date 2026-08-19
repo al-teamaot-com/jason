@@ -78,6 +78,11 @@ class Cap001KernelResolutionAdapter:
             policy_ids=("cap-001-read-only-v0.1",),
             allow_pilot_capability=True,
             allow_pilot_provider=True,
+            # CAP-001 request IDs are already unique operation identifiers. Reusing
+            # the request ID as the resolution idempotency key preserves the
+            # capability's existing deterministic/read-only contract while
+            # satisfying the Kernel's capability-level idempotency gate.
+            idempotency_key=request["request_id"],
         )
 
         result = self._resolver.resolve(resolution_request)

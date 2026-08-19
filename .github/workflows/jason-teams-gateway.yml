@@ -1,0 +1,29 @@
+name: Validate Jason Teams Gateway
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  teams-gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check gateway syntax
+        run: |
+          node --check infrastructure/jason-teams-gateway/index.mjs
+          node --check infrastructure/jason-teams-gateway/test/gateway-contract.test.mjs
+      - name: Test single-response and bounded failure observability
+        run: node --test infrastructure/jason-teams-gateway/test/gateway-contract.test.mjs
+      - name: Reject canned working acknowledgement
+        shell: bash
+        run: |
+          ! grep -RIn \
+            'Received - working on that now' \
+            infrastructure/jason-teams-gateway/index.mjs

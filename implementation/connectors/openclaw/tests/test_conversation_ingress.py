@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from threading import Event, Thread
 
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
-from orchestrator.teams_conversation_flow import TeamsConversationFlowResult
+from orchestrator.teams_conversation_flow import (
+    ConversationClarificationRequiredError,
+    ConversationIntentUnresolvedError,
+    TeamsConversationFlowResult,
+)
 
 
 class Authenticator:
@@ -210,6 +215,148 @@ def test_replay_is_rejected_before_second_execution():
     assert len(flow.requests) == 1
 
 
+def test_same_authenticated_teams_message_with_new_request_id_is_suppressed():
+    flow = Flow()
+    replay = Replay()
+    audit = Audit()
+    handler = ingress(flow=flow, replay=replay, audit=audit)
+
+    first = handler.handle(
+        envelope(
+            request_id="req-message-first",
+            correlation_id="corr-message-first",
+        )
+    )
+    duplicate = handler.handle(
+        envelope(
+            request_id="req-message-duplicate",
+            correlation_id="corr-message-duplicate",
+            nonce="nonce-duplicate",
+        )
+    )
+
+    assert first["status"] == "completed"
+    assert duplicate == {
+        "request_id": "req-message-duplicate",
+        "correlation_id": "corr-message-duplicate",
+        "status": "duplicate",
+        "error_code": "duplicate_message",
+        "message_id": "teams-message-1",
+    }
+    assert len(flow.requests) == 1
+    assert audit.events[-1][0] == (
+        "openclaw.teams_conversation_duplicate_suppressed"
+    )
+    assert audit.events[-1][1]["message_id"] == "teams-message-1"
+
+
+
+def test_duplicate_is_suppressed_while_first_message_is_still_in_flight():
+    started = Event()
+    release = Event()
+    calls = []
+    first_result = []
+
+    class BlockingFlow:
+        def handle(self, request):
+            calls.append(request)
+            started.set()
+
+            if not release.wait(timeout=5):
+                raise TimeoutError("test flow was not released")
+
+            return Flow().handle(request)
+
+    replay = Replay()
+    audit = Audit()
+    handler = ingress(
+        flow=BlockingFlow(),
+        replay=replay,
+        audit=audit,
+    )
+
+    def run_first():
+        first_result.append(
+            handler.handle(
+                envelope(
+                    request_id="req-inflight-first",
+                    correlation_id="corr-inflight-first",
+                    message_id="teams-message-inflight",
+                )
+            )
+        )
+
+    worker = Thread(target=run_first)
+    worker.start()
+
+    assert started.wait(timeout=5)
+
+    duplicate = handler.handle(
+        envelope(
+            request_id="req-inflight-duplicate",
+            correlation_id="corr-inflight-duplicate",
+            nonce="nonce-inflight-duplicate",
+            message_id="teams-message-inflight",
+        )
+    )
+
+    assert duplicate == {
+        "request_id": "req-inflight-duplicate",
+        "correlation_id": "corr-inflight-duplicate",
+        "status": "duplicate",
+        "error_code": "duplicate_message",
+        "message_id": "teams-message-inflight",
+    }
+
+    assert len(calls) == 1
+
+    duplicate_events = [
+        payload
+        for event_type, payload in audit.events
+        if event_type
+        == "openclaw.teams_conversation_duplicate_suppressed"
+    ]
+
+    assert len(duplicate_events) == 1
+    assert duplicate_events[0]["message_id"] == (
+        "teams-message-inflight"
+    )
+
+    release.set()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(first_result) == 1
+    assert first_result[0]["status"] == "completed"
+
+
+
+def test_same_text_in_new_teams_message_is_not_suppressed():
+    flow = Flow()
+    replay = Replay()
+    handler = ingress(flow=flow, replay=replay)
+
+    first = handler.handle(
+        envelope(
+            request_id="req-new-message-1",
+            correlation_id="corr-new-message-1",
+            message_id="teams-message-new-1",
+        )
+    )
+    second = handler.handle(
+        envelope(
+            request_id="req-new-message-2",
+            correlation_id="corr-new-message-2",
+            nonce="nonce-new-message-2",
+            message_id="teams-message-new-2",
+        )
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert len(flow.requests) == 2
+
+
 def test_expired_turn_fails_before_replay_claim_and_flow():
     flow = Flow()
     replay = Replay()
@@ -239,3 +386,148 @@ def test_flow_identity_or_authority_denial_is_sanitized():
         "status": "denied",
         "error_code": "conversation_denied",
     }
+
+
+def test_only_explicit_intent_resolution_failure_is_reported_as_unresolved():
+    audit = Audit()
+    flow = Flow(
+        error=ConversationIntentUnresolvedError(
+            "no governed Jason capability intent could be resolved"
+        )
+    )
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-unresolved")
+    )
+
+    assert result == {
+        "request_id": "req-unresolved",
+        "correlation_id": "corr-conversation-1",
+        "status": "rejected",
+        "error_code": "conversation_unresolved",
+    }
+    assert audit.events[-1][0] == "openclaw.teams_conversation_rejected"
+
+
+def test_downstream_lookup_failure_is_reported_as_failed_not_unresolved():
+    audit = Audit()
+    flow = Flow(error=LookupError("provider evidence pointer does not exist"))
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-evidence-failed")
+    )
+
+    assert result == {
+        "request_id": "req-evidence-failed",
+        "correlation_id": "corr-conversation-1",
+        "status": "failed",
+        "error_code": "conversation_failed",
+    }
+    assert audit.events[-1][0] == "openclaw.teams_conversation_failed"
+
+
+def test_structured_clarification_is_audited_and_returned_without_rejection():
+    audit = Audit()
+
+    flow = Flow(
+        error=ConversationClarificationRequiredError(
+            reason_code=
+                "canonical_fact_ambiguous",
+            candidate_facts=(
+                "LAN IP address",
+                "WAN IP address",
+            ),
+        )
+    )
+
+    result = ingress(
+        flow=flow,
+        audit=audit,
+    ).handle(
+        envelope(
+            request_id=
+                "req-clarification",
+            message_id=
+                "teams-message-clarification",
+        )
+    )
+
+    assert result == {
+        "request_id":
+            "req-clarification",
+        "correlation_id":
+            "corr-conversation-1",
+        "status":
+            "clarification_required",
+        "error_code":
+            "canonical_fact_ambiguous",
+        "clarification": {
+            "text": (
+                "I need one detail before I can "
+                "continue. Do you mean LAN IP "
+                "address or WAN IP address? "
+                "Please send a complete request "
+                "naming the one you want."
+            ),
+            "candidate_facts": [
+                "LAN IP address",
+                "WAN IP address",
+            ],
+            "requires_complete_request":
+                True,
+        },
+    }
+
+    assert audit.events[-1][0] == (
+        "openclaw.teams_conversation_"
+        "clarification_required"
+    )
+
+    assert audit.events[-1][1][
+        "candidate_facts"
+    ] == [
+        "LAN IP address",
+        "WAN IP address",
+    ]
+
+    assert all(
+        event_type
+        != "openclaw.teams_conversation_rejected"
+        for event_type, _
+        in audit.events
+    )
+
+
+def test_flow_permission_denial_records_internal_diagnostic_but_keeps_response_sanitized():
+    audit = Audit()
+    flow = Flow(
+        error=PermissionError(
+            "semantic fact reasoner selected facts outside governed candidates"
+        )
+    )
+
+    result = ingress(
+        flow=flow,
+        audit=audit,
+    ).handle(
+        envelope(request_id="req-denial-diagnostic")
+    )
+
+    assert result == {
+        "request_id": "req-denial-diagnostic",
+        "correlation_id": "corr-conversation-1",
+        "status": "denied",
+        "error_code": "conversation_denied",
+    }
+
+    event_type, payload = audit.events[-1]
+
+    assert event_type == "openclaw.teams_conversation_denied"
+    assert payload["reason"] == "conversation_denied"
+    assert payload["error_type"] == "PermissionError"
+    assert payload["error_message"] == (
+        "semantic fact reasoner selected facts outside governed candidates"
+    )
+
+    # Internal diagnostics must never escape through the transport response.
+    assert "semantic fact" not in str(result)

@@ -18,8 +18,8 @@ on:
       - "tools/openclaw_authority_operational_health.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/prepare_authority_openclaw_host.sh"
-      - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
-      - "07-Operations/OpenClaw-JKD001-Operational-Hardening.md"
+      - "docs/components/kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
+      - "docs/operations/OpenClaw-JKD001-Operational-Hardening.md"
       - ".github/workflows/identity-authority.yml"
   pull_request:
     paths:
@@ -38,8 +38,8 @@ on:
       - "tools/openclaw_authority_operational_health.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/prepare_authority_openclaw_host.sh"
-      - "03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
-      - "07-Operations/OpenClaw-JKD001-Operational-Hardening.md"
+      - "docs/components/kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md"
+      - "docs/operations/OpenClaw-JKD001-Operational-Hardening.md"
       - ".github/workflows/identity-authority.yml"
 
 permissions:

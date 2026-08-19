@@ -3,11 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from connectors.core.contracts import Connector, ConnectorContext, ConnectorRequest
+from connectors.core.contracts import (
+    Connector,
+    ConnectorContext,
+    ConnectorRequest,
+    connector_execution_deadline,
+)
 from kernel.resolution import CapabilityResolutionResult
 
 from .contracts import OrchestrationRequest
 from .service import InvocationResult
+
+
+_DEFAULT_EXTERNAL_CONNECTOR_EXECUTION_SECONDS = 30.0
+_PROVIDER_EXECUTION_SECONDS_METADATA = "provider_maximum_execution_seconds"
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,10 +27,19 @@ class GovernedConnectorCapabilityInvoker:
     permits the resolved provider to execute the requested canonical capability and
     preserves Jason identity/client scope and authority mode in the connector context.
     Execution strategy and authority permission are intentionally separate concepts.
+
+    One governed deadline covers the whole logical connector invocation, including
+    any bounded discovery and follow-up reads performed by the connector. Individual
+    HTTP timeouts therefore cannot multiply into an unbounded conversational stall.
     """
 
     connectors: Mapping[str, Connector]
     provider_capability_map: Mapping[tuple[str, str], str]
+    default_maximum_execution_seconds: float = _DEFAULT_EXTERNAL_CONNECTOR_EXECUTION_SECONDS
+
+    def __post_init__(self) -> None:
+        if self.default_maximum_execution_seconds <= 0:
+            raise ValueError("default_maximum_execution_seconds must be positive")
 
     def invoke(
         self,
@@ -61,7 +79,9 @@ class GovernedConnectorCapabilityInvoker:
             ),
             arguments=request.arguments,
         )
-        result = connector.execute(connector_request)
+        maximum_execution_seconds = self._maximum_execution_seconds(resolution)
+        with connector_execution_deadline(maximum_execution_seconds):
+            result = connector.execute(connector_request)
         if result.provider != connector.provider_name:
             raise RuntimeError("connector result provider does not match registered connector")
         if result.capability != provider_capability:
@@ -77,3 +97,23 @@ class GovernedConnectorCapabilityInvoker:
             },
             attempts=1,
         )
+
+    def _maximum_execution_seconds(
+        self,
+        resolution: CapabilityResolutionResult,
+    ) -> float:
+        metadata = getattr(resolution, "metadata", {}) or {}
+        declared = metadata.get(_PROVIDER_EXECUTION_SECONDS_METADATA)
+        if declared is None:
+            return self.default_maximum_execution_seconds
+        try:
+            value = float(declared)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "provider maximum execution seconds metadata must be numeric"
+            ) from exc
+        if value <= 0:
+            raise ValueError(
+                "provider maximum execution seconds metadata must be positive"
+            )
+        return min(value, self.default_maximum_execution_seconds)
