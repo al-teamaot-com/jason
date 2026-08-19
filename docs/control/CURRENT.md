@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-15  
-**Status:** Ordinary Microsoft Teams ingress is now production-proven through the dedicated `jason-teams-gateway`, with OpenClaw removed from externally reachable ordinary inbound Teams routing. The live Teams request completed through Jason Runtime/Central Orchestrator and Datto RMM with provider-derived evidence and no matching OpenClaw model dispatch.  
+**Updated:** 2026-08-19  
+**Status:** Ordinary Microsoft Teams ingress is production-proven through the dedicated `jason-teams-gateway`. A working non-dynamic Teams conversational baseline is now re-proven live with `JASON_DYNAMIC_CONVERSATION_ENABLED=false`; the direct gateway completed a real Teams turn with HTTP 200 after being recreated from the already-installed production gateway image.  
 **Canonical purpose:** Human-readable resume point for current work. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -14,23 +14,84 @@ Future sessions should read, in order:
 4. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 5. `docs/control/DOCUMENTATION-REGISTER.md`
 6. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-7. `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
-8. `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`
-9. `docs/operations/Runbook-Teams-Integration.md`
-10. `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
-11. current Git and System Registry/host evidence before asserting live production state
+7. `docs/operations/Teams-Conversation-Working-Baseline-2026-08-18.md`
+8. `docs/operations/Teams-Conversation-Baseline-Attempt-Log-2026-08-19.md`
+9. `docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md`
+10. `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
+11. `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`
+12. `docs/operations/Runbook-Teams-Integration.md`
+13. `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
+14. current Git and System Registry/host evidence before asserting live production state
 
 Conversation memory is context only. It is not authority.
 
-## Last durable success
+## Current working Teams conversational baseline — 2026-08-19
+
+The currently proven working conversational baseline is:
+
+`Microsoft Teams -> teams-jason.teamaot.com/api/messages -> relay/ZeroTier -> Jason host :3978 -> jason-teams-gateway:3979 -> signed Jason ingress -> jason-runtime -> governed non-dynamic conversation path -> Central Orchestrator -> governed provider -> response -> Teams`
+
+The runtime configuration for this known-good baseline is:
+
+`JASON_DYNAMIC_CONVERSATION_ENABLED=false`
+
+The configuration-only baseline transition completed with:
+
+- `BASELINE_IMAGE=jason-runtime:local`
+- `BASELINE_BUILD=SKIPPED`
+- `COMPOSE_VALIDATION=PASS`
+- `BASELINE_MODE=PASS`
+- `JASON_DYNAMIC_CONVERSATION_ENABLED=false`
+- `READY_FOR_LIVE_TEST=1`
+
+Observed service state before the final live proof:
+
+- `jason-runtime` healthy on internal `8080/tcp`;
+- `jason-teams-gateway` on `0.0.0.0:3978->3979/tcp`;
+- `openclaw-openclaw-gateway-1` healthy on host `18789-18790` only.
+
+The direct gateway was recreated from the already-installed `jason-teams-gateway:production` image without changing runtime application code, planner code, Datto code, semantic mappings, or OpenClaw routing. The recreated gateway:
+
+- joined Docker network `jason-core`;
+- resolved `jason-runtime` successfully;
+- connected to `jason-runtime:8080` successfully;
+- retained the governed ingress signing key and dedicated Teams credential file;
+- retained the documented runtime target `http://jason-runtime:8080/v1/openclaw/teams/conversation`;
+- owned host port `3978`.
+
+The live regression request was:
+
+`When was AOT-50107 last seen?`
+
+The direct gateway emitted:
+
+```text
+{"event":"jason_teams_gateway_started","port":3979,"tenantId":"f7054323-d52b-4863-8c2f-1898f0b6077c","clientId":"c94301b7-7194-46ab-aab7-94f9366f51a9"}
+{"event":"jason_teams_turn_completed","status":"completed","httpStatus":200,"conversationId":"a:1OHDLSOI1q1Q__cbeAT5B1JDBmxw298L53JZshpQVGJvBhGbIWIyjri1H3zkJu2GiBBi4aP90SVBcDb5GIqkr4dD9GS23cMQ91Kcmz0LgDQbKBfa9PlVqQaf6baLpR3Ah","messageId":"1787168773572"}
+```
+
+Durable proof:
+
+`docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md`
+
+### Do not rediscover these conclusions
+
+1. The working baseline is the non-dynamic path with `JASON_DYNAMIC_CONVERSATION_ENABLED=false`.
+2. The direct `jason-teams-gateway` is the ordinary inbound Teams transport owner. Do not route ordinary inbound Teams back through OpenClaw.
+3. The Central Orchestrator, identity boundary, Datto execution path, provider governance, evidence path, and Teams return transport are retained baseline components, not redesign targets without new evidence.
+4. A dynamic-planner experiment constrained the plan to one capability and mechanically enforced the bound, but the real catalog still selected `endpoint.alert.history.search` five out of five times for `When was AOT-50107 last seen?`. The temporary `_MAX_REQUIREMENTS = 1` change was restored to `12`; do not reintroduce it as though it solved routing.
+5. Do not add phrase-specific `last seen` routing, question-to-field mappings, or bespoke workflow logic to make this regression sentence pass.
+6. Do not treat model-size or token-budget tuning as the primary architecture strategy for the dynamic path.
+7. Reintroduce constitutional behavior one major step at a time from the working baseline: runtime capability discovery with single-capability execution first, then dynamic grounding, then later continuity/evidence/multi-capability stages.
+8. `jason-ops.sh capture` currently misses gateway event `jason_teams_turn_failed_closed`; an empty gateway capture section is therefore not proof that no failed-closed gateway turn occurred. Align the helper with the actual gateway event vocabulary before relying on that inference.
+9. An ad-hoc Node health command using a double-quoted `!r.ok` expression failed because Bash history expansion consumed `!`; that shell error did not affect the gateway or the successful live proof. Do not reuse that exact command form.
+10. Configuration-only `baseline-deploy` proves runtime configuration, not newly pulled source. Any claim about changed source requires the provenance-verified source refresh path documented in the attempt log.
+
+## Previous durable ingress success — 2026-08-15
 
 On 2026-08-15, ordinary Teams ingress was cut over from OpenClaw to a dedicated non-intelligent Jason Teams Gateway.
 
-Current proven inbound path:
-
-`Microsoft Teams -> teams-jason.teamaot.com/api/messages -> relay/ZeroTier -> Jason host :3978 -> jason-teams-gateway:3979 -> signed Jason ingress -> jason-runtime -> Central Orchestrator -> governed provider -> deterministic response -> Teams`
-
-The live production regression request was:
+The production regression request was:
 
 `Hey Jason, can you tell me who was last on AOT-50282 and if anything is wrong with it right now?`
 
@@ -42,12 +103,6 @@ The Teams response returned:
 - evidence source `datto_rmm`.
 
 Direct gateway logs recorded completed HTTP `200` turns. The same evidence window contained no OpenClaw `dispatching to agent` event for those ordinary Teams turns.
-
-Final observed service state:
-
-- `jason-teams-gateway` owned host `3978 -> container 3979`;
-- `openclaw-openclaw-gateway-1` remained healthy on host `18789-18790` only;
-- `jason-runtime` remained healthy on internal port `8080`.
 
 Durable architecture decision:
 
@@ -80,13 +135,23 @@ The durable rule is now: **ordinary Jason-bound Teams ingress has one transport 
 
 The direct Teams ingress routing workstream is complete and production-proven.
 
-The next work is **hardening and lifecycle cleanup**, not more routing debugging:
+The active conversational workstream is now **working-baseline preservation followed by constitutional evolution one major behavior at a time**.
 
-1. keep the System Registry/current generated operational view aligned with the direct gateway topology;
-2. review whether OpenClaw's dormant inbound `msteams` listener/provider can be disabled without breaking approved outbound/proactive Teams messaging;
-3. migrate the direct gateway's dedicated Microsoft client credential from the temporary mode-0600 host environment file into Jason's preferred governed secret-delivery/federated identity architecture;
-4. revoke/retire obsolete Microsoft application credentials when migration is complete;
-5. then return to the previously planned governed clarification-continuation workstream.
+The immediate sequence is:
+
+1. preserve/freeze the 2026-08-19 working non-dynamic baseline with regression coverage and durable evidence;
+2. correct the gateway capture helper so its event vocabulary matches the gateway implementation;
+3. reintroduce runtime capability discovery while retaining single-capability execution;
+4. prove that discovery generally, independently of the `AOT-50107` wording;
+5. only after that is stable, proceed to dynamic selector grounding;
+6. continue later stages only after re-proving the baseline after each change.
+
+The direct-gateway hardening/lifecycle items remain valid but are separate from the conversational baseline sequence:
+
+- keep the System Registry/current generated operational view aligned with the direct gateway topology;
+- review whether OpenClaw's dormant inbound `msteams` listener/provider can be disabled without breaking approved outbound/proactive Teams messaging;
+- migrate the direct gateway's dedicated Microsoft client credential from the temporary mode-0600 host environment file into Jason's preferred governed secret-delivery/federated identity architecture;
+- revoke/retire obsolete Microsoft application credentials when migration is complete.
 
 ## Production/runtime boundary
 
@@ -142,7 +207,7 @@ The rollback entry point is:
 
 `bash infrastructure/jason-teams-gateway/rollback-production.sh`
 
-The cutover backup observed during proof was:
+The cutover backup observed during the original 2026-08-15 proof was:
 
 `/opt/jason/services/openclaw/docker-compose.yml.pre-jason-teams-20260815T173328Z`
 
@@ -156,7 +221,9 @@ These are point-in-time proof values. Verify current state before future mutatio
 4. **Runtime concurrency topology:** the production runtime remains intentionally single-worker; future replicas require atomic shared idempotency state.
 5. **Consequential-action idempotency:** transport message idempotency does not replace capability/action/provider side-effect idempotency.
 6. **System Registry Datto read-surface completeness:** active Datto read capabilities should continue to be reconciled with current verified registry lifecycle rather than inferred from successful conversation alone.
-7. **OpenClaw plugin-registry metadata warning and pre-existing approval-test debt:** remain separate controlled maintenance items.
+7. **Gateway capture helper event mismatch:** `jason-ops.sh capture` does not currently include `jason_teams_turn_failed_closed`, so gateway failure evidence can be omitted from standard capture output.
+8. **Dynamic capability selection:** the current dynamic planner is not yet a reliable replacement for the known-good non-dynamic baseline; real-catalog testing still selected alert history for the endpoint `last seen` request.
+9. **OpenClaw plugin-registry metadata warning and pre-existing approval-test debt:** remain separate controlled maintenance items.
 
 ## Continuity rules now in force
 
@@ -175,25 +242,29 @@ Future conversational/interface work must preserve:
 - source attribution;
 - fail-closed behavior on identity, authority, planning, evidence, signature, or provider failure;
 - no bespoke one-off script merely because a new human wording appears;
-- rollback and verification before declaring transport topology changes complete.
+- rollback and verification before declaring transport topology changes complete;
+- a known-good live baseline after each major conversational architecture change.
 
 ## Next safe actions
 
-1. Validate the repository System Registry and generated operational view contain `component.jason-teams-gateway` and current Teams ingress ownership.
-2. Preserve the direct-gateway production proof and ADR-009 as the canonical historical decision/evidence pair.
-3. Review outbound/proactive Teams dependence on OpenClaw before disabling its internal `msteams` provider.
-4. Design a governed credential migration for the direct gateway without printing or copying the current client credential.
-5. After hardening, resume the governed clarification-continuation design using explicit Jason-owned, authenticated, expiring, auditable state.
+1. Treat `docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md` as the current live conversational checkpoint.
+2. Add/freeze automated regression coverage around the known-good non-dynamic conversation contract.
+3. Correct `jason-ops.sh capture` to include the gateway's actual failed-closed event.
+4. Reintroduce runtime capability discovery while retaining single-capability execution and without adding question-specific mappings.
+5. Re-run the live Teams baseline immediately after that one major change; revert or isolate if it breaks.
+6. Continue constitutional evolution only one major behavior at a time.
+7. Independently continue System Registry alignment and gateway credential hardening as governed infrastructure workstreams.
 
 ## Documentation-complete condition for this workstream
 
-The direct Teams ingress workstream is documentation-complete when durable repository records allow a future operator/AI to determine without chat history:
+The Teams conversational baseline workstream is documentation-complete when a future operator/AI can determine without chat history:
 
-- why OpenClaw ordinary inbound ingress was retired;
-- which ADR now governs the transport;
-- the exact current service/port ownership model;
-- how to deploy, verify, and roll back the direct gateway;
-- how the Microsoft identity/credential is handled without storing secret values;
-- what live evidence proved the Datto-backed Teams request and OpenClaw model bypass;
-- what System Registry entities represent the current topology; and
-- which remaining items are hardening/future work rather than unresolved routing defects.
+- which component owns ordinary Teams ingress;
+- which runtime mode is the known-good conversational baseline;
+- how that baseline was proven live;
+- which dynamic-planner experiments failed and must not be rediscovered;
+- how configuration-only transitions differ from source-code refreshes;
+- which capture/tooling defect can hide gateway failed-closed events;
+- the next single constitutional improvement to introduce;
+- how to verify, revert, and preserve a working baseline after each major change; and
+- which separate gateway hardening items remain outstanding.
