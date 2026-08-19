@@ -7,6 +7,7 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="$REPO_ROOT/infrastructure/jason-runtime/Dockerfile"
 IMAGE="jason-runtime:local"
+RUNTIME_CONTAINER="jason-runtime"
 REVISION_LABEL="org.opencontainers.image.revision"
 
 cd "$REPO_ROOT" || return 1 2>/dev/null || exit 1
@@ -60,6 +61,58 @@ echo "IMAGE_REVISION=$built_revision"
 if ! bash "$REPO_ROOT/infrastructure/jason-runtime/jason-ops.sh" baseline-deploy; then
     echo "BASELINE_REFRESH=FAIL"
     echo "REASON=baseline recreation failed after image refresh"
+    return 1 2>/dev/null || exit 1
+fi
+
+# Image provenance is not sufficient by itself: prove the running container was
+# recreated from the just-built image rather than an older local image reference.
+expected_image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null)"
+running_image_id="$(docker inspect --format '{{.Image}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
+running_revision="$(docker inspect --format "{{index .Config.Labels \"$REVISION_LABEL\"}}" "$RUNTIME_CONTAINER" 2>/dev/null)"
+
+if [ -z "$expected_image_id" ] || [ "$running_image_id" != "$expected_image_id" ]; then
+    echo "BASELINE_REFRESH=FAIL"
+    echo "REASON=running runtime container does not use the refreshed image"
+    echo "RUNNING_IMAGE_MATCH=FAIL"
+    return 1 2>/dev/null || exit 1
+fi
+
+if [ "$running_revision" != "$revision" ]; then
+    echo "BASELINE_REFRESH=FAIL"
+    echo "REASON=running runtime provenance does not match repository revision"
+    echo "RUNNING_REVISION=${running_revision:-missing}"
+    return 1 2>/dev/null || exit 1
+fi
+
+echo "RUNNING_IMAGE_MATCH=PASS"
+echo "RUNNING_REVISION=$running_revision"
+
+# Prove the running container contains and executes the semantic presentation
+# boundary added to the current source. This is a diagnostic smoke proof only; it
+# grants no provider authority and performs no external calls.
+if ! docker exec -i "$RUNTIME_CONTAINER" python - <<'PY'
+from orchestrator.conversation_response import _normalize_semantic_presentation
+from orchestrator.teams_conversation_flow import ConversationIntent
+
+intent = ConversationIntent(
+    capability_name="endpoint.device.search",
+    arguments={
+        "hostname": "SMOKE-ENDPOINT",
+        "requested_facts": ("endpoint last seen",),
+    },
+    execution_mode="deterministic",
+    permission_mode="observe",
+)
+raw = "SMOKE-ENDPOINT — endpoint last seen: 1787134597000. Source: smoke."
+rendered = _normalize_semantic_presentation(raw, intent)
+expected = "SMOKE-ENDPOINT — endpoint last seen: 2026-08-19 10:16:37 UTC. Source: smoke."
+if rendered != expected:
+    raise SystemExit(f"semantic presentation smoke mismatch: {rendered!r}")
+print("RUNTIME_PRESENTATION_SMOKE=PASS")
+PY
+then
+    echo "BASELINE_REFRESH=FAIL"
+    echo "REASON=running runtime semantic presentation smoke failed"
     return 1 2>/dev/null || exit 1
 fi
 
