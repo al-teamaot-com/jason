@@ -91,6 +91,23 @@ if model:
     )"
 }
 
+build_runtime_image() {
+    attempt=1
+    while [ "$attempt" -le 2 ]; do
+        echo "BUILD_ATTEMPT=$attempt"
+        if compose_runtime build jason-runtime; then
+            return 0
+        fi
+        if [ "$attempt" -lt 2 ]; then
+            echo "BUILD_RETRY=1"
+            echo "REASON=runtime build/export failed; retrying once without changing source or pruning Docker state"
+            sleep 2
+        fi
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 deploy() {
     echo "========== JASON RUNTIME DEPLOY =========="
 
@@ -146,9 +163,9 @@ JASON_OLLAMA_MODEL
         echo "ROLLBACK_IMAGE=$rollback_tag"
     fi
 
-    if ! compose_runtime build jason-runtime; then
+    if ! build_runtime_image; then
         echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=runtime build failed"
+        echo "REASON=runtime build failed after bounded retry"
         return 1
     fi
 
