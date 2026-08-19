@@ -28,11 +28,23 @@ Record baseline attempts separately from application changes so deployment-tooli
 - **Lesson:** a retry is only useful when the failure class is plausibly transient. Identical deterministic failures should cause the deployment method to change rather than repeat.
 - **Do not repeat:** do not rebuild the runtime merely to toggle a runtime environment flag when the existing image already contains both code paths.
 
-## Corrected Baseline Deployment Method
+## Attempt 3 — Baseline recreation succeeded but reused stale application code
 
-The baseline test changes exactly one intended variable: `JASON_DYNAMIC_CONVERSATION_ENABLED=false`.
+- **Hypothesis:** after pulling the structural semantic-coverage changes, `baseline-deploy` would let the live runtime exercise those changes while preserving the non-dynamic conversation path.
+- **Change:** pulled through commit `6a06ae5` and invoked `jason-ops.sh baseline-deploy`.
+- **Observed result:** baseline recreation passed and `JASON_DYNAMIC_CONVERSATION_ENABLED=false` was verified, but the live IP-address question returned the exact pre-change `governed_fact_not_available` response.
+- **Failure class:** deployment provenance failure. `baseline-deploy` intentionally uses `--no-build`, so it recreated the container from the previously installed `jason-runtime:local` image. Pulling source did not put the new source into that image.
+- **Application conclusion:** the live result does not test the structural semantic-coverage code added after the existing image was built.
+- **Lesson:** configuration-only baseline transitions and source-code baseline refreshes are two different operations. The former must avoid rebuilding; the latter must produce a new image and prove which source revision that image contains before live conclusions are accepted.
+- **Do not repeat:** never treat `git pull` plus `--no-build` container recreation as deployment of new application code.
 
-The existing installed `jason-runtime:local` image already contains both the legacy and dynamic conversation implementations. Therefore the baseline deployment must:
+## Baseline Deployment Modes
+
+### Configuration-only baseline transition
+
+When the application image is already known to contain the desired code and the experiment changes only runtime configuration, the baseline transition changes exactly one intended variable: `JASON_DYNAMIC_CONVERSATION_ENABLED=false`.
+
+That transition must:
 
 1. recover the currently mounted credential-file paths and current Ollama model from the existing runtime container;
 2. validate those required inputs without printing secret values;
@@ -44,8 +56,23 @@ The existing installed `jason-runtime:local` image already contains both the leg
 8. verify the live container environment reports `JASON_DYNAMIC_CONVERSATION_ENABLED=false`;
 9. only then begin Teams baseline questions.
 
-No Docker image build, BuildKit export/import, cache pruning, source modification, provider change, or conversation-code change belongs in this baseline transition.
+No image build belongs in a configuration-only transition.
+
+### Source-code baseline refresh
+
+When source code has changed, the baseline must first refresh `jason-runtime:local` from the current repository revision and prove image provenance. The refresh path must:
+
+1. capture the current Git revision;
+2. preserve the currently installed image under a rollback tag;
+3. avoid the custom `jason-builder` BuildKit path that already failed deterministically on image import;
+4. build through Docker's default buildx builder;
+5. stamp the image with `org.opencontainers.image.revision=<current Git SHA>`;
+6. verify that label from the installed image;
+7. only then invoke the configuration-only `baseline-deploy` transition;
+8. accept live evidence only when image revision and repository revision match.
+
+`infrastructure/jason-runtime/jason-baseline-refresh.sh` implements this source-code refresh path.
 
 ## Governing Lesson
 
-> A working-baseline experiment must minimize simultaneous variables. If the desired experiment is a runtime configuration change and the existing image already contains both paths, rebuilding the image is an unrelated variable and should be excluded.
+> A working-baseline experiment must minimize simultaneous variables, but it must also prove deployment provenance. Configuration-only recreation proves configuration; it does not prove that newly pulled source is running. Any live conclusion about a code change requires a provenance-verified image built from that revision.
