@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from connectors.core.contracts import ConnectorTransportError
+
 from .conversation_resource_intent import (
     MetadataFirstResourceInquiryInterpreter,
 )
@@ -31,7 +33,9 @@ class GroundedSemanticResourceInquiryInterpreter(
 
     Hosted semantic interpretation may select canonical facts only. It cannot
     select resource types, selectors, providers, capabilities, authority,
-    credentials, execution modes, tools, or agents.
+    credentials, execution modes, tools, or agents. Hosted transport availability
+    is not an authority prerequisite: a transport failure degrades to the next
+    governed semantic path, while semantic/contract violations still fail closed.
     """
 
     semantic_intent_translator: SemanticIntentTranslator | None = None
@@ -56,10 +60,16 @@ class GroundedSemanticResourceInquiryInterpreter(
                 "hostname": endpoint_identifier.upper(),
             }
 
-        hosted = self._interpret_with_hosted_semantics(
-            text=text,
-            selector=selector,
-        )
+        try:
+            hosted = self._interpret_with_hosted_semantics(
+                text=text,
+                selector=selector,
+            )
+        except ConnectorTransportError:
+            # Hosted semantic reasoning is optional interpretation assistance, not
+            # identity, authority, or evidence. Provider transport failure must not
+            # make the human-facing interface depend on one backend model/provider.
+            hosted = None
         if hosted is not None:
             return hosted
 
