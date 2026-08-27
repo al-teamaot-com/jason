@@ -34,6 +34,27 @@ class GovernedConversationFlow(Protocol):
     def handle(self, request: TeamsConversationRequest) -> GovernedConversationFlowResult: ...
 
 
+def _conversation_failure_diagnostic(error: Exception) -> dict[str, object]:
+    """Return bounded, already-sanitized diagnostic metadata for operator use."""
+
+    fields = {
+        "error_type": type(error).__name__,
+        "status_code": getattr(error, "status_code", None),
+        "retry_after_seconds": getattr(error, "retry_after_seconds", None),
+        "service": getattr(error, "service", None),
+        "provider_error_type": getattr(error, "provider_error_type", None),
+        "provider_error_code": getattr(error, "provider_error_code", None),
+        "provider_error_param": getattr(error, "provider_error_param", None),
+        "provider_error_message": getattr(error, "provider_error_message", None),
+    }
+
+    return {
+        key: value
+        for key, value in fields.items()
+        if value is not None and value != ""
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class OpenClawTeamsConversationEnvelope:
     request_id: str
@@ -361,6 +382,9 @@ class GovernedOpenClawTeamsConversationIngress:
             diagnostic_message = str(error).strip()
             if len(diagnostic_message) > 500:
                 diagnostic_message = diagnostic_message[:500] + "..."
+
+            diagnostic = _conversation_failure_diagnostic(error)
+
             self.audit.append(
                 "openclaw.teams_conversation_failed",
                 {
@@ -369,14 +393,19 @@ class GovernedOpenClawTeamsConversationIngress:
                     "machine_identity": machine_identity,
                     "error_type": type(error).__name__,
                     "error_message": diagnostic_message,
+                    "diagnostic": diagnostic,
                 },
             )
-            return {
+
+            result = {
                 "request_id": parsed.request_id,
                 "correlation_id": parsed.correlation_id,
                 "status": "failed",
                 "error_code": "conversation_failed",
             }
+            if diagnostic:
+                result["diagnostic"] = diagnostic
+            return result
 
         orchestration_status = _conversation_orchestration_status(result)
         self.audit.append(

@@ -14,6 +14,113 @@ from .contracts import (
 )
 
 
+_MAX_PROVIDER_ERROR_BODY_BYTES = 16384
+_MAX_PROVIDER_ERROR_FIELD_CHARS = 500
+
+
+def _bounded_text(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple, set)):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) > _MAX_PROVIDER_ERROR_FIELD_CHARS:
+        text = text[:_MAX_PROVIDER_ERROR_FIELD_CHARS] + "..."
+    return _redact_diagnostic_text(text)
+
+
+def _redact_diagnostic_text(text: str) -> str:
+    """Remove common credential/token forms from bounded diagnostic text."""
+
+    import re
+
+    patterns = (
+        (
+            re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+"),
+            r"\1[REDACTED]",
+        ),
+        (
+            re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
+            r"\1[REDACTED]",
+        ),
+        (
+            re.compile(
+                r"(?i)((?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
+                r"client[_ -]?secret|secret[_ -]?id|password)\s*[:=]\s*)"
+                r"[^\s,;]+"
+            ),
+            r"\1[REDACTED]",
+        ),
+        (
+            re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+            "[REDACTED]",
+        ),
+    )
+
+    result = text
+    for pattern, replacement in patterns:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+def _provider_error_fields(raw: bytes) -> dict[str, str | None]:
+    """Extract a small provider-neutral diagnostic envelope from JSON errors."""
+
+    import json
+
+    try:
+        decoded = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return {
+            "provider_error_type": None,
+            "provider_error_code": None,
+            "provider_error_param": None,
+            "provider_error_message": None,
+        }
+
+    candidate = decoded
+    if isinstance(decoded, dict) and isinstance(decoded.get("error"), dict):
+        candidate = decoded["error"]
+
+    if not isinstance(candidate, dict):
+        return {
+            "provider_error_type": None,
+            "provider_error_code": None,
+            "provider_error_param": None,
+            "provider_error_message": None,
+        }
+
+    return {
+        "provider_error_type": _bounded_text(
+            candidate.get("type") or candidate.get("error_type")
+        ),
+        "provider_error_code": _bounded_text(
+            candidate.get("code") or candidate.get("error_code")
+        ),
+        "provider_error_param": _bounded_text(
+            candidate.get("param") or candidate.get("parameter")
+        ),
+        "provider_error_message": _bounded_text(
+            candidate.get("message")
+            or candidate.get("detail")
+            or candidate.get("error_description")
+            or candidate.get("description")
+        ),
+    }
+
+
+def _http_service(url: str) -> str | None:
+    from urllib.parse import urlsplit
+
+    try:
+        hostname = urlsplit(url).hostname
+    except Exception:
+        return None
+    return hostname.strip().lower() if hostname else None
+
+
 class UrlLibJsonHttpTransport:
     """Small reusable JSON HTTP transport for governed connectors.
 
@@ -58,10 +165,19 @@ class UrlLibJsonHttpTransport:
             with urlopen(request, timeout=effective_timeout) as response:
                 raw = response.read()
         except HTTPError as exc:
+            try:
+                raw_error = exc.read(_MAX_PROVIDER_ERROR_BODY_BYTES)
+            except Exception:
+                raw_error = b""
+
+            provider_fields = _provider_error_fields(raw_error)
+
             raise ConnectorTransportError(
                 f"HTTP transport failed with status {exc.code}",
                 status_code=int(exc.code),
                 retry_after_seconds=_retry_after_seconds(exc.headers),
+                service=_http_service(url),
+                **provider_fields,
             ) from exc
         except (TimeoutError, SocketTimeout) as exc:
             if deadline_limited:

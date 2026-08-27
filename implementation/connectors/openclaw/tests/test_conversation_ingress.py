@@ -5,6 +5,7 @@ from threading import Event, Thread
 
 from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
+from connectors.core.contracts import ConnectorTransportError
 from orchestrator.teams_conversation_flow import (
     ConversationClarificationRequiredError,
     ConversationGuidanceRequiredError,
@@ -445,6 +446,9 @@ def test_downstream_lookup_failure_is_reported_as_failed_not_unresolved():
         "correlation_id": "corr-conversation-1",
         "status": "failed",
         "error_code": "conversation_failed",
+        "diagnostic": {
+            "error_type": "LookupError",
+        },
     }
     assert audit.events[-1][0] == "openclaw.teams_conversation_failed"
 
@@ -554,3 +558,42 @@ def test_flow_permission_denial_records_internal_diagnostic_but_keeps_response_s
 
     # Internal diagnostics must never escape through the transport response.
     assert "semantic fact" not in str(result)
+
+
+def test_transport_failure_returns_bounded_provider_diagnostic():
+    audit = Audit()
+    flow = Flow(
+        error=ConnectorTransportError(
+            "HTTP transport failed with status 429",
+            status_code=429,
+            retry_after_seconds=30.0,
+            service="api.example.com",
+            provider_error_type="quota_error",
+            provider_error_code="account_balance_exhausted",
+            provider_error_param="model",
+            provider_error_message="The provider account has no remaining service credit.",
+        )
+    )
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-provider-failed")
+    )
+
+    assert result["status"] == "failed"
+    assert result["error_code"] == "conversation_failed"
+    assert result["correlation_id"] == "corr-conversation-1"
+    assert result["diagnostic"] == {
+        "error_type": "ConnectorTransportError",
+        "status_code": 429,
+        "retry_after_seconds": 30.0,
+        "service": "api.example.com",
+        "provider_error_type": "quota_error",
+        "provider_error_code": "account_balance_exhausted",
+        "provider_error_param": "model",
+        "provider_error_message":
+            "The provider account has no remaining service credit.",
+    }
+
+    event_type, details = audit.events[-1]
+    assert event_type == "openclaw.teams_conversation_failed"
+    assert details["diagnostic"] == result["diagnostic"]

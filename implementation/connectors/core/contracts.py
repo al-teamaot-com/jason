@@ -20,7 +20,13 @@ class ConnectorConfigurationError(ConnectorError):
 
 
 class ConnectorTransportError(ConnectorError):
-    """Transport failure with bounded, non-secret HTTP classification metadata."""
+    """Transport failure with bounded, non-secret diagnostic metadata.
+
+    Provider-supplied diagnostic fields are captured only after transport-level
+    sanitization. They are suitable for governed troubleshooting and bounded
+    operator presentation, but raw HTTP response bodies, headers, credentials,
+    and tokens are never retained on the exception.
+    """
 
     def __init__(
         self,
@@ -28,10 +34,20 @@ class ConnectorTransportError(ConnectorError):
         *,
         status_code: int | None = None,
         retry_after_seconds: float | None = None,
+        service: str | None = None,
+        provider_error_type: str | None = None,
+        provider_error_code: str | None = None,
+        provider_error_param: str | None = None,
+        provider_error_message: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retry_after_seconds = retry_after_seconds
+        self.service = service
+        self.provider_error_type = provider_error_type
+        self.provider_error_code = provider_error_code
+        self.provider_error_param = provider_error_param
+        self.provider_error_message = provider_error_message
 
 
 class ConnectorExecutionDeadlineExceeded(ConnectorTransportError):

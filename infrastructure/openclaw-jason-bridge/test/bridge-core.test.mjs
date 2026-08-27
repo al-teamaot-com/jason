@@ -163,3 +163,52 @@ test("renders bounded conversation-only response", () => {
     "Good morning. What can I help you with?",
   );
 });
+
+
+test("renders bounded provider diagnostics for failed runtime responses", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 500,
+    payload: {
+      request_id: "req-provider-failed",
+      correlation_id: "corr-provider-failed",
+      status: "failed",
+      error_code: "conversation_failed",
+      diagnostic: {
+        error_type: "ConnectorTransportError",
+        status_code: 429,
+        service: "api.example.com",
+        provider_error_type: "quota_error",
+        provider_error_code: "account_balance_exhausted",
+        provider_error_message:
+          "The provider account has no remaining service credit.",
+      },
+    },
+  });
+
+  assert.match(reply, /api\.example\.com/);
+  assert.match(reply, /no remaining service credit/i);
+  assert.match(reply, /HTTP status: 429/);
+  assert.match(reply, /corr-provider-failed/);
+  assert.match(reply, /No action was taken/);
+});
+
+test("failed runtime reply does not expose absent raw provider data", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 500,
+    payload: {
+      correlation_id: "corr-safe-failure",
+      status: "failed",
+      error_code: "conversation_failed",
+      diagnostic: {
+        error_type: "ConnectorTransportError",
+        status_code: 503,
+      },
+    },
+  });
+
+  assert.match(reply, /ConnectorTransportError/);
+  assert.match(reply, /HTTP status: 503/);
+  assert.match(reply, /corr-safe-failure/);
+  assert.doesNotMatch(reply, /authorization/i);
+  assert.doesNotMatch(reply, /bearer/i);
+});

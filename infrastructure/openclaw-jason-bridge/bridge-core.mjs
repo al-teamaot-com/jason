@@ -118,6 +118,70 @@ export async function postConversationEnvelope({
   }
 }
 
+function boundedDiagnosticText(value, maxLength = 500) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const text = value.trim();
+  if (!text) {
+    return undefined;
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function failedRuntimeReply(payload) {
+  const diagnostic =
+    payload?.diagnostic && typeof payload.diagnostic === "object"
+      ? payload.diagnostic
+      : {};
+
+  const parts = [];
+
+  const service = boundedDiagnosticText(diagnostic.service, 120);
+  const providerMessage = boundedDiagnosticText(
+    diagnostic.provider_error_message,
+    500,
+  );
+  const providerCode = boundedDiagnosticText(
+    diagnostic.provider_error_code,
+    120,
+  );
+  const providerType = boundedDiagnosticText(
+    diagnostic.provider_error_type,
+    120,
+  );
+  const errorType = boundedDiagnosticText(diagnostic.error_type, 120);
+
+  if (service) {
+    parts.push(`Service: ${service}.`);
+  }
+  if (providerMessage) {
+    parts.push(providerMessage);
+  } else if (providerCode) {
+    parts.push(`Provider error: ${providerCode}.`);
+  } else if (providerType) {
+    parts.push(`Provider error type: ${providerType}.`);
+  } else if (errorType) {
+    parts.push(`Failure type: ${errorType}.`);
+  }
+
+  const statusCode = Number(diagnostic.status_code);
+  if (Number.isInteger(statusCode) && statusCode >= 100 && statusCode <= 599) {
+    parts.push(`HTTP status: ${statusCode}.`);
+  }
+
+  const correlationId = boundedDiagnosticText(payload?.correlation_id, 120);
+  if (correlationId) {
+    parts.push(`Correlation ID: ${correlationId}.`);
+  }
+
+  if (!parts.length) {
+    return "Jason could not complete that request. No action was taken.";
+  }
+
+  return `Jason could not complete that request. ${parts.join(" ")} No action was taken.`;
+}
+
 export function replyForRuntimeResult(result) {
   const payload = result?.payload;
   if (!payload || typeof payload !== "object") {
@@ -152,6 +216,9 @@ export function replyForRuntimeResult(result) {
   }
   if (payload.status === "rejected") {
     return "Jason rejected this request because its governed transport or request contract could not be validated.";
+  }
+  if (payload.status === "failed") {
+    return failedRuntimeReply(payload);
   }
   return "Jason could not safely process that request. No action was taken.";
 }
