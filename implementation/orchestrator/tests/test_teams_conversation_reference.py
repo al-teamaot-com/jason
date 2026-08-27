@@ -48,6 +48,14 @@ class NeverCalled:
         raise AssertionError(f"{name} must not be called")
 
 
+class CorrelationOnlyFactory:
+    def new_correlation_id(self):
+        return "corr-guidance"
+
+    def build(self, **kwargs):
+        raise AssertionError("build must not be called")
+
+
 class MemoryStore:
     def __init__(self, state=None):
         self.state = state
@@ -84,11 +92,11 @@ def identity(message_id="message-2"):
     )
 
 
-def flow(*, resolver, store):
+def flow(*, resolver, store, request_factory=None):
     return TeamsConversationFlow(
         identity_binder=Binder(),
         intent_resolver=resolver,
-        request_factory=NeverCalled(),
+        request_factory=request_factory or NeverCalled(),
         orchestrator=NeverCalled(),
         response_renderer=NeverCalled(),
         transport=NeverCalled(),
@@ -143,8 +151,13 @@ def test_unsupported_fact_guidance_replaces_previous_turn_but_preserves_safe_tar
         )
     )
 
+    conversation_flow = flow(
+        resolver=GuidanceResolver(),
+        store=store,
+        request_factory=CorrelationOnlyFactory(),
+    )
     with pytest.raises(ConversationGuidanceRequiredError):
-        flow(resolver=GuidanceResolver(), store=store).handle(
+        conversation_flow.handle(
             TeamsConversationRequest(
                 text="Can you give me the bitlocker unlock code?",
                 identity=identity(),

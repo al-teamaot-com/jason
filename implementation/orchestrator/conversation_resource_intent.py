@@ -325,6 +325,11 @@ class MetadataFirstResourceInquiryInterpreter:
                 definition.canonical_fact
                 for definition in qualified.candidates
             )
+            if qualified.qualifier_conflict:
+                raise ConversationClarificationRequiredError(
+                    reason_code="canonical_fact_ambiguous",
+                    candidate_facts=candidate_facts,
+                )
             if len(candidate_facts) > self._MAX_BOUNDED_FACT_EXPANSION:
                 raise ConversationClarificationRequiredError(
                     reason_code="canonical_fact_ambiguity_exceeds_safe_bound",

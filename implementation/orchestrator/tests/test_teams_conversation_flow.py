@@ -301,6 +301,9 @@ def test_clarification_required_stops_before_request_factory_and_orchestration()
             )
 
     class FailingFactory:
+        def new_correlation_id(self):
+            return "corr-clarification"
+
         def build(self, **kwargs):
             raise AssertionError(
                 "clarification reached request factory"

@@ -16,6 +16,7 @@ class QualifiedCanonicalFactResolution:
         "CanonicalFactDefinition",
         ...,
     ] = ()
+    qualifier_conflict: bool = False
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -61,6 +62,11 @@ class QualifiedCanonicalFactResolution:
             raise ValueError(
                 "only ambiguous qualified facts may "
                 "carry competing candidates"
+            )
+
+        if self.qualifier_conflict and self.status != "ambiguous":
+            raise ValueError(
+                "only ambiguous qualified facts may carry a qualifier conflict"
             )
 
 
@@ -312,6 +318,7 @@ class CanonicalFactVocabulary:
         return QualifiedCanonicalFactResolution(
             status="ambiguous",
             candidates=tuple(active_definitions),
+            qualifier_conflict=len(matched) > 1,
         )
 
     @staticmethod

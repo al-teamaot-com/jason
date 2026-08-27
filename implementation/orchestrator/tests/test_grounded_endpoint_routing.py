@@ -359,30 +359,27 @@ def test_qualified_endpoint_ip_language_routes_without_model_fallback():
         )
 
 
-def test_bare_endpoint_ip_is_stopped_before_language_fallback():
+def test_bare_endpoint_ip_expands_before_language_fallback():
     fallback = RecordingFallback()
 
-    with pytest.raises(
-        ConversationIntentUnresolvedError
-    ):
-        qualified_interpreter(
-            fallback=fallback
-        ).interpret(
-            text=(
-                "What IP does "
-                "AOT-50282 have?"
-            ),
-            principal=principal(),
-        )
+    inquiry = qualified_interpreter(fallback=fallback).interpret(
+        text="What IP does AOT-50282 have?",
+        principal=principal(),
+    )
 
     assert fallback.calls == []
+    assert inquiry is not None
+    assert inquiry.requested_facts == (
+        "LAN IP address",
+        "WAN IP address",
+    )
 
 
 def test_conflicting_endpoint_ip_is_stopped_before_explicit_alias_match():
     fallback = RecordingFallback()
 
     with pytest.raises(
-        ConversationIntentUnresolvedError
+        ConversationClarificationRequiredError
     ):
         qualified_interpreter(
             fallback=fallback
@@ -398,25 +395,13 @@ def test_conflicting_endpoint_ip_is_stopped_before_explicit_alias_match():
 
 
 def test_bare_endpoint_ip_exposes_only_governed_competing_facts():
-    with pytest.raises(
-        ConversationClarificationRequiredError
-    ) as captured:
-        qualified_interpreter().interpret(
-            text=(
-                "What IP does "
-                "AOT-50282 have?"
-            ),
-            principal=principal(),
-        )
-
-    error = captured.value
-
-    assert (
-        error.reason_code
-        == "canonical_fact_ambiguous"
+    inquiry = qualified_interpreter().interpret(
+        text="What IP does AOT-50282 have?",
+        principal=principal(),
     )
 
-    assert error.candidate_facts == (
+    assert inquiry is not None
+    assert inquiry.requested_facts == (
         "LAN IP address",
         "WAN IP address",
     )

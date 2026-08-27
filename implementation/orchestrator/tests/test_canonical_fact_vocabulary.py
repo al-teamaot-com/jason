@@ -113,6 +113,7 @@ def test_qualified_fact_bare_ip_is_ambiguous():
 
     assert result.status == "ambiguous"
     assert result.definition is None
+    assert result.qualifier_conflict is False
 
 
 def test_qualified_fact_conflicting_ip_is_ambiguous():
@@ -132,6 +133,7 @@ def test_qualified_fact_conflicting_ip_is_ambiguous():
 
     assert result.status == "ambiguous"
     assert result.definition is None
+    assert result.qualifier_conflict is True
 
 
 def test_qualified_fact_unrelated_language_is_not_applicable():

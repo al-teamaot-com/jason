@@ -155,23 +155,6 @@ class GovernedResourceEvidenceInterpreter:
                         "resource evidence must use an absolute JSON Pointer"
                     )
 
-                contexts = tuple(
-                    (evidence_contexts or {}).get(
-                        requested_fact,
-                        (),
-                    )
-                )
-                if contexts and not _evidence_matches_contexts(
-                    pointer=pointer,
-                    contexts=contexts,
-                ):
-                    # A reasoner may identify an arbitrary provider field only as
-                    # a candidate location. Canonical semantic context remains a
-                    # deterministic release condition. An unrelated generic
-                    # status/discovery field therefore cannot become the requested
-                    # fact merely because a model selected its pointer.
-                    continue
-
                 pointers = grouped.setdefault(requested_fact, [])
 
                 if pointer not in pointers:
