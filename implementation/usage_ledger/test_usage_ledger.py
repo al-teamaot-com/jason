@@ -12,7 +12,7 @@ from .contracts import (
     UsageEntry,
     UsageSource,
 )
-from .ledger import DuplicateAttemptError, InMemoryUsageLedger, ScopeError
+from .ledger import DuplicateAttemptError, InMemoryUsageLedger, SQLiteUsageLedger, ScopeError
 
 
 def context(attempt_id: str, *, organization_id: str = "aot") -> UsageContext:
@@ -124,3 +124,44 @@ def test_unknown_usage_attempt_is_visible() -> None:
 
     assert totals.attempts == 1
     assert totals.unknown_usage_attempts == 1
+
+
+def test_sqlite_ledger_survives_restart(tmp_path) -> None:
+    path = tmp_path / "model-usage.sqlite3"
+    ledger = SQLiteUsageLedger(path)
+    ledger.append(entry("attempt-1"))
+    ledger.close()
+
+    reopened = SQLiteUsageLedger(path)
+    totals = reopened.totals(organization_id="aot", workflow_id="wf-1")
+    reopened.close()
+
+    assert totals.attempts == 1
+    assert totals.total_tokens == 15
+    assert totals.provider_reported_cost == Decimal("0.01")
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_sqlite_ledger_preserves_idempotency_and_adjustments(tmp_path) -> None:
+    ledger = SQLiteUsageLedger(tmp_path / "model-usage.sqlite3")
+    original = entry("attempt-1")
+    ledger.append(original)
+    ledger.append(original)
+    ledger.append_adjustment(
+        UsageAdjustment(
+            adjustment_id="adjustment-1",
+            original_entry_id=original.entry_id,
+            organization_id="aot",
+            reason="provider reconciliation",
+            created_at=datetime.now(timezone.utc),
+            replacement_tokens=TokenUsage(input_tokens=12, output_tokens=5, total_tokens=17),
+            replacement_cost=CostUsage(provider_reported_cost=Decimal("0.015")),
+        )
+    )
+
+    totals = ledger.totals(organization_id="aot")
+    ledger.close()
+
+    assert totals.attempts == 1
+    assert totals.total_tokens == 17
+    assert totals.provider_reported_cost == Decimal("0.015")
