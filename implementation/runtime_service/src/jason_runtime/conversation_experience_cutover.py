@@ -19,6 +19,9 @@ from orchestrator.conversation_evidence_reasoning import (
 from orchestrator.conversation_evidence_support import (
     ConversationEvidenceSupportExtractor,
 )
+
+from orchestrator.conversation_resource_intent import ReasonedResourceInquiryInterpreter
+from orchestrator.ollama_reasoning import OllamaResourceInquiryReasoner
 from orchestrator.conversation_experience import ConversationExperienceCoordinator
 from orchestrator.conversation_interpretation_quality import ReviewedConversationKernel
 from orchestrator.conversation_kernel import (
@@ -165,6 +168,32 @@ def select_conversation_experience_flow(
     )
     catalog = RegistryBackedFulfillmentCatalog(registry=capabilities)
     intent_builder = InformationNeedIntentBuilder(reasoning=work_pool)
+    primary_resources = tuple(
+        item
+        for item in catalog.list_available()
+        if item.role == "primary"
+        and item.permission_mode == "observe"
+        and item.operation in {"search", "read"}
+    )
+    grounding_resource_types = tuple(
+        sorted(
+            {
+                resource_type
+                for item in primary_resources
+                for resource_type in item.resource_types
+            }
+        )
+    )
+    grounding_selector_keys = tuple(
+        sorted(
+            {
+                selector_key
+                for item in primary_resources
+                for selector_key in item.selector_keys
+            }
+        )
+    )
+
     experience = ConversationExperienceCoordinator(
         kernel=ReviewedConversationKernel(
             proposing=experience_pool,
@@ -174,6 +203,14 @@ def select_conversation_experience_flow(
         fulfillment=GovernedInitialFulfillmentPlanner(catalog=catalog),
         catalog=catalog,
         intent_builder=intent_builder,
+        resource_interpreter=ReasonedResourceInquiryInterpreter(
+            reasoner=OllamaResourceInquiryReasoner(
+                work_pool.backends[0].client,
+                resource_types=grounding_resource_types,
+                selector_keys=grounding_selector_keys,
+                fact_hints=(),
+            ),
+        ),
     )
     evidence_reasoner = ValidatedConversationEvidenceReasoner(
         selecting=work_pool,

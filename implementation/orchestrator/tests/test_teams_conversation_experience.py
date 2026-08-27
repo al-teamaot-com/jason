@@ -68,7 +68,7 @@ class FakeExperience:
         self.catalog = FakeCatalog()
         self.calls = []
 
-    def resolve(self, *, text, context):
+    def resolve(self, *, text, context, principal=None):
         self.calls.append((text, context))
         return self.resolution
 

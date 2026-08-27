@@ -170,6 +170,7 @@ class TeamsConversationExperienceFlow:
         resolution = self.experience.resolve(
             text=request.text.strip(),
             context=context,
+            principal=principal,
         )
         self.context_store.put(resolution.context)
 

@@ -64,12 +64,14 @@ class ConversationExperienceCoordinator:
     fulfillment: GovernedInitialFulfillmentPlanner
     catalog: RegistryBackedFulfillmentCatalog
     intent_builder: InformationNeedIntentBuilder
+    resource_interpreter: object | None = None
 
     def resolve(
         self,
         *,
         text: str,
         context: DynamicConversationContext,
+        principal=None,
     ) -> ConversationExperienceResolution:
         try:
             decision, attempts = self.kernel.interpret(text=text, context=context)
@@ -78,6 +80,22 @@ class ConversationExperienceCoordinator:
                 text=text,
                 context=context,
             )
+
+            if (
+                decision is None
+                and self.resource_interpreter is not None
+                and principal is not None
+            ):
+                inquiry = self.resource_interpreter.interpret(
+                    text=text,
+                    principal=principal,
+                )
+                if inquiry is not None:
+                    decision = _recover_literal_resource_observe_read(
+                        text=text,
+                        inquiry=inquiry,
+                    )
+
             if decision is None:
                 raise
             attempts = ()
@@ -132,6 +150,84 @@ class ConversationExperienceCoordinator:
             planned_information=tuple(planned),
             intent=intent,
         )
+
+
+def _recover_literal_resource_observe_read(
+    *,
+    text: str,
+    inquiry,
+) -> ConversationKernelDecision | None:
+    """Recover one safe literal resource read after kernel interpretation fails.
+
+    The resource interpreter may establish only provider-neutral resource type
+    and a human-grounded selector. It does not determine provider, capability,
+    evidence path, or authoritative operational value.
+
+    The original human request remains the information need so downstream
+    governed evidence reasoning must prove the actual answer.
+    """
+
+    clean_text = text.strip()
+    if not clean_text:
+        return None
+
+    if str(getattr(inquiry, "permission_mode", "")).strip() != "observe":
+        return None
+
+    if str(getattr(inquiry, "execution_mode", "")).strip() != "deterministic":
+        return None
+
+    resource_type = str(getattr(inquiry, "resource_type", "")).strip()
+    if not resource_type:
+        return None
+
+    raw_selector = getattr(inquiry, "resource_selector", None)
+    if not isinstance(raw_selector, dict):
+        try:
+            raw_selector = dict(raw_selector)
+        except Exception:
+            return None
+
+    # The Conversation Experience target contract currently carries one
+    # literal reference. Do not collapse compound selectors or choose one
+    # arbitrarily.
+    selectors = tuple(
+        (str(key).strip(), str(value).strip())
+        for key, value in raw_selector.items()
+        if str(key).strip() and str(value).strip()
+    )
+    if len(selectors) != 1:
+        return None
+
+    _selector_name, reference = selectors[0]
+
+    completeness = str(
+        getattr(inquiry, "completeness_requirement", "sufficient")
+    ).strip()
+    if completeness not in {"sufficient", "complete"}:
+        completeness = "sufficient"
+
+    return ConversationKernelDecision(
+        outcome="information",
+        information_needs=(
+            InformationNeed(
+                target=InformationTarget(
+                    kind=resource_type,
+                    source="literal",
+                    reference=reference,
+                    entity_ref=None,
+                ),
+                need=clean_text,
+                authority="observe",
+                temporal_scope="unspecified",
+                completeness=completeness,
+                relationship=None,
+            ),
+        ),
+        topic=None,
+    )
+
+
 
 def _recover_verified_observe_read(
     *,
