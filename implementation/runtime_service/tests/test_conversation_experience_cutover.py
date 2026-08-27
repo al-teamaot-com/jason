@@ -175,3 +175,36 @@ def test_duplicate_or_untrimmed_model_names_are_rejected_by_role():
             enabled=True,
             work_models=(" cheap ",),
         )
+
+def test_enabled_cutover_reuses_existing_structured_runtime_client_when_roles_have_no_overrides(tmp_path):
+    class RuntimeClient:
+        model = "hosted-runtime-model"
+
+        def complete(self, *, system, user, schema, max_output_tokens=160):
+            raise AssertionError("composition test must not invoke the model")
+
+    shared = RuntimeClient()
+
+    selected = select_conversation_experience_flow(
+        settings=ConversationExperienceCutoverSettings(
+            enabled=True,
+            context_db=tmp_path / "context.sqlite3",
+        ),
+        fallback_flow=Dummy(),
+        capabilities=Dummy(),
+        ollama_url="",
+        default_ollama_model="",
+        identity_binder=Dummy(),
+        request_factory=Dummy(),
+        orchestrator=Dummy(),
+        transport=Dummy(),
+        structured_client=shared,
+    )
+
+    experience_backend = selected.experience.kernel.proposing.backends[0]
+    work_backend = selected.progressive_reads.gaps.reasoning.backends[0]
+
+    assert experience_backend.name == "experience:hosted-runtime-model"
+    assert work_backend.name == "work:hosted-runtime-model"
+    assert experience_backend.client is shared
+    assert work_backend.client is shared

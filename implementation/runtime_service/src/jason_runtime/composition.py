@@ -794,5 +794,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ingress=OpenClawReturnPathConversationIngress(
             ingress=governed_ingress,
             transport=return_transport,
-        )
+        ),
+        conversation_reasoning_client=hosted_conversation_client or ollama_client,
     )

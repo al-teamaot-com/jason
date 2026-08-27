@@ -94,6 +94,7 @@ def select_conversation_experience_flow(
     orchestrator,
     transport,
     http_transport: UrlLibJsonHttpTransport | None = None,
+    structured_client=None,
 ):
     """Return the existing flow or a fully composed model-independent Teams experience.
 
@@ -106,29 +107,53 @@ def select_conversation_experience_flow(
         return fallback_flow
 
     default_model = default_ollama_model.strip()
-    if not default_model:
-        raise ValueError("Conversation Experience requires a default reasoning model")
-    if not ollama_url.strip():
-        raise ValueError("Conversation Experience Ollama URL is required")
-
-    experience_models = settings.experience_models or (default_model,)
-    work_models = settings.work_models or (default_model,)
     transport_client = http_transport or UrlLibJsonHttpTransport()
 
-    experience_pool = _ollama_pool(
-        models=experience_models,
-        transport=transport_client,
-        ollama_url=ollama_url.strip(),
-        timeout_seconds=settings.reasoning_timeout_seconds,
-        role_prefix="experience",
-    )
-    work_pool = _ollama_pool(
-        models=work_models,
-        transport=transport_client,
-        ollama_url=ollama_url.strip(),
-        timeout_seconds=settings.reasoning_timeout_seconds,
-        role_prefix="work",
-    )
+    # Prefer the already-composed runtime reasoning client when no explicit role model
+    # override is configured. This preserves the current provider choice (for example,
+    # hosted OpenAI) without recomposing credentials, transports, pricing, or schema
+    # adapters. Explicit role model lists remain an opt-in Ollama override.
+    if structured_client is not None and not settings.experience_models:
+        experience_pool = _structured_client_pool(
+            client=structured_client,
+            role_prefix="experience",
+        )
+    else:
+        experience_models = settings.experience_models or (default_model,)
+        if not default_model and not settings.experience_models:
+            raise ValueError(
+                "Conversation Experience requires a default reasoning model"
+            )
+        if not ollama_url.strip():
+            raise ValueError("Conversation Experience Ollama URL is required")
+        experience_pool = _ollama_pool(
+            models=experience_models,
+            transport=transport_client,
+            ollama_url=ollama_url.strip(),
+            timeout_seconds=settings.reasoning_timeout_seconds,
+            role_prefix="experience",
+        )
+
+    if structured_client is not None and not settings.work_models:
+        work_pool = _structured_client_pool(
+            client=structured_client,
+            role_prefix="work",
+        )
+    else:
+        work_models = settings.work_models or (default_model,)
+        if not default_model and not settings.work_models:
+            raise ValueError(
+                "Conversation Experience requires a default reasoning model"
+            )
+        if not ollama_url.strip():
+            raise ValueError("Conversation Experience Ollama URL is required")
+        work_pool = _ollama_pool(
+            models=work_models,
+            transport=transport_client,
+            ollama_url=ollama_url.strip(),
+            timeout_seconds=settings.reasoning_timeout_seconds,
+            role_prefix="work",
+        )
     drafting_pool = _combined_pool(
         work_pool=work_pool,
         experience_pool=experience_pool,
@@ -198,6 +223,24 @@ def _primary_resource_kinds(
                 if capability.role == "primary"
                 for resource_type in capability.resource_types
             }
+        )
+    )
+
+
+def _structured_client_pool(
+    *,
+    client,
+    role_prefix: str,
+) -> ValidatedReasoningPool:
+    """Reuse one already-composed structured runtime client for a reasoning role."""
+
+    model = str(getattr(client, "model", "")).strip() or "current-runtime"
+    return ValidatedReasoningPool(
+        backends=(
+            ReasoningBackend(
+                name=f"{role_prefix}:{model}",
+                client=client,
+            ),
         )
     )
 

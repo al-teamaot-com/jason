@@ -32,6 +32,10 @@ class RuntimeHttpApplication:
     """
 
     ingress: TeamsConversationIngress
+    # Internal composition dependency only. This is never exposed through the HTTP
+    # contract. Conversation Experience may reuse the same already-governed structured
+    # reasoning runtime instead of recomposing a provider or resolving secrets again.
+    conversation_reasoning_client: Any | None = None
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
 

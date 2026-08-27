@@ -80,6 +80,7 @@ def apply_conversation_experience_cutover(
         request_factory=request_factory,
         orchestrator=orchestrator,
         transport=transport,
+        structured_client=application.conversation_reasoning_client,
     )
 
     try:
