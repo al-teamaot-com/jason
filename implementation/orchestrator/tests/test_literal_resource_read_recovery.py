@@ -1,7 +1,13 @@
 from types import SimpleNamespace
 
 from orchestrator.conversation_experience import (
+    _enrich_literal_resource_selector,
     _recover_literal_resource_observe_read,
+)
+from orchestrator.conversation_kernel import (
+    ConversationKernelDecision,
+    InformationNeed,
+    InformationTarget,
 )
 
 
@@ -61,3 +67,94 @@ def test_non_observe_resource_inquiry_cannot_enter_recovery():
     )
 
     assert decision is None
+
+
+class ResourceInterpreter:
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def interpret(self, *, text, principal):
+        self.calls += 1
+        return self.result
+
+
+def kernel_decision(reference="NODE-77", kind="endpoint"):
+    return ConversationKernelDecision(
+        outcome="information",
+        information_needs=(
+            InformationNeed(
+                target=InformationTarget(
+                    kind=kind,
+                    source="literal",
+                    reference=reference,
+                ),
+                need="arbitrary state",
+                authority="observe",
+            ),
+        ),
+    )
+
+
+def test_successful_kernel_literal_is_enriched_with_agreed_selector():
+    interpreter = ResourceInterpreter(
+        inquiry(
+            resource_type="endpoint",
+            selector={"hostname": "NODE-77"},
+        )
+    )
+
+    decision = _enrich_literal_resource_selector(
+        decision=kernel_decision(),
+        text="Inspect NODE-77.",
+        principal=object(),
+        resource_interpreter=interpreter,
+    )
+
+    target = decision.information_needs[0].target
+    assert target.reference == "NODE-77"
+    assert target.kind == "endpoint"
+    assert target.selector == "hostname"
+    assert interpreter.calls == 1
+
+
+def test_selector_enrichment_cannot_rewrite_kernel_target():
+    interpreter = ResourceInterpreter(
+        inquiry(
+            resource_type="endpoint",
+            selector={"hostname": "OTHER-NODE"},
+        )
+    )
+
+    original = kernel_decision()
+
+    decision = _enrich_literal_resource_selector(
+        decision=original,
+        text="Inspect NODE-77.",
+        principal=object(),
+        resource_interpreter=interpreter,
+    )
+
+    assert decision == original
+    assert decision.information_needs[0].target.selector is None
+
+
+def test_selector_enrichment_rejects_resource_kind_disagreement():
+    interpreter = ResourceInterpreter(
+        inquiry(
+            resource_type="printer",
+            selector={"hostname": "NODE-77"},
+        )
+    )
+
+    original = kernel_decision()
+
+    decision = _enrich_literal_resource_selector(
+        decision=original,
+        text="Inspect NODE-77.",
+        principal=object(),
+        resource_interpreter=interpreter,
+    )
+
+    assert decision == original
+    assert decision.information_needs[0].target.selector is None

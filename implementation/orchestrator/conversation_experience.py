@@ -8,7 +8,7 @@ provider resolution, execution, evidence, approvals, and audit remain unchanged.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .conversation_kernel import (
     ConversationKernel,
@@ -100,6 +100,13 @@ class ConversationExperienceCoordinator:
                 raise
             attempts = ()
 
+        decision = _enrich_literal_resource_selector(
+            decision=decision,
+            text=text,
+            principal=principal,
+            resource_interpreter=self.resource_interpreter,
+        )
+
         updated_context = context.with_verified_entities((), topic=decision.topic)
 
         if decision.outcome != "information":
@@ -150,6 +157,102 @@ class ConversationExperienceCoordinator:
             planned_information=tuple(planned),
             intent=intent,
         )
+
+
+def _enrich_literal_resource_selector(
+    *,
+    decision: ConversationKernelDecision,
+    text: str,
+    principal,
+    resource_interpreter,
+) -> ConversationKernelDecision:
+    """Preserve selector identity for one already-grounded literal resource target.
+
+    The Conversation Kernel remains authoritative for human meaning and the exact
+    literal target. The resource interpreter may only add provider-neutral selector
+    identity when it independently agrees on resource type and exact target value.
+    It cannot rewrite the target, provider, capability, information need, or authority.
+    """
+
+    if (
+        decision.outcome != "information"
+        or principal is None
+        or resource_interpreter is None
+    ):
+        return decision
+
+    candidates = tuple(
+        need
+        for need in decision.information_needs
+        if need.target.source == "literal"
+        and need.target.selector is None
+    )
+    if not candidates:
+        return decision
+
+    targets = {
+        (need.target.kind, need.target.reference)
+        for need in candidates
+    }
+    if len(targets) != 1:
+        return decision
+
+    target_kind, target_reference = next(iter(targets))
+
+    try:
+        inquiry = resource_interpreter.interpret(
+            text=text,
+            principal=principal,
+        )
+    except Exception:
+        # Selector enrichment is bounded metadata enrichment. Failure must not
+        # rewrite or invalidate an otherwise valid kernel interpretation.
+        return decision
+
+    if inquiry is None:
+        return decision
+    if str(getattr(inquiry, "permission_mode", "")).strip() != "observe":
+        return decision
+    if str(getattr(inquiry, "execution_mode", "")).strip() != "deterministic":
+        return decision
+    if str(getattr(inquiry, "resource_type", "")).strip() != target_kind:
+        return decision
+
+    raw_selector = getattr(inquiry, "resource_selector", None)
+    if not isinstance(raw_selector, dict):
+        try:
+            raw_selector = dict(raw_selector)
+        except Exception:
+            return decision
+
+    selectors = tuple(
+        (str(key).strip(), str(value).strip())
+        for key, value in raw_selector.items()
+        if str(key).strip() and str(value).strip()
+    )
+    if len(selectors) != 1:
+        return decision
+
+    selector_name, selector_value = selectors[0]
+    if selector_value != target_reference:
+        return decision
+
+    enriched = tuple(
+        replace(
+            need,
+            target=replace(need.target, selector=selector_name),
+        )
+        if (
+            need.target.source == "literal"
+            and need.target.selector is None
+            and need.target.kind == target_kind
+            and need.target.reference == target_reference
+        )
+        else need
+        for need in decision.information_needs
+    )
+
+    return replace(decision, information_needs=enriched)
 
 
 def _recover_literal_resource_observe_read(
