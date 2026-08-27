@@ -118,6 +118,10 @@ from orchestrator.teams_identity_binding_sqlite import (
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
 from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
+from .conversation_experience_cutover import (
+    ConversationExperienceCutoverSettings,
+    select_conversation_experience_flow,
+)
 from .dynamic_conversation_cutover import (
     DynamicConversationCutoverSettings,
     select_teams_conversation_flow,
@@ -170,6 +174,7 @@ class RuntimeSettings:
     ses_region: str = "us-east-1"
     ses_default_sender: str = "jason@teamaot.com"
     dynamic_conversation_enabled: bool = False
+    conversation_experience_enabled: bool = False
     dynamic_conversation_context_db: Path = Path(
         "/var/lib/jason/openclaw/dynamic-conversation-context.sqlite3"
     )
@@ -311,6 +316,9 @@ class RuntimeSettings:
             ).strip(),
             dynamic_conversation_enabled=os.getenv(
                 "JASON_DYNAMIC_CONVERSATION_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            conversation_experience_enabled=os.getenv(
+                "JASON_CONVERSATION_EXPERIENCE_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             dynamic_conversation_context_db=Path(
                 os.getenv(
@@ -780,6 +788,24 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         response_renderer=response_renderer,
         transport=return_transport,
         continuation_store=continuation_store,
+    )
+
+    flow = select_conversation_experience_flow(
+        settings=ConversationExperienceCutoverSettings(
+            enabled=settings.conversation_experience_enabled,
+            context_db=settings.dynamic_conversation_context_db,
+            context_ttl_seconds=settings.dynamic_conversation_context_ttl_seconds,
+        ),
+        fallback_flow=flow,
+        capabilities=capabilities,
+        ollama_url=settings.ollama_url,
+        default_ollama_model=settings.ollama_model,
+        identity_binder=identity_binder,
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+        transport=return_transport,
+        http_transport=http_transport,
+        structured_client=hosted_conversation_client or ollama_client,
     )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)

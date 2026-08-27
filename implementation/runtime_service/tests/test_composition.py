@@ -169,3 +169,25 @@ def test_production_authority_uses_governed_provider_read_matcher(tmp_path):
     authority = application.ingress.ingress.flow.request_factory.authority
 
     assert isinstance(authority.capability_matcher, GovernedProviderReadAuthorityMatcher)
+
+
+def test_production_composition_selects_conversation_experience_when_enabled(tmp_path):
+    settings = _settings(tmp_path)
+    settings = RuntimeSettings(
+        **{
+            field.name: getattr(settings, field.name)
+            for field in __import__("dataclasses").fields(settings)
+            if field.name not in {
+                "dynamic_conversation_enabled",
+                "conversation_experience_enabled",
+            }
+        },
+        dynamic_conversation_enabled=True,
+        conversation_experience_enabled=True,
+    )
+
+    application = build_runtime_application(settings)
+
+    flow = application.ingress.ingress.flow
+
+    assert type(flow).__name__ == "TeamsConversationExperienceFlow"
