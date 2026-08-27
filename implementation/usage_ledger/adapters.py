@@ -36,6 +36,7 @@ def from_openai_response(
     response: Mapping[str, Any],
     outcome: AttemptOutcome = AttemptOutcome.COMPLETED,
     started_at: datetime | None = None,
+    duration_ms: int | None = None,
 ) -> UsageEntry:
     usage = response.get("usage") or {}
     input_details = usage.get("input_tokens_details") or {}
@@ -58,6 +59,7 @@ def from_openai_response(
         finish_reason=response.get("status"),
         started_at=started_at,
         completed_at=datetime.now(timezone.utc),
+        duration_ms=duration_ms,
         confidence=1.0 if usage else 0.0,
     )
 

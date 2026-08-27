@@ -2,6 +2,10 @@ import json
 
 import pytest
 
+from usage_ledger.contracts import UsageContext
+from usage_ledger.ledger import SQLiteUsageLedger
+from usage_ledger.runtime_context import bind_usage_context
+
 from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
@@ -27,6 +31,11 @@ class Transport:
     def request(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
+
+
+class FailingTransport:
+    def request(self, **kwargs):
+        raise TimeoutError("bounded provider timeout")
 
 
 def response(value):
@@ -227,3 +236,81 @@ def test_unresolved_returns_none():
         text="something unknown",
         eligible_concepts=CONCEPTS,
     ) is None
+
+
+def test_records_provider_usage_with_bound_teams_context(tmp_path):
+    ledger = SQLiteUsageLedger(tmp_path / "model-usage.sqlite3")
+    transport = Transport(
+        response(
+            {
+                "resolved": True,
+                "requested_concepts": ["processor model"],
+                "confidence": 0.99,
+            }
+        )
+    )
+    translator = OpenAISemanticIntentTranslator(
+        api_key="test-secret",
+        transport=transport,
+        model="gpt-5.4-mini",
+        usage_ledger=ledger,
+    )
+    context = UsageContext(
+        workflow_id="teams-conversation-1",
+        request_id="teams-message-1",
+        attempt_id="turn-scope",
+        organization_id="aot",
+        client_id=None,
+        capability="conversation.intent.resolve",
+        routing_profile="teams",
+        metadata={"correlation_id": "corr-1", "principal_id": "al"},
+    )
+
+    with bind_usage_context(context):
+        translator.translate(
+            text="what processor does AOT-50282 have?",
+            eligible_concepts=CONCEPTS,
+            grounded_selector={"hostname": "AOT-50282"},
+        )
+
+    entries = ledger.list_entries(organization_id="aot")
+    ledger.close()
+
+    assert len(entries) == 1
+    assert entries[0].model == "gpt-5.4-mini"
+    assert entries[0].tokens.total_tokens == 120
+    assert entries[0].context.workflow_id == "teams-conversation-1"
+    assert entries[0].context.request_id == "teams-message-1"
+    assert entries[0].context.attempt_id != "turn-scope"
+
+
+def test_records_failed_provider_attempt_without_prompt_or_response(tmp_path):
+    ledger = SQLiteUsageLedger(tmp_path / "model-usage.sqlite3")
+    translator = OpenAISemanticIntentTranslator(
+        api_key="test-secret",
+        transport=FailingTransport(),
+        model="gpt-5.4-mini",
+        usage_ledger=ledger,
+    )
+    context = UsageContext(
+        workflow_id="teams-conversation-1",
+        request_id="teams-message-1",
+        attempt_id="turn-scope",
+        organization_id="aot",
+        client_id=None,
+        capability="conversation.intent.resolve",
+    )
+
+    with pytest.raises(TimeoutError), bind_usage_context(context):
+        translator.translate(
+            text="sensitive human text",
+            eligible_concepts=("processor model",),
+        )
+
+    entries = ledger.list_entries(organization_id="aot")
+    ledger.close()
+
+    assert len(entries) == 1
+    assert entries[0].outcome.value == "timed_out"
+    assert entries[0].tokens.total_tokens is None
+    assert "sensitive human text" not in json.dumps(entries[0].metadata)

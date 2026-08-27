@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from usage_ledger.ledger import SQLiteUsageLedger
+
 from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
@@ -134,6 +136,7 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     openai_semantic_model: str = "gpt-5.4-mini"
@@ -197,6 +200,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_ORCHESTRATION_EVENTS_DB",
                     "/var/lib/jason/openclaw/orchestration-events.sqlite3",
+                )
+            ),
+            model_usage_db=Path(
+                os.getenv(
+                    "JASON_MODEL_USAGE_DB",
+                    "/var/lib/jason/openclaw/model-usage.sqlite3",
                 )
             ),
             trusted_keys_registry=Path(
@@ -490,6 +499,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
         hosted_semantic_translator = None
         if settings.hosted_semantics_enabled:
+            model_usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
             semantic_secret_resolver = OpenBaoSecretResolver(
                 base_url=settings.openbao_url,
                 role_id_path=settings.openai_openbao_role_id_path,
@@ -516,6 +526,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                     api_key=semantic_api_key,
                     transport=http_transport,
                     model=settings.openai_semantic_model,
+                    usage_ledger=model_usage_ledger,
                 )
             finally:
                 semantic_secret_values.clear()

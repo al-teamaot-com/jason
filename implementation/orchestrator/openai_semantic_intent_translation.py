@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Mapping, Protocol
+
+from usage_ledger.adapters import from_openai_response
+from usage_ledger.contracts import (
+    AttemptOutcome,
+    TokenUsage,
+    UsageContext,
+    UsageEntry,
+    UsageLedger,
+    UsageSource,
+)
+from usage_ledger.runtime_context import new_attempt_context
 
 from .semantic_intent_translation import (
     SemanticIntentTranslation,
@@ -45,6 +58,7 @@ class OpenAISemanticIntentTranslator:
     endpoint: str = "https://api.openai.com/v1/responses"
     timeout_seconds: float = 30.0
     max_output_tokens: int = 128
+    usage_ledger: UsageLedger | None = None
 
     def translate(
         self,
@@ -123,19 +137,46 @@ class OpenAISemanticIntentTranslator:
                 self.max_output_tokens,
         }
 
-        response = self.transport.request(
-            method="POST",
-            url=self.endpoint,
-            headers={
-                "Authorization":
-                    f"Bearer {self.api_key}",
-                "Content-Type":
-                    "application/json",
-            },
-            json=payload,
-            timeout_seconds=
-                self.timeout_seconds,
-        )
+        usage_context = new_attempt_context()
+        started_at = datetime.now(timezone.utc)
+        started_clock = monotonic()
+        try:
+            response = self.transport.request(
+                method="POST",
+                url=self.endpoint,
+                headers={
+                    "Authorization":
+                        f"Bearer {self.api_key}",
+                    "Content-Type":
+                        "application/json",
+                },
+                json=payload,
+                timeout_seconds=
+                    self.timeout_seconds,
+            )
+        except Exception as error:
+            self._record_failed_attempt(
+                context=usage_context,
+                started_at=started_at,
+                duration_ms=int((monotonic() - started_clock) * 1000),
+                outcome=(
+                    AttemptOutcome.TIMED_OUT
+                    if isinstance(error, TimeoutError)
+                    else AttemptOutcome.FAILED
+                ),
+            )
+            raise
+
+        if self.usage_ledger is not None and usage_context is not None:
+            self.usage_ledger.append(
+                from_openai_response(
+                    context=usage_context,
+                    model=self.model,
+                    response=response,
+                    started_at=started_at,
+                    duration_ms=int((monotonic() - started_clock) * 1000),
+                )
+            )
 
         usage = self._usage(response)
         decoded = self._decode_output(
@@ -195,6 +236,32 @@ class OpenAISemanticIntentTranslator:
         return OpenAITranslationOutcome(
             translation=translation,
             usage=usage,
+        )
+
+    def _record_failed_attempt(
+        self,
+        *,
+        context: UsageContext | None,
+        started_at: datetime,
+        duration_ms: int,
+        outcome: AttemptOutcome,
+    ) -> None:
+        if self.usage_ledger is None or context is None:
+            return
+        self.usage_ledger.append(
+            UsageEntry(
+                entry_id=context.attempt_id,
+                context=context,
+                provider="openai",
+                model=self.model,
+                outcome=outcome,
+                usage_source=UsageSource.UNKNOWN,
+                tokens=TokenUsage(),
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+                duration_ms=duration_ms,
+                confidence=0.0,
+            )
         )
 
     @staticmethod

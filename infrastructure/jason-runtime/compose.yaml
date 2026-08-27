@@ -23,6 +23,7 @@ services:
       JASON_REPLAY_DB: /var/lib/jason/openclaw/replay.sqlite3
       JASON_SECURITY_AUDIT_DB: /var/lib/jason/openclaw/security-audit.sqlite3
       JASON_ORCHESTRATION_EVENTS_DB: /var/lib/jason/openclaw/orchestration-events.sqlite3
+      JASON_MODEL_USAGE_DB: /var/lib/jason/openclaw/model-usage.sqlite3
       JASON_TRUSTED_KEYS_REGISTRY: /var/lib/jason/openclaw/trusted-keys/registry.json
       JASON_ALLOWED_OPENCLAW_MACHINE_IDENTITIES: svc-openclaw-gateway
       JASON_OPENBAO_URL: http://openbao:8200

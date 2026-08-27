@@ -137,6 +137,29 @@ The direct Teams ingress routing workstream is complete and production-proven.
 
 The active conversational workstream is now **working-baseline preservation followed by constitutional evolution one major behavior at a time**.
 
+### Repository candidate — durable hosted-model usage correlation
+
+The feature branch now contains a repository-only candidate for durable model-usage
+accounting. This is not yet a production-state claim. The candidate:
+
+- provides a mode-`0600` SQLite implementation of the existing append-only usage
+  ledger contract;
+- binds accounting context at the authenticated Teams turn boundary after Jason
+  identity and organization scope are known;
+- correlates hosted OpenAI attempts with the Teams conversation/message, Jason
+  principal, organization/client scope, and turn correlation identifier;
+- records provider-reported input, cached-input, output, reasoning, and total token
+  fields when supplied;
+- records duration, provider request identity, outcome, model, retry/fallback attempt
+  identity, and unknown usage for failed calls without persisting prompts or raw
+  provider responses; and
+- keeps accounting context non-authoritative: it cannot select scope, capability,
+  provider execution, credentials, or policy.
+
+The committed persistence and accounting smoke tests pass in the development
+workspace. Full repository acceptance and live deployment/proof remain required
+before this candidate may be described as operational.
+
 The immediate sequence is:
 
 1. preserve/freeze the 2026-08-19 working non-dynamic baseline with regression coverage and durable evidence;

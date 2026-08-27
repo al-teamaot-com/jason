@@ -13,6 +13,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
+from usage_ledger.contracts import UsageContext
+from usage_ledger.runtime_context import bind_usage_context
+
 from .contracts import OrchestrationRequest, OrchestrationResult
 from .service import CentralOrchestrator
 from .teams_conversation_continuation import ConversationContinuationState
@@ -334,8 +337,27 @@ class TeamsConversationFlow:
                 requested_facts=continuation.requested_facts,
             )
 
+        correlation_id = self.request_factory.new_correlation_id()
+        usage_context = UsageContext(
+            workflow_id=request.identity.conversation_id,
+            request_id=request.identity.message_id,
+            attempt_id="turn-scope",
+            organization_id=principal.organization_id,
+            client_id=principal.client_id,
+            capability="conversation.intent.resolve",
+            routing_profile="teams",
+            metadata={
+                "correlation_id": correlation_id,
+                "principal_id": principal.principal_id,
+                "teams_conversation_id": request.identity.conversation_id,
+                "teams_message_id": request.identity.message_id,
+            },
+        )
         try:
-            resolved = self.intent_resolver.resolve(text=request.text.strip(), principal=principal)
+            with bind_usage_context(usage_context):
+                resolved = self.intent_resolver.resolve(
+                    text=request.text.strip(), principal=principal
+                )
         except ConversationGuidanceRequiredError as error:
             self._record_guidance(
                 principal=principal,
@@ -355,8 +377,6 @@ class TeamsConversationFlow:
             if isinstance(resolved, ConversationIntentPlan)
             else (resolved,)
         )
-
-        correlation_id = self.request_factory.new_correlation_id()
 
         orchestration_requests: list[OrchestrationRequest] = []
         for intent in intents:

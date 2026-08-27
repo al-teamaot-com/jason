@@ -104,3 +104,10 @@ The SQLite ledger preserves organization-scoped reads, attempt idempotency,
 append-only reconciliation, and restart durability. Larger multi-node deployments
 may replace it with an append-only database or event stream implementing the same
 contract and organization-isolation guarantees.
+
+The Teams runtime binds non-authoritative accounting context after authenticated
+identity resolution and before hosted semantic interpretation. Each provider call
+receives a fresh attempt ID while retaining the originating Teams conversation,
+message, Jason principal, organization/client scope, and correlation ID. Prompts,
+raw provider responses, credentials, and provider payload evidence are not written
+to the usage ledger.
