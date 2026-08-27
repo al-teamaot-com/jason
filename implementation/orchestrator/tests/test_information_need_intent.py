@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from orchestrator.conversation_kernel import (
     InformationNeed,
     InformationTarget,
@@ -12,6 +13,7 @@ from orchestrator.information_fulfillment import (
 )
 from orchestrator.information_need_intent import (
     InformationNeedIntentBuilder,
+    InformationNeedIntentError,
     PlannedInformationNeed,
 )
 from orchestrator.teams_conversation_flow import (
@@ -58,6 +60,7 @@ def planned(
     reference="NODE-77",
     information_need="arbitrary endpoint state",
     cap=None,
+    selector=None,
 ):
     selected = cap or capability()
     need = InformationNeed(
@@ -65,6 +68,7 @@ def planned(
             kind="endpoint",
             source="literal",
             reference=reference,
+            selector=selector,
         ),
         need=information_need,
         authority="observe",
@@ -131,6 +135,38 @@ def test_multiple_selector_names_use_model_only_for_argument_name_not_target_val
         "hostname",
         "name",
     }
+
+
+def test_grounded_selector_is_preserved_without_model_reclassification():
+    client = FakeClient({"argument": "name"})
+    builder = InformationNeedIntentBuilder(reasoning=pool(client))
+
+    intent = builder.build(
+        human_text="Inspect NODE-77.",
+        planned=(planned(selector="hostname"),),
+    )
+
+    assert isinstance(intent, ConversationIntent)
+    assert intent.arguments["hostname"] == "NODE-77"
+    assert intent.arguments["requested_facts"] == ["Inspect NODE-77."]
+    assert client.calls == []
+
+
+def test_grounded_selector_not_supported_by_capability_fails_closed():
+    client = FakeClient({"argument": "name"})
+    builder = InformationNeedIntentBuilder(reasoning=pool(client))
+    cap = capability(selectors=("resource_id", "name"))
+
+    with pytest.raises(
+        InformationNeedIntentError,
+        match="grounded target selector is not supported",
+    ):
+        builder.build(
+            human_text="Inspect NODE-77.",
+            planned=(planned(cap=cap, selector="hostname"),),
+        )
+
+    assert client.calls == []
 
 
 def test_invalid_selector_name_is_rejected_and_next_backend_can_repair():

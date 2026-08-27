@@ -166,10 +166,13 @@ class InformationTarget:
     source: str
     reference: str
     entity_ref: str | None = None
+    selector: str | None = None
 
     def __post_init__(self) -> None:
         if not self.kind.strip() or not self.reference.strip():
             raise ConversationKernelError("information target kind and reference are required")
+        if self.selector is not None and not self.selector.strip():
+            raise ConversationKernelError("information target selector must be non-empty")
         if self.source not in {"literal", "verified_entity"}:
             raise ConversationKernelError("information target source is invalid")
         if self.source == "literal" and self.entity_ref is not None:

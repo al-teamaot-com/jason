@@ -139,7 +139,13 @@ class InformationNeedIntentBuilder:
                 "one intent cannot bind several different grounded targets"
             )
 
-        if len(selector_keys) == 1:
+        if target.selector is not None:
+            selector_name = target.selector.strip()
+            if selector_name not in selector_keys:
+                raise InformationNeedIntentError(
+                    "grounded target selector is not supported by selected capability"
+                )
+        elif len(selector_keys) == 1:
             selector_name = selector_keys[0]
         else:
             selector_name, _ = self.reasoning.complete_validated(

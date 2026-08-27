@@ -35,6 +35,7 @@ def test_unseen_literal_resource_preserves_original_human_question():
     assert need.target.kind == "printer"
     assert need.target.source == "literal"
     assert need.target.reference == "PRINT-12"
+    assert need.target.selector == "asset_tag"
     assert need.authority == "observe"
     assert need.need == "What arbitrary maintenance state does PRINT-12 report?"
 

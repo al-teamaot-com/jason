@@ -199,7 +199,7 @@ def _recover_literal_resource_observe_read(
     if len(selectors) != 1:
         return None
 
-    _selector_name, reference = selectors[0]
+    selector_name, reference = selectors[0]
 
     completeness = str(
         getattr(inquiry, "completeness_requirement", "sufficient")
@@ -216,6 +216,7 @@ def _recover_literal_resource_observe_read(
                     source="literal",
                     reference=reference,
                     entity_ref=None,
+                    selector=selector_name,
                 ),
                 need=clean_text,
                 authority="observe",
