@@ -96,7 +96,7 @@ echo "========== SECTION 6: HEALTH =========="
 health_rc=1
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   echo "Health attempt $attempt"
-  if docker exec "$SERVICE" python - <<'PY'
+  if docker exec -i "$SERVICE" python - <<'PY'
 import urllib.request
 try:
     with urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=5) as response:
