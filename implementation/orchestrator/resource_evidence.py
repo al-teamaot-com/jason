@@ -155,6 +155,15 @@ class GovernedResourceEvidenceInterpreter:
                         "resource evidence must use an absolute JSON Pointer"
                     )
 
+                contexts = tuple(
+                    (evidence_contexts or {}).get(requested_fact, ())
+                )
+                if contexts and not _evidence_matches_contexts(
+                    pointer=pointer,
+                    contexts=contexts,
+                ):
+                    continue
+
                 pointers = grouped.setdefault(requested_fact, [])
 
                 if pointer not in pointers:
@@ -413,11 +422,18 @@ def _escape_json_pointer_segment(value: str) -> str:
 
 
 def _normalized_semantic_tokens(value: str) -> set[str]:
+    separated: list[str] = []
+    previous = ""
+    for character in value:
+        if character.isupper() and previous and previous.islower():
+            separated.append(" ")
+        separated.append(character)
+        previous = character
     return {
         token
         for token in "".join(
             character if character.isalnum() else " "
-            for character in value.casefold()
+            for character in "".join(separated).casefold()
         ).split()
         if token
     }
@@ -447,13 +463,12 @@ def _evidence_matches_contexts(*, pointer: str, contexts: tuple[str, ...]) -> bo
     pointer_tokens = _normalized_semantic_tokens(pointer)
     if not pointer_tokens:
         return False
-    for context in contexts:
-        context_tokens = _normalized_semantic_tokens(context)
-        if not context_tokens:
-            continue
-        if pointer_tokens.isdisjoint(context_tokens):
-            return False
-    return True
+    return any(
+        context_tokens
+        and not pointer_tokens.isdisjoint(context_tokens)
+        for context in contexts
+        if (context_tokens := _normalized_semantic_tokens(context))
+    )
 
 
 def _value_matches_expected_shape(value: Any, expected_shape: str) -> bool:
