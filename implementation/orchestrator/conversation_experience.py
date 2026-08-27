@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from .conversation_kernel import (
     ConversationKernel,
     ConversationKernelDecision,
+    ConversationKernelError,
+    InformationNeed,
+    InformationTarget,
     ReasoningAttempt,
 )
 from .dynamic_conversation_kernel import DynamicConversationContext
@@ -68,7 +71,17 @@ class ConversationExperienceCoordinator:
         text: str,
         context: DynamicConversationContext,
     ) -> ConversationExperienceResolution:
-        decision, attempts = self.kernel.interpret(text=text, context=context)
+        try:
+            decision, attempts = self.kernel.interpret(text=text, context=context)
+        except ConversationKernelError:
+            decision = _recover_verified_observe_read(
+                text=text,
+                context=context,
+            )
+            if decision is None:
+                raise
+            attempts = ()
+
         updated_context = context.with_verified_entities((), topic=decision.topic)
 
         if decision.outcome != "information":
@@ -119,3 +132,64 @@ class ConversationExperienceCoordinator:
             planned_information=tuple(planned),
             intent=intent,
         )
+
+def _recover_verified_observe_read(
+    *,
+    text: str,
+    context: DynamicConversationContext,
+) -> ConversationKernelDecision | None:
+    """Recover a failed interpretation only from unambiguous verified identity.
+
+    This is intentionally not semantic question handling. It does not interpret facts,
+    actions, providers, capabilities, fields, or synonyms. It merely recognizes when
+    the human explicitly named exactly one resource that Jason has already established
+    through governed evidence.
+
+    Recovery is always observe-only. Downstream governed fulfillment and evidence
+    verification still determine whether the human's actual question can be answered.
+    """
+
+    clean_text = text.strip()
+    if not clean_text:
+        return None
+
+    folded_text = clean_text.casefold()
+    matches = {}
+
+    for entity in context.entities:
+        verified_names = (
+            entity.canonical_id.strip(),
+            entity.display_name.strip(),
+        )
+        if any(
+            name and name.casefold() in folded_text
+            for name in verified_names
+        ):
+            matches[entity.ref] = entity
+
+    if len(matches) != 1:
+        return None
+
+    entity = next(iter(matches.values()))
+
+    return ConversationKernelDecision(
+        outcome="information",
+        information_needs=(
+            InformationNeed(
+                target=InformationTarget(
+                    kind=entity.kind,
+                    source="verified_entity",
+                    reference=entity.canonical_id,
+                    entity_ref=entity.ref,
+                ),
+                # Preserve the human's actual request. Evidence reasoning determines
+                # what, if anything, in the governed provider result supports it.
+                need=clean_text,
+                authority="observe",
+                temporal_scope="unspecified",
+                completeness="sufficient",
+                relationship=None,
+            ),
+        ),
+        topic=context.active_topic,
+    )
