@@ -169,7 +169,12 @@ def test_governed_continuation_selector_is_available_to_next_turn_without_observ
             last_message_id="previous-message",
         )
     )
-    resolver = Resolver(DynamicConversationPlan(outcome="conversation"))
+    resolver = Resolver(
+        DynamicConversationPlan(
+            outcome="conversation",
+            conversation_response="I can check that. Which system should I use?",
+        )
+    )
     coordinator = DynamicTeamsConversationCoordinator(
         context_store=MemoryStore(),
         capability_catalog=Catalog(()),
@@ -179,13 +184,17 @@ def test_governed_continuation_selector_is_available_to_next_turn_without_observ
         continuation_store=continuation,
     )
 
-    result = coordinator.resolve_turn(
-        text="Check it again.",
-        principal=principal(),
-        identity=identity("next-message"),
-    )
-
-    assert result is None
+    try:
+        coordinator.resolve_turn(
+            text="Check it again.",
+            principal=principal(),
+            identity=identity("next-message"),
+        )
+    except ConversationGuidanceRequiredError as error:
+        assert error.reason_code == "dynamic_conversation_response"
+        assert error.guidance_text == "I can check that. Which system should I use?"
+    else:
+        raise AssertionError("conversation-only turn must return its bounded response")
     context = resolver.calls[0][1]
     assert len(context.entities) == 1
     entity = context.entities[0]

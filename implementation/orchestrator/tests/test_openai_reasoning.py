@@ -4,6 +4,10 @@ import json
 
 import pytest
 
+from usage_ledger.contracts import UsageContext
+from usage_ledger.ledger import SQLiteUsageLedger
+from usage_ledger.runtime_context import bind_usage_context
+
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
 
 
@@ -28,7 +32,8 @@ def response(value):
                     }
                 ]
             }
-        ]
+        ],
+        "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
     }
 
 
@@ -182,3 +187,38 @@ def test_openai_structured_client_validates_local_configuration_before_network_u
         )
 
     assert transport.calls == []
+
+
+def test_openai_structured_client_records_bound_dynamic_turn_usage(tmp_path):
+    ledger = SQLiteUsageLedger(tmp_path / "model-usage.sqlite3")
+    client = OpenAIStructuredJsonClient(
+        api_key="test-key",
+        transport=Transport(response({"status": "ok"})),
+        model="gpt-5.4-mini",
+        usage_ledger=ledger,
+    )
+    context = UsageContext(
+        workflow_id="teams-conversation-1",
+        request_id="teams-message-1",
+        attempt_id="turn-scope",
+        organization_id="aot",
+        client_id=None,
+        capability="conversation.dynamic",
+        metadata={"correlation_id": "corr-1", "principal_id": "al"},
+    )
+
+    with bind_usage_context(context):
+        client.complete(
+            system="system",
+            user="user",
+            schema={"type": "object"},
+            max_output_tokens=16,
+        )
+
+    entries = ledger.list_entries(organization_id="aot")
+    ledger.close()
+
+    assert len(entries) == 1
+    assert entries[0].tokens.total_tokens == 50
+    assert entries[0].context.workflow_id == "teams-conversation-1"
+    assert entries[0].context.request_id == "teams-message-1"

@@ -150,3 +150,16 @@ test("renders governed clarification without inventing an answer", () => {
     "I need one detail before I can continue. Do you mean LAN IP address or WAN IP address? Please send a complete request naming the one you want.",
   );
 });
+
+test("renders bounded conversation-only response", () => {
+  assert.equal(
+    replyForRuntimeResult({
+      httpStatus: 200,
+      payload: {
+        status: "conversation_response",
+        reply: { text: "Good morning. What can I help you with?" },
+      },
+    }),
+    "Good morning. What can I help you with?",
+  );
+});

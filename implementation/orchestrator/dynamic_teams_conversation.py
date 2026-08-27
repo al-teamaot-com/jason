@@ -93,7 +93,13 @@ class DynamicTeamsConversationCoordinator:
                 guidance_text=plan.clarification_question or "Please clarify the request.",
             )
         if plan.outcome == "conversation":
-            return None
+            raise ConversationGuidanceRequiredError(
+                reason_code="dynamic_conversation_response",
+                guidance_text=(
+                    plan.conversation_response
+                    or "I’m ready. What would you like me to help with?"
+                ),
+            )
 
         return self.intent_builder.build(
             text=text.strip(),

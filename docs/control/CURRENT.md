@@ -156,6 +156,28 @@ accounting. This is not yet a production-state claim. The candidate:
 - keeps accounting context non-authoritative: it cannot select scope, capability,
   provider execution, credentials, or policy.
 
+The same candidate adds a separately reversible hosted-conversation cutover:
+
+- `JASON_HOSTED_CONVERSATION_ENABLED=true` selects the existing bounded
+  `OpenAIStructuredJsonClient` for the existing dynamic conversation planner and
+  evidence renderer;
+- `JASON_OPENAI_CONVERSATION_MODEL=gpt-5.4-mini` establishes the least-cost initial
+  hosted model and remains configuration-selectable;
+- the matching 2026-08-27 official token-price profile is explicit configuration
+  (`$0.75`/million uncached input, `$0.075`/million cached input, and
+  `$4.50`/million output), and startup rejects a hosted model/pricing-model mismatch;
+- the existing dynamic context store, runtime capability discovery, deterministic
+  validators, Central Orchestrator, authority/policy boundary, provider execution,
+  evidence contracts, and Teams transport remain unchanged; and
+- disabling either the dynamic-conversation flag or hosted-conversation flag retains
+  the existing rollback paths without changing the direct Teams gateway.
+
+The candidate also closes the prior conversation-only gap: the bounded dynamic
+planner may return a natural human-facing response when no capability invocation is
+required. That response has a dedicated runtime/gateway status, cannot contain a
+capability execution request, and may not claim operational evidence, completed
+action, or authority.
+
 The committed persistence and accounting smoke tests pass in the development
 workspace. Full repository acceptance and live deployment/proof remain required
 before this candidate may be described as operational.

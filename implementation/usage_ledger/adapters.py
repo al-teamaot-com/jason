@@ -37,10 +37,24 @@ def from_openai_response(
     outcome: AttemptOutcome = AttemptOutcome.COMPLETED,
     started_at: datetime | None = None,
     duration_ms: int | None = None,
+    input_cost_per_million_tokens: Decimal | None = None,
+    cached_input_cost_per_million_tokens: Decimal | None = None,
+    output_cost_per_million_tokens: Decimal | None = None,
 ) -> UsageEntry:
     usage = response.get("usage") or {}
     input_details = usage.get("input_tokens_details") or {}
     output_details = usage.get("output_tokens_details") or {}
+    input_tokens = _integer(usage.get("input_tokens"))
+    cached_tokens = _integer(input_details.get("cached_tokens"))
+    output_tokens = _integer(usage.get("output_tokens"))
+    calculated_cost = _openai_calculated_cost(
+        input_tokens=input_tokens,
+        cached_input_tokens=cached_tokens,
+        output_tokens=output_tokens,
+        input_rate=input_cost_per_million_tokens,
+        cached_input_rate=cached_input_cost_per_million_tokens,
+        output_rate=output_cost_per_million_tokens,
+    )
     return UsageEntry(
         entry_id=str(uuid4()),
         context=context,
@@ -49,12 +63,13 @@ def from_openai_response(
         outcome=outcome,
         usage_source=UsageSource.PROVIDER_REPORTED if usage else UsageSource.UNKNOWN,
         tokens=TokenUsage(
-            input_tokens=_integer(usage.get("input_tokens")),
-            cached_input_tokens=_integer(input_details.get("cached_tokens")),
-            output_tokens=_integer(usage.get("output_tokens")),
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_tokens,
+            output_tokens=output_tokens,
             reasoning_tokens=_integer(output_details.get("reasoning_tokens")),
             total_tokens=_integer(usage.get("total_tokens")),
         ),
+        cost=CostUsage(calculated_cost=calculated_cost),
         provider_request_id=response.get("id"),
         finish_reason=response.get("status"),
         started_at=started_at,
@@ -62,6 +77,30 @@ def from_openai_response(
         duration_ms=duration_ms,
         confidence=1.0 if usage else 0.0,
     )
+
+
+def _openai_calculated_cost(
+    *,
+    input_tokens: int | None,
+    cached_input_tokens: int | None,
+    output_tokens: int | None,
+    input_rate: Decimal | None,
+    cached_input_rate: Decimal | None,
+    output_rate: Decimal | None,
+) -> Decimal | None:
+    if input_tokens is None or output_tokens is None:
+        return None
+    if input_rate is None or cached_input_rate is None or output_rate is None:
+        return None
+    cached = cached_input_tokens or 0
+    if cached > input_tokens:
+        raise ValueError("cached input tokens cannot exceed input tokens")
+    uncached = input_tokens - cached
+    return (
+        Decimal(uncached) * input_rate
+        + Decimal(cached) * cached_input_rate
+        + Decimal(output_tokens) * output_rate
+    ) / Decimal("1000000")
 
 
 def from_openrouter_response(

@@ -9,8 +9,22 @@ or execution authority; it can only return a candidate JSON object for Jason to 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from decimal import Decimal
+from time import monotonic
 from typing import Any, Mapping, Protocol
+
+from usage_ledger.adapters import from_openai_response
+from usage_ledger.contracts import (
+    AttemptOutcome,
+    TokenUsage,
+    UsageContext,
+    UsageEntry,
+    UsageLedger,
+    UsageSource,
+)
+from usage_ledger.runtime_context import new_attempt_context
 
 
 class JsonHttpTransport(Protocol):
@@ -44,6 +58,10 @@ class OpenAIStructuredJsonClient:
     endpoint: str = "https://api.openai.com/v1/responses"
     timeout_seconds: float = 60.0
     response_format_name: str = "jason_structured_reasoning"
+    usage_ledger: UsageLedger | None = field(default=None, repr=False)
+    input_cost_per_million_tokens: Decimal | None = None
+    cached_input_cost_per_million_tokens: Decimal | None = None
+    output_cost_per_million_tokens: Decimal | None = None
 
     def __post_init__(self) -> None:
         if not self.api_key.strip():
@@ -75,31 +93,82 @@ class OpenAIStructuredJsonClient:
         if max_output_tokens < 16 or max_output_tokens > 4096:
             raise ValueError("OpenAI structured reasoning output budget is invalid")
 
-        response = self.transport.request(
-            method="POST",
-            url=self.endpoint,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "instructions": system,
-                "input": user,
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": self.response_format_name,
-                        "strict": True,
-                        "schema": dict(schema),
-                    }
+        usage_context = new_attempt_context()
+        started_at = datetime.now(timezone.utc)
+        started_clock = monotonic()
+        try:
+            response = self.transport.request(
+                method="POST",
+                url=self.endpoint,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
                 },
-                "max_output_tokens": max_output_tokens,
-                "store": False,
-            },
-            timeout_seconds=self.timeout_seconds,
-        )
+                json={
+                    "model": self.model,
+                    "instructions": system,
+                    "input": user,
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": self.response_format_name,
+                            "strict": True,
+                            "schema": dict(schema),
+                        }
+                    },
+                    "max_output_tokens": max_output_tokens,
+                    "store": False,
+                },
+                timeout_seconds=self.timeout_seconds,
+            )
+        except Exception as error:
+            self._record_failed_attempt(
+                context=usage_context,
+                started_at=started_at,
+                duration_ms=int((monotonic() - started_clock) * 1000),
+                outcome=(AttemptOutcome.TIMED_OUT if isinstance(error, TimeoutError) else AttemptOutcome.FAILED),
+            )
+            raise
+        if self.usage_ledger is not None and usage_context is not None:
+            self.usage_ledger.append(
+                from_openai_response(
+                    context=usage_context,
+                    model=self.model,
+                    response=response,
+                    started_at=started_at,
+                    duration_ms=int((monotonic() - started_clock) * 1000),
+                    input_cost_per_million_tokens=self.input_cost_per_million_tokens,
+                    cached_input_cost_per_million_tokens=self.cached_input_cost_per_million_tokens,
+                    output_cost_per_million_tokens=self.output_cost_per_million_tokens,
+                )
+            )
         return self._decode_output(response)
+
+    def _record_failed_attempt(
+        self,
+        *,
+        context: UsageContext | None,
+        started_at: datetime,
+        duration_ms: int,
+        outcome: AttemptOutcome,
+    ) -> None:
+        if self.usage_ledger is None or context is None:
+            return
+        self.usage_ledger.append(
+            UsageEntry(
+                entry_id=context.attempt_id,
+                context=context,
+                provider="openai",
+                model=self.model,
+                outcome=outcome,
+                usage_source=UsageSource.UNKNOWN,
+                tokens=TokenUsage(),
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+                duration_ms=duration_ms,
+                confidence=0.0,
+            )
+        )
 
     @staticmethod
     def _decode_output(response: Mapping[str, Any]) -> Mapping[str, Any]:

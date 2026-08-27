@@ -313,6 +313,22 @@ class GovernedOpenClawTeamsConversationIngress:
                 },
             }
         except ConversationGuidanceRequiredError as error:
+            if error.reason_code == "dynamic_conversation_response":
+                self.audit.append(
+                    "openclaw.teams_conversation_response_returned",
+                    {
+                        "request_id": parsed.request_id,
+                        "correlation_id": parsed.correlation_id,
+                        "machine_identity": machine_identity,
+                        "reason_code": error.reason_code,
+                    },
+                )
+                return {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "status": "conversation_response",
+                    "reply": {"text": error.guidance_text},
+                }
             self.audit.append(
                 "openclaw.teams_conversation_guidance_returned",
                 {

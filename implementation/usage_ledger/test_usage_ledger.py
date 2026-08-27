@@ -3,6 +3,8 @@ from decimal import Decimal
 
 import pytest
 
+from .adapters import from_openai_response
+
 from .contracts import (
     AttemptOutcome,
     CostUsage,
@@ -165,3 +167,23 @@ def test_sqlite_ledger_preserves_idempotency_and_adjustments(tmp_path) -> None:
     assert totals.attempts == 1
     assert totals.total_tokens == 17
     assert totals.provider_reported_cost == Decimal("0.015")
+
+
+def test_openai_usage_calculates_uncached_cached_and_output_cost() -> None:
+    recorded = from_openai_response(
+        context=context("attempt-priced"),
+        model="gpt-5.4-mini",
+        response={
+            "usage": {
+                "input_tokens": 1_000_000,
+                "input_tokens_details": {"cached_tokens": 200_000},
+                "output_tokens": 100_000,
+                "total_tokens": 1_100_000,
+            }
+        },
+        input_cost_per_million_tokens=Decimal("0.75"),
+        cached_input_cost_per_million_tokens=Decimal("0.075"),
+        output_cost_per_million_tokens=Decimal("4.50"),
+    )
+
+    assert recorded.cost.calculated_cost == Decimal("1.065")

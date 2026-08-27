@@ -111,3 +111,12 @@ receives a fresh attempt ID while retaining the originating Teams conversation,
 message, Jason principal, organization/client scope, and correlation ID. Prompts,
 raw provider responses, credentials, and provider payload evidence are not written
 to the usage ledger.
+
+For `gpt-5.4-mini`, the runtime pricing profile recorded on 2026-08-27 is based on
+OpenAI's official model page: `$0.75` per million uncached input tokens, `$0.075`
+per million cached input tokens, and `$4.50` per million output tokens. The model
+name and all three rates are explicit runtime configuration. Startup fails when an
+enabled hosted model does not match the named pricing profile, preventing a silent
+model change from producing misleading calculated cost.
+
+Official source: https://developers.openai.com/api/docs/models/gpt-5.4-mini

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -57,6 +58,7 @@ from orchestrator.ollama_action_reasoning import OllamaActionIntentReasoner
 from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
+from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
 from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
 from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
 from orchestrator.planning_context_views import GovernedPlanningContextCatalog
@@ -139,7 +141,13 @@ class RuntimeSettings:
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
+    hosted_conversation_enabled: bool = False
     openai_semantic_model: str = "gpt-5.4-mini"
+    openai_conversation_model: str = "gpt-5.4-mini"
+    openai_pricing_model: str = "gpt-5.4-mini"
+    openai_input_cost_per_million_tokens: Decimal = Decimal("0.75")
+    openai_cached_input_cost_per_million_tokens: Decimal = Decimal("0.075")
+    openai_output_cost_per_million_tokens: Decimal = Decimal("4.50")
     openai_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/openai/role_id"
     )
@@ -229,9 +237,27 @@ class RuntimeSettings:
             hosted_semantics_enabled=os.getenv(
                 "JASON_HOSTED_SEMANTICS_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
+            hosted_conversation_enabled=os.getenv(
+                "JASON_HOSTED_CONVERSATION_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
                 "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5.4-mini"
             ).strip(),
+            openai_conversation_model=os.getenv(
+                "JASON_OPENAI_CONVERSATION_MODEL", "gpt-5.4-mini"
+            ).strip(),
+            openai_pricing_model=os.getenv(
+                "JASON_OPENAI_PRICING_MODEL", "gpt-5.4-mini"
+            ).strip(),
+            openai_input_cost_per_million_tokens=Decimal(
+                os.getenv("JASON_OPENAI_INPUT_COST_PER_MILLION", "0.75")
+            ),
+            openai_cached_input_cost_per_million_tokens=Decimal(
+                os.getenv("JASON_OPENAI_CACHED_INPUT_COST_PER_MILLION", "0.075")
+            ),
+            openai_output_cost_per_million_tokens=Decimal(
+                os.getenv("JASON_OPENAI_OUTPUT_COST_PER_MILLION", "4.50")
+            ),
             openai_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_OPENAI_OPENBAO_ROLE_ID_PATH",
@@ -304,6 +330,35 @@ class RuntimeSettings:
             raise ValueError(
                 "JASON_OPENAI_SEMANTIC_MODEL is required when hosted semantics are enabled"
             )
+        if self.hosted_conversation_enabled and not self.openai_conversation_model:
+            raise ValueError(
+                "JASON_OPENAI_CONVERSATION_MODEL is required when hosted conversation is enabled"
+            )
+        if self.hosted_conversation_enabled and not self.dynamic_conversation_enabled:
+            raise ValueError(
+                "hosted conversation requires JASON_DYNAMIC_CONVERSATION_ENABLED=true"
+            )
+        hosted_models = {
+            model
+            for enabled, model in (
+                (self.hosted_semantics_enabled, self.openai_semantic_model),
+                (self.hosted_conversation_enabled, self.openai_conversation_model),
+            )
+            if enabled
+        }
+        if hosted_models and hosted_models != {self.openai_pricing_model}:
+            raise ValueError(
+                "OpenAI pricing model must match every enabled hosted model"
+            )
+        if any(
+            value < 0
+            for value in (
+                self.openai_input_cost_per_million_tokens,
+                self.openai_cached_input_cost_per_million_tokens,
+                self.openai_output_cost_per_million_tokens,
+            )
+        ):
+            raise ValueError("OpenAI token pricing values must be non-negative")
         if not self.openbao_url or not self.ollama_url:
             raise ValueError("runtime provider service URLs must be non-empty")
         if not self.allowed_machine_identities:
@@ -481,6 +536,49 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         base_url=settings.ollama_url,
     )
 
+    model_usage_ledger = None
+    openai_api_key = None
+    if settings.hosted_semantics_enabled or settings.hosted_conversation_enabled:
+        model_usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
+        semantic_secret_resolver = OpenBaoSecretResolver(
+            base_url=settings.openbao_url,
+            role_id_path=settings.openai_openbao_role_id_path,
+            secret_id_path=settings.openai_openbao_secret_id_path,
+        )
+        semantic_secret_values = dict(
+            semantic_secret_resolver.resolve(
+                "openai.semantic_intent",
+                ConnectorContext(
+                    correlation_id="runtime-openai-bootstrap",
+                    principal_id="jason-runtime",
+                    organization_id="aot",
+                    client_id=None,
+                    capability="conversation.reason",
+                    mode="observe",
+                ),
+            )
+        )
+        try:
+            openai_api_key = str(semantic_secret_values["api_key"]).strip()
+            if not openai_api_key:
+                raise ValueError("OpenAI API key resolved empty")
+        finally:
+            semantic_secret_values.clear()
+
+    hosted_conversation_client = None
+    if settings.hosted_conversation_enabled:
+        if openai_api_key is None or model_usage_ledger is None:
+            raise RuntimeError("hosted conversation dependencies were not composed")
+        hosted_conversation_client = OpenAIStructuredJsonClient(
+            api_key=openai_api_key,
+            transport=http_transport,
+            model=settings.openai_conversation_model,
+            usage_ledger=model_usage_ledger,
+            input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+            cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+            output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+        )
+
     intent_resolver = None
     if not settings.dynamic_conversation_enabled:
         semantic_mapping_path = (
@@ -499,37 +597,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
         hosted_semantic_translator = None
         if settings.hosted_semantics_enabled:
-            model_usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
-            semantic_secret_resolver = OpenBaoSecretResolver(
-                base_url=settings.openbao_url,
-                role_id_path=settings.openai_openbao_role_id_path,
-                secret_id_path=settings.openai_openbao_secret_id_path,
+            if openai_api_key is None or model_usage_ledger is None:
+                raise RuntimeError("hosted semantic dependencies were not composed")
+            hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                api_key=openai_api_key,
+                transport=http_transport,
+                model=settings.openai_semantic_model,
+                usage_ledger=model_usage_ledger,
+                input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+                cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+                output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
             )
-            semantic_secret_values = dict(
-                semantic_secret_resolver.resolve(
-                    "openai.semantic_intent",
-                    ConnectorContext(
-                        correlation_id="runtime-semantic-bootstrap",
-                        principal_id="jason-runtime",
-                        organization_id="aot",
-                        client_id=None,
-                        capability="semantic.intent.translate",
-                        mode="observe",
-                    ),
-                )
-            )
-            try:
-                semantic_api_key = str(semantic_secret_values["api_key"]).strip()
-                if not semantic_api_key:
-                    raise ValueError("OpenAI semantic API key resolved empty")
-                hosted_semantic_translator = OpenAISemanticIntentTranslator(
-                    api_key=semantic_api_key,
-                    transport=http_transport,
-                    model=settings.openai_semantic_model,
-                    usage_ledger=model_usage_ledger,
-                )
-            finally:
-                semantic_secret_values.clear()
 
         resource_intent_resolver = GovernedResourceConversationIntentResolver(
             interpreter=GroundedSemanticResourceInquiryInterpreter(
@@ -688,7 +766,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ),
         legacy_flow=legacy_flow,
         capabilities=capabilities,
-        structured_client=ollama_client,
+        structured_client=hosted_conversation_client or ollama_client,
         identity_binder=identity_binder,
         request_factory=request_factory,
         orchestrator=orchestrator,

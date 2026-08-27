@@ -229,6 +229,29 @@ def test_model_cannot_resolve_reference_to_unknown_entity():
         )
 
 
+def test_conversation_outcome_returns_only_bounded_human_response():
+    client = FakeStructuredClient(
+        {
+            "outcome": "conversation",
+            "requirements": [],
+            "resolved_references": [],
+            "topic": "greeting",
+            "clarification_question": None,
+            "conversation_response": "Good morning. What can I help you with?",
+        }
+    )
+
+    plan = DynamicConversationResolver(client=client).resolve(
+        text="Good morning",
+        context=context(),
+        capabilities=capabilities(),
+    )
+
+    assert plan.outcome == "conversation"
+    assert plan.requirements == ()
+    assert plan.conversation_response == "Good morning. What can I help you with?"
+
+
 def test_context_accepts_only_verified_entity_records_and_preserves_provider_independence():
     original = context()
     ticket = ConversationEntity(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from dataclasses import dataclass
+from decimal import Decimal
 from time import monotonic
 from typing import Any, Mapping, Protocol
 
@@ -59,6 +60,9 @@ class OpenAISemanticIntentTranslator:
     timeout_seconds: float = 30.0
     max_output_tokens: int = 128
     usage_ledger: UsageLedger | None = None
+    input_cost_per_million_tokens: Decimal | None = None
+    cached_input_cost_per_million_tokens: Decimal | None = None
+    output_cost_per_million_tokens: Decimal | None = None
 
     def translate(
         self,
@@ -175,6 +179,9 @@ class OpenAISemanticIntentTranslator:
                     response=response,
                     started_at=started_at,
                     duration_ms=int((monotonic() - started_clock) * 1000),
+                    input_cost_per_million_tokens=self.input_cost_per_million_tokens,
+                    cached_input_cost_per_million_tokens=self.cached_input_cost_per_million_tokens,
+                    output_cost_per_million_tokens=self.output_cost_per_million_tokens,
                 )
             )
 

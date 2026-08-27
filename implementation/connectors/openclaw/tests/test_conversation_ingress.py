@@ -7,6 +7,7 @@ from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversatio
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
 from orchestrator.teams_conversation_flow import (
     ConversationClarificationRequiredError,
+    ConversationGuidanceRequiredError,
     ConversationIntentUnresolvedError,
     TeamsConversationFlowResult,
 )
@@ -127,6 +128,28 @@ def test_authenticated_turn_passes_only_text_and_microsoft_evidence_to_jason_flo
     assert submitted.identity.conversation_id == "teams-conversation-1"
     assert submitted.identity.message_id == "teams-message-1"
     assert audit.events[-1][0] == "openclaw.teams_conversation_completed"
+
+
+def test_bounded_conversation_response_is_returned_without_provider_completion():
+    audit = Audit()
+    flow = Flow(
+        error=ConversationGuidanceRequiredError(
+            reason_code="dynamic_conversation_response",
+            guidance_text="Good morning. What can I help you with?",
+        )
+    )
+
+    result = ingress(flow=flow, audit=audit).handle(
+        envelope(request_id="req-conversation-response")
+    )
+
+    assert result == {
+        "request_id": "req-conversation-response",
+        "correlation_id": "corr-conversation-1",
+        "status": "conversation_response",
+        "reply": {"text": "Good morning. What can I help you with?"},
+    }
+    assert audit.events[-1][0] == "openclaw.teams_conversation_response_returned"
 
 
 def test_conversation_envelope_cannot_assert_jason_principal_or_capability():

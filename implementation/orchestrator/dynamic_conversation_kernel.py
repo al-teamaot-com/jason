@@ -213,6 +213,7 @@ class DynamicConversationPlan:
     resolved_references: tuple[ConversationReferenceResolution, ...] = ()
     topic: str | None = None
     clarification_question: str | None = None
+    conversation_response: str | None = None
 
     def __post_init__(self) -> None:
         if self.outcome not in {"plan", "clarify", "conversation"}:
@@ -228,6 +229,17 @@ class DynamicConversationPlan:
                 raise DynamicConversationPlanError("clarify outcome requires a question")
         elif self.clarification_question is not None:
             raise DynamicConversationPlanError("only clarify outcome may carry a clarification question")
+        if self.outcome == "conversation":
+            if self.conversation_response is not None:
+                response = self.conversation_response.strip()
+                if not response or len(response) > 1600:
+                    raise DynamicConversationPlanError(
+                        "conversation response is empty or exceeds safety bound"
+                    )
+        elif self.conversation_response is not None:
+            raise DynamicConversationPlanError(
+                "only conversation outcome may carry a conversation response"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,7 +308,7 @@ class DynamicConversationResolver:
         return _validate_plan(proposal, offered_ids=set(ids), known_refs=set(known_refs))
 
 
-_SYSTEM_INSTRUCTIONS = """You are Jason's bounded conversational planner. Interpret the human message using only the supplied conversation context and the self-describing governed capabilities supplied for this turn. There are no hidden phrase-to-provider, synonym, question-to-field, or fact mappings. Resolve references such as pronouns only when the supplied context supports the resolution. Select capabilities by their runtime descriptions and schemas, not by hard-coded provider assumptions. A capability selection is only a request to the Central Orchestrator; it does not grant authority and does not supply factual evidence. Never invent operational facts, entity identifiers, capabilities, or provider results. Do not ask the human to choose or provide an internal provider, registry, log, evidence source, or evidence location when an offered governed read/search capability can inspect the clearly identified resource. Uncertainty about whether a requested fact exists in returned evidence is not material ambiguity. For a clear factual read, select the best matching provider-neutral read/search capability using its resource types, business purpose, operation, and selectors, then let downstream governed evidence interpretation determine whether the requested fact is actually supported. Do not substitute a more specialized evidence collection merely because it might contain the fact when a general resource read better matches the human's target. If choosing among plausible meanings would materially change the target, authority, requested action, risk, or meaning, return clarify with one concise natural clarification question. Otherwise return the complete bounded plan needed for the user's request. Use conversation only when no capability invocation is required. Return only the structured object required by the schema."""
+_SYSTEM_INSTRUCTIONS = """You are Jason's bounded conversational planner. Interpret the human message using only the supplied conversation context and the self-describing governed capabilities supplied for this turn. There are no hidden phrase-to-provider, synonym, question-to-field, or fact mappings. Resolve references such as pronouns only when the supplied context supports the resolution. Select capabilities by their runtime descriptions and schemas, not by hard-coded provider assumptions. A capability selection is only a request to the Central Orchestrator; it does not grant authority and does not supply factual evidence. Never invent operational facts, entity identifiers, capabilities, provider results, completed actions, or authority. Do not ask the human to choose or provide an internal provider, registry, log, evidence source, or evidence location when an offered governed read/search capability can inspect the clearly identified resource. Uncertainty about whether a requested fact exists in returned evidence is not material ambiguity. For a clear factual read, select the best matching provider-neutral read/search capability using its resource types, business purpose, operation, and selectors, then let downstream governed evidence interpretation determine whether the requested fact is actually supported. Do not substitute a more specialized evidence collection merely because it might contain the fact when a general resource read better matches the human's target. If choosing among plausible meanings would materially change the target, authority, requested action, risk, or meaning, return clarify with one concise natural clarification question. Otherwise return the complete bounded plan needed for the user's request. Use conversation only when no capability invocation is required. For a conversation outcome, provide a concise, natural human-facing conversation_response that does not claim operational evidence or action. Return only the structured object required by the schema."""
 
 
 def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) -> Mapping[str, Any]:
@@ -310,7 +322,7 @@ def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) 
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "outcome", "requirements", "resolved_references", "topic", "clarification_question"
+            "outcome", "requirements", "resolved_references", "topic", "clarification_question", "conversation_response"
         ],
         "properties": {
             "outcome": {"type": "string", "enum": ["plan", "clarify", "conversation"]},
@@ -347,6 +359,7 @@ def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) 
             },
             "topic": {"type": ["string", "null"], "maxLength": _MAX_LABEL_CHARS},
             "clarification_question": {"type": ["string", "null"], "maxLength": 800},
+            "conversation_response": {"type": ["string", "null"], "maxLength": 1600},
         },
     }
 
@@ -404,6 +417,10 @@ def _validate_plan(
     clarification = (
         None if clarification_value is None else str(clarification_value).strip() or None
     )
+    response_value = proposal.get("conversation_response")
+    conversation_response = (
+        None if response_value is None else str(response_value).strip() or None
+    )
 
     # Clarification is a stop decision. A structured model can occasionally
     # emit capability requirements while also declaring that clarification is
@@ -429,6 +446,7 @@ def _validate_plan(
     # to block execution even if a model also emitted capability requirements.
     if outcome == "conversation" and requirements:
         outcome = "plan"
+        conversation_response = None
 
     return DynamicConversationPlan(
         outcome=outcome,
@@ -436,4 +454,5 @@ def _validate_plan(
         resolved_references=tuple(resolutions),
         topic=topic,
         clarification_question=clarification,
+        conversation_response=conversation_response,
     )

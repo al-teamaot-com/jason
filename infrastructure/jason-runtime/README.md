@@ -43,6 +43,10 @@ Jason does not publish port 8080 to the host. The runtime joins only the existin
 - Only active public keys from the governed trusted-key registry authenticate OpenClaw machine envelopes.
 - OpenBao AppRole credential files are mounted read-only and used only by the applicable provider secret resolver.
 - Datto, Microsoft, and AWS credential values and access tokens are not exposed to the reasoning layer.
+- Hosted conversation rollout is independently controlled by
+  `JASON_HOSTED_CONVERSATION_ENABLED`; the initial model is selected through
+  `JASON_OPENAI_CONVERSATION_MODEL` and every hosted attempt is written to the
+  durable model-usage ledger at `JASON_MODEL_USAGE_DB`.
 - Ollama receives provider-neutral planning metadata or provider evidence only for bounded structured interpretation. It cannot select providers, invoke connectors, or assert final evidence values.
 - The System Registry query provider is deterministic and read-only. It cannot mutate declared state, lifecycle history, production services, governance, or secret values.
 - Central Orchestrator and JKD-001 remain the execution and identity-authority boundaries.
