@@ -230,3 +230,75 @@ def test_no_verified_context_keeps_null_only_entity_ref_in_canonical_contract():
             {"type": "null"},
         ],
     }
+
+
+def test_openai_adapter_removes_unique_items_recursively_without_mutating_canonical():
+    from orchestrator.model_runtime_adapter import (
+        openai_structured_output_compatible_schema,
+    )
+
+    canonical = {
+        "type": "object",
+        "properties": {
+            "requirements": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "entity_refs": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "uniqueItems": True,
+                            "maxItems": 8,
+                        }
+                    },
+                    "required": ["entity_refs"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["requirements"],
+        "additionalProperties": False,
+    }
+
+    adapted = openai_structured_output_compatible_schema(canonical)
+
+    entity_refs = (
+        adapted["properties"]["requirements"]["items"]["properties"]["entity_refs"]
+    )
+
+    assert "uniqueItems" not in entity_refs
+    assert entity_refs["maxItems"] == 8
+
+    canonical_entity_refs = (
+        canonical["properties"]["requirements"]["items"]["properties"]["entity_refs"]
+    )
+    assert canonical_entity_refs["uniqueItems"] is True
+
+
+def test_openai_adapter_preserves_unrelated_schema_structure():
+    from orchestrator.model_runtime_adapter import (
+        openai_structured_output_compatible_schema,
+    )
+
+    canonical = {
+        "type": "object",
+        "properties": {
+            "status": {
+                "type": ["string", "null"],
+                "enum": ["ok", None],
+            },
+            "items": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 5,
+            },
+        },
+        "required": ["status", "items"],
+        "additionalProperties": False,
+    }
+
+    adapted = openai_structured_output_compatible_schema(canonical)
+
+    assert adapted == canonical
+    assert adapted is not canonical

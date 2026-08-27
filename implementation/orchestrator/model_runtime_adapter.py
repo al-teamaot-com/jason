@@ -65,6 +65,47 @@ class ModelRuntimeAdapter:
         )
 
 
+
+def openai_structured_output_compatible_schema(
+    schema: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Return an OpenAI Structured Outputs generation view of Jason's schema.
+
+    Jason's canonical JSON Schema remains unchanged and continues to be the
+    deterministic validation authority. This adapter removes only generation-time
+    constraints known to be unsupported by OpenAI's Structured Outputs schema
+    compiler.
+
+    ``uniqueItems`` is intentionally omitted from the generation view. Jason's
+    canonical validator still enforces uniqueness after model output is returned.
+
+    The transformation is recursive, non-mutating, and provider-compatibility-only.
+    It does not inspect or change human text, entity identifiers, capabilities,
+    providers, facts, permissions, or execution semantics.
+    """
+
+    adapted = _adapt_openai_schema_value(schema)
+    if not isinstance(adapted, Mapping):
+        raise ValueError("adapted OpenAI schema must remain an object")
+    return dict(adapted)
+
+
+def _adapt_openai_schema_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _adapt_openai_schema_value(item)
+            for key, item in value.items()
+            if key != "uniqueItems"
+        }
+
+    if isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        return [_adapt_openai_schema_value(item) for item in value]
+
+    return value
+
+
 def ollama_grammar_compatible_schema(schema: Mapping[str, Any]) -> Mapping[str, Any]:
     """Return a conservative Ollama generation view of a canonical JSON Schema.
 

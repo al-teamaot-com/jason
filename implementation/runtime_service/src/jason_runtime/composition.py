@@ -59,6 +59,10 @@ from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
+from orchestrator.model_runtime_adapter import (
+    ModelRuntimeAdapter,
+    openai_structured_output_compatible_schema,
+)
 from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
 from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
 from orchestrator.planning_context_views import GovernedPlanningContextCatalog
@@ -569,14 +573,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     if settings.hosted_conversation_enabled:
         if openai_api_key is None or model_usage_ledger is None:
             raise RuntimeError("hosted conversation dependencies were not composed")
-        hosted_conversation_client = OpenAIStructuredJsonClient(
-            api_key=openai_api_key,
-            transport=http_transport,
-            model=settings.openai_conversation_model,
-            usage_ledger=model_usage_ledger,
-            input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
-            cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
-            output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+        hosted_conversation_client = ModelRuntimeAdapter(
+            client=OpenAIStructuredJsonClient(
+                api_key=openai_api_key,
+                transport=http_transport,
+                model=settings.openai_conversation_model,
+                usage_ledger=model_usage_ledger,
+                input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+                cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+                output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+            ),
+            schema_adapter=openai_structured_output_compatible_schema,
         )
 
     intent_resolver = None
