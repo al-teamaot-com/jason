@@ -200,9 +200,325 @@ class SQLiteUsageLedger(InMemoryUsageLedger):
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(str(self._path), check_same_thread=False)
         self._connection.execute("PRAGMA foreign_keys = ON")
+        self._migrate_legacy_schema_if_required()
         self._connection.executescript(_SQLITE_SCHEMA)
         self._connection.commit()
         os.chmod(self._path, 0o600)
+
+    def _migrate_legacy_schema_if_required(self) -> None:
+        entry_columns = self._table_columns("model_usage_entries")
+        if not entry_columns or "payload_json" in entry_columns:
+            return
+
+        required_entry_columns = {
+            "entry_id",
+            "workflow_id",
+            "request_id",
+            "attempt_id",
+            "organization_id",
+            "capability",
+            "provider",
+            "model",
+            "outcome",
+            "usage_source",
+            "completed_at",
+            "confidence",
+            "metadata",
+        }
+        if not required_entry_columns.issubset(entry_columns):
+            raise RuntimeError("unsupported legacy model usage entry schema")
+
+        adjustment_columns = self._table_columns("model_usage_adjustments")
+        required_adjustment_columns = {
+            "adjustment_id",
+            "original_entry_id",
+            "organization_id",
+            "reason",
+            "created_at",
+        }
+        if adjustment_columns and not required_adjustment_columns.issubset(
+            adjustment_columns
+        ):
+            raise RuntimeError("unsupported legacy model usage adjustment schema")
+
+        entry_names = self._column_names("model_usage_entries")
+        adjustment_names = (
+            self._column_names("model_usage_adjustments")
+            if adjustment_columns
+            else []
+        )
+
+        entry_rows = self._connection.execute(
+            "SELECT * FROM model_usage_entries ORDER BY rowid"
+        ).fetchall()
+        adjustment_rows = (
+            self._connection.execute(
+                "SELECT * FROM model_usage_adjustments ORDER BY rowid"
+            ).fetchall()
+            if adjustment_columns
+            else []
+        )
+
+        def entry_value(row, name):
+            return row[entry_names.index(name)] if name in entry_names else None
+
+        def adjustment_value(row, name):
+            return (
+                row[adjustment_names.index(name)]
+                if name in adjustment_names
+                else None
+            )
+
+        migrated_entries = []
+        for row in entry_rows:
+            raw_metadata = entry_value(row, "metadata")
+            metadata = json.loads(raw_metadata) if raw_metadata else {}
+            if not isinstance(metadata, dict):
+                raise ValueError(
+                    "legacy model usage metadata must be a JSON object"
+                )
+
+            payload = {
+                "entry_id": entry_value(row, "entry_id"),
+                "context": {
+                    "workflow_id": entry_value(row, "workflow_id"),
+                    "request_id": entry_value(row, "request_id"),
+                    "attempt_id": entry_value(row, "attempt_id"),
+                    "organization_id": entry_value(row, "organization_id"),
+                    "client_id": entry_value(row, "client_id"),
+                    "capability": entry_value(row, "capability"),
+                    "agent_name": None,
+                    "ticket_id": None,
+                    "parent_attempt_id": None,
+                    "routing_profile": None,
+                    "metadata": {},
+                },
+                "provider": entry_value(row, "provider"),
+                "model": entry_value(row, "model"),
+                "outcome": entry_value(row, "outcome"),
+                "usage_source": entry_value(row, "usage_source"),
+                "tokens": {
+                    "input_tokens": entry_value(row, "input_tokens"),
+                    "cached_input_tokens": entry_value(row, "cached_input_tokens"),
+                    "output_tokens": entry_value(row, "output_tokens"),
+                    "reasoning_tokens": entry_value(row, "reasoning_tokens"),
+                    "total_tokens": entry_value(row, "total_tokens"),
+                },
+                "cost": {
+                    "provider_reported_cost": entry_value(
+                        row, "provider_reported_cost"
+                    ),
+                    "calculated_cost": entry_value(row, "calculated_cost"),
+                    "currency": entry_value(row, "currency"),
+                },
+                "provider_request_id": entry_value(row, "provider_request_id"),
+                "provider_usage_reference": None,
+                "finish_reason": entry_value(row, "finish_reason"),
+                "started_at": entry_value(row, "started_at"),
+                "completed_at": entry_value(row, "completed_at"),
+                "duration_ms": entry_value(row, "duration_ms"),
+                "time_to_first_token_ms": None,
+                "local_eval_duration_ms": None,
+                "confidence": entry_value(row, "confidence"),
+                "metadata": metadata,
+            }
+            migrated_entries.append(
+                (
+                    payload["entry_id"],
+                    payload["context"]["organization_id"],
+                    payload["context"]["attempt_id"],
+                    json.dumps(
+                        payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+            )
+
+        migrated_adjustments = []
+        for row in adjustment_rows:
+            token_values = {
+                name: adjustment_value(row, name)
+                for name in (
+                    "input_tokens",
+                    "cached_input_tokens",
+                    "output_tokens",
+                    "reasoning_tokens",
+                    "total_tokens",
+                )
+            }
+            replacement_tokens = (
+                None
+                if all(value is None for value in token_values.values())
+                else token_values
+            )
+
+            cost_values = {
+                "provider_reported_cost": adjustment_value(
+                    row, "provider_reported_cost"
+                ),
+                "calculated_cost": adjustment_value(row, "calculated_cost"),
+                "currency": adjustment_value(row, "currency"),
+            }
+            replacement_cost = (
+                None
+                if all(value is None for value in cost_values.values())
+                else cost_values
+            )
+
+            payload = {
+                "adjustment_id": adjustment_value(row, "adjustment_id"),
+                "original_entry_id": adjustment_value(
+                    row, "original_entry_id"
+                ),
+                "organization_id": adjustment_value(row, "organization_id"),
+                "reason": adjustment_value(row, "reason"),
+                "created_at": adjustment_value(row, "created_at"),
+                "replacement_tokens": replacement_tokens,
+                "replacement_cost": replacement_cost,
+                "authoritative_reference": adjustment_value(
+                    row, "authoritative_reference"
+                ),
+            }
+            migrated_adjustments.append(
+                (
+                    payload["adjustment_id"],
+                    payload["original_entry_id"],
+                    payload["organization_id"],
+                    json.dumps(
+                        payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+            )
+
+        self._connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            self._connection.execute(
+                "ALTER TABLE model_usage_entries "
+                "RENAME TO model_usage_entries_legacy"
+            )
+            if adjustment_columns:
+                self._connection.execute(
+                    "ALTER TABLE model_usage_adjustments "
+                    "RENAME TO model_usage_adjustments_legacy"
+                )
+
+            self._connection.execute(
+                "DROP INDEX IF EXISTS ix_model_usage_entries_scope"
+            )
+            self._connection.execute(
+                "DROP INDEX IF EXISTS ix_model_usage_adjustments_original"
+            )
+
+            self._connection.execute(
+                """
+                CREATE TABLE model_usage_entries (
+                    entry_id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    UNIQUE (organization_id, attempt_id)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX ix_model_usage_entries_scope
+                ON model_usage_entries(organization_id)
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE model_usage_adjustments (
+                    adjustment_id TEXT PRIMARY KEY,
+                    original_entry_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    FOREIGN KEY (original_entry_id)
+                        REFERENCES model_usage_entries(entry_id)
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE INDEX ix_model_usage_adjustments_original
+                ON model_usage_adjustments(original_entry_id)
+                """
+            )
+
+            self._connection.executemany(
+                """
+                INSERT INTO model_usage_entries(
+                    entry_id,
+                    organization_id,
+                    attempt_id,
+                    payload_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                migrated_entries,
+            )
+            self._connection.executemany(
+                """
+                INSERT INTO model_usage_adjustments(
+                    adjustment_id,
+                    original_entry_id,
+                    organization_id,
+                    payload_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                migrated_adjustments,
+            )
+
+            new_entry_count = self._connection.execute(
+                "SELECT COUNT(*) FROM model_usage_entries"
+            ).fetchone()[0]
+            new_adjustment_count = self._connection.execute(
+                "SELECT COUNT(*) FROM model_usage_adjustments"
+            ).fetchone()[0]
+
+            if new_entry_count != len(entry_rows):
+                raise RuntimeError(
+                    "model usage entry migration row-count mismatch"
+                )
+            if new_adjustment_count != len(adjustment_rows):
+                raise RuntimeError(
+                    "model usage adjustment migration row-count mismatch"
+                )
+
+            if adjustment_columns:
+                self._connection.execute(
+                    "DROP TABLE model_usage_adjustments_legacy"
+                )
+            self._connection.execute(
+                "DROP TABLE model_usage_entries_legacy"
+            )
+
+            self._connection.commit()
+        except Exception:
+            self._connection.rollback()
+            raise
+        finally:
+            self._connection.execute("PRAGMA foreign_keys = ON")
+
+    def _table_columns(self, table: str) -> set[str]:
+        return {
+            str(row[1])
+            for row in self._connection.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+
+    def _column_names(self, table: str) -> list[str]:
+        return [
+            str(row[1])
+            for row in self._connection.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        ]
 
     def append(self, entry: UsageEntry) -> None:
         entry.validate()
