@@ -6,6 +6,7 @@ import pytest
 
 from orchestrator.conversation_kernel import _decision_schema
 from orchestrator.model_runtime_adapter import (
+    openai_structured_output_compatible_schema,
     ModelRuntimeAdapter,
     ollama_grammar_compatible_schema,
 )
@@ -302,3 +303,29 @@ def test_openai_adapter_preserves_unrelated_schema_structure():
 
     assert adapted == canonical
     assert adapted is not canonical
+
+
+def test_openai_adapter_requires_every_closed_object_property_recursively():
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "resource_selector": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "hostname": {"type": "string"},
+                    "resource_id": {"type": "string"},
+                },
+            },
+            "resolved": {"type": "boolean"},
+        },
+    }
+
+    adapted = openai_structured_output_compatible_schema(schema)
+
+    assert adapted["required"] == ["resource_selector", "resolved"]
+    assert adapted["properties"]["resource_selector"]["required"] == [
+        "hostname",
+        "resource_id",
+    ]

@@ -92,11 +92,21 @@ def openai_structured_output_compatible_schema(
 
 def _adapt_openai_schema_value(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {
+        adapted = {
             str(key): _adapt_openai_schema_value(item)
             for key, item in value.items()
             if key != "uniqueItems"
         }
+
+        properties = adapted.get("properties")
+        if (
+            adapted.get("type") == "object"
+            and adapted.get("additionalProperties") is False
+            and isinstance(properties, Mapping)
+        ):
+            adapted["required"] = [str(key) for key in properties]
+
+        return adapted
 
     if isinstance(value, Sequence) and not isinstance(
         value, (str, bytes, bytearray)
