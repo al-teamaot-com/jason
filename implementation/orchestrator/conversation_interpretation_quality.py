@@ -253,7 +253,14 @@ def _normalize_experience_proposal(
                         else str(raw_entity_ref).strip() or None
                     )
                     if source == "verified_entity" and entity_ref in verified_entities:
-                        item["target_kind"] = verified_entities[entity_ref].kind
+                        # target_entity_ref is constrained to Jason-owned verified
+                        # conversation state. Once that reference is valid, the model
+                        # does not also get to restate or transform authoritative
+                        # resource identity. Project both structural kind and durable
+                        # reference from the verified entity.
+                        entity = verified_entities[entity_ref]
+                        item["target_kind"] = entity.kind
+                        item["target_reference"] = entity.canonical_id
                     needs.append(item)
                 else:
                     needs.append(raw)

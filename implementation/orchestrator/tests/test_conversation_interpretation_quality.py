@@ -512,3 +512,65 @@ def test_discarded_branch_cannot_hide_internal_routing_selection():
     assert decision.outcome == "clarify"
     assert [item.outcome for item in attempts] == ["rejected", "accepted"]
     assert len(reviewer.calls) == 1
+
+def test_verified_entity_reference_is_authoritative_over_model_restated_identity():
+    """Verified entity identity is Jason-owned, not dependent on model string copying."""
+
+    ctx = DynamicConversationContext(
+        conversation_id="conv-future-resource",
+        principal_id="person-al",
+        organization_id="aot",
+        entities=(
+            ConversationEntity(
+                ref="verified-printer-1",
+                kind="printer",
+                canonical_id="durable-printer-8472",
+                display_name="PRINT-12",
+                provenance="verified provider evidence",
+            ),
+        ),
+        active_entity_refs={"printer": "verified-printer-1"},
+    )
+
+    # The model has selected the correct verified entity_ref but restated identity
+    # incorrectly. Jason must project authoritative identity from verified context
+    # rather than requiring brittle model string reproduction.
+    proposing = FakeClient(
+        {
+            "outcome": "information",
+            "information_needs": [
+                {
+                    "target_kind": "endpoint",
+                    "target_source": "verified_entity",
+                    "target_reference": "print-12",
+                    "target_entity_ref": "verified-printer-1",
+                    "need": "arbitrary information requested about this resource",
+                    "authority": "observe",
+                    "temporal_scope": "current",
+                    "completeness": "sufficient",
+                    "relationship": None,
+                }
+            ],
+            "clarification_question": None,
+            "conversational_response": None,
+            "topic": "resource state",
+        }
+    )
+    reviewer = FakeClient(review())
+    kernel = ReviewedConversationKernel(
+        proposing=pool(proposing),
+        reviewing=pool(reviewer),
+        resource_kinds=lambda: ("endpoint", "printer"),
+    )
+
+    decision, attempts = kernel.interpret(
+        text="Tell me the arbitrary information about print-12.",
+        context=ctx,
+    )
+
+    target = decision.information_needs[0].target
+    assert target.source == "verified_entity"
+    assert target.entity_ref == "verified-printer-1"
+    assert target.kind == "printer"
+    assert target.reference == "durable-printer-8472"
+    assert attempts[0].outcome == "accepted"
