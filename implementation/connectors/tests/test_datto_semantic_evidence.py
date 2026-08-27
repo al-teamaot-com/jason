@@ -51,3 +51,31 @@ def test_semantic_adapter_rejects_conflicting_duplicate_processor_aliases():
 
     semantic = adapted.get("semantic_evidence", {})
     assert "processor" not in semantic
+
+def test_datto_last_seen_is_exposed_as_endpoint_presence_evidence():
+    value = "2026-08-19T16:42:00Z"
+
+    adapted = adapt_datto_device_semantic_evidence(
+        {
+            "uid": "device-123",
+            "hostname": "AOT-50107",
+            "lastSeen": value,
+        }
+    )
+
+    assert (
+        adapted["semantic_evidence"]["endpoint"]["presence"]["endpoint_last_seen"]
+        == value
+    )
+
+
+def test_datto_last_seen_is_not_manufactured_when_provider_does_not_return_it():
+    adapted = adapt_datto_device_semantic_evidence(
+        {
+            "uid": "device-123",
+            "hostname": "AOT-50107",
+        }
+    )
+
+    semantic = adapted.get("semantic_evidence", {})
+    assert "endpoint" not in semantic

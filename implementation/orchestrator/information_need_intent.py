@@ -127,13 +127,15 @@ class InformationNeedIntentBuilder:
         items: tuple[PlannedInformationNeed, ...],
         capability: FulfillmentCapability,
     ) -> Mapping[str, Any]:
-        selector_keys = tuple(
-            dict.fromkeys(key.strip() for key in capability.selector_keys if key.strip())
+        target = items[0].need.target
+
+        selector_keys = _selectors_for_target(
+            selector_keys=capability.selector_keys,
+            target_source=target.source,
         )
+
         if not selector_keys:
             return {"requested_facts": [human_text]}
-
-        target = items[0].need.target
         if any(item.need.target != target for item in items):
             raise InformationNeedIntentError(
                 "one intent cannot bind several different grounded targets"
@@ -192,6 +194,48 @@ class InformationNeedIntentBuilder:
             # that the human actually asked.
             "requested_facts": [human_text],
         }
+
+
+def _selectors_for_target(
+    *,
+    selector_keys: tuple[str, ...],
+    target_source: str,
+) -> tuple[str, ...]:
+    """Return selectors structurally valid for the target identity state.
+
+    A literal human reference has not yet been proven to be a durable resource
+    identifier, so it must never be bound to the canonical resource_id selector.
+
+    Once a target is represented as a verified entity, resource_id is safe and
+    preferred when offered because the identity has already been established by
+    governed observation.
+    """
+
+    offered = tuple(
+        dict.fromkeys(
+            key.strip()
+            for key in selector_keys
+            if key.strip()
+        )
+    )
+
+    source = target_source.strip().casefold()
+
+    if source == "literal":
+        return tuple(
+            key
+            for key in offered
+            if key != "resource_id"
+        )
+
+    if source == "verified_entity":
+        if "resource_id" in offered:
+            return ("resource_id",)
+        return offered
+
+    return offered
+
+
 
 
 def _validate_selector(

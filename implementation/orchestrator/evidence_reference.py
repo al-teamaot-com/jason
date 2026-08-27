@@ -64,6 +64,117 @@ def build_evidence_catalog(value: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(entries[:_MAX_CATALOG_ENTRIES])
 
 
+
+def build_evidence_frontier(
+    value: Any,
+    *,
+    roots: tuple[str, ...] = ("/",),
+    max_entries: int = 48,
+) -> tuple[Mapping[str, Any], ...]:
+    """Expose one bounded structural level beneath one or more JSON Pointer roots.
+
+    This is intentionally provider-neutral and semantic-free. It allows a bounded
+    reasoner to navigate large governed evidence trees without receiving a flattened
+    catalog containing thousands of paths or provider values at once.
+    """
+    if max_entries < 1 or max_entries > 256:
+        raise ValueError("evidence frontier entry bound is invalid")
+
+    entries: list[Mapping[str, Any]] = []
+
+    def append_child(child: Any, pointer: str) -> None:
+        if len(entries) >= max_entries:
+            return
+
+        if isinstance(child, Mapping):
+            keys = [
+                str(key)
+                for key in list(child.keys())[:16]
+            ]
+            entries.append(
+                {
+                    "path": pointer,
+                    "type": "object",
+                    "selectable": False,
+                    "expandable": bool(child),
+                    "child_count": len(child),
+                    "keys": keys,
+                }
+            )
+            return
+
+        if isinstance(child, (list, tuple)):
+            entries.append(
+                {
+                    "path": pointer,
+                    "type": "array",
+                    "selectable": False,
+                    "expandable": bool(child),
+                    "length": len(child),
+                }
+            )
+            return
+
+        if child is None or child == "" or child == REDACTED:
+            return
+
+        preview: Any = child
+        if isinstance(child, str):
+            preview = " ".join(child.split())[:120]
+
+        entries.append(
+            {
+                "path": pointer,
+                "type": type(child).__name__,
+                "preview": preview,
+                "selectable": True,
+                "expandable": False,
+            }
+        )
+
+    for root in roots:
+        if len(entries) >= max_entries:
+            break
+
+        current = value if root == "/" else resolve_evidence_pointer(
+            value,
+            root,
+        )
+
+        if isinstance(current, Mapping):
+            for raw_key, child in current.items():
+                key = (
+                    str(raw_key)
+                    .replace("~", "~0")
+                    .replace("/", "~1")
+                )
+                pointer = (
+                    f"/{key}"
+                    if root == "/"
+                    else f"{root}/{key}"
+                )
+                append_child(child, pointer)
+                if len(entries) >= max_entries:
+                    break
+            continue
+
+        if isinstance(current, (list, tuple)):
+            for index, child in enumerate(current):
+                pointer = (
+                    f"/{index}"
+                    if root == "/"
+                    else f"{root}/{index}"
+                )
+                append_child(child, pointer)
+                if len(entries) >= max_entries:
+                    break
+            continue
+
+        append_child(current, root)
+
+    return tuple(entries)
+
+
 def selectable_evidence_paths(value: Any) -> tuple[str, ...]:
     return tuple(
         str(item["path"])

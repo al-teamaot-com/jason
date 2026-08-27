@@ -38,6 +38,10 @@ services:
       JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
       JASON_SES_REGION: us-east-1
       JASON_SES_DEFAULT_SENDER: jason@teamaot.com
+      JASON_DYNAMIC_CONVERSATION_ENABLED: "true"
+      JASON_CONVERSATION_EXPERIENCE_ENABLED: "true"
+      JASON_CONVERSATION_HOSTED_KERNEL_ENABLED: "true"
+      JASON_CONVERSATION_HOSTED_KERNEL_MODEL: "gpt-5.4-nano"
       JASON_OLLAMA_URL: http://jason-ollama:11434
       JASON_OLLAMA_MODEL: ${JASON_OLLAMA_MODEL:?JASON_OLLAMA_MODEL must name an installed local model}
     volumes:

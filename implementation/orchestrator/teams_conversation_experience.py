@@ -189,6 +189,11 @@ class TeamsConversationExperienceFlow:
                 question=request.text.strip(),
                 resolution=resolution,
                 executor=executor,
+                reasoning_context={
+                    "organization_id": principal.organization_id,
+                    "principal_id": principal.principal_id,
+                    "conversation_id": correlation_id,
+                },
             )
             response_text = read_result.answer.text.strip()
             verified_resources = read_result.verified_resources

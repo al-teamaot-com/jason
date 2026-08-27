@@ -160,3 +160,38 @@ def test_invalid_declared_conversation_permission_mode_fails_closed():
         assert "invalid conversation permission mode" in str(error)
     else:
         raise AssertionError("invalid permission mode must fail closed")
+
+
+
+def test_discovery_description_does_not_expose_internal_selector_choices():
+    offered = catalog_for(
+        capability(
+            "synthetic.resource.search",
+            metadata={
+                "read_only": "true",
+                "resource_types": "synthetic_resource",
+                "operation": "search",
+                "selector_keys": "hostname,resource_id,name",
+            },
+        )
+    ).list_offered()[0]
+
+    # Discovery explains what the capability does, not how its internal
+    # argument contract happens to represent the human-supplied target.
+    assert "Accepted selector keys:" not in offered.description
+    assert "hostname" not in offered.description
+    assert "resource_id" not in offered.description
+
+    discovery = offered.discovery_view()
+
+    assert "selector_keys" not in discovery
+    assert "provider" not in discovery
+    assert "input_schema" not in discovery
+    assert "output_schema" not in discovery
+
+    # The complete selected capability retains the structural binding contract.
+    assert offered.input_schema["selector_keys"] == [
+        "hostname",
+        "resource_id",
+        "name",
+    ]

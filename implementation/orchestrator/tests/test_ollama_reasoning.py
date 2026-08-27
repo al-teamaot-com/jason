@@ -442,7 +442,7 @@ def test_canonical_evidence_hints_rank_provider_fields_without_changing_requeste
     assert "/provider_data/processors/0/name" in pointers[:8]
 
 
-def test_structured_json_retry_increases_generation_budget_after_truncated_json():
+def test_structured_json_retry_preserves_declared_generation_budget_after_truncated_json():
     import json
 
     class TruncatingTransport:
@@ -467,7 +467,7 @@ def test_structured_json_retry_increases_generation_budget_after_truncated_json(
 
     assert result == {"status": "ok"}
     assert transport.payloads[0]["options"]["num_predict"] == 160
-    assert transport.payloads[1]["options"]["num_predict"] == 320
+    assert transport.payloads[1]["options"]["num_predict"] == 160
 
 
 def test_bounded_index_scans_deep_evidence_after_large_early_noise():

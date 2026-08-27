@@ -175,3 +175,66 @@ def test_duplicate_or_untrimmed_model_names_are_rejected_by_role():
             enabled=True,
             work_models=(" cheap ",),
         )
+
+
+
+class HostedClient:
+    model = "gpt-5.4-nano"
+
+
+def test_hosted_kernel_is_limited_to_proposal_stage_with_bounded_local_fallback(tmp_path):
+    selected = select_conversation_experience_flow(
+        settings=ConversationExperienceCutoverSettings(
+            enabled=True,
+            context_db=tmp_path / "context.sqlite3",
+            experience_models=("quality-local",),
+            work_models=("cheap-work",),
+        ),
+        fallback_flow=Dummy(),
+        capabilities=Dummy(),
+        ollama_url="http://ollama.invalid:11434",
+        default_ollama_model="unused",
+        identity_binder=Dummy(),
+        request_factory=Dummy(),
+        orchestrator=Dummy(),
+        transport=Dummy(),
+        hosted_kernel_client=HostedClient(),
+    )
+
+    proposing = selected.experience.kernel.proposing.backends
+
+    assert [item.name for item in proposing] == [
+        "experience-hosted:gpt-5.4-nano",
+        "experience:quality-local",
+    ]
+
+    assert proposing[0].max_attempts == 2
+    assert proposing[1].max_attempts == 1
+
+    reviewing = selected.experience.kernel.reviewing.backends
+    assert [item.name for item in reviewing] == [
+        "experience:quality-local",
+    ]
+
+    work = selected.progressive_reads.gaps.reasoning.backends
+    assert [item.name for item in work] == [
+        "work:cheap-work",
+    ]
+
+    evidence_review = (
+        selected.progressive_reads.evidence.reasoner.reviewing.backends
+    )
+    assert [item.name for item in evidence_review] == [
+        "experience:quality-local",
+    ]
+
+    drafting = selected.progressive_reads.answerer.drafting.backends
+    assert [item.name for item in drafting] == [
+        "work:cheap-work",
+        "experience:quality-local",
+    ]
+
+    answer_review = selected.progressive_reads.answerer.reviewing.backends
+    assert [item.name for item in answer_review] == [
+        "experience:quality-local",
+    ]

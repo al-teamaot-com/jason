@@ -96,6 +96,70 @@ class CostEstimator:
             confidence=entry.confidence,
         )
 
+    def calculate_token_usage_cost(
+        self,
+        *,
+        provider_id: str,
+        model_id: str,
+        execution_mode: ExecutionMode,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> ExecutionCostEstimate:
+        """Calculate post-execution cost from measured provider token usage."""
+
+        if input_tokens < 0 or output_tokens < 0 or cached_input_tokens < 0:
+            raise ValueError("measured token usage must be non-negative")
+        if cached_input_tokens > input_tokens:
+            raise ValueError("cached input tokens cannot exceed input tokens")
+
+        entry = self._pricing.get(
+            provider_id=provider_id,
+            model_id=model_id,
+            execution_mode=execution_mode,
+        )
+        if entry is None:
+            return self._unknown(
+                "No active pricing entry exists for measured execution usage."
+            )
+
+        uncached_input_tokens = input_tokens - cached_input_tokens
+
+        input_cost = (
+            Decimal(uncached_input_tokens)
+            / _MILLION
+            * entry.input_cost_per_million_tokens
+        )
+        cached_input_cost = (
+            Decimal(cached_input_tokens)
+            / _MILLION
+            * entry.cached_input_cost_per_million_tokens
+        )
+        output_cost = (
+            Decimal(output_tokens)
+            / _MILLION
+            * entry.output_cost_per_million_tokens
+        )
+
+        provider_cost = (
+            input_cost
+            + cached_input_cost
+            + output_cost
+            + entry.request_cost
+        )
+
+        return ExecutionCostEstimate(
+            provider_cost=provider_cost,
+            internal_compute_cost=Decimal("0"),
+            infrastructure_cost=Decimal("0"),
+            operational_cost=Decimal("0"),
+            total_estimated_cost=provider_cost,
+            currency=entry.currency,
+            pricing_version=entry.pricing_version,
+            confidence=entry.confidence,
+            limitations=(),
+        )
+
     def create_cost_record(
         self,
         *,

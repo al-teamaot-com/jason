@@ -35,6 +35,11 @@ DATTO_DEVICE_SEMANTIC_FIELDS = (
         semantic_contexts=("memory", "hardware_inventory"),
         provider_keys=("totalMemory", "physicalMemory", "totalPhysicalMemory", "ram"),
     ),
+    SemanticEvidenceField(
+        canonical_fact="endpoint last seen",
+        semantic_contexts=("endpoint", "presence"),
+        provider_keys=("lastSeen",),
+    ),
 )
 
 

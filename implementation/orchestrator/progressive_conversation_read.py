@@ -10,7 +10,10 @@ unsupported fact become a human-facing answer or trigger speculative fan-out.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+import json
+import logging
+import time
+from typing import Mapping, Protocol
 
 from .conversation_answer import (
     ConversationAnswer,
@@ -22,6 +25,10 @@ from .conversation_evidence_support import (
     ConversationEvidenceAssessment,
     ConversationEvidenceSupportExtractor,
 )
+from .conversation_kernel import (
+    InformationNeed,
+    InformationTarget,
+)
 from .conversation_experience import ConversationExperienceResolution
 from .conversation_resource_observation import (
     VerifiedConversationResourceObservation,
@@ -31,6 +38,7 @@ from .contracts import OrchestrationResult
 from .evidence_gap_fulfillment import EvidenceGapFulfillmentPlanner
 from .information_fulfillment import (
     FulfillmentCapability,
+    FulfillmentStep,
     RegistryBackedFulfillmentCatalog,
 )
 from .information_need_intent import (
@@ -38,6 +46,50 @@ from .information_need_intent import (
     PlannedInformationNeed,
 )
 from .teams_conversation_flow import ConversationIntent, ConversationIntentPlan
+
+
+_progressive_logger = logging.getLogger(
+    "jason.conversation.progressive"
+)
+
+
+def _progressive_trace(
+    *,
+    stage: str,
+    reasoning_context: Mapping[str, str] | None,
+    capability_name: str | None = None,
+    outcome: str | None = None,
+    error: BaseException | None = None,
+    elapsed_ms: int | None = None,
+) -> None:
+    """Emit bounded transaction-stage observability without evidence payloads."""
+
+    context = reasoning_context or {}
+
+    details = {
+        "stage": stage,
+        "correlation_id": str(
+            context.get("correlation_id", "")
+        ).strip() or None,
+        "capability_name": capability_name,
+        "outcome": outcome,
+        "error_type": (
+            type(error).__name__
+            if error is not None
+            else None
+        ),
+        "elapsed_ms": elapsed_ms,
+    }
+
+    _progressive_logger.warning(
+        "conversation.progressive %s",
+        json.dumps(
+            details,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
 
 
 class GovernedConversationIntentExecutor(Protocol):
@@ -95,6 +147,7 @@ class ProgressiveConversationReadEngine:
         question: str,
         resolution: ConversationExperienceResolution,
         executor: GovernedConversationIntentExecutor,
+        reasoning_context: Mapping[str, str] | None = None,
     ) -> ProgressiveConversationReadResult:
         if resolution.decision.outcome != "information":
             raise ValueError("progressive read engine requires an information outcome")
@@ -136,6 +189,8 @@ class ProgressiveConversationReadEngine:
                     need=planned.need,
                     result=result,
                     support_prefix=f"g{group_index}n{need_index}p",
+                    reasoning_context=reasoning_context,
+                    verified_target=primary_observation,
                 )
                 if assessment.status == "supported":
                     supports.extend(assessment.supports)
@@ -149,6 +204,8 @@ class ProgressiveConversationReadEngine:
                     available=available,
                     internal_identifiers=internal_identifiers,
                     support_prefix=f"g{group_index}n{need_index}x",
+                    reasoning_context=reasoning_context,
+                    verified_target=primary_observation,
                 )
                 observations.extend(expansion_observations)
                 if recovered.status == "supported":
@@ -189,6 +246,9 @@ class ProgressiveConversationReadEngine:
         available: dict[str, FulfillmentCapability],
         internal_identifiers: list[str],
         support_prefix: str,
+        reasoning_context: Mapping[str, str] | None,
+        verified_target: VerifiedConversationResourceObservation | None,
+
     ) -> tuple[
         ConversationEvidenceAssessment,
         tuple[VerifiedConversationResourceObservation, ...],
@@ -197,51 +257,290 @@ class ProgressiveConversationReadEngine:
         last_assessment = first_assessment
         observations: list[VerifiedConversationResourceObservation] = []
         for expansion_index in range(1, self.max_specialized_reads_per_need + 1):
-            step = self.gaps.next_step(
-                need=planned.need,
-                attempted_capabilities=tuple(attempted),
+            started = time.monotonic()
+            _progressive_trace(
+                stage="gap_selection_started",
+                reasoning_context=reasoning_context,
             )
+            try:
+                step = self.gaps.next_step(
+                    need=planned.need,
+                    attempted_capabilities=tuple(attempted),
+                )
+            except Exception as error:
+                _progressive_trace(
+                    stage="gap_selection_failed",
+                    reasoning_context=reasoning_context,
+                    outcome="failed",
+                    error=error,
+                    elapsed_ms=int(
+                        (time.monotonic() - started) * 1000
+                    ),
+                )
+                raise
+
+            _progressive_trace(
+                stage="gap_selection_completed",
+                reasoning_context=reasoning_context,
+                capability_name=(
+                    step.capability_name
+                    if step is not None
+                    else None
+                ),
+                outcome=(
+                    "selected"
+                    if step is not None
+                    else "exhausted"
+                ),
+                elapsed_ms=int(
+                    (time.monotonic() - started) * 1000
+                ),
+            )
+
             if step is None:
                 break
+
             attempted.append(step.capability_name)
             capability = available.get(step.capability_name)
+
             if capability is None:
-                raise LookupError(
+                error = LookupError(
                     "evidence-gap capability is no longer registered"
                 )
-            specialized = PlannedInformationNeed(
-                need=planned.need,
+                _progressive_trace(
+                    stage="specialized_capability_resolution_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=step.capability_name,
+                    outcome="failed",
+                    error=error,
+                )
+                raise error
+
+            specialized = _specialized_planned_need(
+                planned=planned,
                 step=step,
                 capability=capability,
+                verified_target=verified_target,
             )
-            intent = self.intent_builder.build(
-                human_text=question.strip(),
-                planned=(specialized,),
+
+            started = time.monotonic()
+            _progressive_trace(
+                stage="specialized_intent_build_started",
+                reasoning_context=reasoning_context,
+                capability_name=step.capability_name,
             )
+            try:
+                intent = self.intent_builder.build(
+                    human_text=question.strip(),
+                    planned=(specialized,),
+                )
+            except Exception as error:
+                _progressive_trace(
+                    stage="specialized_intent_build_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=step.capability_name,
+                    outcome="failed",
+                    error=error,
+                    elapsed_ms=int(
+                        (time.monotonic() - started) * 1000
+                    ),
+                )
+                raise
+
             if not isinstance(intent, ConversationIntent):
-                raise RuntimeError(
+                error = RuntimeError(
                     "one specialized information need must produce one governed intent"
                 )
-            result = executor.execute(intent)
+                _progressive_trace(
+                    stage="specialized_intent_build_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=step.capability_name,
+                    outcome="failed",
+                    error=error,
+                    elapsed_ms=int(
+                        (time.monotonic() - started) * 1000
+                    ),
+                )
+                raise error
+
+            _progressive_trace(
+                stage="specialized_intent_build_completed",
+                reasoning_context=reasoning_context,
+                capability_name=intent.capability_name,
+                outcome="completed",
+                elapsed_ms=int(
+                    (time.monotonic() - started) * 1000
+                ),
+            )
+
+            started = time.monotonic()
+            _progressive_trace(
+                stage="specialized_execution_started",
+                reasoning_context=reasoning_context,
+                capability_name=intent.capability_name,
+            )
+            try:
+                result = executor.execute(intent)
+            except Exception as error:
+                _progressive_trace(
+                    stage="specialized_execution_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=intent.capability_name,
+                    outcome="failed",
+                    error=error,
+                    elapsed_ms=int(
+                        (time.monotonic() - started) * 1000
+                    ),
+                )
+                raise
+
+            _progressive_trace(
+                stage="specialized_execution_completed",
+                reasoning_context=reasoning_context,
+                capability_name=intent.capability_name,
+                outcome=str(result.status.value),
+                elapsed_ms=int(
+                    (time.monotonic() - started) * 1000
+                ),
+            )
+
             _record_internal_identifiers(
                 internal_identifiers,
                 intent=intent,
                 result=result,
             )
-            observation = observe_verified_resource(
-                planned=specialized,
-                result=result,
-            )
+
+            try:
+                observation = observe_verified_resource(
+                    planned=specialized,
+                    result=result,
+                )
+            except Exception as error:
+                _progressive_trace(
+                    stage="specialized_observation_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=intent.capability_name,
+                    outcome="failed",
+                    error=error,
+                )
+                raise
+
             if observation is not None:
                 observations.append(observation)
-            last_assessment = self.evidence.assess(
-                need=planned.need,
-                result=result,
-                support_prefix=f"{support_prefix}{expansion_index}",
+
+            started = time.monotonic()
+            _progressive_trace(
+                stage="specialized_evidence_started",
+                reasoning_context=reasoning_context,
+                capability_name=intent.capability_name,
             )
+            try:
+                last_assessment = self.evidence.assess(
+                    need=planned.need,
+                    result=result,
+                    support_prefix=f"{support_prefix}{expansion_index}",
+                    reasoning_context=reasoning_context,
+                    verified_target=observation or verified_target,
+                )
+            except Exception as error:
+                _progressive_trace(
+                    stage="specialized_evidence_failed",
+                    reasoning_context=reasoning_context,
+                    capability_name=intent.capability_name,
+                    outcome="failed",
+                    error=error,
+                    elapsed_ms=int(
+                        (time.monotonic() - started) * 1000
+                    ),
+                )
+                raise
+
+            _progressive_trace(
+                stage="specialized_evidence_completed",
+                reasoning_context=reasoning_context,
+                capability_name=intent.capability_name,
+                outcome=last_assessment.status,
+                elapsed_ms=int(
+                    (time.monotonic() - started) * 1000
+                ),
+            )
+
             if last_assessment.status == "supported":
                 return last_assessment, tuple(observations)
         return last_assessment, tuple(observations)
+
+
+def _specialized_planned_need(
+    *,
+    planned: PlannedInformationNeed,
+    step: FulfillmentStep,
+    capability: FulfillmentCapability,
+    verified_target: VerifiedConversationResourceObservation | None,
+) -> PlannedInformationNeed:
+    """Bind specialized reads to durable identity once it is verified.
+
+    Human literal references are useful for discovery, but must not be reused
+    as canonical provider identifiers after a governed resource resolution has
+    already established durable identity.
+
+    This transformation is provider-independent. It consumes only Jason's
+    verified conversation-resource observation contract and never inspects
+    provider-specific identifiers or fields.
+    """
+
+    if verified_target is None:
+        return PlannedInformationNeed(
+            need=planned.need,
+            step=step,
+            capability=capability,
+        )
+
+    original = planned.need.target
+
+    if verified_target.active_kind != original.kind:
+        raise RuntimeError(
+            "verified target kind does not match information target"
+        )
+
+    entity = verified_target.entity
+
+    canonical_id = entity.canonical_id.strip()
+    entity_ref = entity.ref.strip()
+
+    if not canonical_id or not entity_ref:
+        raise RuntimeError(
+            "verified conversation target lacks durable identity"
+        )
+
+    target = InformationTarget(
+        kind=original.kind,
+        source="verified_entity",
+        reference=canonical_id,
+        entity_ref=entity_ref,
+    )
+
+    need = InformationNeed(
+        target=target,
+        need=planned.need.need,
+        authority=planned.need.authority,
+        temporal_scope=planned.need.temporal_scope,
+        completeness=planned.need.completeness,
+        relationship=planned.need.relationship,
+    )
+
+    rebound_step = FulfillmentStep(
+        capability_name=step.capability_name,
+        target_reference=canonical_id,
+        target_source="verified_entity",
+        information_need=step.information_need,
+        authority=step.authority,
+    )
+
+    return PlannedInformationNeed(
+        need=need,
+        step=rebound_step,
+        capability=capability,
+    )
 
 
 def _planned_groups(

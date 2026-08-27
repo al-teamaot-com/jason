@@ -427,16 +427,29 @@ def _validate_decision(
                 )
         elif source == "verified_entity":
             if entity_ref not in known:
-                raise ConversationKernelError("target_entity_ref is not a verified context entity")
+                raise ConversationKernelError(
+                    "target_entity_ref is not a verified context entity"
+                )
             entity = known[entity_ref]
             if kind != entity.kind:
                 raise ConversationKernelError(
                     "verified entity target kind must match verified entity data"
                 )
-            if reference not in {entity.canonical_id, entity.display_name}:
+            if reference not in {
+                entity.canonical_id,
+                entity.display_name,
+            }:
                 raise ConversationKernelError(
                     "verified entity target reference must use verified entity data"
                 )
+
+            # A model may refer to an already verified entity by either its
+            # human-facing display name or its canonical identifier. Once the
+            # entity_ref has been deterministically validated, however, the
+            # execution-facing target is always bound locally to the durable
+            # canonical identifier. Model output is never authoritative for
+            # canonical resource identity.
+            reference = entity.canonical_id
         else:
             raise ConversationKernelError("information target source is invalid")
 

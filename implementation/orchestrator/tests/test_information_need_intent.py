@@ -199,3 +199,80 @@ def test_model_cannot_change_selected_capability_or_grounded_target_value():
 
     assert intent.capability_name == item.capability.capability_name
     assert intent.arguments["hostname"] == item.need.target.reference
+
+
+def test_literal_target_cannot_be_bound_to_unverified_resource_id():
+    client = FakeClient({"argument": "name"})
+    cap = capability(
+        selectors=("hostname", "name", "resource_id")
+    )
+    builder = InformationNeedIntentBuilder(
+        reasoning=pool(client)
+    )
+
+    intent = builder.build(
+        human_text="Inspect NODE-77.",
+        planned=(planned(cap=cap),),
+    )
+
+    assert intent.arguments["name"] == "NODE-77"
+    assert "resource_id" not in intent.arguments
+
+    call = client.calls[0]
+    assert set(
+        call["schema"]["properties"]["argument"]["enum"]
+    ) == {
+        "hostname",
+        "name",
+    }
+
+
+def test_verified_entity_prefers_resource_id_without_model_call():
+    client = FakeClient()
+    cap = capability(
+        selectors=("hostname", "name", "resource_id")
+    )
+
+    item = planned(
+        reference="durable-resource-77",
+        cap=cap,
+    )
+
+    verified_need = InformationNeed(
+        target=InformationTarget(
+            kind="endpoint",
+            source="verified_entity",
+            reference="durable-resource-77",
+        ),
+        need=item.need.need,
+        authority="observe",
+    )
+
+    verified_step = FulfillmentStep(
+        capability_name=cap.capability_name,
+        target_reference="durable-resource-77",
+        target_source="verified_entity",
+        information_need=item.need.need,
+        authority="observe",
+    )
+
+    verified = PlannedInformationNeed(
+        need=verified_need,
+        step=verified_step,
+        capability=cap,
+    )
+
+    builder = InformationNeedIntentBuilder(
+        reasoning=pool(client)
+    )
+
+    intent = builder.build(
+        human_text="Inspect this verified endpoint.",
+        planned=(verified,),
+    )
+
+    assert intent.arguments["resource_id"] == (
+        "durable-resource-77"
+    )
+
+    assert client.calls == []

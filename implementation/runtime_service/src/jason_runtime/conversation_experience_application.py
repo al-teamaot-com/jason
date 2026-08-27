@@ -12,6 +12,19 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 
+from connectors.core.contracts import ConnectorContext
+from connectors.core.http_transport import UrlLibJsonHttpTransport
+from connectors.core.openbao_secrets import OpenBaoSecretResolver
+from orchestrator.governed_hosted_reasoning import (
+    GovernedHostedReasoningClient,
+    minimum_evidence_payload,
+)
+from orchestrator.hosted_reasoning_egress import HostedReasoningEgressClassifier
+from orchestrator.hosted_reasoning_registration import (
+    OPENAI_CONVERSATION_EVIDENCE_CAPABILITY,
+    OPENAI_CONVERSATION_PROVIDER_ID,
+)
+from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
 from .conversation_experience_cutover import (
@@ -70,6 +83,16 @@ def apply_conversation_experience_cutover(
             "Conversation Experience requires the existing flow and return path to share one transport"
         )
 
+    (
+        hosted_kernel_client,
+        hosted_evidence_client,
+    ) = _build_hosted_reasoning_clients(
+        settings=settings,
+        runtime_settings=runtime_settings,
+        environ=env,
+        governance=application.governance,
+    )
+
     new_flow = select_conversation_experience_flow(
         settings=settings,
         fallback_flow=fallback_flow,
@@ -80,6 +103,9 @@ def apply_conversation_experience_cutover(
         request_factory=request_factory,
         orchestrator=orchestrator,
         transport=transport,
+        audit=application.governance.orchestration_events,
+        hosted_kernel_client=hosted_kernel_client,
+        hosted_evidence_client=hosted_evidence_client,
     )
 
     try:
@@ -136,6 +162,104 @@ def _settings_from_env(*, runtime_settings, environ) -> ConversationExperienceCu
         max_specialized_reads_per_need=specialized_budget,
     )
 
+
+
+def _build_hosted_reasoning_clients(*, settings, runtime_settings, environ, governance):
+    """Compose the optional hosted Conversation Kernel proposer.
+
+    Credentials remain behind Jason's existing OpenBao boundary. The hosted
+    reasoning client is injected only into the Conversation Kernel proposal stage
+    and receives no connector handles or execution authority.
+
+    Hosted execution-policy and data-egress governance are added in the
+    constitutional hardening phase before production activation.
+    """
+
+    if not _bool_env(
+        environ,
+        "JASON_CONVERSATION_HOSTED_KERNEL_ENABLED",
+        default=False,
+    ):
+        return None, None
+
+    if governance is None:
+        raise RuntimeError(
+            "hosted Conversation Kernel requires canonical runtime governance services"
+        )
+
+    model = str(
+        environ.get(
+            "JASON_CONVERSATION_HOSTED_KERNEL_MODEL",
+            runtime_settings.conversation_hosted_kernel_model,
+        )
+    ).strip()
+
+    if not model:
+        raise ValueError(
+            "JASON_CONVERSATION_HOSTED_KERNEL_MODEL is required when hosted kernel is enabled"
+        )
+
+    resolver = OpenBaoSecretResolver(
+        base_url=runtime_settings.openbao_url,
+        role_id_path=runtime_settings.openai_openbao_role_id_path,
+        secret_id_path=runtime_settings.openai_openbao_secret_id_path,
+    )
+
+    values = dict(
+        resolver.resolve(
+            "openai.semantic_intent",
+            ConnectorContext(
+                correlation_id="runtime-conversation-kernel-bootstrap",
+                principal_id="jason-runtime",
+                organization_id="aot",
+                client_id=None,
+                capability="conversation.intent.interpret",
+                mode="observe",
+            ),
+        )
+    )
+
+    try:
+        api_key = str(values["api_key"]).strip()
+
+        if not api_key:
+            raise ValueError(
+                "OpenAI Conversation Kernel API key resolved empty"
+            )
+
+        raw_client = OpenAIStructuredJsonClient(
+            api_key=api_key,
+            transport=UrlLibJsonHttpTransport(),
+            model=model,
+            timeout_seconds=settings.reasoning_timeout_seconds,
+            response_format_name="jason_conversation_kernel",
+        )
+
+        common = {
+            "client": raw_client,
+            "policy": governance.policy,
+            "cost_estimator": governance.cost_estimator,
+            "providers": governance.providers,
+            "audit": governance.orchestration_events,
+            "usage_ledger": governance.usage_ledger,
+            "provider_id": OPENAI_CONVERSATION_PROVIDER_ID,
+            "model_id": model,
+            "classifier": HostedReasoningEgressClassifier(),
+        }
+
+        kernel = GovernedHostedReasoningClient(
+            **common,
+        )
+
+        evidence = GovernedHostedReasoningClient(
+            **common,
+            capability=OPENAI_CONVERSATION_EVIDENCE_CAPABILITY,
+            payload_projector=minimum_evidence_payload,
+        )
+
+        return kernel, evidence
+    finally:
+        values.clear()
 
 def _models_env(environ, name: str) -> tuple[str, ...]:
     raw = str(environ.get(name, ""))

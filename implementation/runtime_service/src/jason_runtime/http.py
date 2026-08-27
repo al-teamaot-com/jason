@@ -23,6 +23,18 @@ class HttpResponse:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeGovernanceServices:
+    """Canonical runtime-owned governance dependencies shared by composed experiences."""
+
+    providers: Any
+    pricing: Any
+    cost_estimator: Any
+    policy: Any
+    orchestration_events: Any
+    usage_ledger: Any
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeHttpApplication:
     """Small internal HTTP boundary around Jason's governed conversation ingress.
 
@@ -32,6 +44,7 @@ class RuntimeHttpApplication:
     """
 
     ingress: TeamsConversationIngress
+    governance: RuntimeGovernanceServices | None = None
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
 

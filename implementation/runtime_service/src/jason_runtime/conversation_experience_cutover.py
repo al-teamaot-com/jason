@@ -8,6 +8,9 @@ same governed runtime objects.
 
 from __future__ import annotations
 
+import json
+import logging
+
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -93,7 +96,10 @@ def select_conversation_experience_flow(
     request_factory,
     orchestrator,
     transport,
+    audit,
     http_transport: UrlLibJsonHttpTransport | None = None,
+    hosted_kernel_client=None,
+    hosted_evidence_client=None,
 ):
     """Return the existing flow or a fully composed model-independent Teams experience.
 
@@ -129,10 +135,26 @@ def select_conversation_experience_flow(
         timeout_seconds=settings.reasoning_timeout_seconds,
         role_prefix="work",
     )
+    kernel_proposing_pool = _kernel_proposing_pool(
+        hosted_client=hosted_kernel_client,
+        local_pool=experience_pool,
+    )
     drafting_pool = _combined_pool(
         work_pool=work_pool,
         experience_pool=experience_pool,
     )
+
+    evidence_selecting_pool = (
+        _hosted_evidence_pool(hosted_evidence_client)
+        if hosted_evidence_client is not None
+        else work_pool
+    )
+    evidence_reviewing_pool = (
+        _hosted_evidence_pool(hosted_evidence_client)
+        if hosted_evidence_client is not None
+        else experience_pool
+    )
+
 
     context_store = SQLiteDynamicConversationContextStore(
         settings.context_db,
@@ -142,17 +164,40 @@ def select_conversation_experience_flow(
     intent_builder = InformationNeedIntentBuilder(reasoning=work_pool)
     experience = ConversationExperienceCoordinator(
         kernel=ReviewedConversationKernel(
-            proposing=experience_pool,
+            proposing=kernel_proposing_pool,
             reviewing=experience_pool,
             resource_kinds=lambda: _primary_resource_kinds(catalog),
+            resource_descriptions=lambda: _primary_resource_descriptions(
+                catalog
+            ),
         ),
         fulfillment=GovernedInitialFulfillmentPlanner(catalog=catalog),
         catalog=catalog,
         intent_builder=intent_builder,
     )
+    evidence_logger = logging.getLogger(
+        "jason.conversation.evidence"
+    )
+
+    def evidence_trace(details):
+        payload = {
+            "stage": "conversation_evidence",
+            "details": dict(details),
+        }
+        evidence_logger.warning(
+            "conversation.evidence.reasoning %s",
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
     evidence_reasoner = ValidatedConversationEvidenceReasoner(
-        selecting=work_pool,
-        reviewing=experience_pool,
+        selecting=evidence_selecting_pool,
+        reviewing=evidence_reviewing_pool,
+        trace=evidence_trace,
     )
     progressive_reads = ProgressiveConversationReadEngine(
         evidence=ConversationEvidenceSupportExtractor(reasoner=evidence_reasoner),
@@ -185,6 +230,64 @@ def select_conversation_experience_flow(
     )
 
 
+
+
+def _hosted_evidence_pool(
+    hosted_client,
+) -> ValidatedReasoningPool:
+    """Use hosted evidence reasoning as the authoritative semantic selector.
+
+    Deterministic validators and local JSON-pointer dereference remain authoritative.
+    There is intentionally no local semantic fallback in this pool: if governed
+    hosted processing is unavailable or denied, evidence support is not established.
+    """
+
+    model = str(
+        getattr(hosted_client, "model", "")
+    ).strip() or "hosted"
+
+    return ValidatedReasoningPool(
+        backends=(
+            ReasoningBackend(
+                name=f"evidence-hosted:{model}",
+                client=hosted_client,
+                max_attempts=2,
+            ),
+        )
+    )
+
+
+def _kernel_proposing_pool(
+    *,
+    hosted_client,
+    local_pool: ValidatedReasoningPool,
+) -> ValidatedReasoningPool:
+    """Prefer bounded hosted interpretation without expanding hosted data exposure.
+
+    Only the Conversation Kernel proposal stage receives the hosted client.
+    Independent semantic review, evidence reasoning, fulfillment, answer drafting,
+    and text-quality review remain on the existing local pools.
+
+    Hosted interpretation receives two bounded attempts. The existing local
+    Experience backends remain the final fallback.
+    """
+
+    if hosted_client is None:
+        return local_pool
+
+    model = str(getattr(hosted_client, "model", "")).strip() or "hosted"
+
+    return ValidatedReasoningPool(
+        backends=(
+            ReasoningBackend(
+                name=f"experience-hosted:{model}",
+                client=hosted_client,
+                max_attempts=2,
+            ),
+            *local_pool.backends,
+        )
+    )
+
 def _primary_resource_kinds(
     catalog: RegistryBackedFulfillmentCatalog,
 ) -> tuple[str, ...]:
@@ -200,6 +303,45 @@ def _primary_resource_kinds(
             }
         )
     )
+
+
+def _primary_resource_descriptions(
+    catalog: RegistryBackedFulfillmentCatalog,
+) -> dict[str, str]:
+    """Describe primary resource kinds from registered capability contracts.
+
+    Descriptions remain provider-neutral and are generated from the same
+    governed fulfillment catalog that declares which structural resource
+    kinds are available to the Conversation Kernel.
+    """
+
+    grouped: dict[str, list[str]] = {}
+
+    for capability in catalog.list_available():
+        if capability.role != "primary":
+            continue
+
+        description = " ".join(
+            capability.description.split()
+        )
+
+        if not description:
+            continue
+
+        for resource_type in capability.resource_types:
+            grouped.setdefault(
+                resource_type,
+                [],
+            ).append(description)
+
+    return {
+        resource_type: " ".join(
+            dict.fromkeys(descriptions)
+        )
+        for resource_type, descriptions in sorted(
+            grouped.items()
+        )
+    }
 
 
 def _ollama_pool(

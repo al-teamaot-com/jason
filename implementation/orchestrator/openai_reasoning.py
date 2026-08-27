@@ -25,6 +25,14 @@ class JsonHttpTransport(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class OpenAIStructuredResponseError(ValueError):
+    """OpenAI returned a response but its structured output could not be decoded."""
+
+    def __init__(self, message: str, *, response: Mapping[str, Any]) -> None:
+        super().__init__(message)
+        self.response = dict(response)
+
+
 @dataclass(frozen=True, slots=True)
 class OpenAIStructuredJsonClient:
     """Use OpenAI only as a bounded structured reasoning backend.
@@ -68,6 +76,28 @@ class OpenAIStructuredJsonClient:
         schema: Mapping[str, Any],
         max_output_tokens: int = 160,
     ) -> Mapping[str, Any]:
+        output, _ = self.complete_with_response(
+            system=system,
+            user=user,
+            schema=schema,
+            max_output_tokens=max_output_tokens,
+        )
+        return output
+
+    def complete_with_response(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: Mapping[str, Any],
+        max_output_tokens: int = 160,
+    ) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+        """Return decoded structured output plus the transient provider envelope.
+
+        The raw envelope is intended only for governed usage/audit normalization.
+        Callers must not persist prompt or response bodies.
+        """
+
         if not system.strip() or not user.strip():
             raise ValueError("OpenAI structured reasoning requires system and user text")
         if not isinstance(schema, Mapping) or not schema:
@@ -99,7 +129,16 @@ class OpenAIStructuredJsonClient:
             },
             timeout_seconds=self.timeout_seconds,
         )
-        return self._decode_output(response)
+
+        try:
+            output = self._decode_output(response)
+        except Exception as error:
+            raise OpenAIStructuredResponseError(
+                "OpenAI response failed structured-output decoding",
+                response=response,
+            ) from error
+
+        return output, dict(response)
 
     @staticmethod
     def _decode_output(response: Mapping[str, Any]) -> Mapping[str, Any]:

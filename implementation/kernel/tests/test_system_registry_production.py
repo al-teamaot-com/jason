@@ -49,6 +49,11 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     assert "provider.system-registry" in ids
     assert "identity-binding.aot-microsoft-al" in ids
     assert "deployment.jason-single-host-pilot" in ids
+    assert "governance.hosted-reasoning-egress" in ids
+    assert "credential.openbao.openai-semantic-intent" in ids
+    assert "resource.model-usage-ledger" in ids
+    assert "provider.openai-conversation-kernel" in ids
+    assert "capability.conversation-interpret" in ids
 
 
 def test_physical_configured_entities_have_bounded_host_checks_or_governed_verification() -> None:
@@ -188,3 +193,38 @@ def test_probe_runner_rejects_unregistered_arbitrary_probe_type() -> None:
             source="test",
             observed_at=NOW,
         )
+
+
+
+def test_hosted_reasoning_registry_state_is_declared_but_not_prematurely_verified() -> None:
+    registry = registry_from_manifest(MANIFEST)
+
+    for registry_id in (
+        "governance.hosted-reasoning-egress",
+        "credential.openbao.openai-semantic-intent",
+        "resource.model-usage-ledger",
+        "provider.openai-conversation-kernel",
+        "capability.conversation-interpret",
+    ):
+        assert registry.get(registry_id).lifecycle_status.value == "registered"
+
+
+def test_hosted_reasoning_registry_declares_no_execution_authority() -> None:
+    registry = registry_from_manifest(MANIFEST)
+
+    provider = registry.get("provider.openai-conversation-kernel")
+    capability = registry.get("capability.conversation-interpret")
+
+    assert provider.declared_state["execution_authority"] == "none"
+    assert capability.declared_state["execution_authority"] == "none"
+    assert capability.declared_state["advisory_only"] == "true"
+
+
+def test_hosted_provider_depends_on_egress_governance_and_usage_evidence() -> None:
+    registry = registry_from_manifest(MANIFEST)
+
+    provider = registry.get("provider.openai-conversation-kernel")
+
+    assert "governance.hosted-reasoning-egress" in provider.dependencies
+    assert "resource.model-usage-ledger" in provider.dependencies
+    assert "credential.openbao.openai-semantic-intent" in provider.dependencies

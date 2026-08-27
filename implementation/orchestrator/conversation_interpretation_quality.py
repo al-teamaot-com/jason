@@ -82,6 +82,7 @@ class ReviewedConversationKernel:
     proposing: ValidatedReasoningPool
     reviewing: ValidatedReasoningPool
     resource_kinds: Callable[[], tuple[str, ...]] | None = None
+    resource_descriptions: Callable[[], Mapping[str, str]] | None = None
 
     def interpret(
         self,
@@ -97,12 +98,20 @@ class ReviewedConversationKernel:
 
         known_refs = tuple(entity.ref for entity in context.entities)
         runtime_resource_kinds = _normalize_resource_kinds(self.resource_kinds)
+        runtime_resource_descriptions = _normalize_resource_descriptions(
+            self.resource_descriptions,
+            allowed_resource_kinds=runtime_resource_kinds,
+        )
         payload: dict[str, Any] = {
             "message": clean_text,
             "context": _context_payload(context),
         }
         if self.resource_kinds is not None:
             payload["available_resource_kinds"] = list(runtime_resource_kinds)
+        if runtime_resource_descriptions:
+            payload["resource_kind_descriptions"] = dict(
+                runtime_resource_descriptions
+            )
 
         schema = _decision_schema(known_refs)
         information_properties = schema["properties"]["information_needs"]["items"][
@@ -164,6 +173,20 @@ class ReviewedConversationKernel:
             "verified_context": context_payload,
             "proposed_interpretation": _decision_payload(decision),
         }
+        if allowed_resource_kinds is not None:
+            review_payload["available_resource_kinds"] = list(
+                allowed_resource_kinds
+            )
+        runtime_resource_descriptions = _normalize_resource_descriptions(
+            self.resource_descriptions,
+            allowed_resource_kinds=(
+                allowed_resource_kinds or ()
+            ),
+        )
+        if runtime_resource_descriptions:
+            review_payload["resource_kind_descriptions"] = dict(
+                runtime_resource_descriptions
+            )
         review, _ = self.reviewing.complete_validated(
             system=_REVIEW_INSTRUCTIONS,
             user=json.dumps(review_payload, ensure_ascii=False, separators=(",", ":")),
@@ -307,6 +330,56 @@ def _normalize_resource_kinds(
     return normalized
 
 
+def _normalize_resource_descriptions(
+    source: Callable[[], Mapping[str, str]] | None,
+    *,
+    allowed_resource_kinds: tuple[str, ...],
+) -> Mapping[str, str]:
+    if source is None:
+        return {}
+
+    raw = source()
+
+    if not isinstance(raw, Mapping):
+        raise ConversationInterpretationQualityError(
+            "runtime resource descriptions must be a mapping"
+        )
+
+    allowed = set(allowed_resource_kinds)
+    normalized: dict[str, str] = {}
+
+    for raw_kind, raw_description in raw.items():
+        kind = str(raw_kind).strip()
+        description = " ".join(
+            str(raw_description).split()
+        )
+
+        if not kind or not description:
+            continue
+
+        if allowed and kind not in allowed:
+            raise ConversationInterpretationQualityError(
+                "runtime resource description references an unavailable resource kind"
+            )
+
+        if len(description) > 2048:
+            raise ConversationInterpretationQualityError(
+                "runtime resource description exceeds safety bound"
+            )
+
+        normalized[kind] = description
+
+    if len(normalized) > 256:
+        raise ConversationInterpretationQualityError(
+            "runtime resource descriptions exceed safety bound"
+        )
+
+    return {
+        kind: normalized[kind]
+        for kind in sorted(normalized)
+    }
+
+
 def _context_payload(context: DynamicConversationContext) -> Mapping[str, Any]:
     entities = {item.ref: item for item in context.entities}
     active_entities = []
@@ -323,6 +396,7 @@ def _context_payload(context: DynamicConversationContext) -> Mapping[str, Any]:
     return {
         "conversation_id": context.conversation_id,
         "organization_id": context.organization_id,
+        "principal_id": context.principal_id,
         "active_topic": context.active_topic,
         "active_entity_refs": dict(context.active_entity_refs),
         "active_entities": active_entities,

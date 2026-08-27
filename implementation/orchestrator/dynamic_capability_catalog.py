@@ -67,8 +67,6 @@ def _offer(capability: CapabilityDefinition) -> OfferedConversationCapability:
     if operation:
         description_parts.append(f"Operation: {operation}.")
     selector_keys = structural.get("selector_keys", ())
-    if selector_keys:
-        description_parts.append("Accepted selector keys: " + ", ".join(selector_keys) + ".")
 
     return OfferedConversationCapability(
         capability_id=capability.capability_name,

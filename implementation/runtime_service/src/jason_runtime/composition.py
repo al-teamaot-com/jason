@@ -90,6 +90,10 @@ from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLo
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
+from orchestrator.hosted_reasoning_registration import (
+    register_openai_conversation_provider,
+)
+from usage_ledger.sqlite import SQLiteUsageLedger
 from orchestrator.system_registry_resource import (
     GovernedSystemRegistryCapabilityInvoker,
     SYSTEM_REGISTRY_READ,
@@ -114,7 +118,7 @@ from .dynamic_conversation_cutover import (
     DynamicConversationCutoverSettings,
     select_teams_conversation_flow,
 )
-from .http import RuntimeHttpApplication
+from .http import RuntimeGovernanceServices, RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
@@ -127,6 +131,7 @@ class RuntimeSettings:
     replay_db: Path
     security_audit_db: Path
     orchestration_events_db: Path
+    model_usage_db: Path
     trusted_keys_registry: Path
     openbao_url: str
     openbao_role_id_path: Path
@@ -137,6 +142,7 @@ class RuntimeSettings:
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     openai_semantic_model: str = "gpt-5.4-mini"
+    conversation_hosted_kernel_model: str = "gpt-5.4-nano"
     openai_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/openai/role_id"
     )
@@ -199,6 +205,12 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/orchestration-events.sqlite3",
                 )
             ),
+            model_usage_db=Path(
+                os.getenv(
+                    "JASON_MODEL_USAGE_DB",
+                    "/var/lib/jason/openclaw/model-usage.sqlite3",
+                )
+            ),
             trusted_keys_registry=Path(
                 os.getenv(
                     "JASON_TRUSTED_KEYS_REGISTRY",
@@ -222,6 +234,10 @@ class RuntimeSettings:
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
                 "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5.4-mini"
+            ).strip(),
+            conversation_hosted_kernel_model=os.getenv(
+                "JASON_CONVERSATION_HOSTED_KERNEL_MODEL",
+                "gpt-5.4-nano",
             ).strip(),
             openai_openbao_role_id_path=Path(
                 os.getenv(
@@ -450,7 +466,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    pricing = InMemoryPricingRegistry()
     now = datetime.now(timezone.utc)
+
+    register_openai_conversation_provider(
+        capabilities=capabilities,
+        providers=providers,
+        pricing=pricing,
+        now=now,
+        model=settings.conversation_hosted_kernel_model,
+    )
+
     register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_email_send(capabilities=capabilities, providers=providers)
@@ -560,6 +586,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         )
 
     orchestration_events = SQLiteOrchestrationEventStore(settings.orchestration_events_db)
+    usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
     openbao = OpenBaoSecretResolver(
         base_url=settings.openbao_url,
         role_id_path=settings.openbao_role_id_path,
@@ -618,7 +645,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
-    policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
+    cost_estimator = CostEstimator(pricing)
+    policy = ExecutionPolicyEngine(cost_estimator=cost_estimator)
     resolution = GovernedCapabilityResolutionEngine(
         capabilities=capabilities,
         providers=providers,
@@ -698,5 +726,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         ingress=OpenClawReturnPathConversationIngress(
             ingress=governed_ingress,
             transport=return_transport,
-        )
+        ),
+        governance=RuntimeGovernanceServices(
+            providers=providers,
+            pricing=pricing,
+            cost_estimator=cost_estimator,
+            policy=policy,
+            orchestration_events=orchestration_events,
+            usage_ledger=usage_ledger,
+        ),
     )

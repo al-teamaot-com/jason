@@ -7,12 +7,23 @@
       "display_name": "OpenBao Secret Provider Runtime",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"container_name": "openbao", "image": "ghcr.io/openbao/openbao:2.6.1", "service_state": "running"},
+      "declared_state": {
+        "container_name": "openbao",
+        "image": "ghcr.io/openbao/openbao:2.6.1",
+        "service_state": "running"
+      },
       "dependencies": [],
-      "verification_methods": ["docker-container-inspect-v1"],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article XIX", "JKD-003"],
-      "evidence_references": ["07-Operations/Jason-Secret-Provider-Deployment-Record.md"],
+      "authority_references": [
+        "J-002 Article XIX",
+        "JKD-003"
+      ],
+      "evidence_references": [
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -23,12 +34,22 @@
       "display_name": "JKD-001 Identity and Authority Gate",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"purpose": "identity-authority-and-approval", "execution_authority": "central-orchestrator"},
+      "declared_state": {
+        "purpose": "identity-authority-and-approval",
+        "execution_authority": "central-orchestrator"
+      },
       "dependencies": [],
-      "verification_methods": ["governance-contract-review"],
+      "verification_methods": [
+        "governance-contract-review"
+      ],
       "steward": "architecture-authority",
-      "authority_references": ["J-002 Article II", "J-003"],
-      "evidence_references": ["08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article II",
+        "J-003"
+      ],
+      "evidence_references": [
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -39,12 +60,24 @@
       "display_name": "JKD-003 Governed Secret Resolution Gate",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"purpose": "provider-credential-resolution", "provider": "openbao"},
-      "dependencies": ["component.openbao"],
-      "verification_methods": ["governance-contract-review"],
+      "declared_state": {
+        "purpose": "provider-credential-resolution",
+        "provider": "openbao"
+      },
+      "dependencies": [
+        "component.openbao"
+      ],
+      "verification_methods": [
+        "governance-contract-review"
+      ],
       "steward": "architecture-authority",
-      "authority_references": ["J-002 Article II", "J-002 Article XIX"],
-      "evidence_references": ["07-Operations/Jason-Secret-Provider-Deployment-Record.md"],
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -66,11 +99,24 @@
         "cap_drop": "ALL",
         "networks": "jason-core,jason-observability,openclaw_default"
       },
-      "dependencies": ["component.openbao", "governance.jkd-001", "governance.jkd-003"],
-      "verification_methods": ["docker-container-inspect-v1"],
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-001",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article VI", "J-002 Article XIX", "J-100"],
-      "evidence_references": ["infrastructure/jason-runtime/compose.yaml", "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article VI",
+        "J-002 Article XIX",
+        "J-100"
+      ],
+      "evidence_references": [
+        "infrastructure/jason-runtime/compose.yaml",
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -81,12 +127,27 @@
       "display_name": "Jason Central Orchestrator",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"authority_role": "sole-execution-coordinator", "implementation_host": "component.jason-runtime"},
-      "dependencies": ["component.jason-runtime", "governance.jkd-001"],
-      "verification_methods": ["runtime-composition-source-and-health"],
+      "declared_state": {
+        "authority_role": "sole-execution-coordinator",
+        "implementation_host": "component.jason-runtime"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "runtime-composition-source-and-health"
+      ],
       "steward": "architecture-authority",
-      "authority_references": ["J-002 Article VI", "J-100", "J-103"],
-      "evidence_references": ["implementation/runtime_service/src/jason_runtime/composition.py", "implementation/runtime_service/src/jason_runtime/http.py"],
+      "authority_references": [
+        "J-002 Article VI",
+        "J-100",
+        "J-103"
+      ],
+      "evidence_references": [
+        "implementation/runtime_service/src/jason_runtime/composition.py",
+        "implementation/runtime_service/src/jason_runtime/http.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -97,12 +158,25 @@
       "display_name": "OpenClaw Gateway Transport",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"container_name": "openclaw-openclaw-gateway-1", "service_state": "running", "health": "healthy"},
-      "dependencies": ["component.jason-runtime"],
-      "verification_methods": ["docker-container-inspect-v1"],
+      "declared_state": {
+        "container_name": "openclaw-openclaw-gateway-1",
+        "service_state": "running",
+        "health": "healthy"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article VI", "J-100"],
-      "evidence_references": ["08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article VI",
+        "J-100"
+      ],
+      "evidence_references": [
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -113,12 +187,30 @@
       "display_name": "OpenClaw Jason Teams Bridge",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"container_name": "openclaw-openclaw-gateway-1", "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs", "sha256": "40e6084d45418d259d74971776cea65677c56a898e8057900fa2f78b896a95e4"},
-      "dependencies": ["component.openclaw-gateway", "component.jason-runtime"],
-      "verification_methods": ["docker-file-sha256-v1"],
+      "declared_state": {
+        "container_name": "openclaw-openclaw-gateway-1",
+        "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs",
+        "sha256": "40e6084d45418d259d74971776cea65677c56a898e8057900fa2f78b896a95e4"
+      },
+      "dependencies": [
+        "component.openclaw-gateway",
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "docker-file-sha256-v1"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article VI", "J-002 Article XIX", "J-100"],
-      "evidence_references": ["infrastructure/openclaw-jason-bridge/openclaw.plugin.json", "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md", "08-Session-Records/System-Registry-Bridge-Drift-Reconciliation-2026-08-11.md", "08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article VI",
+        "J-002 Article XIX",
+        "J-100"
+      ],
+      "evidence_references": [
+        "infrastructure/openclaw-jason-bridge/openclaw.plugin.json",
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md",
+        "08-Session-Records/System-Registry-Bridge-Drift-Reconciliation-2026-08-11.md",
+        "08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.3",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -129,12 +221,26 @@
       "display_name": "Direct Teams Gateway Microsoft Application Credential Reference",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider": "host-protected-file", "logical_name": "microsoft_teams.gateway_app", "path": "/opt/jason/services/jason-teams-gateway/msteams.env", "protection": "0600", "migration_state": "temporary"},
+      "declared_state": {
+        "provider": "host-protected-file",
+        "logical_name": "microsoft_teams.gateway_app",
+        "path": "/opt/jason/services/jason-teams-gateway/msteams.env",
+        "protection": "0600",
+        "migration_state": "temporary"
+      },
       "dependencies": [],
-      "verification_methods": ["host-file-permission-and-runtime-auth-proof"],
+      "verification_methods": [
+        "host-file-permission-and-runtime-auth-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article XIX", "JKD-003", "ADR-009"],
-      "evidence_references": ["docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"],
+      "authority_references": [
+        "J-002 Article XIX",
+        "JKD-003",
+        "ADR-009"
+      ],
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ],
       "source_version": "2026-08-15.1",
       "created_at": "2026-08-15T17:44:00Z",
       "created_by": "Jason Architecture Authority"
@@ -145,13 +251,42 @@
       "display_name": "Jason Direct Microsoft Teams Ingress Gateway",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"container_name": "jason-teams-gateway", "service_state": "running", "health": "healthy", "host_port": "3978", "container_port": "3979", "runtime_endpoint": "http://jason-runtime:8080/v1/openclaw/teams/conversation", "external_teams_ingress_owner": "true", "auth_sdk": "microsoft-agents-sdk"},
-      "dependencies": ["component.jason-runtime", "credential.microsoft-teams-gateway-client"],
-      "verification_methods": ["docker-container-inspect-v1"],
+      "declared_state": {
+        "container_name": "jason-teams-gateway",
+        "service_state": "running",
+        "health": "healthy",
+        "host_port": "3978",
+        "container_port": "3979",
+        "runtime_endpoint": "http://jason-runtime:8080/v1/openclaw/teams/conversation",
+        "external_teams_ingress_owner": "true",
+        "auth_sdk": "microsoft-agents-sdk"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "credential.microsoft-teams-gateway-client"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article VI", "J-100", "J-103", "ADR-006", "ADR-009"],
-      "credential_references": [{"provider": "host-protected-file", "reference": "microsoft_teams.gateway_app"}],
-      "evidence_references": ["infrastructure/jason-teams-gateway/index.mjs", "infrastructure/jason-teams-gateway/cutover-production.sh", "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"],
+      "authority_references": [
+        "J-002 Article VI",
+        "J-100",
+        "J-103",
+        "ADR-006",
+        "ADR-009"
+      ],
+      "credential_references": [
+        {
+          "provider": "host-protected-file",
+          "reference": "microsoft_teams.gateway_app"
+        }
+      ],
+      "evidence_references": [
+        "infrastructure/jason-teams-gateway/index.mjs",
+        "infrastructure/jason-teams-gateway/cutover-production.sh",
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md"
+      ],
       "source_version": "2026-08-15.1",
       "created_at": "2026-08-15T17:44:00Z",
       "created_by": "Jason Architecture Authority"
@@ -162,12 +297,25 @@
       "display_name": "Datto RMM Read-Only Credential Reference",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider": "openbao", "logical_name": "datto_rmm.readonly"},
-      "dependencies": ["component.openbao", "governance.jkd-003"],
-      "verification_methods": ["provider-credential-status"],
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "datto_rmm.readonly"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "provider-credential-status"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["JKD-003", "J-002 Article XIX"],
-      "evidence_references": ["07-Operations/Jason-Secret-Provider-Deployment-Record.md"],
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -178,12 +326,26 @@
       "display_name": "Microsoft Graph Directory Read Credential Reference",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider": "openbao", "logical_name": "microsoft_graph.directory_read"},
-      "dependencies": ["component.openbao", "governance.jkd-003"],
-      "verification_methods": ["provider-credential-status"],
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "microsoft_graph.directory_read"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "provider-credential-status"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["JKD-003", "J-002 Article XIX"],
-      "evidence_references": ["07-Operations/Jason-Secret-Provider-Deployment-Record.md", "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md"],
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
+        "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -194,12 +356,26 @@
       "display_name": "AWS SES Sendmail Credential Reference",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider": "openbao", "logical_name": "aws_ses.sendmail"},
-      "dependencies": ["component.openbao", "governance.jkd-003"],
-      "verification_methods": ["provider-credential-status"],
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "aws_ses.sendmail"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "provider-credential-status"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["JKD-003", "J-002 Article XIX"],
-      "evidence_references": ["07-Operations/Jason-Secret-Provider-Deployment-Record.md", "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md"],
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
+        "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -210,13 +386,34 @@
       "display_name": "Datto RMM Endpoint Provider",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider_id": "datto_rmm", "connector_id": "datto_rmm", "resource_authority": "managed_endpoint", "execution_mode": "deterministic"},
-      "dependencies": ["component.jason-runtime", "credential.openbao.datto-rmm-readonly"],
-      "verification_methods": ["governed-provider-read"],
+      "declared_state": {
+        "provider_id": "datto_rmm",
+        "connector_id": "datto_rmm",
+        "resource_authority": "managed_endpoint",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "credential.openbao.datto-rmm-readonly"
+      ],
+      "verification_methods": [
+        "governed-provider-read"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article IV", "J-002 Article V"],
-      "credential_references": [{"provider": "openbao", "reference": "datto_rmm.readonly"}],
-      "evidence_references": ["implementation/orchestrator/resource_capability_catalog.py", "07-Operations/Jason-Secret-Provider-Deployment-Record.md"],
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article V"
+      ],
+      "credential_references": [
+        {
+          "provider": "openbao",
+          "reference": "datto_rmm.readonly"
+        }
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/resource_capability_catalog.py",
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -227,13 +424,37 @@
       "display_name": "Microsoft Graph Identity Enrichment Provider",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider_id": "microsoft_graph", "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c", "application_id": "c94301b7-7194-46ab-aab7-94f9366f51a9", "service_principal_id": "f784d32d-1d6f-4080-97d4-5efa194a14ed", "primary_domain": "teamaot.com", "profile": "directory-read", "permission": "User.Read.All"},
-      "dependencies": ["component.jason-runtime", "credential.openbao.microsoft-graph-directory-read"],
-      "verification_methods": ["microsoft-exact-user-read"],
+      "declared_state": {
+        "provider_id": "microsoft_graph",
+        "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+        "application_id": "c94301b7-7194-46ab-aab7-94f9366f51a9",
+        "service_principal_id": "f784d32d-1d6f-4080-97d4-5efa194a14ed",
+        "primary_domain": "teamaot.com",
+        "profile": "directory-read",
+        "permission": "User.Read.All"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "credential.openbao.microsoft-graph-directory-read"
+      ],
+      "verification_methods": [
+        "microsoft-exact-user-read"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article IV", "J-002 Article II"],
-      "credential_references": [{"provider": "openbao", "reference": "microsoft_graph.directory_read"}],
-      "evidence_references": ["07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md", "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article II"
+      ],
+      "credential_references": [
+        {
+          "provider": "openbao",
+          "reference": "microsoft_graph.directory_read"
+        }
+      ],
+      "evidence_references": [
+        "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md",
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -244,12 +465,30 @@
       "display_name": "AOT Microsoft Identity Binding for person-al",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c", "object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f", "principal_id": "person-al", "internal_client_id": "client-aot-internal", "resolved_mailbox": "al@teamaot.com"},
-      "dependencies": ["component.jason-runtime", "provider.microsoft-graph", "governance.jkd-001"],
-      "verification_methods": ["identity-binding-and-directory-read"],
+      "declared_state": {
+        "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+        "object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+        "principal_id": "person-al",
+        "internal_client_id": "client-aot-internal",
+        "resolved_mailbox": "al@teamaot.com"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "provider.microsoft-graph",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "identity-binding-and-directory-read"
+      ],
       "steward": "identity-authority",
-      "authority_references": ["J-002 Article II", "JKD-001"],
-      "evidence_references": ["07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md", "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article II",
+        "JKD-001"
+      ],
+      "evidence_references": [
+        "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md",
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -260,13 +499,34 @@
       "display_name": "AWS SES Email Provider",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"provider_id": "aws-ses", "region": "us-east-1", "default_sender": "jason@teamaot.com", "automatic_fallback": "prohibited"},
-      "dependencies": ["component.jason-runtime", "credential.openbao.aws-ses-sendmail"],
-      "verification_methods": ["governed-cap007-provider-proof"],
+      "declared_state": {
+        "provider_id": "aws-ses",
+        "region": "us-east-1",
+        "default_sender": "jason@teamaot.com",
+        "automatic_fallback": "prohibited"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "credential.openbao.aws-ses-sendmail"
+      ],
+      "verification_methods": [
+        "governed-cap007-provider-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article IV", "CAP-007"],
-      "credential_references": [{"provider": "openbao", "reference": "aws_ses.sendmail"}],
-      "evidence_references": ["07-Operations/CAP-007-AWS-SES-Activation-Runbook.md", "07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-002 Article IV",
+        "CAP-007"
+      ],
+      "credential_references": [
+        {
+          "provider": "openbao",
+          "reference": "aws_ses.sendmail"
+        }
+      ],
+      "evidence_references": [
+        "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md",
+        "07-Operations/CAP-007-Live-Pilot-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -277,12 +537,28 @@
       "display_name": "Jason System Registry Provider",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"provider_id": "system_registry", "resource_authority": "jason_operational_state", "execution_mode": "deterministic", "read_only": "true", "authoritative": "true"},
-      "dependencies": ["component.jason-runtime"],
-      "verification_methods": ["governed-system-registry-read"],
+      "declared_state": {
+        "provider_id": "system_registry",
+        "resource_authority": "jason_operational_state",
+        "execution_mode": "deterministic",
+        "read_only": "true",
+        "authoritative": "true"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "governed-system-registry-read"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article XIX", "J-103"],
-      "evidence_references": ["implementation/orchestrator/system_registry_resource.py", "implementation/runtime_service/src/jason_runtime/composition.py"],
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/system_registry_resource.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T16:10:00Z",
       "created_by": "Jason Architecture Authority"
@@ -293,12 +569,29 @@
       "display_name": "Search Managed Endpoints",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"capability_name": "endpoint.device.search", "version": "1.0", "provider_neutral": "true", "read_only": "true", "execution_mode": "deterministic"},
-      "dependencies": ["component.central-orchestrator", "provider.datto-rmm", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-provider-proof"],
+      "declared_state": {
+        "capability_name": "endpoint.device.search",
+        "version": "1.0",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.datto-rmm",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-provider-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-101", "J-002 Article IV"],
-      "evidence_references": ["implementation/orchestrator/resource_capability_catalog.py"],
+      "authority_references": [
+        "J-101",
+        "J-002 Article IV"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/resource_capability_catalog.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -309,12 +602,29 @@
       "display_name": "Read Managed Endpoint",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"capability_name": "endpoint.device.read", "version": "1.0", "provider_neutral": "true", "read_only": "true", "execution_mode": "deterministic"},
-      "dependencies": ["component.central-orchestrator", "provider.datto-rmm", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-provider-proof"],
+      "declared_state": {
+        "capability_name": "endpoint.device.read",
+        "version": "1.0",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.datto-rmm",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-provider-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-101", "J-002 Article IV"],
-      "evidence_references": ["implementation/orchestrator/resource_capability_catalog.py"],
+      "authority_references": [
+        "J-101",
+        "J-002 Article IV"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/resource_capability_catalog.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -325,12 +635,34 @@
       "display_name": "Governed Email Send",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"capability_name": "communication.email.send", "version": "0.1", "provider_neutral": "true", "risk": "high", "idempotency": "non-idempotent", "maximum_attempts": "1"},
-      "dependencies": ["component.central-orchestrator", "provider.aws-ses", "identity-binding.aot-microsoft-al", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-live-pilot-proof"],
+      "declared_state": {
+        "capability_name": "communication.email.send",
+        "version": "0.1",
+        "provider_neutral": "true",
+        "risk": "high",
+        "idempotency": "non-idempotent",
+        "maximum_attempts": "1"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.aws-ses",
+        "identity-binding.aot-microsoft-al",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-live-pilot-proof"
+      ],
       "steward": "architecture-authority",
-      "authority_references": ["J-101", "CAP-007", "JKD-001"],
-      "evidence_references": ["implementation/cap-007/src/jason_cap_007/kernel_registration.py", "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md", "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"],
+      "authority_references": [
+        "J-101",
+        "CAP-007",
+        "JKD-001"
+      ],
+      "evidence_references": [
+        "implementation/cap-007/src/jason_cap_007/kernel_registration.py",
+        "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md",
+        "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
@@ -341,12 +673,31 @@
       "display_name": "Search Jason System Registry",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"capability_name": "system.registry.search", "version": "1.0", "provider_neutral": "true", "read_only": "true", "execution_mode": "deterministic"},
-      "dependencies": ["component.central-orchestrator", "provider.system-registry", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-runtime-proof"],
+      "declared_state": {
+        "capability_name": "system.registry.search",
+        "version": "1.0",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.system-registry",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-runtime-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-101", "J-103", "J-002 Article XIX"],
-      "evidence_references": ["implementation/orchestrator/system_registry_resource.py", "implementation/runtime_service/src/jason_runtime/composition.py"],
+      "authority_references": [
+        "J-101",
+        "J-103",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/system_registry_resource.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T16:10:00Z",
       "created_by": "Jason Architecture Authority"
@@ -357,12 +708,31 @@
       "display_name": "Read Jason System Registry Entity",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"capability_name": "system.registry.read", "version": "1.0", "provider_neutral": "true", "read_only": "true", "execution_mode": "deterministic"},
-      "dependencies": ["component.central-orchestrator", "provider.system-registry", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-runtime-proof"],
+      "declared_state": {
+        "capability_name": "system.registry.read",
+        "version": "1.0",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.system-registry",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-runtime-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-101", "J-103", "J-002 Article XIX"],
-      "evidence_references": ["implementation/orchestrator/system_registry_resource.py", "implementation/runtime_service/src/jason_runtime/composition.py"],
+      "authority_references": [
+        "J-101",
+        "J-103",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/system_registry_resource.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T16:10:00Z",
       "created_by": "Jason Architecture Authority"
@@ -373,12 +743,31 @@
       "display_name": "Trace Jason System Registry Topology",
       "environment": "production-pilot",
       "lifecycle_status": "configured",
-      "declared_state": {"capability_name": "system.registry.trace", "version": "1.0", "provider_neutral": "true", "read_only": "true", "execution_mode": "deterministic"},
-      "dependencies": ["component.central-orchestrator", "provider.system-registry", "governance.jkd-001"],
-      "verification_methods": ["capability-registry-and-runtime-proof"],
+      "declared_state": {
+        "capability_name": "system.registry.trace",
+        "version": "1.0",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "execution_mode": "deterministic"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "provider.system-registry",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "capability-registry-and-runtime-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-101", "J-103", "J-002 Article XIX"],
-      "evidence_references": ["implementation/orchestrator/system_registry_resource.py", "implementation/runtime_service/src/jason_runtime/composition.py"],
+      "authority_references": [
+        "J-101",
+        "J-103",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/system_registry_resource.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py"
+      ],
       "source_version": "2026-08-11.1",
       "created_at": "2026-08-11T16:10:00Z",
       "created_by": "Jason Architecture Authority"
@@ -389,14 +778,221 @@
       "display_name": "Jason Single-Host Pilot Deployment",
       "environment": "production-pilot",
       "lifecycle_status": "registered",
-      "declared_state": {"scope": "single-host-pilot", "runtime": "component.jason-runtime", "teams_ingress": "component.jason-teams-gateway", "openclaw_component": "component.openclaw-gateway", "credential_provider_component": "component.openbao"},
-      "dependencies": ["component.jason-runtime", "component.jason-teams-gateway", "component.openclaw-gateway", "component.openbao"],
-      "verification_methods": ["production-host-proof"],
+      "declared_state": {
+        "scope": "single-host-pilot",
+        "runtime": "component.jason-runtime",
+        "teams_ingress": "component.jason-teams-gateway",
+        "openclaw_component": "component.openclaw-gateway",
+        "credential_provider_component": "component.openbao"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.jason-teams-gateway",
+        "component.openclaw-gateway",
+        "component.openbao"
+      ],
+      "verification_methods": [
+        "production-host-proof"
+      ],
       "steward": "technology-steward",
-      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009"],
-      "evidence_references": ["docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md", "07-Operations/Jason-Secret-Provider-Deployment-Record.md"],
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103",
+        "ADR-009"
+      ],
+      "evidence_references": [
+        "docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md",
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+      ],
       "source_version": "2026-08-15.1",
       "created_at": "2026-08-11T15:25:00Z",
+      "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "governance.hosted-reasoning-egress",
+      "entity_type": "governance_gate",
+      "display_name": "Hosted Reasoning Data Egress Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "hosted-reasoning-data-egress-control",
+        "classification_owner": "jason-runtime",
+        "default_behavior": "fail-closed",
+        "minimum_context_required": "true",
+        "restricted_processing": "prohibited",
+        "provider_execution_authority": "none"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "governed-hosted-reasoning-egress-proof"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article VI",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/hosted_reasoning_egress.py",
+        "implementation/orchestrator/governed_hosted_reasoning.py",
+        "implementation/orchestrator/tests/test_hosted_reasoning_egress.py",
+        "implementation/orchestrator/tests/test_governed_hosted_reasoning.py"
+      ],
+      "source_version": "2026-08-20.1",
+      "created_at": "2026-08-20T19:51:00Z",
+      "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "credential.openbao.openai-semantic-intent",
+      "entity_type": "credential_reference",
+      "display_name": "OpenAI Hosted Reasoning Credential Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "openai.semantic_intent"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "provider-credential-status"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/runtime_service/src/jason_runtime/conversation_experience_application.py"
+      ],
+      "source_version": "2026-08-20.1",
+      "created_at": "2026-08-20T19:51:00Z",
+      "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "resource.model-usage-ledger",
+      "entity_type": "resource",
+      "display_name": "Jason Model Usage Ledger",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "storage": "sqlite",
+        "append_only": "true",
+        "organization_scoped": "true",
+        "prompt_storage": "prohibited",
+        "response_body_storage": "prohibited",
+        "file_protection": "0600",
+        "default_path": "/var/lib/jason/openclaw/model-usage.sqlite3"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "model-usage-ledger-runtime-proof"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/usage_ledger/contracts.py",
+        "implementation/usage_ledger/sqlite.py",
+        "implementation/usage_ledger/README.md"
+      ],
+      "source_version": "2026-08-20.1",
+      "created_at": "2026-08-20T19:51:00Z",
+      "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "provider.openai-conversation-kernel",
+      "entity_type": "provider",
+      "display_name": "OpenAI Hosted Conversation Kernel Provider",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "openai-conversation-kernel",
+        "model_id": "gpt-5.4-nano",
+        "execution_mode": "hosted_ai",
+        "role": "conversation-kernel-proposer",
+        "supported_classification": "internal",
+        "minimum_context": "required",
+        "retention_requested": "false",
+        "execution_authority": "none",
+        "maximum_attempts": "2"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "credential.openbao.openai-semantic-intent",
+        "governance.hosted-reasoning-egress",
+        "resource.model-usage-ledger"
+      ],
+      "verification_methods": [
+        "governed-hosted-reasoning-provider-proof"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article VI",
+        "J-002 Article XIX",
+        "JKD-003"
+      ],
+      "credential_references": [
+        {
+          "provider": "openbao",
+          "reference": "openai.semantic_intent"
+        }
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/openai_reasoning.py",
+        "implementation/orchestrator/hosted_reasoning_registration.py",
+        "implementation/orchestrator/governed_hosted_reasoning.py"
+      ],
+      "source_version": "2026-08-20.1",
+      "created_at": "2026-08-20T19:51:00Z",
+      "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "capability.conversation-interpret",
+      "entity_type": "capability",
+      "display_name": "Interpret Human Conversation Intent",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "conversation.intent.interpret",
+        "version": "0.1",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "advisory_only": "true",
+        "execution_authority": "none",
+        "hosted_egress_requires_policy": "true",
+        "maximum_attempts": "2"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "provider.openai-conversation-kernel",
+        "governance.hosted-reasoning-egress",
+        "resource.model-usage-ledger"
+      ],
+      "verification_methods": [
+        "conversation-kernel-governed-provider-proof"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article VI",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/conversation_kernel.py",
+        "implementation/orchestrator/conversation_interpretation_quality.py",
+        "implementation/orchestrator/hosted_reasoning_registration.py",
+        "implementation/orchestrator/governed_hosted_reasoning.py"
+      ],
+      "source_version": "2026-08-20.1",
+      "created_at": "2026-08-20T19:51:00Z",
       "created_by": "Jason Architecture Authority"
     }
   ]

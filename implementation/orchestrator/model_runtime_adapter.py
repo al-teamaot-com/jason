@@ -78,9 +78,11 @@ def ollama_grammar_compatible_schema(schema: Mapping[str, Any]) -> Mapping[str, 
     Jason therefore does not attempt to transpile every JSON Schema validation semantic
     into an Ollama grammar. This adapter performs only the minimum representation rewrite
     needed for bounded structured generation: type arrays become type-only ``anyOf``
-    branches while the original sibling constraints remain present as non-authoritative
-    generation hints. The deterministic Jason validator remains the sole authority for
-    exact enums, grounding, lengths, relationships, permissions, and outcome invariants.
+    branches, and ``maxLength`` is omitted from the Ollama generation view because
+    supported Ollama grammar builds can reject otherwise valid schemas containing that
+    keyword. The canonical schema remains unchanged. The deterministic Jason validator
+    remains the sole authority for exact enums, grounding, lengths, relationships,
+    permissions, and outcome invariants.
 
     This is intentionally recursive, non-mutating, and semantic-free. It never inspects
     human text, resource kinds, providers, capabilities, facts, or values.
@@ -113,7 +115,7 @@ def _adapt_schema_value(value: Any) -> Any:
             adapted = {
                 str(key): _adapt_schema_value(item)
                 for key, item in value.items()
-                if key != "type"
+                if key not in {"type", "maxLength"}
             }
 
             if len(members) == 1:
@@ -125,6 +127,7 @@ def _adapt_schema_value(value: Any) -> Any:
         return {
             str(key): _adapt_schema_value(item)
             for key, item in value.items()
+            if key != "maxLength"
         }
 
     if isinstance(value, Sequence) and not isinstance(
