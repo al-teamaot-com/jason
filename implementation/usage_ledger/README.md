@@ -90,13 +90,17 @@ Orchestrator prepares model request
 
 ## Initial implementation
 
-The initial implementation provides:
+The implementation provides:
 
 - provider-neutral contracts
 - an in-memory append-only ledger for testing and adapter development
+- a mode-0600 SQLite append-only ledger for durable runtime use
 - normalized adapters for OpenAI-style, OpenRouter-style, and Ollama-style usage payloads
 - workflow and client aggregation
 - reconciliation adjustment records
 - validation and idempotency tests
 
-A production deployment should replace the in-memory store with an append-only database table or event stream and protect it with organization-level row security.
+The SQLite ledger preserves organization-scoped reads, attempt idempotency,
+append-only reconciliation, and restart durability. Larger multi-node deployments
+may replace it with an append-only database or event stream implementing the same
+contract and organization-isolation guarantees.
