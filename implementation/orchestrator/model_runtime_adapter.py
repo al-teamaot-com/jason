@@ -27,6 +27,10 @@ class StructuredReasoner(Protocol):
 
 
 SchemaAdapter = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+ResultAdapter = Callable[
+    [Mapping[str, Any], Mapping[str, Any]],
+    Mapping[str, Any],
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,7 @@ class ModelRuntimeAdapter:
 
     client: StructuredReasoner
     schema_adapter: SchemaAdapter
+    result_adapter: ResultAdapter | None = None
 
     @property
     def model(self) -> str:
@@ -57,12 +62,15 @@ class ModelRuntimeAdapter:
         max_output_tokens: int = 160,
     ) -> Mapping[str, Any]:
         adapted = self.schema_adapter(schema)
-        return self.client.complete(
+        result = self.client.complete(
             system=system,
             user=user,
             schema=adapted,
             max_output_tokens=max_output_tokens,
         )
+        if self.result_adapter is None:
+            return result
+        return self.result_adapter(result, schema)
 
 
 
@@ -99,12 +107,39 @@ def _adapt_openai_schema_value(value: Any) -> Any:
         }
 
         properties = adapted.get("properties")
+        canonical_properties = value.get("properties")
         if (
             adapted.get("type") == "object"
             and adapted.get("additionalProperties") is False
             and isinstance(properties, Mapping)
+            and isinstance(canonical_properties, Mapping)
         ):
-            adapted["required"] = [str(key) for key in properties]
+            raw_required = value.get("required", ())
+            canonical_required = {
+                str(item)
+                for item in raw_required
+                if isinstance(item, str)
+            } if isinstance(raw_required, Sequence) and not isinstance(
+                raw_required, (str, bytes, bytearray)
+            ) else set()
+
+            mutable_properties = dict(properties)
+            for key, property_schema in tuple(mutable_properties.items()):
+                canonical_property = canonical_properties.get(key)
+                if (
+                    key not in canonical_required
+                    and isinstance(canonical_property, Mapping)
+                    and not _schema_allows_null(canonical_property)
+                ):
+                    mutable_properties[key] = {
+                        "anyOf": [
+                            property_schema,
+                            {"type": "null"},
+                        ]
+                    }
+
+            adapted["properties"] = mutable_properties
+            adapted["required"] = [str(key) for key in mutable_properties]
 
         return adapted
 
@@ -112,6 +147,106 @@ def _adapt_openai_schema_value(value: Any) -> Any:
         value, (str, bytes, bytearray)
     ):
         return [_adapt_openai_schema_value(item) for item in value]
+
+    return value
+
+
+def _schema_allows_null(schema: Mapping[str, Any]) -> bool:
+    raw_type = schema.get("type")
+    if raw_type == "null":
+        return True
+    if isinstance(raw_type, Sequence) and not isinstance(
+        raw_type, (str, bytes, bytearray)
+    ):
+        return "null" in raw_type
+
+    raw_enum = schema.get("enum")
+    if isinstance(raw_enum, Sequence) and not isinstance(
+        raw_enum, (str, bytes, bytearray)
+    ) and None in raw_enum:
+        return True
+
+    if "const" in schema and schema.get("const") is None:
+        return True
+
+    for keyword in ("anyOf", "oneOf"):
+        branches = schema.get(keyword)
+        if isinstance(branches, Sequence) and not isinstance(
+            branches, (str, bytes, bytearray)
+        ):
+            if any(
+                isinstance(branch, Mapping) and _schema_allows_null(branch)
+                for branch in branches
+            ):
+                return True
+
+    # A schema with no explicit type/value constraint already permits null.
+    return raw_type is None and not any(
+        keyword in schema for keyword in ("enum", "const", "anyOf", "oneOf")
+    )
+
+
+def openai_structured_output_restore_optional_values(
+    result: Mapping[str, Any],
+    canonical_schema: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Remove only null values introduced for OpenAI optional-field compatibility."""
+
+    restored = _restore_openai_optional_values(result, canonical_schema)
+    if not isinstance(restored, Mapping):
+        raise ValueError("restored OpenAI structured output must remain an object")
+    return dict(restored)
+
+
+def _restore_openai_optional_values(value: Any, schema: Any) -> Any:
+    if isinstance(value, Mapping) and isinstance(schema, Mapping):
+        properties = schema.get("properties")
+        raw_required = schema.get("required", ())
+        required = {
+            str(item)
+            for item in raw_required
+            if isinstance(item, str)
+        } if isinstance(raw_required, Sequence) and not isinstance(
+            raw_required, (str, bytes, bytearray)
+        ) else set()
+
+        restored: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            key = str(raw_key)
+            property_schema = (
+                properties.get(key)
+                if isinstance(properties, Mapping)
+                else None
+            )
+
+            if isinstance(property_schema, Mapping):
+                if (
+                    item is None
+                    and key not in required
+                    and not _schema_allows_null(property_schema)
+                ):
+                    continue
+                restored[key] = _restore_openai_optional_values(
+                    item,
+                    property_schema,
+                )
+            else:
+                # Preserve unknown output so Jason's canonical validation can reject it.
+                restored[key] = item
+
+        return restored
+
+    if (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes, bytearray))
+        and isinstance(schema, Mapping)
+    ):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            return [
+                _restore_openai_optional_values(item, item_schema)
+                for item in value
+            ]
 
     return value
 

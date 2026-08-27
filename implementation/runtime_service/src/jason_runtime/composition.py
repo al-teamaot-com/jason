@@ -62,6 +62,7 @@ from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
 from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     openai_structured_output_compatible_schema,
+    openai_structured_output_restore_optional_values,
 )
 from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
 from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
@@ -592,6 +593,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
             ),
             schema_adapter=openai_structured_output_compatible_schema,
+            result_adapter=openai_structured_output_restore_optional_values,
         )
 
     intent_resolver = None

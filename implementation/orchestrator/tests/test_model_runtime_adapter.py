@@ -325,7 +325,75 @@ def test_openai_adapter_requires_every_closed_object_property_recursively():
     adapted = openai_structured_output_compatible_schema(schema)
 
     assert adapted["required"] == ["resource_selector", "resolved"]
-    assert adapted["properties"]["resource_selector"]["required"] == [
+    resource_selector_schema = adapted["properties"]["resource_selector"]
+    assert {"type": "null"} in resource_selector_schema["anyOf"]
+    resource_selector_object = next(
+        branch
+        for branch in resource_selector_schema["anyOf"]
+        if branch.get("type") == "object"
+    )
+    assert resource_selector_object["required"] == [
         "hostname",
         "resource_id",
     ]
+
+
+def test_openai_optional_closed_properties_are_nullable_then_restored():
+    from orchestrator.model_runtime_adapter import (
+        ModelRuntimeAdapter,
+        openai_structured_output_compatible_schema,
+        openai_structured_output_restore_optional_values,
+    )
+
+    canonical = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "resource_selector": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "hostname": {"type": "string", "minLength": 1},
+                    "resource_id": {"type": "string", "minLength": 1},
+                },
+            },
+            "resolved": {"type": "boolean"},
+        },
+        "required": ["resource_selector", "resolved"],
+    }
+
+    class Client:
+        def __init__(self):
+            self.schema = None
+
+        def complete(self, **kwargs):
+            self.schema = kwargs["schema"]
+            return {
+                "resource_selector": {
+                    "hostname": "DEVICE-12",
+                    "resource_id": None,
+                },
+                "resolved": True,
+            }
+
+    client = Client()
+    adapter = ModelRuntimeAdapter(
+        client=client,
+        schema_adapter=openai_structured_output_compatible_schema,
+        result_adapter=openai_structured_output_restore_optional_values,
+    )
+
+    result = adapter.complete(
+        system="system",
+        user="user",
+        schema=canonical,
+    )
+
+    generated_selector = client.schema["properties"]["resource_selector"]
+    assert generated_selector["required"] == ["hostname", "resource_id"]
+    assert {"type": "null"} in generated_selector["properties"]["resource_id"]["anyOf"]
+
+    assert result == {
+        "resource_selector": {"hostname": "DEVICE-12"},
+        "resolved": True,
+    }
