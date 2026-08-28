@@ -4,20 +4,22 @@ on:
   push:
     paths:
       - "implementation/connectors/openclaw/**"
+      - "infrastructure/openclaw-jason-bridge/**"
       - "implementation/orchestrator/gates.py"
       - "implementation/orchestrator/tests/test_gates.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/openclaw_synthetic_e2e.py"
-      - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
+      - "docs/components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
   pull_request:
     paths:
       - "implementation/connectors/openclaw/**"
+      - "infrastructure/openclaw-jason-bridge/**"
       - "implementation/orchestrator/gates.py"
       - "implementation/orchestrator/tests/test_gates.py"
       - "tools/register_openclaw_public_key.py"
       - "tools/openclaw_synthetic_e2e.py"
-      - "03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
+      - "docs/components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md"
       - ".github/workflows/openclaw-ingress.yml"
 
 permissions:
@@ -33,11 +35,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Install tests and transport crypto
         run: python -m pip install --upgrade pip pytest "cryptography>=45,<47"
       - name: Compile ingress, runtime bindings, gates, key tooling, and synthetic proof
         run: python -m compileall -q implementation/connectors/openclaw/src implementation/orchestrator/gates.py tools/register_openclaw_public_key.py tools/openclaw_synthetic_e2e.py
       - name: Test OpenClaw connector, ingress, runtime, audit, signed transport, and key registry
         run: python -m pytest implementation/connectors/openclaw/tests -q
+      - name: Test governed OpenClaw-to-Jason Teams bridge
+        run: node --test infrastructure/openclaw-jason-bridge/test/*.test.mjs
       - name: Test governance gate chain
         run: python -m pytest implementation/orchestrator/tests/test_gates.py -q

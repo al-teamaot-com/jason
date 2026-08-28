@@ -9,7 +9,7 @@ fi
 
 cd "$REPO_ROOT" || exit 2
 
-CHECKPOINT="08-Session-Records/CURRENT.md"
+CHECKPOINT="docs/control/CURRENT.md"
 COLLECTOR="tools/catch_me_up.py"
 
 echo "# Project Jason — Session Resume Brief"

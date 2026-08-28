@@ -1,20 +1,45 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+import re
+from typing import Any, Mapping, Sequence
 
 from connectors.core.connector_base import ConnectorBase, PreparedRequest
+from connectors.core.provider_adaptation import BoundedCollectionReadAdapter
 from connectors.core.contracts import ConnectorRequest, ConnectorResult, require_capability
 from connectors.datto_rmm.auth import acquire_access_token, require_durable_credentials
+from connectors.datto_rmm.semantic_evidence import adapt_datto_device_semantic_evidence
 
 
 class DattoRmmConnector(ConnectorBase):
+    # Provider-specific declarations consumed by the generic adaptation layer.
+    # The algorithm itself remains provider-neutral.
+    adaptive_collection_keys = {
+        "datto_rmm.site.search": "sites",
+    }
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
+    default_device_search_max = 25
+    fallback_discovery_page_size = 250
+    fallback_discovery_max_pages = 20
+    device_scoped_read_capabilities = frozenset(
+        {
+            "datto_rmm.device.alerts.open",
+            "datto_rmm.device.alerts.resolved",
+            "datto_rmm.device.audit.get",
+            "datto_rmm.device.software.list",
+        }
+    )
 
     capabilities = frozenset(
         {
             "datto_rmm.device.get",
             "datto_rmm.device.search",
+            "datto_rmm.device.alerts.open",
+            "datto_rmm.device.alerts.resolved",
+            "datto_rmm.device.audit.get",
+            "datto_rmm.device.software.list",
+            "datto_rmm.account.alerts.open",
+            "datto_rmm.site.search",
             "datto_rmm.alerts.list",
             "datto_rmm.patch_status.get",
             "datto_rmm.component_results.list",
@@ -26,38 +51,76 @@ class DattoRmmConnector(ConnectorBase):
         credentials = self._secrets.resolve(self.logical_secret, request.context)
         require_durable_credentials(credentials)
         token = acquire_access_token(credentials=credentials)
-        prepared = self._prepare_api_request(
-            request=request,
-            credentials=credentials,
-            access_token=token.access_token,
-            token_type=token.token_type,
-        )
-        operation = prepared.audit_operation or prepared.url
-        self._audit.record(
-            "connector.requested",
-            request.context,
-            {"provider": self.provider_name, "operation": operation},
-        )
         try:
-            payload = self._transport.request(
-                method=prepared.method,
-                url=prepared.url,
-                headers=prepared.headers,
-                params=prepared.params,
-                json=prepared.json,
-                timeout_seconds=prepared.timeout_seconds,
+            should_resolve_device = (
+                request.context.capability == "datto_rmm.device.search"
+                and self._requested_facts_present(request.arguments)
             )
+            should_resolve_scoped_read = (
+                request.context.capability in self.device_scoped_read_capabilities
+                and not self._durable_device_identity_present(request.arguments)
+            )
+
+            if should_resolve_device:
+                data = self._execute_device_resolve(
+                    request=request,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
+            elif should_resolve_scoped_read:
+                data = self._execute_device_scoped_read(
+                    request=request,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
+            else:
+                prepared = self._prepare_api_request(
+                    request=request,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
+                payload = self._execute_prepared_request(
+                    request=request,
+                    prepared=prepared,
+                )
+                data = self._normalize_result(
+                    request.context.capability,
+                    payload,
+                )
+                data = self._adapt_collection_result(
+                    request=request,
+                    initial_data=data,
+                    credentials=credentials,
+                    access_token=token.access_token,
+                    token_type=token.token_type,
+                )
         finally:
             token = None
-        self._audit.record(
-            "connector.completed",
-            request.context,
-            {"provider": self.provider_name},
-        )
+
         return ConnectorResult(
             capability=request.context.capability,
             provider=self.provider_name,
-            data=payload,
+            data=data,
+        )
+
+    @staticmethod
+    def _durable_device_identity_present(arguments: Mapping[str, Any]) -> bool:
+        return bool(
+            str(
+                arguments.get("device_uid")
+                or arguments.get("resource_id")
+                or ""
+            ).strip()
+        )
+
+    @staticmethod
+    def _requested_facts_present(arguments: Mapping[str, Any]) -> bool:
+        requested = arguments.get("requested_facts")
+        return isinstance(requested, (list, tuple)) and any(
+            str(item).strip() for item in requested
         )
 
     def prepare_request(
@@ -78,10 +141,25 @@ class DattoRmmConnector(ConnectorBase):
         access_token: str,
         token_type: str,
     ) -> PreparedRequest:
-        path, params = self._resolve_operation(
-            request.context.capability,
-            request.arguments,
+        return self._prepare_provider_request(
+            capability=request.context.capability,
+            arguments=request.arguments,
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
         )
+
+    @classmethod
+    def _prepare_provider_request(
+        cls,
+        *,
+        capability: str,
+        arguments: Mapping[str, Any],
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> PreparedRequest:
+        path, params = cls._resolve_operation(capability, arguments)
         return PreparedRequest(
             method="GET",
             url=f"{credentials['api_url'].rstrip('/')}{path}",
@@ -93,8 +171,537 @@ class DattoRmmConnector(ConnectorBase):
             audit_operation=path,
         )
 
+    def _execute_prepared_request(
+        self,
+        *,
+        request: ConnectorRequest,
+        prepared: PreparedRequest,
+    ) -> Any:
+        operation = prepared.audit_operation or prepared.url
+        self._audit.record(
+            "connector.requested",
+            request.context,
+            {"provider": self.provider_name, "operation": operation},
+        )
+        payload = self._transport.request(
+            method=prepared.method,
+            url=prepared.url,
+            headers=prepared.headers,
+            params=prepared.params,
+            json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        self._audit.record(
+            "connector.completed",
+            request.context,
+            {"provider": self.provider_name, "operation": operation},
+        )
+        return payload
+
+    def _execute_device_resolve(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> Any:
+        """Resolve a human selector without promoting it to identity.
+
+        A fact-bearing endpoint search is a provider-neutral request for information,
+        not permission to treat a hostname as identity. Datto first performs bounded
+        discovery. Zero or multiple matches are returned as discovery evidence only.
+        Exactly one match may proceed to an exact GET, and only after Datto supplied a
+        durable device UID. Pure discovery calls without requested_facts remain search
+        operations and do not trigger the exact read.
+
+        Datto's hostname filter may behave as an exact filter. If the human supplied a
+        grounded name fragment such as ``50282`` and that exact provider query returns
+        no records, the connector performs bounded account discovery and compares the
+        human fragment only against provider-returned hostnames. It never manufactures
+        a prefix, site, tenant, or hostname. A unique durable UID may be resolved only
+        after complete discovery; ambiguity or incomplete discovery fails closed.
+        """
+
+        user_reference = self._user_identity_reference(request.arguments)
+        if user_reference:
+            discovery = self._execute_user_identity_discovery(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+                user_reference=user_reference,
+            )
+            matches = discovery["resource_matches"]
+        else:
+            search_request = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments=request.arguments,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            search_payload = self._execute_prepared_request(
+                request=request,
+                prepared=search_request,
+            )
+            discovery = self._normalize_result("datto_rmm.device.search", search_payload)
+            matches = discovery["resource_matches"]
+
+        hostname_reference = self._hostname_reference(request.arguments)
+        if not matches and hostname_reference:
+            discovery = self._execute_hostname_fragment_discovery(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+                hostname_reference=hostname_reference,
+            )
+            matches = discovery["resource_matches"]
+
+        if len(matches) != 1 or discovery.get("discovery_complete") is False:
+            return discovery
+
+        resource_id = str(matches[0].get("resource_id", "")).strip()
+        if not resource_id:
+            # Preserve the unique candidate as evidence, but do not issue a second
+            # provider request without a durable provider identity. The response layer
+            # will fail closed if exact resource facts were requested.
+            return discovery
+
+        read_request = self._prepare_provider_request(
+            capability="datto_rmm.device.get",
+            arguments={"resource_id": resource_id},
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
+        )
+        read_payload = self._execute_prepared_request(
+            request=request,
+            prepared=read_request,
+        )
+        return {
+            "resource_matches": matches,
+            "resolved_resource_id": resource_id,
+            # Requested facts must be located in the exact device read, never in a
+            # summary record returned by the discovery request.
+            "provider_data": adapt_datto_device_semantic_evidence(read_payload),
+        }
+
+    def _execute_device_scoped_read(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> Any:
+        """Resolve one human endpoint selector before a device-scoped read.
+
+        Human endpoint names remain discovery selectors. The provider must return
+        exactly one durable device UID before the requested device-scoped read is
+        issued. Ambiguous or incomplete discovery fails closed.
+        """
+
+        search_request = self._prepare_provider_request(
+            capability="datto_rmm.device.search",
+            arguments=request.arguments,
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
+        )
+
+        search_payload = self._execute_prepared_request(
+            request=request,
+            prepared=search_request,
+        )
+
+        discovery = self._normalize_result(
+            "datto_rmm.device.search",
+            search_payload,
+        )
+
+        matches = discovery["resource_matches"]
+
+        hostname_reference = self._hostname_reference(request.arguments)
+
+        if not matches and hostname_reference:
+            discovery = self._execute_hostname_fragment_discovery(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+                hostname_reference=hostname_reference,
+            )
+            matches = discovery["resource_matches"]
+
+        if len(matches) != 1 or discovery.get("discovery_complete") is False:
+            return discovery
+
+        resource_id = str(
+            matches[0].get("resource_id", "")
+        ).strip()
+
+        if not resource_id:
+            return discovery
+
+        resolved_arguments = dict(request.arguments)
+        resolved_arguments["resource_id"] = resource_id
+        resolved_arguments["device_uid"] = resource_id
+
+        prepared = self._prepare_provider_request(
+            capability=request.context.capability,
+            arguments=resolved_arguments,
+            credentials=credentials,
+            access_token=access_token,
+            token_type=token_type,
+        )
+
+        payload = self._execute_prepared_request(
+            request=request,
+            prepared=prepared,
+        )
+
+        return {
+            "resource_matches": matches,
+            "resolved_resource_id": resource_id,
+            "provider_data": adapt_datto_device_semantic_evidence(payload),
+        }
+
+
+    def _adapt_collection_result(
+        self,
+        *,
+        request: ConnectorRequest,
+        initial_data: Any,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> Any:
+        collection_key = self.adaptive_collection_keys.get(
+            request.context.capability
+        )
+
+        if not collection_key or not isinstance(initial_data, Mapping):
+            return initial_data
+
+        adapter = BoundedCollectionReadAdapter(max_probes=5)
+
+        def probe(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+            merged_arguments = dict(request.arguments)
+            merged_arguments.update(arguments)
+
+            prepared = self._prepare_provider_request(
+                capability=request.context.capability,
+                arguments=merged_arguments,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
+
+            normalized = self._normalize_result(
+                request.context.capability,
+                payload,
+            )
+
+            if not isinstance(normalized, Mapping):
+                return {}
+
+            return normalized
+
+        result = adapter.recover(
+            payload=initial_data,
+            collection_key=collection_key,
+            request_arguments=request.arguments,
+            probe=probe,
+            complete=(
+                str(
+                    request.arguments.get(
+                        "completeness_requirement",
+                        "sufficient",
+                    )
+                ).strip()
+                == "complete"
+            ),
+        )
+
+        if result.observation is not None:
+            observation = result.observation
+
+            self._audit.record(
+                "connector.adaptation_observed",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "capability": request.context.capability,
+                    "collection_key": observation.collection_key,
+                    "declared_total": observation.declared_total,
+                    "initial_count": observation.initial_count,
+                    "probes_attempted": observation.probes_attempted,
+                    "recovered": observation.recovered,
+                    "accepted_arguments": dict(
+                        observation.accepted_arguments or {}
+                    ),
+                    "pages_aggregated": observation.pages_aggregated,
+                    "final_count": observation.final_count,
+                    "complete": observation.complete,
+                },
+            )
+
+        return result.payload
+
+
+    def _execute_hostname_fragment_discovery(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+        hostname_reference: str,
+    ) -> Mapping[str, Any]:
+        """Discover provider hostnames matching one grounded human identifier segment.
+
+        The fallback deliberately removes only the hostname filter that produced zero
+        results. A human-supplied site constraint, when present, is retained. Pages are
+        bounded and must reach a short page before discovery is considered complete.
+        The connector never treats a single candidate from an incomplete scan as unique.
+        """
+
+        site = str(request.arguments.get("site") or "").strip()
+        provider_pages: list[Any] = []
+        matches: list[Mapping[str, str]] = []
+        seen_resource_ids: set[str] = set()
+        discovery_complete = False
+
+        for page in range(1, self.fallback_discovery_max_pages + 1):
+            arguments: dict[str, Any] = {
+                "page": page,
+                "max": self.fallback_discovery_page_size,
+            }
+            if site:
+                arguments["site"] = site
+
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments=arguments,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
+            provider_pages.append(payload)
+            records = self._device_records(payload)
+
+            for record in records:
+                match = self._canonical_device_match(record)
+                hostname = str(match.get("hostname", "")).strip()
+                if not hostname or not self._hostname_reference_matches(
+                    reference=hostname_reference,
+                    hostname=hostname,
+                ):
+                    continue
+                resource_id = str(match.get("resource_id", "")).strip()
+                dedupe_key = resource_id or f"{hostname.casefold()}|{match.get('site_id', '')}"
+                if dedupe_key in seen_resource_ids:
+                    continue
+                seen_resource_ids.add(dedupe_key)
+                matches.append(match)
+
+            if len(records) < self.fallback_discovery_page_size:
+                discovery_complete = True
+                break
+
+        return {
+            "resource_matches": matches,
+            "provider_data": {
+                "discovery_mode": "hostname_fragment",
+                "hostname_reference": hostname_reference,
+                "pages": provider_pages,
+            },
+            "discovery_complete": discovery_complete,
+        }
+
+    def _execute_user_identity_discovery(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+        user_reference: str,
+    ) -> Mapping[str, Any]:
+        """Resolve endpoint association from provider-reported user identity evidence.
+
+        The provider-neutral contract supplies ``user_identity``. Datto adaptation
+        performs bounded account discovery and compares only provider-returned user
+        evidence. It preserves ambiguity and never selects the first device.
+        """
+        provider_pages: list[Any] = []
+        matches: list[Mapping[str, str]] = []
+        seen: set[str] = set()
+        discovery_complete = False
+
+        for page in range(1, self.fallback_discovery_max_pages + 1):
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments={"page": page, "max": self.fallback_discovery_page_size},
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            payload = self._execute_prepared_request(request=request, prepared=prepared)
+            provider_pages.append(payload)
+            records = self._device_records(payload)
+
+            for record in records:
+                provider_user = self._first_scalar(
+                    record,
+                    "lastUser",
+                    "last_user",
+                    "lastLoggedInUser",
+                    "last_logged_in_user",
+                    "username",
+                    "userName",
+                )
+                if not provider_user or not self._user_identity_matches(
+                    reference=user_reference,
+                    provider_identity=provider_user,
+                ):
+                    continue
+
+                match = self._canonical_device_match(record)
+                resource_id = str(match.get("resource_id", "")).strip()
+                key = resource_id or f"{match.get('hostname', '').casefold()}|{match.get('site_id', '')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(match)
+
+            if len(records) < self.fallback_discovery_page_size:
+                discovery_complete = True
+                break
+
+        return {
+            "resource_matches": matches,
+            "provider_data": {
+                "discovery_mode": "user_identity_relationship",
+                "pages": provider_pages,
+            },
+            "discovery_complete": discovery_complete,
+        }
+
     @staticmethod
+    def _user_identity_reference(arguments: Mapping[str, Any]) -> str:
+        return str(arguments.get("user_identity") or "").strip()
+
+    @staticmethod
+    def _normalized_human_identity(value: str) -> str:
+        text = value.strip()
+        if "\\" in text:
+            text = text.rsplit("\\", 1)[-1]
+        elif "/" in text:
+            text = text.rsplit("/", 1)[-1]
+        if "@" in text:
+            text = text.split("@", 1)[0]
+        return "".join(ch for ch in text.casefold() if ch.isalnum())
+
+    @classmethod
+    def _user_identity_matches(cls, *, reference: str, provider_identity: str) -> bool:
+        left = cls._normalized_human_identity(reference)
+        right = cls._normalized_human_identity(provider_identity)
+        return bool(left and right and left == right)
+
+    @staticmethod
+    def _hostname_reference(arguments: Mapping[str, Any]) -> str:
+        return str(arguments.get("hostname") or arguments.get("name") or "").strip()
+
+    @staticmethod
+    def _hostname_reference_matches(*, reference: str, hostname: str) -> bool:
+        """Match a grounded human reference as a hostname identifier segment.
+
+        Exact hostnames match directly. Otherwise the reference must be delimited by
+        non-alphanumeric hostname punctuation, so ``50282`` matches ``AOT-50282`` but
+        not ``AOT-150282``. This is discovery only and never infers what a prefix means.
+        """
+
+        normalized_reference = reference.strip()
+        normalized_hostname = hostname.strip()
+        if not normalized_reference or not normalized_hostname:
+            return False
+        if normalized_reference.casefold() == normalized_hostname.casefold():
+            return True
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(normalized_reference)}(?![A-Za-z0-9])"
+        return re.search(pattern, normalized_hostname, flags=re.IGNORECASE) is not None
+
+    @classmethod
+    def _normalize_result(cls, capability: str, payload: Any) -> Any:
+        """Preserve provider evidence while exposing canonical discovery candidates.
+
+        Human-friendly endpoint names and hostnames are discovery selectors, not durable
+        identities. Search responses therefore carry a provider-neutral resource_matches
+        collection so orchestration can deterministically detect zero, one, or multiple
+        candidates before any evidence reasoner is allowed to interpret device facts.
+        """
+
+        if capability != "datto_rmm.device.search":
+            return payload
+        records = cls._device_records(payload)
+        return {
+            "resource_matches": [cls._canonical_device_match(record) for record in records],
+            "provider_data": payload,
+        }
+
+    @staticmethod
+    def _device_records(payload: Any) -> Sequence[Mapping[str, Any]]:
+        if isinstance(payload, (list, tuple)):
+            records = payload
+        elif isinstance(payload, Mapping):
+            records = payload.get("devices")
+        else:
+            records = None
+        if not isinstance(records, (list, tuple)):
+            raise ValueError("Datto device search response does not expose a devices collection")
+        if not all(isinstance(item, Mapping) for item in records):
+            raise ValueError("Datto device search returned a non-object device record")
+        return tuple(records)
+
+    @classmethod
+    def _canonical_device_match(cls, record: Mapping[str, Any]) -> Mapping[str, str]:
+        match: dict[str, str] = {}
+        resource_id = cls._first_scalar(record, "uid", "deviceUid", "device_uid")
+        hostname = cls._first_scalar(record, "hostname", "name")
+        site = cls._first_scalar(record, "siteName", "site_name")
+        site_uid = cls._first_scalar(record, "siteUid", "site_uid")
+        if resource_id:
+            match["resource_id"] = resource_id
+        if hostname:
+            match["hostname"] = hostname
+        if site:
+            match["site"] = site
+        if site_uid:
+            match["site_id"] = site_uid
+        return match
+
+    @staticmethod
+    def _first_scalar(record: Mapping[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = record.get(key)
+            if isinstance(value, (str, int, float)) and str(value).strip():
+                return str(value).strip()
+        return ""
+
+    @classmethod
     def _resolve_operation(
+        cls,
         capability: str,
         arguments: Mapping[str, Any],
     ) -> tuple[str, Mapping[str, Any] | None]:
@@ -106,27 +713,95 @@ class DattoRmmConnector(ConnectorBase):
                 raise ValueError("device_uid or resource_id is required")
             return f"/api/v2/device/{device_uid}", None
         if capability == "datto_rmm.device.search":
+            requested_max = int(arguments.get("max", cls.default_device_search_max))
             params: dict[str, Any] = {
-                "page": int(arguments.get("page", 1)),
-                "max": min(int(arguments.get("max", 1)), 250),
+                "page": max(int(arguments.get("page", 1)), 1),
+                # Discovery must be able to observe ambiguity. Never let a caller
+                # collapse a name/hostname search to a single provider result.
+                "max": max(2, min(requested_max, 250)),
             }
-            # Canonical resource inquiries use provider-neutral selectors. The
-            # connector translates them into Datto's broad account-device search
-            # rather than requiring a workflow-specific script or component.
-            search = str(
-                arguments.get("search")
-                or arguments.get("hostname")
+            # Canonical resource inquiries use provider-neutral selectors. Datto's
+            # account-device endpoint exposes hostname and siteName query filters,
+            # so those selectors are translated here rather than introducing a
+            # workflow-specific lookup script. Both are discovery filters only;
+            # neither becomes durable resource identity.
+            hostname = str(
+                arguments.get("hostname")
                 or arguments.get("name")
-                or arguments.get("resource_id")
                 or ""
             ).strip()
-            if search:
-                params["search"] = search
+            site = str(arguments.get("site") or "").strip()
+            if hostname:
+                params["hostname"] = hostname
+            if site:
+                params["siteName"] = site
             return "/api/v2/account/devices", params
+        if capability == "datto_rmm.device.alerts.open":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+            return f"/api/v2/device/{device_uid}/alerts/open", None
+
+        if capability == "datto_rmm.device.alerts.resolved":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+            return f"/api/v2/device/{device_uid}/alerts/resolved", None
+
+        if capability == "datto_rmm.device.audit.get":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+            return f"/api/v2/audit/device/{device_uid}", None
+
+        if capability == "datto_rmm.device.software.list":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+
+            # Datto software inventory is paginated. Keep the provider request
+            # deliberately bounded; callers can request subsequent pages when
+            # needed. A very large default page has produced empty provider
+            # collections even when software inventory exists.
+            return f"/api/v2/audit/device/{device_uid}/software", {
+                "page": max(int(arguments.get("page", 1)), 1),
+                "max": max(1, min(int(arguments.get("max", 50)), 50)),
+            }
+
+        if capability == "datto_rmm.account.alerts.open":
+            params = {
+                "page": max(int(arguments.get("page", 1)), 1),
+                "max": max(1, min(int(arguments.get("max", 250)), 250)),
+            }
+            site_uid = str(
+                arguments.get("site_uid") or arguments.get("site_id") or ""
+            ).strip()
+            if site_uid:
+                params["siteUid"] = site_uid
+            return "/api/v2/account/alerts/open", params
+
+        if capability == "datto_rmm.site.search":
+            params = {
+                "page": max(int(arguments.get("page", 1)), 0),
+                "max": max(2, min(int(arguments.get("max", 250)), 250)),
+            }
+            return "/api/v2/account/sites", params
+
+        # Legacy provider-specific alias retained until callers converge on the
+        # governed provider-neutral alert resource capability.
         if capability == "datto_rmm.alerts.list":
             return "/api/v2/account/alerts/open", {
                 "siteUid": arguments.get("site_uid")
             }
+
         if capability == "datto_rmm.patch_status.get":
             return f"/api/v2/device/{arguments['device_uid']}/audit", None
         if capability == "datto_rmm.component_results.list":

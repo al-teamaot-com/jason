@@ -1,0 +1,87 @@
+services:
+  jason-runtime:
+    build:
+      context: ../..
+      dockerfile: infrastructure/jason-runtime/Dockerfile
+    image: jason-runtime:local
+    container_name: jason-runtime
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    environment:
+      JASON_RUNTIME_HOST: "0.0.0.0"
+      JASON_RUNTIME_PORT: "8080"
+      JASON_AUTHORITY_DB: /var/lib/jason/authority/authority.sqlite3
+      JASON_MICROSOFT_BOUNDARY_DB: /var/lib/jason/authority/client-boundaries.sqlite3
+      JASON_TEAMS_IDENTITY_BINDINGS_DB: /var/lib/jason/openclaw/teams-identity-bindings.sqlite3
+      JASON_REPLAY_DB: /var/lib/jason/openclaw/replay.sqlite3
+      JASON_SECURITY_AUDIT_DB: /var/lib/jason/openclaw/security-audit.sqlite3
+      JASON_ORCHESTRATION_EVENTS_DB: /var/lib/jason/openclaw/orchestration-events.sqlite3
+      JASON_MODEL_USAGE_DB: /var/lib/jason/openclaw/model-usage.sqlite3
+      JASON_TRUSTED_KEYS_REGISTRY: /var/lib/jason/openclaw/trusted-keys/registry.json
+      JASON_ALLOWED_OPENCLAW_MACHINE_IDENTITIES: svc-openclaw-gateway
+      JASON_OPENBAO_URL: http://openbao:8200
+      JASON_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/role_id
+      JASON_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/secret_id
+      JASON_SES_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/aws-ses/role_id
+      JASON_SES_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/aws-ses/secret_id
+      JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/role_id
+      JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/secret_id
+      JASON_OPENAI_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/openai/role_id
+      JASON_OPENAI_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/openai/secret_id
+      JASON_HOSTED_SEMANTICS_ENABLED: "true"
+      JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
+      JASON_HOSTED_CONVERSATION_ENABLED: "true"
+      JASON_OPENAI_CONVERSATION_MODEL: "gpt-5.4-mini"
+      JASON_OPENAI_PRICING_MODEL: "gpt-5.4-mini"
+      JASON_OPENAI_INPUT_COST_PER_MILLION: "0.75"
+      JASON_OPENAI_CACHED_INPUT_COST_PER_MILLION: "0.075"
+      JASON_OPENAI_OUTPUT_COST_PER_MILLION: "4.50"
+      JASON_DYNAMIC_CONVERSATION_ENABLED: "true"
+      JASON_SES_REGION: us-east-1
+      JASON_SES_DEFAULT_SENDER: jason@teamaot.com
+      JASON_OLLAMA_URL: http://jason-ollama:11434
+      JASON_OLLAMA_MODEL: ${JASON_OLLAMA_MODEL:?JASON_OLLAMA_MODEL must name an installed local model}
+    volumes:
+      - /var/lib/jason/authority:/var/lib/jason/authority:rw
+      - /var/lib/jason/openclaw:/var/lib/jason/openclaw:rw
+      - /var/lib/jason/openclaw/trusted-keys:/var/lib/jason/openclaw/trusted-keys:ro
+      - ${JASON_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/role_id:ro
+      - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro
+      - ${JASON_SES_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_SES_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/role_id:ro
+      - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
+      - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
+      - ${JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/secret_id:ro
+      - ${JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/role_id:ro
+      - ${JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/secret_id:ro
+    networks:
+      - openclaw
+      - core
+      - observability
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  openclaw:
+    external: true
+    name: openclaw_default
+  core:
+    external: true
+    name: jason-core
+  observability:
+    external: true
+    name: jason-observability

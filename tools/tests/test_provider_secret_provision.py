@@ -8,6 +8,28 @@ from tools.provider_secret_provision import (
 )
 
 
+def test_aws_ses_contract_uses_canonical_sendmail_path_and_fields() -> None:
+    spec = PROVIDERS["aws_ses"]
+    assert spec["logical_name"] == "aws_ses.sendmail"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/aws-ses/production/sendmail"
+    )
+    assert spec["fields"] == (
+        "access_key_id",
+        "secret_access_key",
+        "session_token",
+    )
+    assert spec["required_fields"] == (
+        "access_key_id",
+        "secret_access_key",
+    )
+    assert spec["policy_name"] == "jason-aws-ses-sendmail-read"
+    assert spec["role_name"] == "jason-aws-ses-sendmail-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/opt/jason/bootstrap/secrets/openbao/aws-ses-sendmail-approle"
+    )
+
+
 def test_datto_contract_uses_canonical_connector_path_and_fields() -> None:
     spec = PROVIDERS["datto_rmm"]
     assert spec["logical_name"] == "datto_rmm.readonly"
@@ -86,11 +108,13 @@ def test_live_provisioning_uses_hidden_admin_and_secret_prompts() -> None:
     assert "OpenBao password for" in sources
     assert "api_key" in sources
     assert "api_secret" in sources
+    assert "access_key_id" in sources
+    assert "secret_access_key" in sources
     assert "secret_values_printed" in sources
 
 
 def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
-    text = Path("07-Operations/Provider-Secret-Provisioning.md").read_text(
+    text = Path("docs/operations/Provider-Secret-Provisioning.md").read_text(
         encoding="utf-8"
     )
     assert "canonical production lifecycle" in text
@@ -106,7 +130,7 @@ def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
 
 
 def test_jkd003_contains_production_identity_and_lifecycle_invariant() -> None:
-    text = Path("03-Components/Kernel/JKD-003-Secrets-Broker.md").read_text(
+    text = Path("docs/components/kernel/JKD-003-Secrets-Broker.md").read_text(
         encoding="utf-8"
     )
     assert "**Version:** 0.4" in text
@@ -130,3 +154,4 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert "finally:" in source
     assert '"datto_rmm.readonly"' in source
     assert '"it_glue.readonly"' in source
+    assert '"aws_ses.sendmail"' in source
