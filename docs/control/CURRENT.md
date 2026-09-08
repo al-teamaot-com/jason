@@ -1,30 +1,28 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-08  
-**Status:** The preferred technician conversational architecture is now **ChatGPT Business as the primary conversational surface with Jason exposed through a governed MCP/tool boundary**. The existing Teams/OpenClaw/Jason production topology remains valid until deliberately changed and re-verified; the new MCP path is the active engineering workstream and is not yet production-proven.  
-**Canonical purpose:** Human-readable resume point for current work. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
+**Status:** Preferred technician architecture is **ChatGPT Business as the primary conversational surface with Jason exposed through a governed MCP/tool boundary**. The existing Teams/OpenClaw/Jason production topology remains valid until deliberately changed and re-verified. MCP-001 is the active engineering workstream and is not yet production-proven.  
+**Canonical purpose:** Human-readable resume point. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
-
-Future sessions should read, in order:
 
 1. `docs/index.md`
 2. `docs/control/JASON-FUNDAMENTALS.md`
 3. this file
 4. `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`
 5. `docs/architecture/J-104-ChatGPT-Jason-Access-Architecture.md`
-6. `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
-7. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
-8. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
-9. `docs/control/DOCUMENTATION-REGISTER.md`
-10. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-11. current Git and System Registry/host evidence before asserting live production state
+6. `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
+7. `docs/engineering/interfaces/ChatGPT-Business-MCP-Platform-Constraints-2026-09-08.md`
+8. `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
+9. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+10. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
+11. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+12. `docs/control/DOCUMENTATION-REGISTER.md`
+13. current Git and System Registry/host evidence before asserting live production state
 
 Conversation memory is context only. It is not authority.
 
-## Current architecture direction — 2026-09-08
-
-The accepted preferred technician path is:
+## Active architecture
 
 ```text
 Technician
@@ -44,11 +42,21 @@ Governed capabilities / connectors
 Datto RMM / Autotask / Microsoft 365 / IT Glue / other approved providers
 ```
 
-The durable operating principle is:
+Durable principle:
 
 > **ChatGPT reasons. Jason governs and executes.**
 
 A ChatGPT tool call is a request for governed execution, not authority.
+
+## Why this changed
+
+The Teams-centered conversational path increasingly required Jason to reproduce mature conversational-agent behavior: natural multi-turn dialogue, context continuity, tool selection, iterative reasoning, and answer synthesis.
+
+Recent work proved useful mechanisms such as provider documentation knowledge, native tool calling, meaningful capability-derived tools, complete collection reads, and deterministic evidence analysis, but the architecture still asked Jason to imitate ChatGPT while also carrying Jason's real responsibilities.
+
+The selected redesign uses AOT's existing ChatGPT Business sessions for normal conversation/reasoning and keeps Jason focused on constitutional governance and execution.
+
+## Constitutional boundary
 
 Jason remains responsible for:
 
@@ -66,68 +74,69 @@ Jason remains responsible for:
 - deterministic analysis;
 - fail-closed behavior.
 
-## Why the architecture changed
-
-The Teams-centered conversational workstream increasingly required Jason to reproduce capabilities already supplied effectively by a mature conversational runtime: natural multi-turn dialogue, follow-up context, tool selection, iterative reasoning, and answer synthesis.
-
-The project proved several useful mechanisms — provider documentation knowledge, native tool calling, meaningful capability-derived tools, complete collection reads, deterministic evidence analysis — but the overall pattern remained unnecessarily complex because Jason was still being asked to imitate the normal ChatGPT experience.
-
-The project owner selected ChatGPT Business + Jason MCP as the initial redesign because it should:
-
-- provide the most fluid technician experience;
-- maximize value from existing ChatGPT Business seats;
-- reduce duplicate OpenAI API reasoning calls;
-- reduce custom conversational code;
-- preserve Jason's constitutional authority/governance model;
-- make provider expansion capability/resource-driven rather than question-driven.
+Do not move these controls into ChatGPT prompts or rely on ChatGPT app access as authority.
 
 ## Cost rule
 
-For the ChatGPT Business path, the default is **one AI brain per interaction**.
+For the ChatGPT Business path, use **one AI brain per interaction whenever practical**.
 
 The technician's ChatGPT session handles ordinary conversation, context, reasoning, tool selection, comparison, and synthesis.
 
-Jason should **not** invoke a second OpenAI API model merely to interpret or restate the same request.
+Jason should not invoke a second hosted model merely to reinterpret or restate the same request.
 
-Jason-side hosted-model calls remain allowed when a specific governed capability genuinely requires them. When required, use the least-cost suitable model by policy and escalate only when justified.
+Jason-side model calls remain allowed only when a specific governed capability genuinely requires them. Use the least-cost suitable model by policy and escalate only when justified.
 
-Deterministic work should remain inside Jason where practical, including:
+Keep mechanical work deterministic inside Jason where practical: pagination, exact counts, filtering, grouping, distinct values, bounded lists, and governed joins/correlation.
 
-- pagination;
-- exact counts;
-- filtering;
-- grouping;
-- distinct values;
-- bounded lists;
-- governed joins/correlation;
-- other mechanical large-dataset operations.
+## Verified ChatGPT Business MCP constraints — 2026-09-08
 
-ChatGPT Business subscription usage and OpenAI API usage are separate cost domains; Jason-side model cost must remain independently measurable.
+Official OpenAI documentation was re-checked before implementation planning. Current constraints that materially affect design:
+
+- full MCP/developer mode is available to ChatGPT Business on ChatGPT web;
+- the feature is beta and may change;
+- Business admins/owners control developer mode and publication;
+- Business does not currently provide the same per-user/per-app RBAC controls as Enterprise/Edu;
+- ChatGPT connects to **remote MCP servers**, not directly to a local-only server;
+- for private/on-prem/local MCP servers, OpenAI currently recommends **Secure MCP Tunnel** rather than exposing the service directly to the public Internet;
+- OAuth/OIDC designs should support refresh tokens / `offline_access` if persistent connectivity is required;
+- custom MCP servers no longer need artificial `search` and `fetch` tools;
+- Business app tool/metadata updates currently require recreate/republish behavior and approved tool definitions are effectively frozen snapshots;
+- custom MCP apps are currently web-only, not mobile;
+- ChatGPT can use multiple apps in one prompt;
+- ChatGPT write confirmations are supplemental and do not replace Jason's own action governance.
+
+Supporting research record:
+
+`docs/engineering/interfaces/ChatGPT-Business-MCP-Platform-Constraints-2026-09-08.md`
 
 ## Active workstream
 
-The active P0 workstream is:
-
 **MCP-001 — ChatGPT Business + Jason read-only MCP foundation**
 
-Immediate sequence:
+Completed architecture/documentation steps:
 
-1. verify current ChatGPT Business custom MCP/app requirements and supported authentication patterns;
-2. define the Jason MCP service/component contract;
-3. define System Registry registration/lifecycle requirements for the MCP service;
-4. build a read-only MCP adapter over the existing capability/resource catalog and Central Orchestrator;
-5. expose a small meaningful tool set generated from governed capability metadata;
-6. prove MCP cannot invoke connectors/providers directly;
-7. prove identity, scope, client isolation, evidence, audit, secret isolation, and fail-closed behavior;
-8. prove deterministic complete-collection analysis through MCP;
-9. configure/publish a limited ChatGPT Business pilot only after local proof;
-10. measure technician fluidity, tool reliability, latency, and duplicate Jason-side API spend;
-11. add a second provider and prove cross-provider reasoning;
-12. simplify/retire legacy conversational components only after the MCP replacement is proven.
+- accepted ADR-010;
+- defined J-104 target architecture;
+- defined MCP construction guidance;
+- created migration roadmap;
+- created pilot runbook;
+- verified current ChatGPT Business/MCP platform constraints against official OpenAI documentation;
+- set MCP-001 active in `docs/roadmaps/Jason-Roadmap-Status.json`.
 
-The detailed plan is:
+## Next implementation sequence
 
-`docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
+1. Choose the smallest supported remote-connectivity pattern for the Jason host, investigating OpenAI Secure MCP Tunnel first.
+2. Define the concrete Jason MCP service component contract and System Registry entity/schema usage.
+3. Implement a read-only MCP adapter over the existing capability/resource catalog and Central Orchestrator.
+4. Expose a small, stable, model-friendly tool set generated from governed capability metadata.
+5. Prove MCP cannot call connectors/providers directly.
+6. Prove identity, scope, client isolation, secret isolation, evidence, audit, and fail-closed behavior locally.
+7. Prove deterministic complete-collection analysis through MCP.
+8. Configure supported authentication/OAuth behavior.
+9. Publish only to a limited ChatGPT Business pilot after local proof.
+10. Measure technician fluidity, tool reliability, latency, and duplicate Jason-side API spend.
+11. Add a second provider and prove cross-provider reasoning.
+12. Simplify/retire legacy conversational components only after replacement proof.
 
 ## Components to preserve
 
@@ -136,7 +145,7 @@ Do not redesign or discard these merely because the conversational surface chang
 - Central Orchestrator;
 - capability/resource registry/catalog;
 - identity and authority services;
-- execution policy and approval services;
+- execution policy and approvals;
 - provider/connector boundaries;
 - OpenBao/secrets architecture;
 - evidence/provenance/audit systems;
@@ -145,71 +154,47 @@ Do not redesign or discard these merely because the conversational surface chang
 - usage/cost ledger;
 - System Registry;
 - Teams transport for retained secondary roles;
-- OpenClaw components that retain independently justified value.
+- OpenClaw components with independently justified value.
 
 ## Components to stop expanding by default
 
-Until MCP is evaluated, do not add non-critical complexity to components whose main purpose is to recreate normal ChatGPT conversation behavior inside Jason, including:
+Until MCP is evaluated, do not add non-critical complexity to components whose main purpose is to recreate normal ChatGPT conversation behavior inside Jason:
 
 - custom semantic conversation routers;
 - custom investigation decision state machines;
-- question-specific routing;
-- phrase maps;
+- question-specific routing or phrase maps;
 - duplicate full conversation memory;
-- increasingly elaborate prompt rules compensating for missing native agent behavior;
+- elaborate prompt rules compensating for missing native agent behavior;
 - duplicate model calls that re-reason a request already reasoned by the ChatGPT session.
 
-Existing production components remain in place until governed replacement/retirement criteria are met.
+Existing production components remain until governed replacement/retirement criteria are met.
 
-## Microsoft Teams role
+## Teams role
 
-Teams remains a valid and useful secondary interface.
+Teams remains a valid secondary interface for approvals, notifications, proactive messages, concise operational requests, and fallback access.
 
-Preferred future roles:
+The existing direct Teams gateway work remains valid evidence. The MCP pivot does not itself change production topology.
 
-- approvals;
-- notifications;
-- proactive messages;
-- concise operational requests;
-- fallback/secondary technician access.
-
-Do not continue treating Teams as the preferred place to recreate a full ChatGPT-quality technician conversational experience.
-
-### Existing Teams production evidence remains valid
-
-The dedicated `jason-teams-gateway` remains the proven ordinary inbound Teams transport owner under ADR-009 until current observed state says otherwise.
-
-Historical/operational references remain:
+Key historical/current references:
 
 - `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
 - `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
 - `docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md`
 - `docs/operations/Runbook-Teams-Integration.md`
 
-The MCP pivot does not erase those records and is not itself evidence that production topology changed.
-
 ## OpenClaw role
 
-OpenClaw remains deployed infrastructure at the time of this architecture decision and may still support approved secondary functions.
+OpenClaw remains deployed infrastructure at the time of this decision and may retain justified secondary functions such as proactive/outbound transport, specialist tooling, or migration compatibility.
 
-It is no longer the preferred primary technician conversational brain.
-
-Possible retained roles include:
-
-- proactive/outbound transport;
-- secondary interfaces;
-- specialist automation/tooling;
-- compatibility during migration.
-
-Its final role is intentionally deferred until the MCP pilot demonstrates what remains necessary.
+It is not the preferred primary technician conversational brain.
 
 OpenClaw must not bypass Jason identity, authority, policy, approvals, Central Orchestrator, provider governance, secrets, evidence, or audit boundaries.
 
 ## Provider/integration direction
 
-New integrations should continue to expand Jason's observable/action world without teaching Jason question-specific workflows.
+New integrations should expand Jason's observable/action world without teaching Jason question-specific workflows.
 
-Preferred integration ingredients:
+Preferred ingredients:
 
 ```text
 governed connector
@@ -222,119 +207,66 @@ governed connector
 + governance/lifecycle metadata
 ```
 
-Provider documentation/schema is descriptive knowledge only. It does not automatically grant execution authority for newly documented provider operations.
+Provider documentation/schema is descriptive knowledge only. It does not automatically grant execution authority.
 
 ## MCP tool rules
 
-The future model-facing MCP surface should expose meaningful governed tools derived from Jason capability/resource metadata.
+Expose meaningful governed tools derived from Jason capability/resource metadata.
 
-Prefer concepts such as:
+Prefer concepts such as endpoint search/read, endpoint audit/inventory, alerts, sites, Autotask resources, Microsoft 365 identity/license/sign-in state, and deterministic evidence analysis.
 
-- search managed endpoints;
-- read endpoint;
-- read endpoint audit/inventory;
-- search alerts;
-- search sites;
-- search/read Autotask resources;
-- read Microsoft 365 identity/license/sign-in state;
-- deterministic analyze/filter/count/group/list over governed evidence.
+Do not create phrase-specific tools, unrestricted HTTP/provider tools, direct connector handles, or opaque internal operation IDs as the primary model vocabulary.
 
-Do not create tools such as:
+## Initial security boundary
 
-- `count_windows_10_devices`;
-- `find_user_logged_into_50282`;
-- phrase-specific workflow handlers;
-- unrestricted HTTP/provider tools;
-- direct connector handles.
+The first MCP pilot is read-only.
 
-## Security/authority proving requirements before pilot publication
-
-The MCP path is not production-ready until it proves:
+Before publication prove:
 
 1. supported caller/workspace authentication;
 2. Jason principal/organization binding before execution;
 3. client/tenant isolation;
 4. capability-specific authorization;
 5. no credential exposure to ChatGPT;
-6. read-only initial surface;
-7. policy/approval separation for future actions;
-8. bounded structured evidence;
-9. provenance/audit for every governed execution;
-10. resource/rate limits and abuse controls;
-11. rapid disable/revocation/rollback;
-12. Central Orchestrator remains sole execution coordinator.
+6. bounded structured evidence;
+7. provenance/audit for every governed execution;
+8. resource/rate limits and abuse controls;
+9. rapid disable/revocation/rollback;
+10. Central Orchestrator remains sole execution coordinator.
 
-## Consequential actions
+Consequential actions remain a later workstream and retain all normal Jason authority, policy, approval, precondition, idempotency, evidence, audit, and recovery requirements.
 
-Do not expose production write/action tools during the first MCP proving phase.
+## Production/runtime caution
 
-When actions are added later, ChatGPT may request them but Jason must enforce normal:
+This document records the target direction and active engineering workstream, not a claim that MCP is deployed.
 
-- identity-first authorization;
-- scope;
-- risk classification;
-- policy;
-- approval;
-- preconditions;
-- idempotency;
-- evidence;
-- audit;
-- rollback/recovery expectations.
-
-Access to the ChatGPT Business workspace or Jason MCP app alone never grants action authority.
-
-## Current production/runtime caution
-
-This document records the **target direction and current workstream**, not a claim that the MCP service is deployed.
-
-Before asserting current production state, inspect:
-
-- current Git;
-- System Registry declared/observed/verified state;
-- current host/container/service evidence;
-- relevant deployment/verification records.
+Before asserting current production state, inspect current Git, System Registry declared/observed/verified state, current host/container/service evidence, and relevant deployment records.
 
 The current Teams/OpenClaw/Jason environment must remain recoverable during the MCP pilot.
 
-## Known prior conversational lessons that must not be rediscovered
+## Prior conversational lessons that must not be rediscovered
 
 1. Do not solve arbitrary technician questions with phrase-specific code.
-2. Do not treat `AOT-50282` or any other proving question as the architecture goal.
+2. Do not reduce the architecture goal to a proving endpoint/question.
 3. Provider collection completeness and pagination matter for exact counts/lists.
 4. Model-facing excerpts are not substitutes for deterministic complete-data analysis.
-5. Meaningful tool descriptions are superior to opaque operation references for model tool selection.
-6. Live provider documentation/schema can improve integration knowledge but does not grant authority.
-7. Model/tool prompt rules cannot compensate indefinitely for an unsuitable conversational architecture.
-8. The Jason reasoning layer should not duplicate work already performed by the technician's ChatGPT session.
-9. Governance controls belong in deterministic Jason boundaries, not hidden in conversational prompt behavior.
+5. Meaningful tool descriptions are superior to opaque operation references.
+6. Live provider documentation/schema can improve knowledge but does not grant authority.
+7. Prompt rules cannot compensate indefinitely for an unsuitable conversational architecture.
+8. Jason should not duplicate work already performed by the technician's ChatGPT session.
+9. Governance belongs in deterministic Jason boundaries, not hidden in conversational behavior.
 10. New provider integration should be plumbing/capability registration, not new question logic.
 
-## Governing records for the pivot
+## Governing records for this pivot
 
 - `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`
 - `docs/architecture/J-104-ChatGPT-Jason-Access-Architecture.md`
+- `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
+- `docs/engineering/interfaces/ChatGPT-Business-MCP-Platform-Constraints-2026-09-08.md`
 - `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
+- `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
 - `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
 
 ## Next safe action
 
-Begin MCP-001 by verifying the current ChatGPT Business custom MCP/app connection and authentication requirements, then design the smallest read-only Jason MCP component that routes exclusively through existing governed capability/Central Orchestrator boundaries.
-
-Do not begin by deleting Teams/OpenClaw or rewriting provider connectors.
-
-## Documentation-complete condition for this pivot
-
-A future competent human or AI session must be able to determine without chat history:
-
-- why the primary conversational architecture changed;
-- why ChatGPT Business was chosen;
-- what ChatGPT owns versus what Jason owns;
-- why the change is constitutionally acceptable;
-- how duplicate API/model cost is controlled;
-- what roles Teams and OpenClaw retain;
-- what existing Jason components remain authoritative;
-- what custom conversational components are candidates for later retirement;
-- what security/identity requirements block MCP production publication;
-- what the exact next implementation sequence is;
-- how to preserve the current production path during migration; and
-- which records govern the decision, architecture, roadmap, and evidence.
+Investigate and select the remote connectivity/authentication pattern for a read-only Jason MCP service, with OpenAI Secure MCP Tunnel as the first candidate for the on-prem Jason host. Then define the smallest MCP server component that routes exclusively through existing governed capability/Central Orchestrator boundaries.
