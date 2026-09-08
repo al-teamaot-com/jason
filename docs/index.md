@@ -18,6 +18,21 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 10. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
 11. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
+## Current preferred technician architecture
+
+As of 2026-09-08, the accepted preferred technician conversational direction is **ChatGPT Business as the primary conversational surface with Jason exposed through a governed MCP/tool boundary**.
+
+Start with these records for that workstream:
+
+- [`decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`](decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md) — governing architecture decision;
+- [`architecture/J-104-ChatGPT-Jason-Access-Architecture.md`](architecture/J-104-ChatGPT-Jason-Access-Architecture.md) — target technical architecture;
+- [`engineering/interfaces/Jason-MCP-Construction-Guide.md`](engineering/interfaces/Jason-MCP-Construction-Guide.md) — reusable construction guidance;
+- [`roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`](roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md) — active migration roadmap;
+- [`operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`](operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md) — pilot/verification procedure;
+- [`sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`](sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md) — durable rationale/session record.
+
+The target principle is: **ChatGPT reasons; Jason governs and executes.** This target does not by itself change current production topology. Use `control/CURRENT.md`, the System Registry, and observed host evidence for current-state claims.
+
 ## No-rediscovery rule
 
 Future work must not re-derive Jason's basic architecture from previous chats, memory, or code archaeology.
