@@ -1,315 +1,184 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-08-19  
-**Status:** Ordinary Microsoft Teams ingress is production-proven through the dedicated `jason-teams-gateway`. A working non-dynamic Teams conversational baseline is now re-proven live with `JASON_DYNAMIC_CONVERSATION_ENABLED=false`; the direct gateway completed a real Teams turn with HTTP 200 after being recreated from the already-installed production gateway image.  
-**Canonical purpose:** Human-readable resume point for current work. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
+**Updated:** 2026-09-09  
+**Status:** ChatGPT Business is the preferred primary technician conversational surface, with Jason exposed through a governed read-only MCP/tool boundary. The ChatGPT/Entra/MCP path is functionally and durably proven from committed source. Command Center usage/attribution telemetry is deployed and healthy. The current workstream is documentation and System Registry reconciliation before any further runtime activation.  
+**Canonical purpose:** Human-readable resume point. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
-
-Future sessions should read, in order:
 
 1. `docs/index.md`
 2. `docs/control/JASON-FUNDAMENTALS.md`
 3. this file
-4. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
-5. `docs/control/DOCUMENTATION-REGISTER.md`
-6. `docs/control/HOW-TO-DOCUMENT-JASON.md`
-7. `docs/operations/Teams-Conversation-Working-Baseline-2026-08-18.md`
-8. `docs/operations/Teams-Conversation-Baseline-Attempt-Log-2026-08-19.md`
-9. `docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md`
-10. `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
-11. `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`
-12. `docs/operations/Runbook-Teams-Integration.md`
-13. `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
-14. current Git and System Registry/host evidence before asserting live production state
+4. `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`
+5. `docs/architecture/J-104-ChatGPT-Jason-Access-Architecture.md`
+6. `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
+7. `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
+8. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+9. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
+10. `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`
+11. `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`
+12. `docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md`
+13. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+14. `docs/control/DOCUMENTATION-REGISTER.md`
+15. current Git and System Registry/host evidence before asserting volatile production state
 
 Conversation memory is context only. It is not authority.
 
-## Current working Teams conversational baseline — 2026-08-19
-
-The currently proven working conversational baseline is:
-
-`Microsoft Teams -> teams-jason.teamaot.com/api/messages -> relay/ZeroTier -> Jason host :3978 -> jason-teams-gateway:3979 -> signed Jason ingress -> jason-runtime -> governed non-dynamic conversation path -> Central Orchestrator -> governed provider -> response -> Teams`
-
-The runtime configuration for this known-good baseline is:
-
-`JASON_DYNAMIC_CONVERSATION_ENABLED=false`
-
-The configuration-only baseline transition completed with:
-
-- `BASELINE_IMAGE=jason-runtime:local`
-- `BASELINE_BUILD=SKIPPED`
-- `COMPOSE_VALIDATION=PASS`
-- `BASELINE_MODE=PASS`
-- `JASON_DYNAMIC_CONVERSATION_ENABLED=false`
-- `READY_FOR_LIVE_TEST=1`
-
-Observed service state before the final live proof:
-
-- `jason-runtime` healthy on internal `8080/tcp`;
-- `jason-teams-gateway` on `0.0.0.0:3978->3979/tcp`;
-- `openclaw-openclaw-gateway-1` healthy on host `18789-18790` only.
-
-The direct gateway was recreated from the already-installed `jason-teams-gateway:production` image without changing runtime application code, planner code, Datto code, semantic mappings, or OpenClaw routing. The recreated gateway:
-
-- joined Docker network `jason-core`;
-- resolved `jason-runtime` successfully;
-- connected to `jason-runtime:8080` successfully;
-- retained the governed ingress signing key and dedicated Teams credential file;
-- retained the documented runtime target `http://jason-runtime:8080/v1/openclaw/teams/conversation`;
-- owned host port `3978`.
-
-The live regression request was:
-
-`When was AOT-50107 last seen?`
-
-The direct gateway emitted:
+## Active architecture
 
 ```text
-{"event":"jason_teams_gateway_started","port":3979,"tenantId":"f7054323-d52b-4863-8c2f-1898f0b6077c","clientId":"c94301b7-7194-46ab-aab7-94f9366f51a9"}
-{"event":"jason_teams_turn_completed","status":"completed","httpStatus":200,"conversationId":"a:1OHDLSOI1q1Q__cbeAT5B1JDBmxw298L53JZshpQVGJvBhGbIWIyjri1H3zkJu2GiBBi4aP90SVBcDb5GIqkr4dD9GS23cMQ91Kcmz0LgDQbKBfa9PlVqQaf6baLpR3Ah","messageId":"1787168773572"}
+Technician
+    ↓
+ChatGPT Business session
+    ↓
+ChatGPT conversation / reasoning / session context
+    ↓
+Jason governed MCP/tool service
+    ↓
+Jason identity / scope / authority / policy / approvals / audit
+    ↓
+Central Orchestrator
+    ↓
+Governed capabilities / connectors
+    ↓
+Approved providers
 ```
 
-Durable proof:
+Durable principle:
 
-`docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md`
+> **ChatGPT reasons. Jason governs and executes.**
 
-### Do not rediscover these conclusions
+A ChatGPT tool request is a request for governed execution, not authority.
 
-1. The working baseline is the non-dynamic path with `JASON_DYNAMIC_CONVERSATION_ENABLED=false`.
-2. The direct `jason-teams-gateway` is the ordinary inbound Teams transport owner. Do not route ordinary inbound Teams back through OpenClaw.
-3. The Central Orchestrator, identity boundary, Datto execution path, provider governance, evidence path, and Teams return transport are retained baseline components, not redesign targets without new evidence.
-4. A dynamic-planner experiment constrained the plan to one capability and mechanically enforced the bound, but the real catalog still selected `endpoint.alert.history.search` five out of five times for `When was AOT-50107 last seen?`. The temporary `_MAX_REQUIREMENTS = 1` change was restored to `12`; do not reintroduce it as though it solved routing.
-5. Do not add phrase-specific `last seen` routing, question-to-field mappings, or bespoke workflow logic to make this regression sentence pass.
-6. Do not treat model-size or token-budget tuning as the primary architecture strategy for the dynamic path.
-7. Reintroduce constitutional behavior one major step at a time from the working baseline: runtime capability discovery with single-capability execution first, then dynamic grounding, then later continuity/evidence/multi-capability stages.
-8. `jason-ops.sh capture` currently misses gateway event `jason_teams_turn_failed_closed`; an empty gateway capture section is therefore not proof that no failed-closed gateway turn occurred. Align the helper with the actual gateway event vocabulary before relying on that inference.
-9. An ad-hoc Node health command using a double-quoted `!r.ok` expression failed because Bash history expansion consumed `!`; that shell error did not affect the gateway or the successful live proof. Do not reuse that exact command form.
-10. Configuration-only `baseline-deploy` proves runtime configuration, not newly pulled source. Any claim about changed source requires the provenance-verified source refresh path documented in the attempt log.
+## Last durable success
 
-## Previous durable ingress success — 2026-08-15
+### ChatGPT / Jason MCP
 
-On 2026-08-15, ordinary Teams ingress was cut over from OpenClaw to a dedicated non-intelligent Jason Teams Gateway.
+GitHub Issue #166 is complete.
 
-The production regression request was:
+Accepted source-built MCP checkpoint:
 
-`Hey Jason, can you tell me who was last on AOT-50282 and if anything is wrong with it right now?`
+`727c3fa6cbcb59dab32f77632393bc5407826ed0`
 
-The Teams response returned:
+Accepted live image:
 
-- last logged-in user `AzureAD\AlDavis`;
-- one moderate `Unhealthy` alert;
-- added local users `CodexSandboxOffline` and `CodexSandboxOnline`;
-- evidence source `datto_rmm`.
+`jason-mcp:source-727c3fa`
 
-Direct gateway logs recorded completed HTTP `200` turns. The same evidence window contained no OpenClaw `dispatching to agent` event for those ordinary Teams turns.
+The accepted MCP surface is exactly:
 
-Durable architecture decision:
+- `jason_mcp_status`
+- `discover_capabilities`
+- `execute_read_capability`
 
-`docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md`
+The baseline is read-only. No write/consequential MCP tool exists. The accepted path preserves Jason identity, authority, client/scope controls, Central Orchestrator execution, provider credential isolation, evidence, provenance, and audit. Public authentication/metadata/transport acceptance and ChatGPT live tool/read acceptance were completed after source-built recreation.
 
-Durable production proof:
+### Command Center usage and attribution telemetry
 
-`docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md`
+Accepted live dashboard deployment checkpoint:
 
-Primary cutover implementation checkpoint:
+`ecc265ee59645154f0bc86b5aa0dc5a2e375f022`
 
-`1e3003f74845f4af6786a6ab36d8e99b20fbcdce` — `Release Teams port from resolved OpenClaw bindings`
+The live observability stack includes:
 
-## Why the ingress architecture changed
+- `jason-prometheus`
+- `jason-grafana`
+- `jason-usage-exporter.service`
+- `jason-usage-attribution-exporter.service`
 
-The prior OpenClaw-based ordinary inbound path could not prove exclusive Jason ownership before OpenClaw's model path.
+The live dashboard worktree remains detached and clean at the accepted deployment checkpoint.
 
-The following approaches were attempted and abandoned rather than accumulated indefinitely:
+Later telemetry source work is represented by:
 
-- `before_agent_run` hook;
-- `before_agent_reply` hook;
-- plugin-owned inbound claim;
-- direct live OpenClaw Teams bundle patching.
+`e245fef72d220cce1fea63cb811a10c8196657b8`
 
-A plugin-bound Teams session was observed still entering the OpenClaw GPT-backed agent path. After repeated failures of the interception approach, Jason changed architecture instead of continuing brittle patching.
-
-The durable rule is now: **ordinary Jason-bound Teams ingress has one transport owner before any model loop.**
+The scoped Showcase Telemetry validation is green at that source checkpoint. The later source has not been used to replace the accepted live dashboard worktree or activate runtime-side attribution instrumentation.
 
 ## Current workstream
 
-The direct Teams ingress routing workstream is complete and production-proven.
+The active workstream is **documentation and System Registry reconciliation**.
 
-The active conversational workstream is now **working-baseline preservation followed by constitutional evolution one major behavior at a time**.
+The architecture decision is already made. Do not resume expansion of the legacy custom conversation stack merely because older Conversation Experience tests remain in the repository. Do not perform another runtime deployment merely to make documentation match what happens to be running.
 
-### Repository candidate — durable hosted-model usage correlation
+Required sequence:
 
-The feature branch now contains a repository-only candidate for durable model-usage
-accounting. This is not yet a production-state claim. The candidate:
-
-- provides a mode-`0600` SQLite implementation of the existing append-only usage
-  ledger contract;
-- binds accounting context at the authenticated Teams turn boundary after Jason
-  identity and organization scope are known;
-- correlates hosted OpenAI attempts with the Teams conversation/message, Jason
-  principal, organization/client scope, and turn correlation identifier;
-- records provider-reported input, cached-input, output, reasoning, and total token
-  fields when supplied;
-- records duration, provider request identity, outcome, model, retry/fallback attempt
-  identity, and unknown usage for failed calls without persisting prompts or raw
-  provider responses; and
-- keeps accounting context non-authoritative: it cannot select scope, capability,
-  provider execution, credentials, or policy.
-
-The same candidate adds a separately reversible hosted-conversation cutover:
-
-- `JASON_HOSTED_CONVERSATION_ENABLED=true` selects the existing bounded
-  `OpenAIStructuredJsonClient` for the existing dynamic conversation planner and
-  evidence renderer;
-- `JASON_OPENAI_CONVERSATION_MODEL=gpt-5.4-mini` establishes the least-cost initial
-  hosted model and remains configuration-selectable;
-- the matching 2026-08-27 official token-price profile is explicit configuration
-  (`$0.75`/million uncached input, `$0.075`/million cached input, and
-  `$4.50`/million output), and startup rejects a hosted model/pricing-model mismatch;
-- the existing dynamic context store, runtime capability discovery, deterministic
-  validators, Central Orchestrator, authority/policy boundary, provider execution,
-  evidence contracts, and Teams transport remain unchanged; and
-- disabling either the dynamic-conversation flag or hosted-conversation flag retains
-  the existing rollback paths without changing the direct Teams gateway.
-
-The candidate also closes the prior conversation-only gap: the bounded dynamic
-planner may return a natural human-facing response when no capability invocation is
-required. That response has a dedicated runtime/gateway status, cannot contain a
-capability execution request, and may not claim operational evidence, completed
-action, or authority.
-
-The committed persistence and accounting smoke tests pass in the development
-workspace. Full repository acceptance and live deployment/proof remain required
-before this candidate may be described as operational.
-
-The immediate sequence is:
-
-1. preserve/freeze the 2026-08-19 working non-dynamic baseline with regression coverage and durable evidence;
-2. correct the gateway capture helper so its event vocabulary matches the gateway implementation;
-3. reintroduce runtime capability discovery while retaining single-capability execution;
-4. prove that discovery generally, independently of the `AOT-50107` wording;
-5. only after that is stable, proceed to dynamic selector grounding;
-6. continue later stages only after re-proving the baseline after each change.
-
-The direct-gateway hardening/lifecycle items remain valid but are separate from the conversational baseline sequence:
-
-- keep the System Registry/current generated operational view aligned with the direct gateway topology;
-- review whether OpenClaw's dormant inbound `msteams` listener/provider can be disabled without breaking approved outbound/proactive Teams messaging;
-- migrate the direct gateway's dedicated Microsoft client credential from the temporary mode-0600 host environment file into Jason's preferred governed secret-delivery/federated identity architecture;
-- revoke/retire obsolete Microsoft application credentials when migration is complete.
+1. restore the September ChatGPT/MCP governing documents to the active source lineage;
+2. classify dated MCP proof records under `docs/sessions/`;
+3. preserve final Issue #166 durability acceptance;
+4. preserve Command Center/usage-attribution deployment proof;
+5. reconcile the System Registry using J-103 lifecycle and verification rules;
+6. regenerate its human-readable operational view;
+7. run documentation/System Registry validation;
+8. only then choose the next engineering/runtime workstream.
 
 ## Production/runtime boundary
 
-### Ordinary inbound Teams
+### ChatGPT / MCP
 
-Owned by `jason-teams-gateway` under ADR-009.
-
-The gateway:
-
-- authenticates through the Microsoft Agents SDK;
-- validates tenant and authenticated Entra object identity;
-- emits only bounded transport acknowledgement text;
-- signs the existing trusted Jason conversation envelope;
-- calls only the governed Jason Runtime boundary;
-- contains no LLM, agent loop, provider-selection authority, business authority, or direct provider invocation.
+The read-only Jason MCP service is live and functionally/durably proven. It remains an interface adapter and capability projection layer, not a second Central Orchestrator, provider client, unrestricted API proxy, secret broker, write authority, or replacement for Jason governance.
 
 ### Jason Runtime
 
-`jason-runtime` remains the governed conversation/orchestration boundary. Existing identity binding, replay protection, exact-message idempotency, resource inquiry, policy, Central Orchestrator, provider resolution, evidence, and deterministic response controls remain in force.
+`jason-runtime` remains the governed execution/orchestration boundary. The 2026-09-09 reconciliation snapshot observed it healthy. No runtime rebuild or restart is authorized by this documentation update.
+
+### Teams
+
+The direct `jason-teams-gateway` remains deployed and owns ordinary inbound Teams transport under the existing Teams architecture. Teams remains a valid secondary interface for approvals, notifications, proactive messaging, concise requests, and fallback access. Do not resume building a duplicate ChatGPT-quality conversation engine in Teams by default.
 
 ### OpenClaw
 
-OpenClaw remains a deployed ecosystem/interface component and may still support approved outbound/proactive Teams behavior and other functions.
+OpenClaw remains deployed for independently justified secondary functions. It is not the preferred primary technician conversational brain and must not bypass Jason identity, authority, policy, approvals, Central Orchestrator, provider governance, secrets, evidence, or audit.
 
-For ordinary inbound Teams turns it no longer owns the external host port and must not be treated as the active ingress merely because its internal `msteams` provider logs a startup message.
+### Observability
 
-ADR-005 remains applicable to approved outbound/proactive OpenClaw Teams transport. ADR-009 supersedes it for ordinary inbound Teams ingress.
+Prometheus, Grafana, the model/API usage exporter, and the usage-attribution exporter are observational surfaces. They do not grant execution authority.
 
-## Credential state
+## System Registry reconciliation gap
 
-The direct gateway uses the existing Teams/Entra application identity:
+The current System Registry predates the final MCP and usage-attribution deployment state. The 2026-09-09 host reconciliation observed that the registry does not yet represent the currently running MCP and observability components.
 
-- tenant ID `f7054323-d52b-4863-8c2f-1898f0b6077c`;
-- application/client ID `c94301b7-7194-46ab-aab7-94f9366f51a9`.
+Do not fix this by simply labeling observed processes `active`. J-103 requires stable entity identifiers, declared state, dependencies, stewardship, authority references, verification methods, evidence references, lifecycle transitions, and verification evidence.
 
-A dedicated second application credential was appended for the direct gateway. The existing OpenClaw credential was not read, replaced, or deleted.
+Until reconciliation is complete, MCP-001 should remain an active engineering milestone even though its protocol, durability, OAuth, edge, and governed read behavior are functionally proven.
 
-Current migration storage:
+## Source/worktree safety
 
-`/opt/jason/services/jason-teams-gateway/msteams.env`
+The primary worktree `/home/al/projects/jason` contains unrelated active development and must not be reset, cleaned, stashed, switched, or used as the reconciliation workspace.
 
-Protection at creation: mode `0600`.
+The accepted live monitoring worktree `/home/al/projects/jason-dashboard-usage-telemetry-20260909` must remain at `ecc265ee59645154f0bc86b5aa0dc5a2e375f022` unless a separate governed dashboard deployment is approved.
 
-No secret value is stored in Git, documentation, or System Registry.
+Documentation reconciliation must use an isolated worktree/branch.
 
-## Rollback state
+## Documentation classification correction
 
-Production cutover created a persistent rollback state file:
+Several September 9 MCP proof records were historically committed on another branch beneath the retired `07-Operations/` root. Their evidence remains valuable. Their correct canonical classification is point-in-time evidence under `docs/sessions/`. Do not recreate the retired root merely to preserve those records.
 
-`/opt/jason/services/jason-teams-gateway/cutover-state.env`
+## Prior lessons that must not be rediscovered
 
-The rollback entry point is:
+1. Do not solve arbitrary technician questions with phrase-specific code.
+2. Do not reduce the architecture goal to a proving endpoint or wording.
+3. ChatGPT Business owns ordinary conversational reasoning for the primary path.
+4. Jason owns identity, authority, scope, policy, approvals, orchestration, provider boundaries, evidence, audit, and deterministic operational processing.
+5. Do not invoke a second Jason-hosted model merely to re-reason an ordinary ChatGPT MCP request.
+6. Provider collection completeness and pagination matter for exact answers.
+7. Model-facing excerpts are not substitutes for deterministic complete-data analysis.
+8. Provider documentation/schema is descriptive knowledge, not authority.
+9. New provider integration should expand governed capabilities rather than add question logic.
+10. System Registry observed state must not be promoted to verified/active without its defined lifecycle proof.
 
-`bash infrastructure/jason-teams-gateway/rollback-production.sh`
+## Known remaining work
 
-The cutover backup observed during the original 2026-08-15 proof was:
+MCP identity/workspace behavior is functionally proven, but formal roadmap closure should remain conservative until System Registry reconciliation and remaining negative/isolation evidence are represented durably.
 
-`/opt/jason/services/openclaw/docker-compose.yml.pre-jason-teams-20260815T173328Z`
+Cross-provider ChatGPT technician proof remains future work. Legacy conversational-stack simplification remains future work. Consequential MCP actions remain future work and require independent identity-first authorization, policy, approval, idempotency, precondition, evidence, audit, and recovery design.
 
-These are point-in-time proof values. Verify current state before future mutation.
-
-## Unresolved controls / risks
-
-1. **Teams gateway secret delivery:** the dedicated client credential is protected but still host-file based. Preferred long-term state is governed OpenBao/secret delivery or certificate/federated identity.
-2. **Dormant OpenClaw inbound Teams configuration:** OpenClaw no longer owns host `3978`, but its internal Teams provider remains configured. Disable inbound behavior only after confirming outbound/proactive dependencies.
-3. **Clarification continuation state:** stateless ambiguity clarification remains operational; short replies such as `LAN` still require separately governed continuation state before they may inherit earlier context.
-4. **Runtime concurrency topology:** the production runtime remains intentionally single-worker; future replicas require atomic shared idempotency state.
-5. **Consequential-action idempotency:** transport message idempotency does not replace capability/action/provider side-effect idempotency.
-6. **System Registry Datto read-surface completeness:** active Datto read capabilities should continue to be reconciled with current verified registry lifecycle rather than inferred from successful conversation alone.
-7. **Gateway capture helper event mismatch:** `jason-ops.sh capture` does not currently include `jason_teams_turn_failed_closed`, so gateway failure evidence can be omitted from standard capture output.
-8. **Dynamic capability selection:** the current dynamic planner is not yet a reliable replacement for the known-good non-dynamic baseline; real-catalog testing still selected alert history for the endpoint `last seen` request.
-9. **OpenClaw plugin-registry metadata warning and pre-existing approval-test debt:** remain separate controlled maintenance items.
-
-## Continuity rules now in force
-
-Future conversational/interface work must preserve:
-
-- one exclusive ordinary inbound transport owner before any model loop;
-- authenticated transport identity as evidence, not execution authority;
-- Jason identity/organization binding before execution;
-- exact-message idempotency before governed work begins;
-- provider-neutral resource/action interpretation;
-- Central Orchestrator as sole execution coordinator;
-- no direct agent-to-agent/provider/connector bypass;
-- deterministic authority/provider/evidence boundaries outside model discretion;
-- bounded model use only where explicitly allowed;
-- provider-derived evidence before operational assertions;
-- source attribution;
-- fail-closed behavior on identity, authority, planning, evidence, signature, or provider failure;
-- no bespoke one-off script merely because a new human wording appears;
-- rollback and verification before declaring transport topology changes complete;
-- a known-good live baseline after each major conversational architecture change.
+Runtime-side usage-attribution activation remains separate from the already deployed observational dashboard/exporter surface.
 
 ## Next safe actions
 
-1. Treat `docs/sessions/Teams-Conversation-Working-Baseline-Proof-2026-08-19.md` as the current live conversational checkpoint.
-2. Add/freeze automated regression coverage around the known-good non-dynamic conversation contract.
-3. Correct `jason-ops.sh capture` to include the gateway's actual failed-closed event.
-4. Reintroduce runtime capability discovery while retaining single-capability execution and without adding question-specific mappings.
-5. Re-run the live Teams baseline immediately after that one major change; revert or isolate if it breaks.
-6. Continue constitutional evolution only one major behavior at a time.
-7. Independently continue System Registry alignment and gateway credential hardening as governed infrastructure workstreams.
-
-## Documentation-complete condition for this workstream
-
-The Teams conversational baseline workstream is documentation-complete when a future operator/AI can determine without chat history:
-
-- which component owns ordinary Teams ingress;
-- which runtime mode is the known-good conversational baseline;
-- how that baseline was proven live;
-- which dynamic-planner experiments failed and must not be rediscovered;
-- how configuration-only transitions differ from source-code refreshes;
-- which capture/tooling defect can hide gateway failed-closed events;
-- the next single constitutional improvement to introduce;
-- how to verify, revert, and preserve a working baseline after each major change; and
-- which separate gateway hardening items remain outstanding.
+1. Complete documentation reconciliation on the isolated branch.
+2. Use `docs/architecture/J-103-System-Registry.md` and existing registry schemas/construction guidance to define MCP and observability registry entities.
+3. Add append-only lifecycle/verification evidence only for states actually supported by 2026-09-09 proof records.
+4. Regenerate `docs/operations/System-Registry-Current-Operational-State.md`.
+5. Run documentation-control, registry, generated-document, and relevant deterministic tests.
+6. Review the resulting diff before promotion.
+7. Only after documentation and operational-state truth agree should the next runtime-side attribution or provider-expansion workstream begin.
