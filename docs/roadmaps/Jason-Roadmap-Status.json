@@ -24,7 +24,7 @@
     {"id": "J-119", "title": "Event Model", "status": "complete", "phase": "Canonical Models"},
     {"id": "J-120", "title": "Organizational Model", "status": "complete", "phase": "Canonical Models"},
     {"id": "ORCH-005", "title": "Recovery eligibility assessment", "status": "paused", "phase": "Orchestration"},
-    {"id": "MCP-001", "title": "ChatGPT Business + Jason read-only MCP foundation", "status": "active", "phase": "Technician Experience"},
+    {"id": "MCP-001", "title": "ChatGPT Business + Jason read-only MCP foundation", "status": "complete", "phase": "Technician Experience"},
     {"id": "MCP-002", "title": "ChatGPT Business identity/workspace binding pilot", "status": "active", "phase": "Technician Experience"},
     {"id": "MCP-003", "title": "Cross-provider ChatGPT technician pilot", "status": "planned", "phase": "Technician Experience"},
     {"id": "MCP-004", "title": "Legacy conversational-stack simplification after MCP proof", "status": "planned", "phase": "Technician Experience"}

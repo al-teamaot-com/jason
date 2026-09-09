@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-09  
-**Status:** ChatGPT Business is the preferred primary technician conversational surface, with Jason exposed through a governed read-only MCP/tool boundary. The ChatGPT/Entra/MCP path is functionally and durably proven from committed source. Command Center usage/attribution telemetry is deployed and healthy. The current workstream is documentation and System Registry reconciliation before any further runtime activation.  
+**Status:** ChatGPT Business is the preferred primary technician conversational surface, with Jason exposed through a governed read-only MCP/tool boundary. The ChatGPT/Entra/MCP path is functionally and durably proven from committed source. Command Center usage/attribution telemetry is deployed and healthy. The MCP, public edge, and observability topology is now represented and verified in the governed System Registry. MCP-001 is complete; the next technician-experience workstream is the remaining MCP-002 identity/workspace isolation proof.  
 **Canonical purpose:** Human-readable resume point. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
 
 ## Read first
@@ -14,13 +14,14 @@
 6. `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
 7. `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
 8. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
-9. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
-10. `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`
-11. `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`
-12. `docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md`
-13. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
-14. `docs/control/DOCUMENTATION-REGISTER.md`
-15. current Git and System Registry/host evidence before asserting volatile production state
+9. `docs/operations/System-Registry-Current-Operational-State.md`
+10. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
+11. `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`
+12. `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`
+13. `docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md`
+14. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+15. `docs/control/DOCUMENTATION-REGISTER.md`
+16. current Git and fresh host evidence before asserting volatile production state
 
 Conversation memory is context only. It is not authority.
 
@@ -93,32 +94,55 @@ Later telemetry source work is represented by:
 
 The scoped Showcase Telemetry validation is green at that source checkpoint. The later source has not been used to replace the accepted live dashboard worktree or activate runtime-side attribution instrumentation.
 
+### System Registry reconciliation
+
+The 2026-09-09 MCP and observability reconciliation is represented by governed registry entities and append-only verification events.
+
+The current generated operational view contains `31` registered entities with effective lifecycle counts:
+
+- `verified=14`
+- `configured=4`
+- `registered=13`
+
+New verified topology includes:
+
+- `resource.aws-zerotier-relay`
+- `component.jason-mcp`
+- `component.jason-usage-exporter`
+- `component.jason-usage-attribution-exporter`
+- `component.jason-prometheus`
+- `component.jason-grafana`
+- `deployment.jason-chatgpt-mcp-observability-pilot`
+
+The new deployment is modeled as an extension of the previously verified single-host pilot rather than rewriting the historical Teams/OpenClaw deployment declaration.
+
+MCP-001 — ChatGPT Business + Jason read-only MCP foundation — is therefore complete.
+
 ## Current workstream
 
-The active workstream is **documentation and System Registry reconciliation**.
+The active technician-experience workstream is **MCP-002 — ChatGPT Business identity/workspace binding pilot**.
 
-The architecture decision is already made. Do not resume expansion of the legacy custom conversation stack merely because older Conversation Experience tests remain in the repository. Do not perform another runtime deployment merely to make documentation match what happens to be running.
+The positive path is already proven: ChatGPT authenticates through Entra, discovers the intended three-tool read-only surface, and completes governed live reads.
 
-Required sequence:
+The remaining work is to preserve durable negative/isolation evidence for the identity/workspace boundary before calling MCP-002 complete. This should use the existing read-only service and must not introduce a write surface or direct provider bypass.
 
-1. restore the September ChatGPT/MCP governing documents to the active source lineage;
-2. classify dated MCP proof records under `docs/sessions/`;
-3. preserve final Issue #166 durability acceptance;
-4. preserve Command Center/usage-attribution deployment proof;
-5. reconcile the System Registry using J-103 lifecycle and verification rules;
-6. regenerate its human-readable operational view;
-7. run documentation/System Registry validation;
-8. only then choose the next engineering/runtime workstream.
+Do not resume expansion of the legacy custom conversation stack merely because older Conversation Experience tests remain in the repository.
+
+Do not perform a runtime rebuild merely because later attribution instrumentation exists in source. Runtime-side attribution activation remains a separate governed decision.
 
 ## Production/runtime boundary
 
 ### ChatGPT / MCP
 
-The read-only Jason MCP service is live and functionally/durably proven. It remains an interface adapter and capability projection layer, not a second Central Orchestrator, provider client, unrestricted API proxy, secret broker, write authority, or replacement for Jason governance.
+The read-only Jason MCP service is live, source-durable, publicly accepted, and represented as a verified System Registry component. It remains an interface adapter and capability projection layer, not a second Central Orchestrator, provider client, unrestricted API proxy, secret broker, write authority, or replacement for Jason governance.
+
+### Public edge
+
+The existing AWS Caddy/ZeroTier relay is represented as `resource.aws-zerotier-relay` and verified from the September 8/9 edge and MCP acceptance evidence. It remains the public ingress relay for the separately named Teams and MCP routes.
 
 ### Jason Runtime
 
-`jason-runtime` remains the governed execution/orchestration boundary. The 2026-09-09 reconciliation snapshot observed it healthy. No runtime rebuild or restart is authorized by this documentation update.
+`jason-runtime` remains the governed execution/orchestration boundary. The 2026-09-09 reconciliation snapshot observed it healthy. No runtime rebuild or restart was required by the documentation or System Registry reconciliation.
 
 ### Teams
 
@@ -130,15 +154,17 @@ OpenClaw remains deployed for independently justified secondary functions. It is
 
 ### Observability
 
-Prometheus, Grafana, the model/API usage exporter, and the usage-attribution exporter are observational surfaces. They do not grant execution authority.
+Prometheus, Grafana, the model/API usage exporter, and the usage-attribution exporter are now represented as verified observational components in the System Registry. They do not grant execution authority.
 
-## System Registry reconciliation gap
+## System Registry reconciliation state
 
-The current System Registry predates the final MCP and usage-attribution deployment state. The 2026-09-09 host reconciliation observed that the registry does not yet represent the currently running MCP and observability components.
+The MCP and current observability topology reconciliation is complete for the evidence available on 2026-09-09.
 
-Do not fix this by simply labeling observed processes `active`. J-103 requires stable entity identifiers, declared state, dependencies, stewardship, authority references, verification methods, evidence references, lifecycle transitions, and verification evidence.
+The registry deliberately records these entities as `configured` baseline declarations with append-only transitions to effective `verified` state. It does not call them `active`; `verified` means the registered verification method is satisfied by governed evidence.
 
-Until reconciliation is complete, MCP-001 should remain an active engineering milestone even though its protocol, durability, OAuth, edge, and governed read behavior are functionally proven.
+The reconciliation does not claim that unrelated logical providers, capabilities, identity bindings, or governance gates are verified merely because the physical topology is healthy.
+
+The generated human view remains subordinate to the machine-readable registry and lifecycle history.
 
 ## Source/worktree safety
 
@@ -146,7 +172,7 @@ The primary worktree `/home/al/projects/jason` contains unrelated active develop
 
 The accepted live monitoring worktree `/home/al/projects/jason-dashboard-usage-telemetry-20260909` must remain at `ecc265ee59645154f0bc86b5aa0dc5a2e375f022` unless a separate governed dashboard deployment is approved.
 
-Documentation reconciliation must use an isolated worktree/branch.
+Documentation/System Registry reconciliation uses isolated Git branches and does not require touching either protected worktree.
 
 ## Documentation classification correction
 
@@ -167,18 +193,21 @@ Several September 9 MCP proof records were historically committed on another bra
 
 ## Known remaining work
 
-MCP identity/workspace behavior is functionally proven, but formal roadmap closure should remain conservative until System Registry reconciliation and remaining negative/isolation evidence are represented durably.
+MCP-002 remains active until negative/isolation behavior for the ChatGPT/Entra/workspace identity boundary is durably proven.
 
-Cross-provider ChatGPT technician proof remains future work. Legacy conversational-stack simplification remains future work. Consequential MCP actions remain future work and require independent identity-first authorization, policy, approval, idempotency, precondition, evidence, audit, and recovery design.
+MCP-003 cross-provider ChatGPT technician proof remains planned.
+
+MCP-004 legacy conversational-stack simplification remains planned.
+
+Consequential MCP actions remain future work and require independent identity-first authorization, policy, approval, idempotency, precondition, evidence, audit, and recovery design.
 
 Runtime-side usage-attribution activation remains separate from the already deployed observational dashboard/exporter surface.
 
 ## Next safe actions
 
-1. Complete documentation reconciliation on the isolated branch.
-2. Use `docs/architecture/J-103-System-Registry.md` and existing registry schemas/construction guidance to define MCP and observability registry entities.
-3. Add append-only lifecycle/verification evidence only for states actually supported by 2026-09-09 proof records.
-4. Regenerate `docs/operations/System-Registry-Current-Operational-State.md`.
-5. Run documentation-control, registry, generated-document, and relevant deterministic tests.
-6. Review the resulting diff before promotion.
-7. Only after documentation and operational-state truth agree should the next runtime-side attribution or provider-expansion workstream begin.
+1. Validate the isolated System Registry reconciliation branch with repository CI, including schema/lifecycle tests and generated-document freshness.
+2. Keep documentation PR #169 separate from the registry reconciliation so authority/evidence changes remain reviewable in sequence.
+3. After the documentation and registry branches are accepted in order, execute the remaining MCP-002 negative/isolation proof using the existing read-only MCP surface.
+4. Preserve evidence for unknown/unbound identity, invalid tenant/workspace context, missing authority, and client/scope isolation to the extent those cases can be safely exercised in the current Business/Entra pilot.
+5. Do not introduce write tools while completing MCP-002.
+6. Only after MCP-002 is closed should MCP-003 cross-provider technician proof become the primary technician-experience workstream.
