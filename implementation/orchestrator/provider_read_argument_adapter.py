@@ -103,6 +103,7 @@ def _canonical_filters(
         "filters",
         "page_number",
         "page_size",
+        "after_resource_id",
     }
     ignored.update(excluded)
     for key, value in arguments.items():
@@ -160,6 +161,21 @@ def _autotask_max_records(arguments: Mapping[str, Any]) -> int:
     return maximum
 
 
+def _autotask_after_resource_id(arguments: Mapping[str, Any]) -> int | None:
+    value = arguments.get("after_resource_id")
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("after_resource_id must be a positive integer")
+    try:
+        resource_id = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("after_resource_id must be a positive integer") from error
+    if resource_id < 1:
+        raise ValueError("after_resource_id must be a positive integer")
+    return resource_id
+
+
 def _autotask_search(
     capability_name: str,
     arguments: Mapping[str, Any],
@@ -183,6 +199,18 @@ def _autotask_search(
         if not field_name:
             raise ValueError("Autotask filter field names must be non-empty")
         clauses.append({"op": "eq", "field": field_name, "value": value})
+
+    after_resource_id = _autotask_after_resource_id(arguments)
+    if after_resource_id is not None:
+        if arguments.get("resource_id") is not None or any(
+            item["field"] == "id" for item in clauses
+        ):
+            raise ValueError(
+                "after_resource_id cannot be combined with an exact id selector"
+            )
+        clauses.append(
+            {"op": "gt", "field": "id", "value": after_resource_id}
+        )
 
     for selector, provider_field in _AUTOTASK_SEARCH_FIELDS[capability_name].items():
         value = arguments.get(selector)
