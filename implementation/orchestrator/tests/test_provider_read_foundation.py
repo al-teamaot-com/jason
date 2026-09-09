@@ -10,6 +10,7 @@ from kernel.execution_providers import (
     ExecutionProviderRegistryService,
     InMemoryExecutionProviderRegistry,
     ProviderApproval,
+    ProviderCandidateQuery,
     ProviderHealth,
     ProviderLifecycle,
 )
@@ -73,6 +74,25 @@ def test_provider_read_foundation_is_read_only_pilot_until_live_acceptance() -> 
     assert autotask.health_status is ProviderHealth.UNKNOWN
     assert itg.metadata["activation_state"] == "awaiting_provider_backed_acceptance"
     assert autotask.metadata["activation_state"] == "awaiting_provider_backed_acceptance"
+
+
+def test_planned_provider_reads_cannot_be_selected_even_when_pilot_is_allowed() -> None:
+    _, providers = _services()
+
+    for capability in (
+        DOCUMENTATION_ORGANIZATION_SEARCH,
+        SERVICE_TICKET_SEARCH,
+    ):
+        candidates = providers.find_candidates(
+            ProviderCandidateQuery(
+                capability=capability,
+                execution_mode="deterministic",
+                classification="internal",
+                include_warning=True,
+                allow_pilot=True,
+            )
+        )
+        assert candidates == ()
 
 
 def test_integration_broker_accepts_it_glue_and_autotask_manifests() -> None:
