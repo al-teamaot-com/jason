@@ -184,7 +184,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized IT documentation organization records.",
             resource_types="documentation_organization,organization",
             operation="search",
-            selector_keys="name,resource_id",
+            selector_keys="name,resource_id,filters,page_number,page_size",
             fact_hints="organization,client,company,name,organization id",
             authoritative_change_sources=itg,
             collection_fact="organizations",
@@ -207,7 +207,9 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized IT documentation contacts.",
             resource_types="documentation_contact,contact",
             operation="search",
-            selector_keys="organization_id,name,email,resource_id",
+            selector_keys=(
+                "organization_id,name,resource_id,filters,page_number,page_size"
+            ),
             fact_hints="contact,contacts,user,email,phone,title,organization",
             authoritative_change_sources=itg,
             collection_fact="contacts",
@@ -230,7 +232,9 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized IT documentation locations.",
             resource_types="documentation_location,location",
             operation="search",
-            selector_keys="organization_id,name,resource_id",
+            selector_keys=(
+                "organization_id,name,resource_id,filters,page_number,page_size"
+            ),
             fact_hints="location,locations,address,site,office,organization",
             authoritative_change_sources=itg,
             collection_fact="locations",
@@ -253,7 +257,9 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized IT Glue configuration records.",
             resource_types="documentation_configuration,configuration",
             operation="search",
-            selector_keys="organization_id,name,resource_id",
+            selector_keys=(
+                "organization_id,name,resource_id,filters,page_number,page_size"
+            ),
             fact_hints=(
                 "configuration,configurations,device,asset,serial number,model,"
                 "manufacturer,operating system,organization"
@@ -282,7 +288,9 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized service-management company records.",
             resource_types="service_company,organization",
             operation="search",
-            selector_keys="name,resource_id,filters",
+            selector_keys=(
+                "name,resource_id,filters,page_size,after_resource_id"
+            ),
             fact_hints="company,client,organization,account,status,phone,address",
             authoritative_change_sources=at,
             collection_fact="companies",
@@ -305,7 +313,10 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized service-management contacts.",
             resource_types="service_contact,contact",
             operation="search",
-            selector_keys="company_id,name,email,resource_id,filters",
+            selector_keys=(
+                "company_id,first_name,last_name,email,resource_id,filters,"
+                "page_size,after_resource_id"
+            ),
             fact_hints="contact,contacts,user,email,phone,title,company",
             authoritative_change_sources=at,
             collection_fact="contacts",
@@ -328,7 +339,10 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized service-management tickets.",
             resource_types="service_ticket,ticket",
             operation="search",
-            selector_keys="ticket_number,company_id,status,resource_id,filters",
+            selector_keys=(
+                "ticket_number,company_id,status,resource_id,filters,page_size,"
+                "after_resource_id"
+            ),
             fact_hints=(
                 "ticket,tickets,ticket number,title,status,queue,priority,assigned,"
                 "due date,issue,description,company"
@@ -369,7 +383,9 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized service-management configuration items.",
             resource_types="service_configuration,configuration",
             operation="search",
-            selector_keys="company_id,name,resource_id,filters",
+            selector_keys=(
+                "company_id,name,resource_id,filters,page_size,after_resource_id"
+            ),
             fact_hints=(
                 "configuration item,configuration items,device,asset,serial number,"
                 "reference name,product,company,status"
