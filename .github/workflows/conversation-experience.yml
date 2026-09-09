@@ -1,0 +1,115 @@
+name: Validate Conversation Experience Foundation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conversation-experience:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile conversation foundation
+        run: |
+          python -m compileall -q \
+            implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/conversation_interpretation_quality.py \
+            implementation/orchestrator/model_runtime_adapter.py \
+            implementation/orchestrator/openai_reasoning.py \
+            implementation/orchestrator/information_fulfillment.py \
+            implementation/orchestrator/information_need_intent.py \
+            implementation/orchestrator/conversation_experience.py \
+            implementation/orchestrator/evidence_gap_fulfillment.py \
+            implementation/orchestrator/evidence_reference.py \
+            implementation/orchestrator/conversation_evidence_reasoning.py \
+            implementation/orchestrator/conversation_evidence_support.py \
+            implementation/orchestrator/conversation_resource_observation.py \
+            implementation/orchestrator/conversation_answer.py \
+            implementation/orchestrator/conversation_text_quality.py \
+            implementation/orchestrator/progressive_conversation_read.py \
+            implementation/orchestrator/teams_conversation_experience.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_application.py \
+            implementation/runtime_service/src/jason_runtime/main.py \
+            implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_applicability.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_verdict.py \
+            implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
+            implementation/orchestrator/tests/test_model_runtime_adapter.py \
+            implementation/orchestrator/tests/test_openai_reasoning.py \
+            implementation/orchestrator/tests/test_information_fulfillment.py \
+            implementation/orchestrator/tests/test_information_need_intent.py \
+            implementation/orchestrator/tests/test_conversation_experience.py \
+            implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
+            implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
+            implementation/orchestrator/tests/test_conversation_evidence_support.py \
+            implementation/orchestrator/tests/test_conversation_resource_observation.py \
+            implementation/orchestrator/tests/test_conversation_answer.py \
+            implementation/orchestrator/tests/test_conversation_answer_review_contract.py \
+            implementation/orchestrator/tests/test_conversation_text_quality.py \
+            implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
+            implementation/orchestrator/tests/test_teams_conversation_experience.py \
+            implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_model_adapter.py \
+            implementation/runtime_service/tests/test_conversation_experience_application.py
+      - name: Test model-independent conversation and progressive fulfillment
+        run: |
+          python -m pytest \
+            implementation/orchestrator/tests/test_conversation_kernel.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_quality.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_applicability.py \
+            implementation/orchestrator/tests/test_conversation_interpretation_review_verdict.py \
+            implementation/orchestrator/tests/test_conversation_resource_kind_contract.py \
+            implementation/orchestrator/tests/test_model_runtime_adapter.py \
+            implementation/orchestrator/tests/test_openai_reasoning.py \
+            implementation/orchestrator/tests/test_information_fulfillment.py \
+            implementation/orchestrator/tests/test_information_need_intent.py \
+            implementation/orchestrator/tests/test_conversation_experience.py \
+            implementation/orchestrator/tests/test_evidence_gap_fulfillment.py \
+            implementation/orchestrator/tests/test_conversation_evidence_reasoning.py \
+            implementation/orchestrator/tests/test_conversation_evidence_support.py \
+            implementation/orchestrator/tests/test_conversation_resource_observation.py \
+            implementation/orchestrator/tests/test_conversation_answer.py \
+            implementation/orchestrator/tests/test_conversation_answer_review_contract.py \
+            implementation/orchestrator/tests/test_conversation_text_quality.py \
+            implementation/orchestrator/tests/test_progressive_conversation_read.py \
+            implementation/orchestrator/tests/test_progressive_conversation_context_observation.py \
+            implementation/orchestrator/tests/test_teams_conversation_experience.py \
+            implementation/runtime_service/tests/test_conversation_experience_cutover.py \
+            implementation/runtime_service/tests/test_conversation_experience_model_adapter.py \
+            implementation/runtime_service/tests/test_conversation_experience_application.py \
+            -q
+      - name: Reject triggering-example production mappings
+        shell: bash
+        run: |
+          ! grep -RInE \
+            'AOT-50107|lastLoggedInUser|question.?to.?field|phrase.?to.?provider' \
+            implementation/orchestrator/conversation_kernel.py \
+            implementation/orchestrator/conversation_interpretation_quality.py \
+            implementation/orchestrator/model_runtime_adapter.py \
+            implementation/orchestrator/openai_reasoning.py \
+            implementation/orchestrator/information_fulfillment.py \
+            implementation/orchestrator/information_need_intent.py \
+            implementation/orchestrator/conversation_experience.py \
+            implementation/orchestrator/evidence_gap_fulfillment.py \
+            implementation/orchestrator/conversation_evidence_reasoning.py \
+            implementation/orchestrator/conversation_evidence_support.py \
+            implementation/orchestrator/conversation_resource_observation.py \
+            implementation/orchestrator/conversation_answer.py \
+            implementation/orchestrator/conversation_text_quality.py \
+            implementation/orchestrator/progressive_conversation_read.py \
+            implementation/orchestrator/teams_conversation_experience.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py \
+            implementation/runtime_service/src/jason_runtime/conversation_experience_application.py

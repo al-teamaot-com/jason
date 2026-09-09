@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
+import ssl
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -11,6 +13,31 @@ from urllib import error, parse, request
 
 
 PROVIDERS: dict[str, dict[str, object]] = {
+    "openai": {
+        "logical_name": "openai.semantic_intent",
+        "secret_path": "secret/data/providers/openai/production/semantic-intent",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-openai-semantic-intent-read",
+        "role_name": "jason-openai-semantic-intent-read",
+        "connector_identity": "openai-semantic-intent",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/"
+            "openai-semantic-intent-approle"
+        ),
+    },
+    "aws_ses": {
+        "logical_name": "aws_ses.sendmail",
+        "secret_path": "secret/data/connectors/aws-ses/production/sendmail",
+        "fields": ("access_key_id", "secret_access_key", "session_token"),
+        "required_fields": ("access_key_id", "secret_access_key"),
+        "policy_name": "jason-aws-ses-sendmail-read",
+        "role_name": "jason-aws-ses-sendmail-read",
+        "connector_identity": "aws-ses-sendmail",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/aws-ses-sendmail-approle"
+        ),
+    },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
         "secret_path": "secret/data/connectors/datto-rmm/production/read-only",
@@ -31,6 +58,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "connector_identity": "itglue-read",
         "credential_dir": Path(
             "/opt/jason/bootstrap/secrets/openbao/itglue-read-approle"
+        ),
+    },
+    "microsoft_graph": {
+        "logical_name": "microsoft_graph.directory_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/directory-read",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-directory-read",
+        "role_name": "jason-microsoft-graph-directory-read",
+        "connector_identity": "microsoft-graph-directory-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-directory-read-approle"
         ),
     },
 }
@@ -107,16 +150,50 @@ def provider_policy_text(provider: str) -> str:
     )
 
 
+def _collect_microsoft_graph_values() -> dict[str, str]:
+    key_path = Path(
+        input("microsoft_graph private key PEM path: ").strip()
+    )
+    certificate_path = Path(
+        input("microsoft_graph certificate PEM path: ").strip()
+    )
+    try:
+        private_key_pem = key_path.read_text(encoding="utf-8").strip()
+        certificate_pem = certificate_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ProvisionError("Microsoft certificate source file is unavailable.") from exc
+    if "PRIVATE KEY" not in private_key_pem:
+        raise ProvisionError("Microsoft private key PEM is invalid.")
+    if "BEGIN CERTIFICATE" not in certificate_pem:
+        raise ProvisionError("Microsoft certificate PEM is invalid.")
+    try:
+        der = ssl.PEM_cert_to_DER_cert(certificate_pem)
+    except ValueError as exc:
+        raise ProvisionError("Microsoft certificate PEM could not be parsed.") from exc
+    thumbprint = hashlib.sha1(der).hexdigest().upper()
+    return {
+        "private_key_pem": private_key_pem,
+        "certificate_pem": certificate_pem,
+        "certificate_thumbprint": thumbprint,
+        "generation": f"sha1:{thumbprint}",
+    }
+
+
 def collect_values(provider: str) -> dict[str, str]:
+    if provider == "microsoft_graph":
+        return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
-    for field in tuple(PROVIDERS[provider]["fields"]):
+    spec = PROVIDERS[provider]
+    required_fields = set(spec.get("required_fields", spec["fields"]))
+    for field in tuple(spec["fields"]):
         if field.endswith("url"):
             value = input(f"{provider} {field}: ").strip()
         else:
             value = getpass.getpass(f"{provider} {field}: ").strip()
-        if not value:
+        if not value and field in required_fields:
             raise ProvisionError(f"Required provider field is empty: {field}")
-        values[field] = value
+        if value:
+            values[field] = value
     return values
 
 
@@ -275,15 +352,19 @@ def write_provider_secret(
 ) -> None:
     spec = PROVIDERS[provider]
     expected = tuple(spec["fields"])
-    missing = [field for field in expected if not values.get(field)]
+    required = tuple(spec.get("required_fields", expected))
+    missing = [field for field in required if not values.get(field)]
+    unexpected = sorted(set(values) - set(expected))
     if missing:
         raise ProvisionError("Missing provider fields: " + ", ".join(missing))
+    if unexpected:
+        raise ProvisionError("Unexpected provider fields: " + ", ".join(unexpected))
     api_request(
         address,
         str(spec["secret_path"]),
         method="POST",
         token=admin_token,
-        payload={"data": {field: values[field] for field in expected}},
+        payload={"data": {field: values[field] for field in expected if field in values}},
         allow_empty=True,
     )
 
@@ -324,6 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "logical_name": spec["logical_name"],
                     "secret_path": spec["secret_path"],
                     "fields": list(spec["fields"]),
+                    "required_fields": list(spec.get("required_fields", spec["fields"])),
                     "policy_name": spec["policy_name"],
                     "role_name": spec["role_name"],
                     "credential_dir": str(spec["credential_dir"]),

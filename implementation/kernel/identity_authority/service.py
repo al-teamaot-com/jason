@@ -26,6 +26,23 @@ class AuthorityGrantRepository(Protocol):
     def list_for_subject(self, subject_id: str) -> tuple[AuthorityGrant, ...]: ...
 
 
+class AuthorityCapabilityMatcher(Protocol):
+    """Evaluate non-exact governed capability grant expressions.
+
+    Exact capability grants remain native JKD-001 behavior. A matcher may only
+    broaden capability matching when explicitly injected by the composition
+    root. Identity, organization, client scope, permission ceiling, approval,
+    status, and effective-time controls remain enforced by JKD-001.
+    """
+
+    def matches(
+        self,
+        *,
+        grant: AuthorityGrant,
+        request: AuthorityRequest,
+    ) -> bool: ...
+
+
 class ApprovalRepository(Protocol):
     def get(self, approval_id: str) -> ApprovalRecord | None: ...
 
@@ -54,6 +71,7 @@ class IdentityAuthorityService:
     grants: AuthorityGrantRepository
     approvals: ApprovalRepository
     contexts: ContextRepository | None = None
+    capability_matcher: AuthorityCapabilityMatcher | None = None
     audit: AuthorityAuditSink | None = None
     context_lifetime: timedelta = timedelta(minutes=5)
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -77,9 +95,17 @@ class IdentityAuthorityService:
                 ("ORGANIZATION_SCOPE_MISMATCH",),
             ))
 
+        policy_subject = f"organization:{request.organization_id}"
+
+        grants_by_id = {
+            grant.grant_id: grant
+            for subject_id in (request.principal_id, policy_subject)
+            for grant in self.grants.list_for_subject(subject_id)
+        }
+
         candidates = tuple(
             grant
-            for grant in self.grants.list_for_subject(request.principal_id)
+            for grant in grants_by_id.values()
             if self._grant_matches(grant, request, now)
         )
         if not candidates:
@@ -139,16 +165,38 @@ class IdentityAuthorityService:
             approval_required=approval_required,
         )
 
-    @staticmethod
-    def _grant_matches(grant: AuthorityGrant, request: AuthorityRequest, now: datetime) -> bool:
-        if grant.status != "active" or grant.capability != request.capability:
+    def _grant_matches(
+        self,
+        grant: AuthorityGrant,
+        request: AuthorityRequest,
+        now: datetime,
+    ) -> bool:
+        if grant.status != "active":
             return False
-        if grant.organization_id != request.organization_id or grant.client_id != request.client_id:
+
+        capability_matches = grant.capability == request.capability
+
+        if not capability_matches and self.capability_matcher is not None:
+            capability_matches = self.capability_matcher.matches(
+                grant=grant,
+                request=request,
+            )
+
+        if not capability_matches:
             return False
+
+        if (
+            grant.organization_id != request.organization_id
+            or grant.client_id != request.client_id
+        ):
+            return False
+
         if grant.effective_from is not None and now < grant.effective_from:
             return False
+
         if grant.effective_until is not None and now >= grant.effective_until:
             return False
+
         return True
 
     @staticmethod

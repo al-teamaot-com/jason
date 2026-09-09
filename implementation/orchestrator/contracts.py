@@ -55,7 +55,6 @@ class OrchestrationRequest:
     organization_id: str
     capability_name: str
     capability_version: str | None
-    # Execution strategy used by capability/provider resolution, e.g. deterministic.
     requested_mode: str
     orchestration_mode: OrchestrationMode
     authority_allowed: bool
@@ -69,11 +68,11 @@ class OrchestrationRequest:
     policy_ids: tuple[str, ...] = ()
     artifact_references: tuple[ArtifactReference, ...] = ()
     requester_kind: str = "human"
-    # Human/service authority mode is intentionally separate from execution strategy.
     permission_mode: str = "observe"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
     authority_context_id: str | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -94,6 +93,8 @@ class OrchestrationRequest:
             raise ValueError("capability_version must be non-empty when provided.")
         if self.authority_context_id is not None and not self.authority_context_id.strip():
             raise ValueError("authority_context_id must be non-empty when provided.")
+        if self.idempotency_key is not None and not self.idempotency_key.strip():
+            raise ValueError("idempotency_key must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
         if self.permission_mode not in {

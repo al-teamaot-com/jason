@@ -3,6 +3,8 @@ from decimal import Decimal
 
 import pytest
 
+from .adapters import from_openai_response
+
 from .contracts import (
     AttemptOutcome,
     CostUsage,
@@ -12,7 +14,7 @@ from .contracts import (
     UsageEntry,
     UsageSource,
 )
-from .ledger import DuplicateAttemptError, InMemoryUsageLedger, ScopeError
+from .ledger import DuplicateAttemptError, InMemoryUsageLedger, SQLiteUsageLedger, ScopeError
 
 
 def context(attempt_id: str, *, organization_id: str = "aot") -> UsageContext:
@@ -124,3 +126,64 @@ def test_unknown_usage_attempt_is_visible() -> None:
 
     assert totals.attempts == 1
     assert totals.unknown_usage_attempts == 1
+
+
+def test_sqlite_ledger_survives_restart(tmp_path) -> None:
+    path = tmp_path / "model-usage.sqlite3"
+    ledger = SQLiteUsageLedger(path)
+    ledger.append(entry("attempt-1"))
+    ledger.close()
+
+    reopened = SQLiteUsageLedger(path)
+    totals = reopened.totals(organization_id="aot", workflow_id="wf-1")
+    reopened.close()
+
+    assert totals.attempts == 1
+    assert totals.total_tokens == 15
+    assert totals.provider_reported_cost == Decimal("0.01")
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_sqlite_ledger_preserves_idempotency_and_adjustments(tmp_path) -> None:
+    ledger = SQLiteUsageLedger(tmp_path / "model-usage.sqlite3")
+    original = entry("attempt-1")
+    ledger.append(original)
+    ledger.append(original)
+    ledger.append_adjustment(
+        UsageAdjustment(
+            adjustment_id="adjustment-1",
+            original_entry_id=original.entry_id,
+            organization_id="aot",
+            reason="provider reconciliation",
+            created_at=datetime.now(timezone.utc),
+            replacement_tokens=TokenUsage(input_tokens=12, output_tokens=5, total_tokens=17),
+            replacement_cost=CostUsage(provider_reported_cost=Decimal("0.015")),
+        )
+    )
+
+    totals = ledger.totals(organization_id="aot")
+    ledger.close()
+
+    assert totals.attempts == 1
+    assert totals.total_tokens == 17
+    assert totals.provider_reported_cost == Decimal("0.015")
+
+
+def test_openai_usage_calculates_uncached_cached_and_output_cost() -> None:
+    recorded = from_openai_response(
+        context=context("attempt-priced"),
+        model="gpt-5.4-mini",
+        response={
+            "usage": {
+                "input_tokens": 1_000_000,
+                "input_tokens_details": {"cached_tokens": 200_000},
+                "output_tokens": 100_000,
+                "total_tokens": 1_100_000,
+            }
+        },
+        input_cost_per_million_tokens=Decimal("0.75"),
+        cached_input_cost_per_million_tokens=Decimal("0.075"),
+        output_cost_per_million_tokens=Decimal("4.50"),
+    )
+
+    assert recorded.cost.calculated_cost == Decimal("1.065")

@@ -28,6 +28,7 @@ class CapabilityResolutionStatus(str, Enum):
     INELIGIBLE_LIFECYCLE = "ineligible_lifecycle"
     EXECUTION_MODE_PROHIBITED = "execution_mode_prohibited"
     ISOLATION_CONTEXT_MISSING = "isolation_context_missing"
+    IDEMPOTENCY_KEY_MISSING = "idempotency_key_missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class CapabilityResolutionRequest:
     policy_ids: tuple[str, ...] = ()
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -82,6 +84,11 @@ class CapabilityResolutionRequest:
         if self.region is not None and not self.region.strip():
             raise ValueError(
                 "region must be non-empty when provided."
+            )
+
+        if self.idempotency_key is not None and not self.idempotency_key.strip():
+            raise ValueError(
+                "idempotency_key must be non-empty when provided."
             )
 
 

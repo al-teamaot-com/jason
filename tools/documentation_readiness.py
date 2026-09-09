@@ -41,7 +41,7 @@ class DocumentationReadinessGate:
             raise DocumentationReadinessError("Release name must not be empty.")
 
         matches: list[DocumentationReadinessResult] = []
-        milestone_root = self._repository_root / "10-Milestones"
+        milestone_root = self._repository_root / "docs" / "milestones"
         for record_path in sorted(milestone_root.glob("*.md")):
             content = record_path.read_text(encoding="utf-8")
             fields = {
@@ -85,7 +85,8 @@ class DocumentationReadinessGate:
         if not navigation.is_file():
             raise DocumentationReadinessError("mkdocs.yml is missing.")
         content = navigation.read_text(encoding="utf-8")
-        if relative_path.as_posix() not in content:
+        nav_path = relative_path.as_posix().removeprefix("docs/")
+        if nav_path not in content:
             raise DocumentationReadinessError(
                 f"Release record is not included in MkDocs navigation: {relative_path}"
             )

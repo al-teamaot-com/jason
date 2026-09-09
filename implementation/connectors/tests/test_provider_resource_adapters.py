@@ -98,19 +98,42 @@ def test_datto_device_and_related_resource_translation() -> None:
     assert jobs.arguments == {"device_uid": "device-123"}
 
 
-def test_datto_device_query_preserves_bounded_page_size() -> None:
+def test_datto_device_query_preserves_ambiguity_and_resource_selectors() -> None:
     invocation = translate_datto_rmm_resource(
         ResourceQuery(
             provider="datto_rmm",
             resource_type="device",
             operation=ResourceOperation.QUERY,
             organization_id="aot",
-            filters={},
+            filters={"hostname": "SERVER", "site": "Customer-B"},
             page_size=1,
         )
     )
     assert invocation.capability == "datto_rmm.device.search"
-    assert invocation.arguments == {"search": "", "page": 1, "max": 1}
+    assert invocation.arguments == {
+        "page": 1,
+        "hostname": "SERVER",
+        "site": "Customer-B",
+        "max": 2,
+    }
+
+
+def test_datto_legacy_search_filter_maps_to_hostname_without_first_match_semantics() -> None:
+    invocation = translate_datto_rmm_resource(
+        ResourceQuery(
+            provider="datto_rmm",
+            resource_type="device",
+            operation=ResourceOperation.QUERY,
+            organization_id="aot",
+            filters={"search": "SERVER"},
+            page_size=25,
+        )
+    )
+    assert invocation.arguments == {
+        "page": 1,
+        "hostname": "SERVER",
+        "max": 25,
+    }
 
 
 def test_adapter_fails_closed_for_untranslated_operation() -> None:

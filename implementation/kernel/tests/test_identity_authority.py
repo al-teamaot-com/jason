@@ -197,3 +197,81 @@ def test_durable_context_rejects_scope_reuse(tmp_path):
     ))
     assert result.valid is False
     assert result.reason_code == "EXECUTION_CONTEXT_SCOPE_MISMATCH"
+
+
+def test_organization_policy_subject_can_supply_matching_authority() -> None:
+    identities = InMemoryIdentityRepository()
+    identities.put(IdentityRecord("person-al", "person", "aot"))
+
+    grants = InMemoryAuthorityGrantRepository()
+    grants.put(
+        AuthorityGrant(
+            grant_id="grant-aot-policy",
+            subject_id="organization:aot",
+            capability="endpoint.device.search",
+            organization_id="aot",
+            client_id="client-1",
+            permission=PermissionMode.OBSERVE,
+        )
+    )
+
+    service = IdentityAuthorityService(
+        identities=identities,
+        grants=grants,
+        approvals=InMemoryApprovalRepository(),
+    )
+
+    result = service.evaluate(
+        AuthorityRequest(
+            request_id="req-org-policy-1",
+            correlation_id="corr-org-policy-1",
+            principal_id="person-al",
+            organization_id="aot",
+            client_id="client-1",
+            capability="endpoint.device.search",
+            requested_mode=PermissionMode.OBSERVE,
+            authentication_assurance="high",
+        )
+    )
+
+    assert result.outcome is AuthorityOutcome.ALLOWED
+    assert result.matched_grants == ("grant-aot-policy",)
+
+
+def test_other_organization_policy_subject_does_not_grant_authority() -> None:
+    identities = InMemoryIdentityRepository()
+    identities.put(IdentityRecord("person-al", "person", "aot"))
+
+    grants = InMemoryAuthorityGrantRepository()
+    grants.put(
+        AuthorityGrant(
+            grant_id="grant-other-policy",
+            subject_id="organization:other",
+            capability="endpoint.device.search",
+            organization_id="aot",
+            client_id="client-1",
+            permission=PermissionMode.OBSERVE,
+        )
+    )
+
+    service = IdentityAuthorityService(
+        identities=identities,
+        grants=grants,
+        approvals=InMemoryApprovalRepository(),
+    )
+
+    result = service.evaluate(
+        AuthorityRequest(
+            request_id="req-other-org-policy-1",
+            correlation_id="corr-other-org-policy-1",
+            principal_id="person-al",
+            organization_id="aot",
+            client_id="client-1",
+            capability="endpoint.device.search",
+            requested_mode=PermissionMode.OBSERVE,
+            authentication_assurance="high",
+        )
+    )
+
+    assert result.outcome is AuthorityOutcome.DENIED
+    assert result.reason_codes == ("NO_MATCHING_AUTHORITY_GRANT",)

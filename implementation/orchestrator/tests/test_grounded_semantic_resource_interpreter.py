@@ -1,0 +1,410 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from connectors.core.contracts import ConnectorTransportError
+from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+from orchestrator.grounded_semantic_resource_interpreter import (
+    GroundedSemanticResourceInquiryInterpreter,
+)
+from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
+from orchestrator.semantic_fact_reasoning import OllamaSemanticFactReasoner
+from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
+from orchestrator.teams_conversation_flow import BoundConversationPrincipal
+
+
+class ForbiddenFallback:
+    def interpret(self, **kwargs):
+        raise AssertionError("grounded semantic endpoint read must not use full inquiry fallback")
+
+
+class FixedSemanticReasoner:
+    def __init__(self, facts):
+        self.facts = facts
+        self.calls = []
+
+    def infer(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.facts
+
+
+class SemanticTransport:
+    def __init__(self, structured):
+        self.structured = structured
+        self.calls = []
+
+    def request(self, **kwargs):
+        self.calls.append(kwargs)
+        return {
+            "message": {
+                "role": "assistant",
+                "content": json.dumps(self.structured),
+            }
+        }
+
+
+def principal() -> BoundConversationPrincipal:
+    return BoundConversationPrincipal(
+        principal_id="person-al",
+        organization_id="aot",
+        client_id=None,
+    )
+
+
+def contracts():
+    return (
+        {
+            "capability_name": "endpoint.device.search",
+            "resource_types": ("endpoint",),
+            "selector_keys": ("hostname", "name", "resource_id"),
+            "fact_hints": (
+                "hostname",
+                "last logged in user",
+                "operating system",
+                "ip address",
+            ),
+            "canonical_facts": (
+                "LAN IP address",
+                "WAN IP address",
+                "last logged in user",
+                "operating system",
+            ),
+            "selector_required": True,
+        },
+    )
+
+
+def interpreter(reasoner) -> GroundedSemanticResourceInquiryInterpreter:
+    return GroundedSemanticResourceInquiryInterpreter(
+        contracts=contracts(),
+        fallback=ForbiddenFallback(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        semantic_fact_reasoner=reasoner,
+        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+    )
+
+
+@pytest.mark.parametrize(
+    "human_text",
+    (
+        "Who used AOT-50282 last",
+        "Who was on AOT-50282 last?",
+        "Who last logged into AOT-50282?",
+        "user on aot-50282?",
+        "recent person for AOT-50282",
+    ),
+)
+def test_free_form_endpoint_language_uses_fact_only_semantic_reasoning(human_text):
+    reasoner = FixedSemanticReasoner(("last logged in user",))
+
+    inquiry = interpreter(reasoner).interpret(
+        text=human_text,
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "endpoint"
+    assert inquiry.resource_selector == {"hostname": "AOT-50282"}
+    assert inquiry.requested_facts == ("last logged in user",)
+    assert inquiry.permission_mode == "observe"
+    assert inquiry.execution_mode == "deterministic"
+
+    assert len(reasoner.calls) == 1
+    call = reasoner.calls[0]
+    assert call["resource_selector"] == {"hostname": "AOT-50282"}
+    assert "last logged in user" in call["eligible_facts"]
+
+
+def test_explicit_known_fact_does_not_require_semantic_model():
+    reasoner = FixedSemanticReasoner(("operating system",))
+
+    inquiry = interpreter(reasoner).interpret(
+        text="last user on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.requested_facts == ("last logged in user",)
+    assert reasoner.calls == []
+
+
+def test_semantic_fact_reasoner_cannot_select_outside_governed_candidates():
+    transport = SemanticTransport(
+        {
+            "resolved": True,
+            "requested_facts": ["delete endpoint"],
+        }
+    )
+    client = OllamaStructuredJsonClient(
+        transport=transport,
+        model="local-test",
+    )
+    reasoner = OllamaSemanticFactReasoner(client)
+
+    with pytest.raises(PermissionError, match="outside governed candidates"):
+        reasoner.infer(
+            text="do something unexpected to AOT-50282",
+            resource_type="endpoint",
+            resource_selector={"hostname": "AOT-50282"},
+            eligible_facts=("last logged in user", "operating system"),
+        )
+
+
+def test_semantic_fact_reasoner_schema_has_no_selector_or_execution_authority():
+    transport = SemanticTransport(
+        {
+            "resolved": True,
+            "requested_facts": ["last logged in user"],
+        }
+    )
+    client = OllamaStructuredJsonClient(
+        transport=transport,
+        model="local-test",
+    )
+    reasoner = OllamaSemanticFactReasoner(client)
+
+    result = reasoner.infer(
+        text="user on aot-50282?",
+        resource_type="endpoint",
+        resource_selector={"hostname": "AOT-50282"},
+        eligible_facts=("last logged in user", "operating system"),
+    )
+
+    assert result == ("last logged in user",)
+
+    request = transport.calls[0]["json"]
+    schema_properties = request["format"]["properties"]
+    assert set(schema_properties) == {"resolved", "requested_facts"}
+    assert schema_properties["requested_facts"]["items"]["enum"] == [
+        "last logged in user",
+        "operating system",
+    ]
+
+    prompt = json.loads(request["messages"][1]["content"])
+    assert prompt["grounded_resource"]["selector"] == {
+        "hostname": "AOT-50282"
+    }
+    assert prompt["governed_fact_candidates"][0]["canonical_fact"] == (
+        "last logged in user"
+    )
+    assert "provider" not in request["format"]["properties"]
+    assert "capability" not in request["format"]["properties"]
+    assert "resource_selector" not in request["format"]["properties"]
+
+
+class FixedHostedTranslator:
+    def __init__(self, concepts):
+        self.concepts = concepts
+        self.calls = []
+
+    def translate(self, **kwargs):
+        from orchestrator.semantic_intent_translation import (
+            SemanticIntentTranslation,
+        )
+
+        self.calls.append(kwargs)
+
+        if self.concepts is None:
+            return None
+
+        return SemanticIntentTranslation(
+            requested_concepts=tuple(self.concepts),
+            confidence=0.99,
+        )
+
+
+class RaisingHostedTranslator:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    def translate(self, **kwargs):
+        self.calls.append(kwargs)
+        raise self.error
+
+
+def hosted_contracts():
+    return (
+        {
+            "capability_name": "endpoint.device.search",
+            "resource_types": ("endpoint",),
+            "selector_keys": ("hostname",),
+            "fact_hints": ("user", "ip"),
+            "canonical_facts": (
+                "LAN IP address",
+                "WAN IP address",
+                "last logged in user",
+                "operating system",
+            ),
+            "selector_required": True,
+        },
+        {
+            "capability_name": "management.alert.search",
+            "resource_types": ("alert",),
+            "selector_keys": (),
+            "fact_hints": ("alerts",),
+            "canonical_facts": (
+                "open alerts",
+            ),
+            "selector_required": False,
+        },
+        {
+            "capability_name": "management.site.search",
+            "resource_types": ("management_site",),
+            "selector_keys": (),
+            "fact_hints": ("sites",),
+            "canonical_facts": (
+                "sites",
+            ),
+            "selector_required": False,
+        },
+    )
+
+
+def hosted_interpreter(translator, *, reasoner=None, fallback=None):
+    return GroundedSemanticResourceInquiryInterpreter(
+        contracts=hosted_contracts(),
+        fallback=fallback or ForbiddenFallback(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        semantic_intent_translator=translator,
+        semantic_fact_reasoner=reasoner,
+        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+    )
+
+
+def test_hosted_semantics_selects_only_fact_for_grounded_endpoint():
+    translator = FixedHostedTranslator(
+        ("last logged in user",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="user on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "endpoint"
+    assert inquiry.resource_selector == {
+        "hostname": "AOT-50282",
+    }
+    assert inquiry.requested_facts == (
+        "last logged in user",
+    )
+
+    assert len(translator.calls) == 1
+    call = translator.calls[0]
+    assert call["grounded_selector"] == {
+        "hostname": "AOT-50282",
+    }
+    assert "last logged in user" in call[
+        "eligible_concepts"
+    ]
+
+
+def test_hosted_semantics_maps_broad_alert_fact_to_management_resource():
+    translator = FixedHostedTranslator(
+        ("open alerts",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="anything actively alerting right now?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "alert"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == (
+        "open alerts",
+    )
+
+
+def test_hosted_semantics_maps_sites_to_management_site_resource():
+    translator = FixedHostedTranslator(
+        ("sites",)
+    )
+
+    inquiry = hosted_interpreter(
+        translator
+    ).interpret(
+        text="what sites are managed?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == (
+        "sites",
+    )
+
+
+def test_hosted_semantics_does_not_receive_selector_value_in_model_output_contract():
+    translator = FixedHostedTranslator(
+        ("last logged in user",)
+    )
+
+    hosted_interpreter(
+        translator
+    ).interpret(
+        text="user on AOT-50282?",
+        principal=principal(),
+    )
+
+    call = translator.calls[0]
+    assert call["grounded_selector"] == {
+        "hostname": "AOT-50282",
+    }
+    assert set(call) == {
+        "text",
+        "eligible_concepts",
+        "grounded_selector",
+    }
+
+
+def test_hosted_transport_failure_falls_back_to_local_semantic_reasoner():
+    translator = RaisingHostedTranslator(
+        ConnectorTransportError(
+            "HTTP transport failed with status 429",
+            status_code=429,
+        )
+    )
+    reasoner = FixedSemanticReasoner(("last logged in user",))
+
+    inquiry = hosted_interpreter(
+        translator,
+        reasoner=reasoner,
+    ).interpret(
+        text="recent person for AOT-50282",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_selector == {"hostname": "AOT-50282"}
+    assert inquiry.requested_facts == ("last logged in user",)
+    assert len(translator.calls) == 1
+    assert len(reasoner.calls) == 1
+
+
+def test_hosted_semantic_contract_failure_still_fails_closed():
+    translator = RaisingHostedTranslator(
+        PermissionError("semantic provider selected concept outside governed catalog")
+    )
+    reasoner = FixedSemanticReasoner(("last logged in user",))
+
+    with pytest.raises(PermissionError, match="outside governed catalog"):
+        hosted_interpreter(
+            translator,
+            reasoner=reasoner,
+        ).interpret(
+            text="recent person for AOT-50282",
+            principal=principal(),
+        )
+
+    assert reasoner.calls == []

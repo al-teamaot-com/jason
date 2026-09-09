@@ -26,7 +26,7 @@ from jason_cli.runtime import build_autotask_connector
 
 
 DEFAULT_DEPLOYMENT_RECORD = Path(
-    "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+    "docs/operations/Jason-Secret-Provider-Deployment-Record.md"
 )
 
 

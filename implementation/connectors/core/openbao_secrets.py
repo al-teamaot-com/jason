@@ -18,6 +18,9 @@ class OpenBaoSecretResolutionError(RuntimeError):
 
 
 DEFAULT_MAPPINGS: Mapping[str, str] = {
+    "openai.semantic_intent": (
+        "secret/data/providers/openai/production/semantic-intent"
+    ),
     "autotask.readonly": (
         "secret/data/connectors/autotask/production/read-only"
     ),
@@ -27,9 +30,20 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "datto_rmm.readonly": (
         "secret/data/connectors/datto-rmm/production/read-only"
     ),
+    "aws_ses.sendmail": (
+        "secret/data/connectors/aws-ses/production/sendmail"
+    ),
+    "microsoft_graph.directory_read": (
+        "secret/data/connectors/microsoft-graph/production/directory-read"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
+    "openai.semantic_intent": frozenset(
+        {
+            "api_key",
+        }
+    ),
     "autotask.readonly": frozenset(
         {
             "username",
@@ -47,6 +61,20 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "api_url",
             "api_key",
             "api_secret",
+        }
+    ),
+    "aws_ses.sendmail": frozenset(
+        {
+            "access_key_id",
+            "secret_access_key",
+        }
+    ),
+    "microsoft_graph.directory_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
         }
     ),
 }
@@ -212,54 +240,43 @@ class OpenBaoSecretResolver(SecretResolver):
         *,
         path: str,
         method: str,
-        payload: Mapping[str, str] | None = None,
+        payload: Mapping[str, object] | None = None,
         token: str | None = None,
         allow_empty: bool = False,
     ) -> Mapping[str, object]:
-        headers = {
-            "Accept": "application/json",
-        }
-
-        body = None
-        if payload is not None:
-            body = json.dumps(payload).encode("utf-8")
+        body = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {"Accept": "application/json"}
+        if body is not None:
             headers["Content-Type"] = "application/json"
-
-        if token is not None:
+        if token:
             headers["X-Vault-Token"] = token
-
         request = urllib.request.Request(
-            url=f"{self._base_url}/{path}",
+            f"{self._base_url}/{path.lstrip('/')}",
             data=body,
             headers=headers,
             method=method,
         )
-
         try:
-            with self._opener(
-                request,
-                timeout=self._timeout_seconds,
-            ) as response:
-                response_body = response.read()
-                if not response_body and allow_empty:
-                    parsed = {}
-                else:
-                    parsed = json.loads(
-                        response_body.decode("utf-8")
-                    )
-        except (
-            urllib.error.HTTPError,
-            urllib.error.URLError,
-            TimeoutError,
-            json.JSONDecodeError,
-        ) as error:
+            with self._opener(request, timeout=self._timeout_seconds) as response:
+                raw = response.read()
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise OpenBaoSecretResolutionError(
-                "OpenBao request failed."
+                "OpenBao secret resolution failed."
             ) from error
-
+        if not raw:
+            if allow_empty:
+                return {}
+            raise OpenBaoSecretResolutionError(
+                "OpenBao returned an empty response."
+            )
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise OpenBaoSecretResolutionError(
+                "OpenBao returned malformed JSON."
+            ) from error
         if not isinstance(parsed, Mapping):
             raise OpenBaoSecretResolutionError(
-                "OpenBao returned an invalid JSON response."
+                "OpenBao returned an invalid response."
             )
-
         return parsed

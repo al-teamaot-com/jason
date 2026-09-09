@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Project Jason shared connector runtime and providers"
 requires-python = ">=3.12"
 dependencies = [
+  "boto3>=1.35,<2",
   "jsonschema>=4.23,<5",
   "msal>=1.35,<2",
   "PyJWT[crypto]>=2.9,<3",

@@ -11,6 +11,7 @@ from kernel.execution_providers import (
 )
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
+    MetadataFirstResourceInquiryInterpreter,
     ReasonedResourceInquiryInterpreter,
 )
 from orchestrator.resource_capability_catalog import register_endpoint_resource_foundation
@@ -86,6 +87,8 @@ def test_human_question_becomes_resource_inquiry_then_broad_capability():
     assert intent.arguments == {
         "hostname": "AOT-50282",
         "requested_facts": ("last logged in user",),
+        "result_intent": "summary",
+        "completeness_requirement": "sufficient",
     }
     assert intent.execution_mode == "deterministic"
     assert intent.permission_mode == "observe"
@@ -137,6 +140,62 @@ def test_language_reasoner_cannot_smuggle_provider_through_selector():
         )
 
 
+def test_language_reasoner_cannot_smuggle_nested_selector_operators():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {"hostname": {"exact": "AOT-50282"}},
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="scalar strings"):
+        intent_resolver.resolve(
+            text="Who is logged into AOT-50282?",
+            principal=principal(),
+        )
+
+
+def test_identifier_prefix_cannot_be_inferred_as_site_or_tenant_scope():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {
+                "hostname": "AOT-50282",
+                "site": "aot",
+            },
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="grounded in identifiers explicitly supplied"):
+        intent_resolver.resolve(
+            text="Who is logged into AOT-50282?",
+            principal=principal(),
+        )
+
+
+def test_explicit_site_selector_is_allowed_when_human_supplies_it():
+    intent_resolver, _ = resolver(
+        {
+            "resource_type": "endpoint",
+            "resource_selector": {
+                "hostname": "AOT-50282",
+                "site": "Customer-B",
+            },
+            "requested_facts": ["last logged in user"],
+        }
+    )
+
+    intent = intent_resolver.resolve(
+        text="Who is logged into AOT-50282 at site Customer-B?",
+        principal=principal(),
+    )
+
+    assert intent is not None
+    assert intent.arguments["site"] == "Customer-B"
+
+
 def test_language_reasoner_cannot_turn_read_question_into_execute_authority():
     intent_resolver, _ = resolver(
         {
@@ -164,3 +223,504 @@ def test_unrecognized_language_can_return_no_resource_inquiry():
         )
         is None
     )
+
+def test_resource_interpreter_allows_empty_selector_for_broad_read_query() -> None:
+    from orchestrator.conversation_resource_intent import ReasonedResourceInquiryInterpreter
+
+    class EmptySelectorReasoner:
+        def propose(self, **kwargs):
+            return {
+                "resource_type": "alert",
+                "resource_selector": {},
+                "requested_facts": ["open alerts"],
+                "execution_mode": "deterministic",
+                "permission_mode": "observe",
+            }
+
+    interpreter = ReasonedResourceInquiryInterpreter(
+        reasoner=EmptySelectorReasoner()
+    )
+
+    principal = type(
+        "Principal",
+        (),
+        {
+            "organization_id": "aot",
+            "client_id": None,
+        },
+    )()
+
+    inquiry = interpreter.interpret(
+        text="Show me open alerts",
+        principal=principal,
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_selector == {}
+    assert inquiry.permission_mode == "observe"
+
+
+def test_metadata_first_interpreter_resolves_unique_management_collection_without_reasoner():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            raise AssertionError("fallback reasoner must not be called")
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                    "site name",
+                    "site identifier",
+                    "site details",
+                ),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    inquiry = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.execution_mode == "deterministic"
+    assert inquiry.permission_mode == "observe"
+    assert fallback.calls == []
+
+
+def test_metadata_first_interpreter_falls_back_when_selector_is_required():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "endpoint.software.search",
+                "resource_types": ("endpoint_software", "endpoint"),
+                "selector_keys": ("hostname", "name", "resource_id"),
+                "fact_hints": ("software", "installed software"),
+                "selector_required": True,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="What software is installed on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_falls_back_on_ambiguous_metadata_match():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "one",
+                "resource_types": ("one",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+            {
+                "capability_name": "two",
+                "resource_types": ("two",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="Show status",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_resolves_unique_management_collection_without_reasoner():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            raise AssertionError("fallback reasoner must not be called")
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                    "site name",
+                    "site identifier",
+                    "site details",
+                ),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    inquiry = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.resource_selector == {}
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.execution_mode == "deterministic"
+    assert inquiry.permission_mode == "observe"
+    assert fallback.calls == []
+
+
+def test_metadata_first_interpreter_falls_back_when_selector_is_required():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "endpoint.software.search",
+                "resource_types": ("endpoint_software", "endpoint"),
+                "selector_keys": ("hostname", "name", "resource_id"),
+                "fact_hints": ("software", "installed software"),
+                "selector_required": True,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="What software is installed on AOT-50282?",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_interpreter_falls_back_on_ambiguous_metadata_match():
+    class Fallback:
+        def __init__(self):
+            self.calls = []
+
+        def interpret(self, *, text, principal):
+            self.calls.append((text, principal))
+            return None
+
+    fallback = Fallback()
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "one",
+                "resource_types": ("one",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+            {
+                "capability_name": "two",
+                "resource_types": ("two",),
+                "selector_keys": (),
+                "fact_hints": ("status",),
+                "selector_required": False,
+            },
+        ),
+        fallback=fallback,
+    )
+
+    result = interpreter.interpret(
+        text="Show status",
+        principal=principal(),
+    )
+
+    assert result is None
+    assert len(fallback.calls) == 1
+
+
+def test_metadata_first_distinguishes_summary_from_complete_enumeration():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": ("site", "sites", "managed site"),
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    summary = interpreter.interpret(
+        text="What sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    listing = interpreter.interpret(
+        text="Please list the sites in Datto RMM",
+        principal=principal(),
+    )
+
+    assert summary.result_intent == "summary"
+    assert summary.completeness_requirement == "sufficient"
+
+    assert listing.result_intent == "enumerate"
+    assert listing.completeness_requirement == "complete"
+
+
+def test_metadata_first_count_requires_complete_collection():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": ("site", "sites", "managed site"),
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    inquiry = interpreter.interpret(
+        text="How many sites are in Datto RMM?",
+        principal=principal(),
+    )
+
+    assert inquiry.result_intent == "count"
+    assert inquiry.completeness_requirement == "complete"
+
+
+
+def test_metadata_first_normalizes_complete_collection_fact_aliases():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                ),
+                "collection_fact": "sites",
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    inquiry = interpreter.interpret(
+        text="List every site in Datto RMM",
+        principal=principal(),
+    )
+
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.result_intent == "enumerate"
+    assert inquiry.completeness_requirement == "complete"
+
+
+def test_deterministic_inquiry_hints_separate_resource_identity_from_incidental_facts():
+    class ForbiddenFallback:
+        def interpret(self, **kwargs):
+            raise AssertionError("fallback must not be called")
+
+    interpreter = MetadataFirstResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "management.alert.search",
+                "resource_types": ("alert",),
+                "selector_keys": ("site", "site_id", "status", "severity", "priority"),
+                "fact_hints": (
+                    "alert",
+                    "alerts",
+                    "open alert",
+                    "open alerts",
+                    "severity",
+                    "priority",
+                    "status",
+                    "message",
+                ),
+                "collection_fact": "alerts",
+                "selector_required": False,
+            },
+            {
+                "capability_name": "management.site.search",
+                "resource_types": ("management_site",),
+                "selector_keys": ("name", "site", "site_id"),
+                "fact_hints": (
+                    "site",
+                    "sites",
+                    "client site",
+                    "managed site",
+                    "site name",
+                    "site identifier",
+                    "site details",
+                ),
+                "collection_fact": "sites",
+                "selector_required": False,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+    )
+
+    inquiry = interpreter.interpret(
+        text="List every site in Datto RMM",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "management_site"
+    assert inquiry.requested_facts == ("sites",)
+    assert inquiry.result_intent == "enumerate"
+    assert inquiry.completeness_requirement == "complete"
+
+
+def test_reasoned_requested_facts_can_be_normalized_to_canonical_vocabulary():
+    from orchestrator.canonical_fact_vocabulary import DEFAULT_CANONICAL_FACT_VOCABULARY
+
+    class CanonicalFactReasoner:
+        def __init__(self, fact):
+            self.fact = fact
+
+        def propose(self, *, text, organization_id, client_id):
+            return {
+                "resource_type": "endpoint",
+                "resource_selector": {"hostname": "AOT-50282"},
+                "requested_facts": [self.fact],
+                "execution_mode": "deterministic",
+                "permission_mode": "observe",
+                "result_intent": "summary",
+                "completeness_requirement": "sufficient",
+            }
+
+    for human_fact, expected in (
+        ("processor", "processor model"),
+        ("CPU", "processor model"),
+        ("RAM", "total memory"),
+        ("memore", "total memory"),
+        ("Windows Display Version", "operating system display version"),
+    ):
+        interpreter = ReasonedResourceInquiryInterpreter(
+            CanonicalFactReasoner(human_fact),
+            fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        )
+        inquiry = interpreter.interpret(
+            text=f"What is the {human_fact} for AOT-50282?",
+            principal=principal(),
+        )
+        assert inquiry is not None
+        assert inquiry.requested_facts == (expected,)
+
+
+def test_reasoned_resource_interpreter_uses_injected_registry_first_fact_resolver():
+    from orchestrator.semantic_fact_resolver import SemanticFactResolver
+    from orchestrator.semantic_knowledge_seed import build_trusted_semantic_registry
+
+    class CpuReasoner:
+        def propose(self, *, text, organization_id, client_id):
+            return {
+                "resource_type": "endpoint",
+                "resource_selector": {"hostname": "AOT-50282"},
+                "requested_facts": ["CPU"],
+                "result_intent": "summary",
+                "completeness_requirement": "sufficient",
+                "permission_mode": "observe",
+            }
+
+    interpreter = ReasonedResourceInquiryInterpreter(
+        reasoner=CpuReasoner(),
+        fact_resolver=SemanticFactResolver(
+            registry=build_trusted_semantic_registry(),
+            legacy_vocabulary=None,
+        ),
+    )
+    inquiry = interpreter.interpret(
+        text="What CPU does AOT-50282 have?",
+        principal=BoundConversationPrincipal(
+            principal_id="person-al",
+            organization_id="aot",
+            client_id=None,
+        ),
+    )
+
+    assert inquiry is not None
+    assert inquiry.requested_facts == ("processor model",)
+    assert inquiry.evidence_contexts == {
+        "processor model": ("processor", "hardware_inventory")
+    }

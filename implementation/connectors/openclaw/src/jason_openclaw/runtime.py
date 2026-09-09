@@ -150,7 +150,7 @@ class OpenClawOrchestratorDispatcher:
 
 
 class SQLiteReplayStore:
-    """Durable request-id replay protection for one OpenClaw ingress."""
+    """Durable replay and idempotency claims for one OpenClaw ingress."""
 
     def __init__(self, path: str | Path) -> None:
         self._path = str(path)

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.teamaot.com/schemas/system-registry/v1",
+  "title": "Jason System Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entities"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity" }
+    }
+  },
+  "$defs": {
+    "credential_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "reference"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "reference": { "type": "string", "minLength": 1 }
+      }
+    },
+    "string_map": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "(?i)(^|[._-])(password|passwd|secret|token|api[_-]?key|private[_-]?key)([._-]|$)"
+        }
+      },
+      "additionalProperties": { "type": "string" }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_id",
+        "entity_type",
+        "display_name",
+        "environment",
+        "lifecycle_status",
+        "declared_state",
+        "dependencies",
+        "verification_methods",
+        "steward"
+      ],
+      "properties": {
+        "registry_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+        },
+        "entity_type": {
+          "enum": [
+            "component",
+            "capability",
+            "provider",
+            "resource",
+            "identity_binding",
+            "governance_gate",
+            "credential_reference",
+            "deployment"
+          ]
+        },
+        "display_name": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "minLength": 1 },
+        "lifecycle_status": {
+          "enum": [
+            "proposed",
+            "registered",
+            "configured",
+            "verified",
+            "active",
+            "deprecated",
+            "suspended",
+            "retired"
+          ]
+        },
+        "declared_state": { "$ref": "#/$defs/string_map" },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._:-]{2,127}$"
+          }
+        },
+        "verification_methods": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "steward": { "type": "string", "minLength": 1 },
+        "authority_references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "credential_references": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/credential_reference" }
+        },
+        "evidence_references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "source_version": { "type": ["string", "null"] },
+        "created_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "created_by": { "type": ["string", "null"] },
+        "metadata": { "$ref": "#/$defs/string_map" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "lifecycle_status": {
+                "enum": ["configured", "verified", "active"]
+              }
+            },
+            "required": ["lifecycle_status"]
+          },
+          "then": {
+            "properties": {
+              "verification_methods": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

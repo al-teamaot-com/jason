@@ -2,82 +2,126 @@ site_name: Project Jason
 site_description: TeamAOT's governed operational platform and professional decision-support architecture
 repo_name: al-teamaot-com/jason
 repo_url: https://github.com/al-teamaot-com/jason
-docs_dir: .build/docs
+docs_dir: docs
 site_dir: site
 theme:
   name: material
 nav:
   - Home: index.md
+  - Documentation Control:
+      - Jason Fundamentals: control/JASON-FUNDAMENTALS.md
+      - Current Resume Point: control/CURRENT.md
+      - Extension Construction Map: control/EXTENSION-CONSTRUCTION-MAP.md
+      - Documentation Register: control/DOCUMENTATION-REGISTER.md
+      - Documentation Migration Issues: control/DOCUMENTATION-MIGRATION-ISSUES.md
+      - How to Document Jason: control/HOW-TO-DOCUMENT-JASON.md
+      - Implementation Documentation Index: control/IMPLEMENTATION-DOCUMENTATION-INDEX.md
+      - Handoff Template: control/HANDOFF-TEMPLATE.md
+      - Document Template: control/DOCUMENT-TEMPLATE.md
+      - Documentation Governance Standard: standards/J-404-Documentation-Governance-and-Continuity.md
   - Foundation:
-      - Manifesto: 01-Foundation/J-001-Manifesto.md
-      - Constitution: 01-Foundation/J-002-Constitution.md
-      - Professional Operating Principles: 01-Foundation/J-003-Professional-Operating-Principles.md
+      - Manifesto: foundation/J-001-Manifesto.md
+      - Constitution: foundation/J-002-Constitution.md
+      - Professional Operating Principles: foundation/J-003-Professional-Operating-Principles.md
+      - Architectural Review and Decision Framework: foundation/J-006-Architectural-Review-and-Decision-Framework.md
+  - Governance:
+      - Authority Map: governance/README.md
+      - J-003 Decision Architecture: governance/J-003-Decision-Architecture.md
+  - Architecture:
+      - Authority Map: architecture/README.md
+      - J-100 Reference Architecture: architecture/J-100-Reference-Architecture.md
+      - J-101 Capability Registry: architecture/J-101-Capability-Registry.md
+      - J-102 Governed Approval Architecture: architecture/J-102-Governed-Approval-Architecture.md
+      - J-103 System Registry: architecture/J-103-System-Registry.md
+  - Engineering Architecture:
+      - Engineering Authority Map: engineering/README.md
+      - JIS Engineering Guide: engineering/jis/README.md
+      - Engineering ADR Index: engineering/adr/README.md
+      - Provider Engineering: engineering/providers/README.md
+      - Capability Engineering: engineering/capabilities/Capability-Registry.md
+      - Execution Policy: engineering/execution-policy/README.md
+      - Governed Resolution: engineering/resolution/Governed-Capability-Resolution-Engine.md
   - Canonical Models:
-      - J-116 State Model: 02-Canonical-Models/J-116-State-Model.md
-      - J-117 Object Model: 02-Canonical-Models/J-117-Object-Model.md
-      - J-118 Relationship Model: 02-Canonical-Models/J-118-Relationship-Model.md
-      - J-119 Event Model: 02-Canonical-Models/J-119-Event-Model.md
-      - J-120 Organizational Model: 02-Canonical-Models/J-120-Organizational-Model.md
-  - Milestones:
-      - M-001 Kernel Foundation: 10-Milestones/M-001-Kernel-Foundation.md
-      - M-002 Release and Recovery Pipeline: 10-Milestones/M-002-Release-and-Recovery-Pipeline.md
-      - M-003 Release Governance Hardening: 10-Milestones/M-003-Release-Governance-Hardening.md
+      - J-116 State Model: models/J-116-State-Model.md
+      - J-117 Object Model: models/J-117-Object-Model.md
+      - J-118 Relationship Model: models/J-118-Relationship-Model.md
+      - J-119 Event Model: models/J-119-Event-Model.md
+      - J-120 Organizational Model: models/J-120-Organizational-Model.md
   - Kernel:
-      - Identity and Authority: 03-Components/Kernel/JKD-001-Identity-and-Authority-Service.md
-      - Identity and Authority Runtime Foundation: 03-Components/Kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
-      - Evidence and Memory: 03-Components/Kernel/JKD-002-Evidence-and-Memory-Service.md
-      - Secrets Broker: 03-Components/Kernel/JKD-003-Secrets-Broker.md
-      - Execution Policy Engine: 03-Components/Kernel/JKD-004-Execution-Policy-Engine.md
-      - Execution Provider Registry: 03-Components/Kernel/JKD-005-Execution-Provider-Registry.md
-      - Capability Registry: 03-Components/Kernel/JKD-006-Capability-Registry.md
-      - Governed Capability Resolution: 03-Components/Kernel/JKD-007-Governed-Capability-Resolution-Engine.md
+      - Identity and Authority: components/kernel/JKD-001-Identity-and-Authority-Service.md
+      - Identity and Authority Runtime Foundation: components/kernel/JKD-001-Identity-and-Authority-Runtime-Foundation.md
+      - Evidence and Memory: components/kernel/JKD-002-Evidence-and-Memory-Service.md
+      - Secrets Broker: components/kernel/JKD-003-Secrets-Broker.md
+      - Execution Policy Engine: components/kernel/JKD-004-Execution-Policy-Engine.md
+      - Execution Provider Registry: components/kernel/JKD-005-Execution-Provider-Registry.md
+      - Capability Registry: components/kernel/JKD-006-Capability-Registry.md
+      - Governed Capability Resolution: components/kernel/JKD-007-Governed-Capability-Resolution-Engine.md
   - Infrastructure:
-      - INF-001 Secret Provider Foundation: 03-Components/Infrastructure/INF-001-Secret-Provider-Foundation.md
-      - INF-001 OpenBao Deployment Verification: 03-Components/Infrastructure/INF-001-OpenBao-Deployment-Verification.md
-      - INF-001 OpenBao Recovery Evidence Fingerprint: 03-Components/Infrastructure/INF-001-OpenBao-Recovery-Evidence-Fingerprint.md
-      - INF-001 Jason Secret Wrapper: 03-Components/Infrastructure/INF-001-Jason-Secret-Wrapper.md
-      - INF-001 Jason Secret Host Deployment: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Deployment.md
-      - INF-001 Jason Secret Host Installation: 03-Components/Infrastructure/INF-001-Jason-Secret-Host-Installation.md
-      - INF-001 OpenBao Authenticated Contract Test: 03-Components/Infrastructure/INF-001-OpenBao-Authenticated-Contract-Test.md
-      - INF-001 Production Readiness Closeout: 03-Components/Infrastructure/INF-001-Production-Readiness-Closeout.md
-      - INF-002 OpenBao Bootstrap Credential Retirement: 03-Components/Infrastructure/INF-002-OpenBao-Bootstrap-Credential-Retirement.md
-      - INF-002 Production Readiness Bootstrap Gate: 03-Components/Infrastructure/INF-002-Production-Readiness-Bootstrap-Gate.md
-      - INF-003 Governed OpenBao Raft Restore Test: 03-Components/Infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
-      - INF-010 Microsoft Cloud Platform Foundation: 03-Components/Infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
-      - INF-011 Kaseya Resource Platform Foundation: 03-Components/Infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
-      - INF-012 Cross-Provider Relationship Foundation: 03-Components/Infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
-      - INF-013 Artifact Evidence Storage Foundation: 03-Components/Infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
-      - INF-014 OpenClaw Production Ingress and Governance Gates: 03-Components/Infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md
-      - INF-015 AWS Provider Platform Foundation: 03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md
+      - INF-001 Secret Provider Foundation: components/infrastructure/INF-001-Secret-Provider-Foundation.md
+      - INF-001 OpenBao Deployment Verification: components/infrastructure/INF-001-OpenBao-Deployment-Verification.md
+      - INF-001 OpenBao Recovery Evidence Fingerprint: components/infrastructure/INF-001-OpenBao-Recovery-Evidence-Fingerprint.md
+      - INF-001 Jason Secret Wrapper: components/infrastructure/INF-001-Jason-Secret-Wrapper.md
+      - INF-001 Jason Secret Host Installation: components/infrastructure/INF-001-Jason-Secret-Host-Installation.md
+      - INF-001 Jason Secret Host Deployment: components/infrastructure/INF-001-Jason-Secret-Host-Deployment.md
+      - INF-001 OpenBao Authenticated Contract Test: components/infrastructure/INF-001-OpenBao-Authenticated-Contract-Test.md
+      - INF-001 Production Readiness Closeout: components/infrastructure/INF-001-Production-Readiness-Closeout.md
+      - INF-002 OpenBao Bootstrap Credential Retirement: components/infrastructure/INF-002-OpenBao-Bootstrap-Credential-Retirement.md
+      - INF-002 Production Readiness Bootstrap Gate: components/infrastructure/INF-002-Production-Readiness-Bootstrap-Gate.md
+      - INF-003 Governed OpenBao Raft Restore Test: components/infrastructure/INF-003-Governed-OpenBao-Raft-Restore-Test.md
+      - INF-010 Microsoft Cloud Platform Foundation: components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md
+      - INF-011 Kaseya Resource Platform Foundation: components/infrastructure/INF-011-Kaseya-Resource-Platform-Foundation.md
+      - INF-012 Cross-Provider Relationship Foundation: components/infrastructure/INF-012-Cross-Provider-Relationship-Foundation.md
+      - INF-013 Artifact Evidence Storage Foundation: components/infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md
+      - INF-014 OpenClaw Production Ingress and Governance Gates: components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md
+      - INF-015 AWS Provider Platform Foundation: components/infrastructure/INF-015-AWS-Provider-Platform-Foundation.md
   - Capabilities:
-      - Professional Ticket Investigation: 03-Components/Capabilities/CAP-001-Professional-Ticket-Investigation.md
-      - CAP-001 Provider Pilot Foundation: 03-Components/Capabilities/CAP-001-Provider-Pilot-Foundation.md
-      - CAP-001 Autotask Read Adapter: 03-Components/Capabilities/CAP-001-Autotask-Read-Adapter.md
-      - CAP-001 Autotask HTTP Transport: 03-Components/Capabilities/CAP-001-Autotask-HTTP-Transport.md
-      - CAP-001 Autotask Production Transport: 03-Components/Capabilities/CAP-001-Autotask-Production-Transport.md
-      - CAP-001 Autotask Live-Read Validation: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Validation.md
-      - CAP-001 Autotask Live-Read Command: 03-Components/Capabilities/CAP-001-Autotask-Live-Read-Command.md
+      - Professional Ticket Investigation: components/capabilities/CAP-001-Professional-Ticket-Investigation.md
+      - CAP-001 Provider Pilot Foundation: components/capabilities/CAP-001-Provider-Pilot-Foundation.md
+      - CAP-001 Autotask Read Adapter: components/capabilities/CAP-001-Autotask-Read-Adapter.md
+      - CAP-001 Autotask HTTP Transport: components/capabilities/CAP-001-Autotask-HTTP-Transport.md
+      - CAP-001 Autotask Production Transport: components/capabilities/CAP-001-Autotask-Production-Transport.md
+      - CAP-001 Autotask Live-Read Validation: components/capabilities/CAP-001-Autotask-Live-Read-Validation.md
+      - CAP-001 Autotask Live-Read Command: components/capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
-      - Bootstrap and Secrets Management: 07-Operations/Jason-Bootstrap-and-Secrets-Runbook.md
-      - Secret Provider Deployment Record: 07-Operations/Jason-Secret-Provider-Deployment-Record.md
-      - OpenBao Initialization and Recovery Record: 07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
-      - Provider Secret Provisioning: 07-Operations/Provider-Secret-Provisioning.md
-      - OpenClaw + JKD-001 Operational Hardening: 07-Operations/OpenClaw-JKD001-Operational-Hardening.md
-      - OpenClaw + JKD-001 Production Packaging: 07-Operations/OpenClaw-JKD001-Production-Packaging.md
-      - OpenClaw Ed25519 Key Rotation: 07-Operations/OpenClaw-Ed25519-Key-Rotation.md
-      - INF-001 Morning Execution Checklist: 07-Operations/INF-001-Morning-Execution-Checklist.md
-      - INF-010 Microsoft Cloud Deployment Checklist: 07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
-      - INF-015 AWS Provider Deployment Checklist: 07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md
-      - Release and Recovery Pipeline: 03-Components/Operations/J-900-Release-and-Recovery-Pipeline.md
-      - Release Governance Hardening: 03-Components/Operations/J-901-Release-Governance-Hardening.md
+      - Operations Authority Map: operations/README.md
+      - Microsoft Teams Integration: operations/Runbook-Teams-Integration.md
+      - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
+      - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
+      - OpenBao Initialization and Recovery Record: operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
+      - Provider Secret Provisioning: operations/Provider-Secret-Provisioning.md
+      - OpenClaw + JKD-001 Operational Hardening: operations/OpenClaw-JKD001-Operational-Hardening.md
+      - OpenClaw + JKD-001 Production Packaging: operations/OpenClaw-JKD001-Production-Packaging.md
+      - OpenClaw Ed25519 Key Rotation: operations/OpenClaw-Ed25519-Key-Rotation.md
+      - INF-001 Morning Execution Checklist: operations/INF-001-Morning-Execution-Checklist.md
+      - INF-010 Microsoft Cloud Deployment Checklist: operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md
+      - INF-015 AWS Provider Deployment Checklist: operations/INF-015-AWS-Provider-Deployment-Checklist.md
+      - Current System Registry State: operations/System-Registry-Current-Operational-State.md
+      - System Registry Production Verification: operations/System-Registry-Production-Verification-Runbook.md
+      - Release and Recovery Pipeline: components/operations/J-900-Release-and-Recovery-Pipeline.md
+      - Release Governance Hardening: components/operations/J-901-Release-Governance-Hardening.md
   - Standards:
-      - Adaptive Build Method: 04-Standards/J-401-Adaptive-Build-Method.md
-      - Definition of Done: 04-Standards/J-402-Capability-Definition-of-Done.md
-      - Canonical Sources and Generated Artifacts: 04-Standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
+      - Adaptive Build Method: standards/J-401-Adaptive-Build-Method.md
+      - Definition of Done: standards/J-402-Capability-Definition-of-Done.md
+      - Canonical Sources and Generated Artifacts: standards/J-403-Canonical-Sources-and-Generated-Artifacts.md
+      - Documentation Governance and Continuity: standards/J-404-Documentation-Governance-and-Continuity.md
+      - Platform Integrity and Boundary Enforcement: standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md
   - Decisions:
-      - Vertical Slice First: 05-ADR/ADR-001-Vertical-Slice-First.md
+      - ADR-001 Vertical Slice First: decisions/ADR-001-Vertical-Slice-First.md
+      - ADR-002 Documentation Layout (Superseded): decisions/ADR-002-Canonical-Documentation-Layout.md
+      - ADR-003 Autotask Connector Convergence: decisions/ADR-003-Autotask-Connector-Convergence.md
+      - ADR-004 Datto RMM Managed-Device Authority: decisions/ADR-004-Datto-RMM-Managed-Device-Authority.md
+      - ADR-005 OpenClaw Teams Transport Boundary: decisions/ADR-005-OpenClaw-Teams-Transport-Boundary.md
+      - ADR-006 Governed Conversational Routing: decisions/ADR-006-Governed-Conversational-Interface-Routing.md
+      - ADR-007 Teams Proactive Messaging: decisions/ADR-007-Teams-Proactive-Messaging.md
+      - ADR-008 Documentation Control Plane Consolidation: decisions/ADR-008-Documentation-Control-Plane-Consolidation.md
+      - ADR-009 Direct Microsoft Teams Ingress: decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md
   - Roadmap:
-      - Capability Register: 06-Roadmaps/Jason-Capability-Register.md
+      - Capability Register: roadmaps/Jason-Capability-Register.md
+      - Governed TODO and Future Ideas: roadmaps/Project-Jason-TODO-and-Future-Ideas.md
+  - Milestones:
+      - M-001 Kernel Foundation: milestones/M-001-Kernel-Foundation.md
+      - M-002 Release and Recovery Pipeline: milestones/M-002-Release-and-Recovery-Pipeline.md
+      - M-003 Release Governance Hardening: milestones/M-003-Release-Governance-Hardening.md
 plugins:
   - search
 markdown_extensions:
@@ -86,7 +130,3 @@ markdown_extensions:
   - tables
   - toc:
       permalink: true
-exclude_docs: |
-  implementation/
-  .github/
-  site/

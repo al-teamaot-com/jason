@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from time import monotonic
+from typing import Any, Iterator, Mapping, Protocol
 
 
 class ConnectorError(RuntimeError):
@@ -17,7 +20,60 @@ class ConnectorConfigurationError(ConnectorError):
 
 
 class ConnectorTransportError(ConnectorError):
-    pass
+    """Transport failure with bounded, non-secret HTTP classification metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ConnectorExecutionDeadlineExceeded(ConnectorTransportError):
+    """Raised when governed connector execution has exhausted its deadline."""
+
+    error_code = "PROVIDER_EXECUTION_DEADLINE_EXCEEDED"
+
+
+_EXECUTION_DEADLINE_MONOTONIC: ContextVar[float | None] = ContextVar(
+    "connector_execution_deadline_monotonic",
+    default=None,
+)
+
+
+@contextmanager
+def connector_execution_deadline(maximum_execution_seconds: float | None) -> Iterator[None]:
+    """Apply one bounded deadline across every transport call in a connector invocation."""
+    if maximum_execution_seconds is None:
+        yield
+        return
+    if maximum_execution_seconds <= 0:
+        raise ValueError("maximum_execution_seconds must be positive when provided")
+    token = _EXECUTION_DEADLINE_MONOTONIC.set(monotonic() + maximum_execution_seconds)
+    try:
+        yield
+    finally:
+        _EXECUTION_DEADLINE_MONOTONIC.reset(token)
+
+
+def bounded_transport_timeout(requested_timeout_seconds: float) -> float:
+    """Clamp a transport timeout to the remaining governed connector deadline."""
+    if requested_timeout_seconds <= 0:
+        raise ValueError("requested_timeout_seconds must be positive")
+    deadline = _EXECUTION_DEADLINE_MONOTONIC.get()
+    if deadline is None:
+        return requested_timeout_seconds
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise ConnectorExecutionDeadlineExceeded(
+            "governed provider execution deadline exceeded"
+        )
+    return min(requested_timeout_seconds, remaining)
 
 
 @dataclass(frozen=True)

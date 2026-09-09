@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence
 
 from kernel.capabilities import CapabilityDefinition, CapabilityRegistryService
+from .semantic_mapping_registry import SemanticMappingRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +16,12 @@ class ResourceInquiry:
     requested_facts: tuple[str, ...]
     execution_mode: str = "deterministic"
     permission_mode: str = "observe"
+    result_intent: str = "summary"
+    completeness_requirement: str = "sufficient"
+    evidence_contexts: Mapping[str, tuple[str, ...]] | None = None
+    relationship_type: str | None = None
+    temporal_semantics: str = "unspecified"
+
 
     def __post_init__(self) -> None:
         if not self.resource_type.strip():
@@ -27,6 +34,39 @@ class ResourceInquiry:
             raise ValueError("execution_mode is required")
         if self.permission_mode != "observe":
             raise PermissionError("resource inquiry planning is read-only")
+
+        if self.result_intent not in {
+            "summary",
+            "enumerate",
+            "count",
+            "search",
+            "inspect",
+        }:
+            raise ValueError("resource result_intent is invalid")
+        if self.completeness_requirement not in {
+            "sufficient",
+            "complete",
+        }:
+            raise ValueError("resource completeness_requirement is invalid")
+        if self.evidence_contexts is not None:
+            unknown = set(self.evidence_contexts).difference(self.requested_facts)
+            if unknown:
+                raise ValueError(
+                    "resource evidence contexts reference unrequested facts: "
+                    + ", ".join(sorted(unknown))
+                )
+            for contexts in self.evidence_contexts.values():
+                if any(not str(item).strip() for item in contexts):
+                    raise ValueError("resource evidence contexts must be non-empty")
+        if self.relationship_type is not None and not self.relationship_type.strip():
+            raise ValueError("resource relationship_type must be non-empty when supplied")
+        if self.temporal_semantics not in {
+            "unspecified",
+            "current",
+            "most_recent",
+            "historical",
+        }:
+            raise ValueError("resource temporal_semantics is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,12 +114,29 @@ class GovernedResourceInquiryPlanner:
 
     registry: CapabilityRegistryService
     reasoner: ResourceCapabilityReasoner
+    semantic_mapping_registry: SemanticMappingRegistry | None = None
 
     def plan(self, inquiry: ResourceInquiry) -> ResourceInquiryPlan:
+        mapped_capability_names: set[str] = set()
+
+        if self.semantic_mapping_registry is not None:
+            for requested_fact in inquiry.requested_facts:
+                for mapping in self.semantic_mapping_registry.find_active(
+                    canonical_fact=requested_fact,
+                ):
+                    mapped_capability_names.update(mapping.capability_names)
+
         candidates = tuple(
             capability
             for capability in self.registry.list_all()
             if self._eligible(capability, inquiry)
+            or (
+                capability.capability_name in mapped_capability_names
+                and self._eligible_by_governed_mapping(
+                    capability,
+                    inquiry,
+                )
+            )
         )
         if not candidates:
             raise LookupError("no governed read capabilities are available for this resource inquiry")
@@ -109,6 +166,25 @@ class GovernedResourceInquiryPlanner:
             steps=tuple(validated),
             requested_facts=inquiry.requested_facts,
         )
+
+    @staticmethod
+    def _eligible_by_governed_mapping(
+        capability: CapabilityDefinition,
+        inquiry: ResourceInquiry,
+    ) -> bool:
+        """Permit only otherwise-governed read capabilities bound by approved mappings.
+
+        An approved semantic mapping may correct an overly narrow language-derived
+        resource subtype, but it does not relax execution mode, provider-neutrality,
+        or read-only controls.
+        """
+        if inquiry.execution_mode not in capability.permitted_execution_modes:
+            return False
+        if capability.metadata.get("provider_neutral", "false").lower() != "true":
+            return False
+        if capability.metadata.get("read_only", "false").lower() != "true":
+            return False
+        return True
 
     @staticmethod
     def _eligible(capability: CapabilityDefinition, inquiry: ResourceInquiry) -> bool:
