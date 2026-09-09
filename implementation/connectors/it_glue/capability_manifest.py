@@ -21,14 +21,18 @@ from orchestrator.provider_read_capability_catalog import (
 )
 
 
-def _search_operation(operation_id: str, capability: str) -> IntegrationOperation:
+def _search_operation(
+    operation_id: str,
+    capability: str,
+    selectors: tuple[str, ...],
+) -> IntegrationOperation:
     return IntegrationOperation(
         operation_id=operation_id,
         kind=OperationKind.SEARCH,
         capability_name=capability,
         description="Search the bounded authorized IT Glue resource collection.",
         read_only=True,
-        selector_names=("name", "organization_id", "resource_id"),
+        selector_names=selectors,
         collection_supported=True,
     )
 
@@ -56,6 +60,18 @@ def _selectors() -> tuple[SelectorDefinition, ...]:
             description="Authorized IT Glue organization scope selector.",
         ),
         SelectorDefinition(
+            name="filters",
+            description="Bounded schema-driven IT Glue equality filters.",
+        ),
+        SelectorDefinition(
+            name="page_number",
+            description="Provider page number for a bounded collection read.",
+        ),
+        SelectorDefinition(
+            name="page_size",
+            description="Maximum records requested from one IT Glue page; bounded to 1-1000.",
+        ),
+        SelectorDefinition(
             name="resource_id",
             description="Durable provider resource identifier.",
             verified_identity_required=True,
@@ -79,6 +95,7 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     _search_operation(
                         "documentation.organization.search",
                         DOCUMENTATION_ORGANIZATION_SEARCH,
+                        ("name", "filters", "page_number", "page_size", "resource_id"),
                     ),
                     _read_operation(
                         "documentation.organization.read",
@@ -96,7 +113,18 @@ def build_it_glue_manifest() -> IntegrationManifest:
                 description="Client contacts documented in IT Glue.",
                 selectors=selectors,
                 operations=(
-                    _search_operation("documentation.contact.search", DOCUMENTATION_CONTACT_SEARCH),
+                    _search_operation(
+                        "documentation.contact.search",
+                        DOCUMENTATION_CONTACT_SEARCH,
+                        (
+                            "organization_id",
+                            "name",
+                            "filters",
+                            "page_number",
+                            "page_size",
+                            "resource_id",
+                        ),
+                    ),
                     _read_operation("documentation.contact.read", DOCUMENTATION_CONTACT_READ),
                 ),
                 observations=(
@@ -110,7 +138,18 @@ def build_it_glue_manifest() -> IntegrationManifest:
                 description="Client locations documented in IT Glue.",
                 selectors=selectors,
                 operations=(
-                    _search_operation("documentation.location.search", DOCUMENTATION_LOCATION_SEARCH),
+                    _search_operation(
+                        "documentation.location.search",
+                        DOCUMENTATION_LOCATION_SEARCH,
+                        (
+                            "organization_id",
+                            "name",
+                            "filters",
+                            "page_number",
+                            "page_size",
+                            "resource_id",
+                        ),
+                    ),
                     _read_operation("documentation.location.read", DOCUMENTATION_LOCATION_READ),
                 ),
                 observations=(
@@ -127,6 +166,14 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     _search_operation(
                         "documentation.configuration.search",
                         DOCUMENTATION_CONFIGURATION_SEARCH,
+                        (
+                            "organization_id",
+                            "name",
+                            "filters",
+                            "page_number",
+                            "page_size",
+                            "resource_id",
+                        ),
                     ),
                     _read_operation(
                         "documentation.configuration.read",
@@ -144,5 +191,6 @@ def build_it_glue_manifest() -> IntegrationManifest:
             "mode": "read_only",
             "credential_surface": "internal_openbao_only",
             "excluded_sensitive_resources": "passwords,credential_vault",
+            "pagination": "page_number_and_size",
         },
     )
