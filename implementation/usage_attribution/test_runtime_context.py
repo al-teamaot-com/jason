@@ -26,7 +26,6 @@ def test_human_attribution_projects_into_model_usage_context():
         model = new_attempt_context()
 
     assert current_attribution_context() is None
-    assert model is not None
     assert model.organization_id == "aot"
     assert model.request_id == "msg-1"
     assert model.workflow_id == "conversation-1"
@@ -56,8 +55,23 @@ def test_workload_attribution_is_named_and_non_human():
     with bind_attribution_context(context):
         model = new_attempt_context()
 
-    assert model is not None
     assert model.agent_name == "Newman Email Monitor"
     assert model.metadata["actor_type"] == "scheduled_process"
     assert model.metadata["workload_name"] == "Newman Email Monitor"
     assert model.metadata["source_channel"] == "scheduler"
+
+
+def test_unbound_model_attempt_is_retained_as_attribution_gap(monkeypatch):
+    monkeypatch.setenv("JASON_ORGANIZATION_ID", "aot")
+
+    model = new_attempt_context()
+
+    assert model.organization_id == "aot"
+    assert model.workflow_id == "unattributed-runtime"
+    assert model.capability == "unknown"
+    assert model.routing_profile == "unattributed-runtime"
+    assert model.metadata["actor_type"] == "unknown"
+    assert model.metadata["actor_id"] == "unknown"
+    assert model.metadata["attribution_quality"] == "unavailable"
+    assert model.request_id.startswith("unattributed-")
+    assert model.attempt_id
