@@ -14,6 +14,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'tools/provider_read_live_acceptance.py'
       - '.github/workflows/validate-provider-reads.yml'
   push:
     paths:
@@ -28,6 +29,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'tools/provider_read_live_acceptance.py'
       - '.github/workflows/validate-provider-reads.yml'
 
 jobs:
@@ -55,6 +57,7 @@ jobs:
             implementation/orchestrator/provider_read_capability_catalog.py \
             implementation/runtime_service/src/jason_runtime/composition.py \
             implementation/runtime_service/src/jason_runtime/provider_reads.py
+          python -m py_compile tools/provider_read_live_acceptance.py
       - name: Test governed provider-read contracts without provider I/O
         run: |
           python -m pytest -q \
@@ -66,6 +69,36 @@ jobs:
             implementation/connectors/tests/test_provider_resource_adapters.py \
             implementation/connectors/tests/test_autotask_operations.py \
             implementation/connectors/tests/test_it_glue_operations.py
+      - name: Verify Central Orchestrator live-read preflight is credential safe
+        run: |
+          rm -f /tmp/jason-itg-provider-read-acceptance.json /tmp/jason-autotask-provider-read-acceptance.json
+          python tools/provider_read_live_acceptance.py \
+            --provider it_glue \
+            --organization-name 'AOT Test Organization' \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-itg-provider-read-acceptance \
+            --evidence-output /tmp/jason-itg-provider-read-acceptance.json \
+            --check-only \
+            > /tmp/jason-itg-provider-read-preflight.txt
+          python tools/provider_read_live_acceptance.py \
+            --provider autotask \
+            --ticket-number T20260909.0001 \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-autotask-provider-read-acceptance \
+            --evidence-output /tmp/jason-autotask-provider-read-acceptance.json \
+            --check-only \
+            > /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"provider_credentials_used": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"provider_credentials_used": false' /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-autotask-provider-read-preflight.txt
+          test ! -e /tmp/jason-itg-provider-read-acceptance.json
+          test ! -e /tmp/jason-autotask-provider-read-acceptance.json
+          echo 'PROVIDER_READ_ACCEPTANCE_PREFLIGHT=PASS'
       - name: Prove source-only cost and safety boundary
         run: |
           python - <<'PY'
