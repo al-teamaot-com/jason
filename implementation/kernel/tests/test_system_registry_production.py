@@ -49,6 +49,13 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     assert "provider.system-registry" in ids
     assert "identity-binding.aot-microsoft-al" in ids
     assert "deployment.jason-single-host-pilot" in ids
+    assert "resource.aws-zerotier-relay" in ids
+    assert "component.jason-mcp" in ids
+    assert "component.jason-usage-exporter" in ids
+    assert "component.jason-usage-attribution-exporter" in ids
+    assert "component.jason-prometheus" in ids
+    assert "component.jason-grafana" in ids
+    assert "deployment.jason-chatgpt-mcp-observability-pilot" in ids
 
 
 def test_physical_configured_entities_have_bounded_host_checks_or_governed_verification() -> None:
@@ -82,20 +89,31 @@ def test_physical_configured_entities_have_bounded_host_checks_or_governed_verif
 
 
 def test_non_host_configured_entities_require_separate_governed_verification() -> None:
-    registry = registry_from_manifest(MANIFEST)
+    baseline = registry_from_manifest(MANIFEST)
+    effective = registry_from_manifest(
+        MANIFEST,
+        lifecycle_events_path=LIFECYCLE_EVENTS,
+    )
     configured_non_host = {
         entity.registry_id
-        for entity in registry.list_all()
+        for entity in baseline.list_all()
         if entity.lifecycle_status.value == "configured"
         and not HOST_VERIFICATION_METHODS.intersection(entity.verification_methods)
     }
-
-    assert configured_non_host == {
+    intentionally_unverified = {
         "provider.system-registry",
         "capability.system-registry-search",
         "capability.system-registry-read",
         "capability.system-registry-trace",
     }
+
+    assert intentionally_unverified.issubset(configured_non_host)
+    for registry_id in configured_non_host - intentionally_unverified:
+        entity = effective.get(registry_id)
+        assert entity.lifecycle_status.value == "verified"
+        verification = effective.latest_verification(registry_id)
+        assert verification is not None
+        assert verification.outcome is VerificationOutcome.VERIFIED
 
 
 def test_docker_container_probe_can_verify_runtime_security_state() -> None:
