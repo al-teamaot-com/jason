@@ -421,7 +421,7 @@ def _provider(
         provider_id=provider_id,
         display_name=display_name,
         provider_type=ProviderType.EXTERNAL_CONNECTOR,
-        lifecycle_status=ProviderLifecycle.AVAILABLE,
+        lifecycle_status=ProviderLifecycle.PLANNED,
         health_status=ProviderHealth.UNKNOWN,
         approval_status=ProviderApproval.PILOT,
         execution_modes=frozenset({"deterministic"}),
