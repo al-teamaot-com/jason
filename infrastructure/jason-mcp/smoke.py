@@ -24,7 +24,7 @@ EXPECTED_TOOLS = {
 }
 
 EXPECTED_SERVER_SHA256 = (
-    "93e113f510893ee53623f3d4272a00b50186a8924e15f2f3292961b95648cd07"
+    "118a016029f7c25e03f95110a1c114d64cddca85ccff1f7bf8d9d50addff8351"
 )
 
 TENANT_ID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
@@ -331,6 +331,15 @@ def main() -> int:
         default="mcp-jason.teamaot.com",
     )
 
+    parser.add_argument(
+        "--verify-real-transport-path",
+        action="store_true",
+        help=(
+            "verify Host/Origin rejection through the "
+            "actual unauthenticated HTTP /mcp path"
+        ),
+    )
+
     args = parser.parse_args()
 
     print("============================================================")
@@ -481,6 +490,134 @@ def main() -> int:
     print("HOST_VALIDATION = PASS")
     print("ORIGIN_VALIDATION = PASS")
     print("TRANSPORT_SECURITY = PASS")
+
+    # --------------------------------------------------------
+    # Actual unauthenticated HTTP transport path
+    # --------------------------------------------------------
+
+    if args.verify_real_transport_path:
+        print()
+        print("=== REAL MCP TRANSPORT PATH ===")
+
+        transport_initialize = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": (
+                            "jason-mcp-real-transport-smoke"
+                        ),
+                        "version": "1.0",
+                    },
+                },
+            }
+        ).encode("utf-8")
+
+        transport_headers = {
+            "Content-Type": "application/json",
+            "Accept": (
+                "application/json, text/event-stream"
+            ),
+        }
+
+        valid_status, _, _ = request(
+            args.base_url,
+            "POST",
+            "/mcp",
+            host_header=args.expected_host,
+            body=transport_initialize,
+            headers=transport_headers,
+        )
+
+        hostile_host_status, _, _ = request(
+            args.base_url,
+            "POST",
+            "/mcp",
+            host_header="hostile.invalid",
+            body=transport_initialize,
+            headers=transport_headers,
+        )
+
+        hostile_origin_headers = dict(
+            transport_headers
+        )
+        hostile_origin_headers["Origin"] = (
+            "https://hostile.invalid"
+        )
+
+        hostile_origin_status, _, _ = request(
+            args.base_url,
+            "POST",
+            "/mcp",
+            host_header=args.expected_host,
+            body=transport_initialize,
+            headers=hostile_origin_headers,
+        )
+
+        chatgpt_origin_headers = dict(
+            transport_headers
+        )
+        chatgpt_origin_headers["Origin"] = (
+            "https://chatgpt.com"
+        )
+
+        chatgpt_origin_status, _, _ = request(
+            args.base_url,
+            "POST",
+            "/mcp",
+            host_header=args.expected_host,
+            body=transport_initialize,
+            headers=chatgpt_origin_headers,
+        )
+
+        print(
+            "REAL_VALID_HOST_NO_AUTH =",
+            valid_status,
+        )
+        print(
+            "REAL_HOSTILE_HOST_NO_AUTH =",
+            hostile_host_status,
+        )
+        print(
+            "REAL_HOSTILE_ORIGIN_NO_AUTH =",
+            hostile_origin_status,
+        )
+        print(
+            "REAL_CHATGPT_ORIGIN_NO_AUTH =",
+            chatgpt_origin_status,
+        )
+
+        require(
+            valid_status == 401,
+            "actual MCP path did not challenge "
+            "valid unauthenticated Host with 401",
+        )
+
+        require(
+            hostile_host_status == 421,
+            "actual MCP path did not reject "
+            "hostile Host with 421 before auth",
+        )
+
+        require(
+            hostile_origin_status == 403,
+            "actual MCP path did not reject "
+            "hostile Origin with 403 before auth",
+        )
+
+        require(
+            chatgpt_origin_status == 401,
+            "actual MCP path rejected ChatGPT "
+            "Origin instead of reaching auth",
+        )
+
+        print(
+            "REAL_TRANSPORT_PATH = PASS"
+        )
 
     # --------------------------------------------------------
     # Accepted host / health

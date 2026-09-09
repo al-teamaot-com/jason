@@ -19,12 +19,16 @@ import jwt
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
 from mcp.server import MCPServer
-from mcp.server.transport_security import TransportSecuritySettings
+from mcp.server.transport_security import (
+    TransportSecurityMiddleware,
+    TransportSecuritySettings,
+)
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from pydantic import AnyHttpUrl
+from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
@@ -1280,6 +1284,61 @@ transport_security = TransportSecuritySettings(
     ],
 )
 
+
+class JasonMcpOuterTransportGuard:
+    """Enforce MCP Host/Origin policy before authentication.
+
+    MCP 2.2.0 places RequireAuthMiddleware outside its transport
+    validator. This outer ASGI middleware reuses the SDK validator
+    for Host/Origin checks before authentication while leaving
+    Content-Type validation to the normal MCP transport path.
+    """
+
+    def __init__(
+        self,
+        app,
+        settings: TransportSecuritySettings,
+    ) -> None:
+        self.app = app
+        self.validator = TransportSecurityMiddleware(
+            settings
+        )
+
+    async def __call__(
+        self,
+        scope,
+        receive,
+        send,
+    ) -> None:
+        if (
+            scope.get("type") == "http"
+            and str(scope.get("path") or "")
+            in {"/mcp", "/mcp/"}
+        ):
+            request = StarletteRequest(scope)
+
+            rejection = (
+                await self.validator.validate_request(
+                    request,
+                    is_post=False,
+                )
+            )
+
+            if rejection is not None:
+                await rejection(
+                    scope,
+                    receive,
+                    send,
+                )
+                return
+
+        await self.app(
+            scope,
+            receive,
+            send,
+        )
+
+
 app = mcp.streamable_http_app(
     stateless_http=True,
     json_response=True,
@@ -1302,6 +1361,11 @@ app.add_route(
     "/.well-known/oauth-authorization-server",
     oauth_authorization_server_metadata,
     methods=["GET"],
+)
+
+app.add_middleware(
+    JasonMcpOuterTransportGuard,
+    settings=transport_security,
 )
 
 
