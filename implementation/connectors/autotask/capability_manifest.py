@@ -51,8 +51,19 @@ def build_autotask_manifest() -> IntegrationManifest:
         SelectorDefinition("name", "Human-readable discovery selector; never durable identity."),
         SelectorDefinition("company_id", "Authorized Autotask company scope selector."),
         SelectorDefinition("ticket_number", "Human-visible Autotask ticket number selector."),
+        SelectorDefinition("first_name", "Contact first-name discovery selector."),
+        SelectorDefinition("last_name", "Contact last-name discovery selector."),
         SelectorDefinition("email", "Contact email discovery selector."),
-        SelectorDefinition("filters", "Bounded structured search filters."),
+        SelectorDefinition("status", "Ticket status discovery selector."),
+        SelectorDefinition("filters", "Bounded schema-driven equality filters."),
+        SelectorDefinition(
+            "page_size",
+            "Maximum records returned by one Autotask query; bounded to 1-500.",
+        ),
+        SelectorDefinition(
+            "after_resource_id",
+            "Safe continuation selector that resumes after a returned durable resource id.",
+        ),
         SelectorDefinition(
             "resource_id",
             "Durable provider resource identifier.",
@@ -77,7 +88,11 @@ def build_autotask_manifest() -> IntegrationManifest:
                 description="Autotask company records in authorized scope.",
                 selectors=selectors,
                 operations=(
-                    _search("service.company.search", SERVICE_COMPANY_SEARCH, ("name", "filters", "resource_id")),
+                    _search(
+                        "service.company.search",
+                        SERVICE_COMPANY_SEARCH,
+                        ("name", "filters", "page_size", "after_resource_id", "resource_id"),
+                    ),
                     _read("service.company.read", SERVICE_COMPANY_READ),
                 ),
                 observations=(
@@ -91,7 +106,20 @@ def build_autotask_manifest() -> IntegrationManifest:
                 description="Autotask contact records in authorized scope.",
                 selectors=selectors,
                 operations=(
-                    _search("service.contact.search", SERVICE_CONTACT_SEARCH, ("company_id", "name", "email", "filters", "resource_id")),
+                    _search(
+                        "service.contact.search",
+                        SERVICE_CONTACT_SEARCH,
+                        (
+                            "company_id",
+                            "first_name",
+                            "last_name",
+                            "email",
+                            "filters",
+                            "page_size",
+                            "after_resource_id",
+                            "resource_id",
+                        ),
+                    ),
                     _read("service.contact.read", SERVICE_CONTACT_READ),
                 ),
                 observations=(
@@ -105,7 +133,19 @@ def build_autotask_manifest() -> IntegrationManifest:
                 description="Autotask service tickets and their notes.",
                 selectors=selectors,
                 operations=(
-                    _search("service.ticket.search", SERVICE_TICKET_SEARCH, ("ticket_number", "company_id", "filters", "resource_id")),
+                    _search(
+                        "service.ticket.search",
+                        SERVICE_TICKET_SEARCH,
+                        (
+                            "ticket_number",
+                            "company_id",
+                            "status",
+                            "filters",
+                            "page_size",
+                            "after_resource_id",
+                            "resource_id",
+                        ),
+                    ),
                     _read("service.ticket.read", SERVICE_TICKET_READ),
                     IntegrationOperation(
                         operation_id="service.ticket.notes.search",
@@ -129,7 +169,18 @@ def build_autotask_manifest() -> IntegrationManifest:
                 description="Autotask configuration items in authorized scope.",
                 selectors=selectors,
                 operations=(
-                    _search("service.configuration.search", SERVICE_CONFIGURATION_SEARCH, ("company_id", "name", "filters", "resource_id")),
+                    _search(
+                        "service.configuration.search",
+                        SERVICE_CONFIGURATION_SEARCH,
+                        (
+                            "company_id",
+                            "name",
+                            "filters",
+                            "page_size",
+                            "after_resource_id",
+                            "resource_id",
+                        ),
+                    ),
                     _read("service.configuration.read", SERVICE_CONFIGURATION_READ),
                 ),
                 observations=(
@@ -161,5 +212,6 @@ def build_autotask_manifest() -> IntegrationManifest:
             "mode": "read_only",
             "credential_surface": "internal_openbao_only",
             "schema_discovery": "approved_entities_only",
+            "pagination": "durable_id_continuation",
         },
     )
