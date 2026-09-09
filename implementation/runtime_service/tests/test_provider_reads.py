@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+from kernel.capabilities import (
+    CapabilityLifecycle,
+    CapabilityRegistryService,
+    InMemoryCapabilityRegistry,
+)
 from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
@@ -13,6 +23,7 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_PROVIDER,
     SERVICE_TICKET_SEARCH,
 )
+from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.provider_reads import (
     build_provider_read_invoker,
     register_provider_read_invokers,
@@ -33,6 +44,51 @@ class _Transport:
 class _Audit:
     def record(self, event_type, context, details):
         return None
+
+
+def _trusted_registry(root: Path) -> Path:
+    private = Ed25519PrivateKey.generate()
+    public = private.public_key()
+    pem = public.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    der = public.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+    public_path = root / "openclaw.pub.pem"
+    public_path.write_bytes(pem)
+    registry = root / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "keys": [
+                    {
+                        "key_id": "provider-read-test",
+                        "machine_identity": "svc-openclaw-gateway",
+                        "public_key_path": str(public_path),
+                        "sha256_fingerprint": hashlib.sha256(der).hexdigest(),
+                        "status": "active",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return registry
+
+
+def _runtime_settings(tmp_path: Path) -> RuntimeSettings:
+    return RuntimeSettings(
+        authority_db=tmp_path / "authority.sqlite3",
+        bindings_db=tmp_path / "bindings.sqlite3",
+        continuation_db=tmp_path / "continuation.sqlite3",
+        replay_db=tmp_path / "replay.sqlite3",
+        security_audit_db=tmp_path / "security.sqlite3",
+        orchestration_events_db=tmp_path / "events.sqlite3",
+        trusted_keys_registry=_trusted_registry(tmp_path),
+        openbao_url="http://openbao.invalid:8200",
+        openbao_role_id_path=tmp_path / "role_id",
+        openbao_secret_id_path=tmp_path / "secret_id",
+        ollama_url="http://ollama.invalid:11434",
+        ollama_model="local-test",
+        allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
+    )
 
 
 def test_provider_read_runtime_registers_broker_manifests_without_becoming_operational() -> None:
@@ -64,6 +120,35 @@ def test_provider_read_runtime_registers_canonical_invokers_without_io() -> None
     register_provider_read_invokers(invokers=invokers, invoker=provider_invoker)
 
     registered = set(invokers.registered_capabilities())
+    assert DOCUMENTATION_ORGANIZATION_SEARCH in registered
+    assert SERVICE_TICKET_SEARCH in registered
+
+
+def test_full_runtime_composes_provider_reads_but_keeps_them_out_of_active_surface(
+    tmp_path: Path,
+) -> None:
+    application = build_runtime_application(_runtime_settings(tmp_path))
+
+    documentation = application.capabilities.get_current(
+        capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+        allow_pilot=True,
+    )
+    service = application.capabilities.get_current(
+        capability_name=SERVICE_TICKET_SEARCH,
+        allow_pilot=True,
+    )
+
+    assert documentation.lifecycle_status is CapabilityLifecycle.PILOT
+    assert service.lifecycle_status is CapabilityLifecycle.PILOT
+
+    with pytest.raises(LookupError):
+        application.capabilities.get_current(
+            capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+        )
+
+    registered = set(
+        application.governed_orchestrator._invoker.registered_capabilities()
+    )
     assert DOCUMENTATION_ORGANIZATION_SEARCH in registered
     assert SERVICE_TICKET_SEARCH in registered
 
