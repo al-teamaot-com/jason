@@ -60,6 +60,7 @@ jobs:
           python -m pytest -q \
             implementation/orchestrator/tests/test_provider_read_foundation.py \
             implementation/orchestrator/tests/test_provider_read_acceptance.py \
+            implementation/orchestrator/tests/test_provider_read_central_orchestrator.py \
             implementation/runtime_service/tests/test_provider_reads.py \
             implementation/connectors/tests/test_autotask_resource_gateway.py \
             implementation/connectors/tests/test_provider_resource_adapters.py \
