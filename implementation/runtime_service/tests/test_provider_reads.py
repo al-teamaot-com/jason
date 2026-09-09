@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
 from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
@@ -65,3 +66,19 @@ def test_provider_read_runtime_registers_canonical_invokers_without_io() -> None
     registered = set(invokers.registered_capabilities())
     assert DOCUMENTATION_ORGANIZATION_SEARCH in registered
     assert SERVICE_TICKET_SEARCH in registered
+
+
+def test_runtime_composition_wires_provider_reads_without_a_second_ai_brain() -> None:
+    root = Path("implementation/runtime_service/src/jason_runtime")
+    composition = (root / "composition.py").read_text(encoding="utf-8")
+    provider_reads = (root / "provider_reads.py").read_text(encoding="utf-8")
+
+    assert "register_provider_read_runtime_foundation(" in composition
+    assert "build_provider_read_invoker(" in composition
+    assert "register_provider_read_invokers(" in composition
+
+    assert "OpenAI" not in provider_reads
+    assert "Ollama" not in provider_reads
+    assert "model" not in provider_reads.casefold()
+    assert "it_glue.readonly" not in composition
+    assert "autotask.readonly" not in composition
