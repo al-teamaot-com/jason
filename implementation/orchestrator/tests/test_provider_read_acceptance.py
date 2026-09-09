@@ -44,7 +44,9 @@ def test_builds_nonmutating_activation_plan_from_sanitized_live_evidence() -> No
     assert plan.verified_capabilities == (DOCUMENTATION_ORGANIZATION_SEARCH,)
     assert plan.target_provider_lifecycle == "available"
     assert plan.target_provider_health == "healthy"
+    assert plan.target_provider_approval == "approved"
     assert plan.target_capability_lifecycle == "active"
+    assert plan.target_activation_state == "provider_backed_accepted"
     assert plan.hosted_model_required is False
 
 
@@ -60,6 +62,7 @@ def test_accepts_autotask_capability_without_provider_specific_mcp_tool() -> Non
 
     assert plan.provider_id == AUTOTASK_PROVIDER
     assert plan.verified_capabilities == (SERVICE_TICKET_SEARCH,)
+    assert plan.target_provider_approval == "approved"
     assert plan.hosted_model_required is False
 
 
