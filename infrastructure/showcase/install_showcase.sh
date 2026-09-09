@@ -3,8 +3,10 @@ set -euo pipefail
 
 REPO_ROOT="${JASON_REPO_ROOT:-$HOME/projects/jason}"
 SHOWCASE_DIR="$REPO_ROOT/infrastructure/showcase"
-SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-status-exporter.service"
-SERVICE_DST="/etc/systemd/system/jason-status-exporter.service"
+STATUS_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-status-exporter.service"
+STATUS_SERVICE_DST="/etc/systemd/system/jason-status-exporter.service"
+USAGE_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-usage-exporter.service"
+USAGE_SERVICE_DST="/etc/systemd/system/jason-usage-exporter.service"
 ENV_FILE="$SHOWCASE_DIR/.env"
 DEFAULT_OLLAMA_MODEL="qwen3:1.7b"
 
@@ -31,9 +33,48 @@ chmod 600 "$ENV_FILE"
 
 OLLAMA_MODEL="$(grep '^OLLAMA_MODEL=' "$ENV_FILE" | tail -1 | cut -d= -f2-)"
 
-sudo install -m 0644 "$SERVICE_SRC" "$SERVICE_DST"
+install_service() {
+  local source_path="$1"
+  local destination_path="$2"
+  local temporary_path
+  temporary_path="$(mktemp)"
+
+  python3 - "$source_path" "$temporary_path" "$REPO_ROOT" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+repo_root = sys.argv[3]
+text = source.read_text(encoding="utf-8")
+text = text.replace("/home/al/projects/jason", repo_root)
+destination.write_text(text, encoding="utf-8")
+PY
+
+  sudo install -m 0644 "$temporary_path" "$destination_path"
+  rm -f "$temporary_path"
+}
+
+install_service "$STATUS_SERVICE_SRC" "$STATUS_SERVICE_DST"
+install_service "$USAGE_SERVICE_SRC" "$USAGE_SERVICE_DST"
 sudo systemctl daemon-reload
 sudo systemctl enable --now jason-status-exporter.service
+sudo systemctl enable --now jason-usage-exporter.service
+
+for endpoint in \
+  "http://127.0.0.1:9464/metrics" \
+  "http://127.0.0.1:9465/metrics"; do
+  for attempt in $(seq 1 20); do
+    if curl -fsS "$endpoint" >/dev/null 2>&1; then
+      break
+    fi
+    if [[ "$attempt" -eq 20 ]]; then
+      echo "Exporter did not become ready: $endpoint" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+done
 
 cd "$SHOWCASE_DIR"
 docker compose --env-file .env pull
@@ -86,7 +127,13 @@ else
   echo "Local model already present: $OLLAMA_MODEL"
 fi
 
-sudo systemctl restart jason-status-exporter.service
+sudo systemctl restart jason-status-exporter.service jason-usage-exporter.service
+
+for endpoint in \
+  "http://127.0.0.1:9464/metrics" \
+  "http://127.0.0.1:9465/metrics"; do
+  curl -fsS "$endpoint" >/dev/null
+ done
 
 echo
 printf 'Grafana: http://%s:3000\n' "$(hostname -I | awk '{print $1}')"
@@ -97,6 +144,7 @@ grep '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d= -f2-
 echo
 
 echo "Status exporter: http://127.0.0.1:9464/metrics"
+echo "Usage exporter: http://127.0.0.1:9465/metrics"
 echo "Prometheus: http://127.0.0.1:9090"
 echo "Ollama: http://127.0.0.1:11434"
 echo "Local model: $OLLAMA_MODEL"
