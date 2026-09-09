@@ -1,0 +1,42 @@
+name: Validate Showcase Telemetry
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/showcase/**"
+      - ".github/workflows/validate-showcase-telemetry.yml"
+  push:
+    branches:
+      - "feature/jason-dashboard-usage-telemetry-20260909"
+    paths:
+      - "infrastructure/showcase/**"
+      - ".github/workflows/validate-showcase-telemetry.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  showcase-telemetry:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile exporters and preflight
+        run: |
+          python -m compileall -q \
+            infrastructure/showcase/status_exporter.py \
+            infrastructure/showcase/usage_exporter.py \
+            infrastructure/showcase/usage_telemetry_preflight.py
+      - name: Test showcase exporters
+        run: |
+          python -m pytest -q \
+            infrastructure/showcase/tests/test_status_exporter.py \
+            infrastructure/showcase/tests/test_usage_exporter.py
+      - name: Validate installer shell syntax
+        run: bash -n infrastructure/showcase/install_showcase.sh
+      - name: Validate Grafana dashboard JSON
+        run: python -m json.tool infrastructure/showcase/grafana/dashboards/jason-command-center.json >/dev/null
