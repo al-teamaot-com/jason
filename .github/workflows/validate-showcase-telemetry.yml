@@ -6,6 +6,7 @@ on:
       - "infrastructure/showcase/**"
       - "implementation/orchestrator/open_world_teams_query_flow.py"
       - "implementation/orchestrator/teams_identity_binding.py"
+      - "implementation/orchestrator/tests/test_teams_identity_usage_audit.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -16,6 +17,7 @@ on:
       - "infrastructure/showcase/**"
       - "implementation/orchestrator/open_world_teams_query_flow.py"
       - "implementation/orchestrator/teams_identity_binding.py"
+      - "implementation/orchestrator/tests/test_teams_identity_usage_audit.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -54,6 +56,7 @@ jobs:
             infrastructure/showcase/tests/test_usage_exporter.py \
             infrastructure/showcase/tests/test_usage_attribution_exporter.py \
             infrastructure/showcase/tests/test_usage_attribution_exporter_runtime.py \
+            implementation/orchestrator/tests/test_teams_identity_usage_audit.py \
             implementation/usage_attribution/test_runtime_context.py
       - name: Validate installer shell syntax
         run: bash -n infrastructure/showcase/install_showcase.sh
