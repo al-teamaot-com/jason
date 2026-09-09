@@ -6,6 +6,7 @@ not be used by a model/provider to select scope, capabilities, or execution.
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import replace
@@ -45,12 +46,39 @@ def _attribution_projection() -> UsageContext | None:
     return model_usage_context()
 
 
-def new_attempt_context(*, parent_attempt_id: str | None = None) -> UsageContext | None:
-    """Return the bound scope with a fresh idempotent provider-attempt identity."""
+def _unattributed_runtime_context() -> UsageContext:
+    """Retain otherwise-unattributed model consumption instead of dropping it.
 
-    current = _CURRENT.get() or _attribution_projection()
-    if current is None:
-        return None
+    This is intentionally low-confidence accounting metadata. It never supplies
+    authority or execution scope; it only ensures that a provider call made without
+    a bound human/workload context still creates an immutable ledger entry that the
+    dashboard can flag as an attribution gap.
+    """
+
+    request_id = f"unattributed-{uuid4()}"
+    organization_id = os.getenv("JASON_ORGANIZATION_ID", "aot").strip() or "aot"
+    return UsageContext(
+        workflow_id="unattributed-runtime",
+        request_id=request_id,
+        attempt_id=str(uuid4()),
+        organization_id=organization_id,
+        client_id=None,
+        capability="unknown",
+        routing_profile="unattributed-runtime",
+        metadata={
+            "actor_type": "unknown",
+            "actor_id": "unknown",
+            "source_channel": "unknown",
+            "purpose": "unattributed model invocation",
+            "attribution_quality": "unavailable",
+        },
+    )
+
+
+def new_attempt_context(*, parent_attempt_id: str | None = None) -> UsageContext:
+    """Return an attributable attempt scope, retaining unknown usage when necessary."""
+
+    current = _CURRENT.get() or _attribution_projection() or _unattributed_runtime_context()
     return replace(
         current,
         attempt_id=str(uuid4()),
