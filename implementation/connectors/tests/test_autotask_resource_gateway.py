@@ -72,6 +72,7 @@ def test_autotask_generic_entity_describe_get_and_query_translation() -> None:
     assert query.capability == "autotask.entity.query"
     assert query.arguments["entity"] == "Contacts"
     assert json.loads(query.arguments["search"]) == {
+        "MaxRecords": 100,
         "filter": [
             {"op": "eq", "field": "companyID", "value": 77},
             {
@@ -79,8 +80,68 @@ def test_autotask_generic_entity_describe_get_and_query_translation() -> None:
                 "field": "emailAddress",
                 "value": "person@example.com",
             },
-        ]
+        ],
     }
+
+
+def test_autotask_resource_query_has_bounded_durable_id_continuation() -> None:
+    invocation = translate_autotask_resource(
+        ResourceQuery(
+            provider="autotask",
+            resource_type="entity",
+            operation=ResourceOperation.QUERY,
+            organization_id="org-aot",
+            filters={"entity": "Tickets", "companyID": 77},
+            page_size=50,
+            cursor="900",
+        )
+    )
+
+    assert json.loads(invocation.arguments["search"]) == {
+        "MaxRecords": 50,
+        "filter": [
+            {"op": "eq", "field": "companyID", "value": 77},
+            {"op": "gt", "field": "id", "value": 900},
+        ],
+    }
+
+
+def test_autotask_resource_query_rejects_unsafe_pagination() -> None:
+    with pytest.raises(ValueError, match="between 1 and 500"):
+        translate_autotask_resource(
+            ResourceQuery(
+                provider="autotask",
+                resource_type="entity",
+                operation=ResourceOperation.QUERY,
+                organization_id="org-aot",
+                filters={"entity": "Tickets"},
+                page_size=501,
+            )
+        )
+
+    with pytest.raises(ValueError, match="positive integer"):
+        translate_autotask_resource(
+            ResourceQuery(
+                provider="autotask",
+                resource_type="entity",
+                operation=ResourceOperation.QUERY,
+                organization_id="org-aot",
+                filters={"entity": "Tickets"},
+                cursor="not-an-id",
+            )
+        )
+
+    with pytest.raises(ValueError, match="exact id filter"):
+        translate_autotask_resource(
+            ResourceQuery(
+                provider="autotask",
+                resource_type="entity",
+                operation=ResourceOperation.QUERY,
+                organization_id="org-aot",
+                filters={"entity": "Tickets", "id": 901},
+                cursor="900",
+            )
+        )
 
 
 def test_autotask_ticket_note_translation_requires_authorized_scope() -> None:
