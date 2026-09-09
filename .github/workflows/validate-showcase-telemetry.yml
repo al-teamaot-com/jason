@@ -5,6 +5,7 @@ on:
     paths:
       - "infrastructure/showcase/**"
       - "implementation/orchestrator/open_world_teams_query_flow.py"
+      - "implementation/orchestrator/teams_identity_binding.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -14,6 +15,7 @@ on:
     paths:
       - "infrastructure/showcase/**"
       - "implementation/orchestrator/open_world_teams_query_flow.py"
+      - "implementation/orchestrator/teams_identity_binding.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -37,8 +39,10 @@ jobs:
             infrastructure/showcase/status_exporter.py \
             infrastructure/showcase/usage_exporter.py \
             infrastructure/showcase/usage_attribution_exporter.py \
+            infrastructure/showcase/usage_attribution_exporter_runtime.py \
             infrastructure/showcase/usage_telemetry_preflight.py \
             implementation/orchestrator/open_world_teams_query_flow.py \
+            implementation/orchestrator/teams_identity_binding.py \
             implementation/usage_attribution \
             implementation/usage_ledger/runtime_context.py
       - name: Test showcase exporters and attribution context
@@ -49,6 +53,7 @@ jobs:
             infrastructure/showcase/tests/test_status_exporter.py \
             infrastructure/showcase/tests/test_usage_exporter.py \
             infrastructure/showcase/tests/test_usage_attribution_exporter.py \
+            infrastructure/showcase/tests/test_usage_attribution_exporter_runtime.py \
             implementation/usage_attribution/test_runtime_context.py
       - name: Validate installer shell syntax
         run: bash -n infrastructure/showcase/install_showcase.sh
