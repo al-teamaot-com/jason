@@ -22,3 +22,9 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-usage.json
         refresh_interval: 30s
+
+  - job_name: jason-usage-attribution
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-usage-attribution.json
+        refresh_interval: 30s
