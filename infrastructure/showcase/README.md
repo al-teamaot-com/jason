@@ -1,6 +1,6 @@
 # Jason Command Center Showcase
 
-SHOWCASE-001 makes Project Jason visibly observable without changing runtime authority. The Command Center now also reflects the later local-LLM and Autotask business-context milestones built on top of the original showcase.
+SHOWCASE-001 makes Project Jason visibly observable without changing runtime authority. The Command Center now also reflects later local-LLM, Autotask business-context, model-usage, and authenticated-user telemetry built on top of the original showcase.
 
 ## Components
 
@@ -8,6 +8,7 @@ SHOWCASE-001 makes Project Jason visibly observable without changing runtime aut
 - Prometheus stores showcase and host metrics.
 - Node Exporter reports Linux host CPU, memory, filesystem, and related metrics.
 - `status_exporter.py` exposes Jason-specific roadmap and component-readiness metrics.
+- `usage_exporter.py` exposes read-only model-cost, token, governed-request, and authenticated-user metrics from Jason's durable SQLite telemetry stores.
 - The machine-readable roadmap is stored in `07-Roadmap/Jason-Roadmap-Status.json`.
 - Ollama provides the loopback-only local model runtime used by governed local-AI capabilities.
 
@@ -20,18 +21,21 @@ SHOWCASE-001 makes Project Jason visibly observable without changing runtime aut
 - The Grafana administrator password is generated locally into `.env`; it is not committed to Git.
 - Ollama is bound to loopback only.
 - The status exporter is observational only. It reads roadmap state, Docker container state, local TCP readiness, and local model readiness. It does not execute Jason capabilities or contact external providers.
+- The usage exporter opens `model-usage.sqlite3`, `orchestration-events.sqlite3`, and `teams-identity-bindings.sqlite3` in SQLite read-only/query-only mode. Missing sources fail closed and are reported as unavailable rather than being created.
+- Usage telemetry exports stable Jason identity IDs and the Jason-owned email address from an active Microsoft identity binding when present. Email is display metadata only; it is never used as an authority key.
+- Prompts, model responses, OAuth/JWT tokens, API keys, provider credentials, and raw provider evidence are not exported to Prometheus or Grafana.
 - Dashboard status never grants capability authority. Execution remains subject to normal Jason governance, orchestration, policy, and audit boundaries.
 
 ## Install
 
-From the repository root on the Jason host:
+From a clean repository worktree on the Jason host:
 
 ```bash
 chmod +x infrastructure/showcase/install_showcase.sh
-infrastructure/showcase/install_showcase.sh
+JASON_REPO_ROOT="$PWD" infrastructure/showcase/install_showcase.sh
 ```
 
-The script prints the Grafana URL and generated local administrator credential.
+`JASON_REPO_ROOT` allows the showcase to be deployed from an isolated worktree without modifying another checked-out Jason worktree. The script installs and verifies both exporters, refreshes Prometheus/Grafana provisioning, and prints the Grafana URL and generated local administrator credential.
 
 ## Dashboard
 
@@ -48,8 +52,18 @@ The provisioned `Jason Command Center` dashboard shows:
 - OpenClaw Gateway health;
 - local LLM readiness;
 - canonical Autotask read-capability readiness;
-- CAP-003 Autotask Business Context milestone state; and
-- host CPU and memory history.
+- CAP-003 Autotask Business Context milestone state;
+- host CPU and memory history;
+- near-live model/API cost for today and month-to-date;
+- rolling 24-hour model attempts and token volume;
+- cost by provider/model;
+- unknown model-usage attempts and telemetry-source health;
+- governed request volume;
+- distinct active Jason identities in the last 24 hours;
+- request counts by authenticated Jason identity/email; and
+- governed capabilities used by each authenticated identity.
+
+The cost panels use the effective cost already recorded in Jason's append-only Model Usage Ledger. A provider-reported cost is preferred when present; otherwise the ledger's calculated cost is used. OpenAI token counts are provider-reported, but OpenAI cost is currently calculated from the runtime's configured per-token pricing, so the production model and pricing environment must be verified before treating calculated dollars as billing-authoritative. Provider billing reconciliation can later be added without changing the dashboard contract.
 
 The roadmap table is sourced from the machine-readable roadmap, so CAP-002 remains visibly identified as a transitional proof while CAP-003 convergence is still in progress.
 

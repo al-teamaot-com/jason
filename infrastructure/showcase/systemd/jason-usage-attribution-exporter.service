@@ -1,0 +1,31 @@
+[Unit]
+Description=Jason Usage Attribution Metrics Exporter
+After=network-online.target jason-runtime.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason/infrastructure/showcase
+Environment=JASON_ATTRIBUTION_HOST=0.0.0.0
+Environment=JASON_ATTRIBUTION_PORT=9466
+Environment=JASON_USAGE_ORGANIZATION_ID=aot
+Environment=JASON_ATTRIBUTION_MAX_RECENT_EVENTS=250
+Environment=JASON_MODEL_USAGE_DB=/var/lib/jason/openclaw/model-usage.sqlite3
+Environment=JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/openclaw/orchestration-events.sqlite3
+Environment=JASON_TEAMS_IDENTITY_BINDINGS_DB=/var/lib/jason/openclaw/teams-identity-bindings.sqlite3
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/usage_attribution_exporter_runtime.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadOnlyPaths=-/var/lib/jason/openclaw/model-usage.sqlite3
+ReadOnlyPaths=-/var/lib/jason/openclaw/orchestration-events.sqlite3
+ReadOnlyPaths=-/var/lib/jason/openclaw/teams-identity-bindings.sqlite3
+
+[Install]
+WantedBy=multi-user.target
