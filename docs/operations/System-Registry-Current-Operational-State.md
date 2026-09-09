@@ -7,20 +7,27 @@
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
-- Registered entities: `24`
-- Effective lifecycle counts: `configured=4, registered=13, verified=7`
+- Registered entities: `31`
+- Effective lifecycle counts: `configured=4, registered=13, verified=14`
 
 ## Verified current operational entities
 
 | Registry ID | Type | Verification method | Governed evidence record |
 |---|---|---|---|
+| `component.jason-grafana` | `component` | `grafana-health-and-dashboard-provisioning-proof-v1` | `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
+| `component.jason-mcp` | `component` | `mcp-source-durability-and-public-acceptance-v1` | `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
+| `component.jason-prometheus` | `component` | `docker-container-and-target-health-proof-v1` | `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
 | `component.jason-runtime` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.jason-teams-gateway` | `component` | `docker-container-inspect-v1` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
+| `component.jason-usage-attribution-exporter` | `component` | `systemd-active-and-prometheus-target-proof-v1` | `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
+| `component.jason-usage-exporter` | `component` | `systemd-active-and-prometheus-target-proof-v1` | `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
 | `component.openbao` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openclaw-gateway` | `component` | `docker-container-inspect-v1` | `docs/sessions/System-Registry-Production-Verification-2026-08-11.md` |
 | `component.openclaw-jason-bridge` | `component` | `docker-file-sha256-v1` | `docs/sessions/OpenClaw-Bridge-Governed-Deployment-Verification-2026-08-11.md`<br>`docs/sessions/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md` |
 | `credential.microsoft-teams-gateway-client` | `credential_reference` | `host-file-permission-and-runtime-auth-proof` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
+| `deployment.jason-chatgpt-mcp-observability-pilot` | `deployment` | `mcp-observability-production-pilot-proof-v1` | `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`<br>`docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
 | `deployment.jason-single-host-pilot` | `deployment` | `production-host-proof` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
+| `resource.aws-zerotier-relay` | `resource` | `public-caddy-host-route-and-rejection-proof-v1` | `docs/sessions/Existing-AWS-ZeroTier-Relay-MCP-Reuse-Assessment-2026-09-08.md`<br>`docs/sessions/MCP-Edge-Discovery-2026-09-08.md`<br>`docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md` |
 
 ## Registered but not yet verified
 
