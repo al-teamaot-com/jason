@@ -148,10 +148,8 @@ echo
 printf 'Grafana: http://%s:3000\n' "$(hostname -I | awk '{print $1}')"
 printf 'Grafana admin user: '
 grep '^GRAFANA_ADMIN_USER=' .env | cut -d= -f2-
-printf 'Grafana admin password: '
-grep '^GRAFANA_ADMIN_PASSWORD=' .env | cut -d= -f2-
+echo "Grafana admin password remains stored only in the mode-600 showcase .env file and is not printed."
 echo
-
 echo "Status exporter: http://127.0.0.1:9464/metrics"
 echo "Usage exporter: http://127.0.0.1:9465/metrics"
 echo "Usage attribution exporter: http://127.0.0.1:9466/metrics"
