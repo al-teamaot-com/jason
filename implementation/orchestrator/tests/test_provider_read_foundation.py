@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from connectors.autotask.capability_manifest import build_autotask_manifest
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService, InMemoryCapabilityRegistry
@@ -26,6 +28,7 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_PROVIDER,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -149,11 +152,12 @@ def test_autotask_adapter_builds_deterministic_structured_search() -> None:
 
     query = json.loads(adapted["search"])
     assert query == {
+        "MaxRecords": 100,
         "filter": [
             {"op": "eq", "field": "queueID", "value": 8},
             {"op": "eq", "field": "ticketNumber", "value": "T20260909.0012"},
             {"op": "eq", "field": "companyID", "value": 77},
-        ]
+        ],
     }
 
 
@@ -175,10 +179,62 @@ def test_autotask_adapter_preserves_exact_reads_notes_and_schema_description() -
 def test_autotask_company_search_supports_bounded_schema_driven_filters() -> None:
     adapted = adapt_autotask_arguments(
         SERVICE_COMPANY_SEARCH,
-        {"filters": {"isActive": True}},
+        {"filters": {"isActive": True}, "page_size": 25},
     )
     assert json.loads(adapted["search"]) == {
+        "MaxRecords": 25,
         "filter": [
             {"op": "eq", "field": "isActive", "value": True},
-        ]
+        ],
     }
+
+
+def test_autotask_collection_search_is_bounded_and_uses_valid_exist_filter() -> None:
+    adapted = adapt_autotask_arguments(SERVICE_COMPANY_SEARCH, {})
+    assert json.loads(adapted["search"]) == {
+        "MaxRecords": 100,
+        "filter": [{"op": "exist", "field": "id"}],
+    }
+
+
+def test_autotask_search_maps_durable_resource_identity_and_contact_fields() -> None:
+    company = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_COMPANY_SEARCH,
+            {"resource_id": 321},
+        )["search"]
+    )
+    contact = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_CONTACT_SEARCH,
+            {
+                "company_id": 77,
+                "first_name": "Paulette",
+                "last_name": "Example",
+                "email": "paulette@example.com",
+            },
+        )["search"]
+    )
+
+    assert company["filter"] == [{"op": "eq", "field": "id", "value": 321}]
+    assert contact["filter"] == [
+        {"op": "eq", "field": "companyID", "value": 77},
+        {"op": "eq", "field": "firstName", "value": "Paulette"},
+        {"op": "eq", "field": "lastName", "value": "Example"},
+        {"op": "eq", "field": "emailAddress", "value": "paulette@example.com"},
+    ]
+
+
+def test_autotask_search_rejects_unbounded_or_provider_specific_escape_hatches() -> None:
+    for invalid_size in (0, 501, True, "not-an-integer"):
+        with pytest.raises(ValueError, match="page_size"):
+            adapt_autotask_arguments(
+                SERVICE_TICKET_SEARCH,
+                {"page_size": invalid_size},
+            )
+
+    with pytest.raises(ValueError, match="provider-specific Autotask search"):
+        adapt_autotask_arguments(
+            SERVICE_TICKET_SEARCH,
+            {"search": '{"filter":[]}'},
+        )
