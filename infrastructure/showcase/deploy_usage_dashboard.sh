@@ -274,17 +274,62 @@ deploy() {
   say "========== PROMETHEUS TARGET ACCEPTANCE =========="
   python3 - <<'PY'
 import json
+import time
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-for job in ("jason-usage", "jason-usage-attribution"):
-    query = urlencode({"query": f'up{{job="{job}"}}'})
-    with urlopen(f"http://127.0.0.1:9090/api/v1/query?{query}", timeout=5) as response:
-        payload = json.load(response)
-    rows = payload.get("data", {}).get("result", [])
-    if not rows or not any(str(row.get("value", [None, "0"])[1]) == "1" for row in rows):
-        raise SystemExit(f"Prometheus target not UP: {job}")
-    print(f"PROMETHEUS_{job.upper().replace('-', '_')}=UP")
+jobs = ("jason-usage", "jason-usage-attribution")
+pending = set(jobs)
+deadline = time.monotonic() + 75
+
+while pending and time.monotonic() < deadline:
+    for job in tuple(pending):
+        query = urlencode({"query": f'up{{job="{job}"}}'})
+        try:
+            with urlopen(
+                f"http://127.0.0.1:9090/api/v1/query?{query}",
+                timeout=5,
+            ) as response:
+                payload = json.load(response)
+        except Exception:
+            continue
+
+        rows = payload.get("data", {}).get("result", [])
+        if any(str(row.get("value", [None, "0"])[1]) == "1" for row in rows):
+            print(f"PROMETHEUS_{job.upper().replace('-', '_')}=UP")
+            pending.remove(job)
+
+    if pending:
+        time.sleep(3)
+
+if pending:
+    try:
+        with urlopen(
+            "http://127.0.0.1:9090/api/v1/targets?state=active",
+            timeout=5,
+        ) as response:
+            targets = json.load(response).get("data", {}).get("activeTargets", [])
+    except Exception as exc:
+        print(f"PROMETHEUS_TARGET_DIAGNOSTIC_ERROR={type(exc).__name__}")
+        targets = []
+
+    for target in targets:
+        labels = target.get("labels", {})
+        job = labels.get("job")
+        if job not in pending:
+            continue
+        print(
+            "PROMETHEUS_TARGET_DIAGNOSTIC"
+            f" job={job}"
+            f" health={target.get('health', '')}"
+            f" scrape_url={target.get('scrapeUrl', '')}"
+            f" last_error={target.get('lastError', '')!r}"
+        )
+
+    raise SystemExit(
+        "Prometheus targets not UP after 75 seconds: "
+        + ", ".join(sorted(pending))
+    )
 PY
   [[ $? -eq 0 ]] || return 1
 
