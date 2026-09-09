@@ -11,6 +11,7 @@ from kernel.execution_providers import (
     InMemoryExecutionProviderRegistry,
     ProviderApproval,
     ProviderHealth,
+    ProviderLifecycle,
 )
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.provider_read_argument_adapter import (
@@ -64,6 +65,8 @@ def test_provider_read_foundation_is_read_only_pilot_until_live_acceptance() -> 
     assert ticket.lifecycle_status is CapabilityLifecycle.PILOT
     assert organization.metadata["read_only"] == "true"
     assert ticket.metadata["read_only"] == "true"
+    assert itg.lifecycle_status is ProviderLifecycle.PLANNED
+    assert autotask.lifecycle_status is ProviderLifecycle.PLANNED
     assert itg.approval_status is ProviderApproval.PILOT
     assert autotask.approval_status is ProviderApproval.PILOT
     assert itg.health_status is ProviderHealth.UNKNOWN
