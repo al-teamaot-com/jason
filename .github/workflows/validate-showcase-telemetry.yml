@@ -34,6 +34,7 @@ jobs:
           python -m compileall -q \
             infrastructure/showcase/status_exporter.py \
             infrastructure/showcase/usage_exporter.py \
+            infrastructure/showcase/usage_attribution_exporter.py \
             infrastructure/showcase/usage_telemetry_preflight.py \
             implementation/usage_attribution \
             implementation/usage_ledger/runtime_context.py
@@ -44,6 +45,7 @@ jobs:
           python -m pytest -q \
             infrastructure/showcase/tests/test_status_exporter.py \
             infrastructure/showcase/tests/test_usage_exporter.py \
+            infrastructure/showcase/tests/test_usage_attribution_exporter.py \
             implementation/usage_attribution/test_runtime_context.py
       - name: Validate installer shell syntax
         run: bash -n infrastructure/showcase/install_showcase.sh
