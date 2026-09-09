@@ -74,19 +74,33 @@ class SQLiteMicrosoftDirectoryUsageAudit:
         evidence: TeamsConversationPrincipalEvidence,
         details: Mapping[str, object] | None = None,
     ) -> None:
-        stage = {
+        stages = {
             "identity.directory.requested": "invoking",
             "identity.directory.completed": "completed",
             "identity.directory.failed": "failed",
-        }.get(event_type, "observed")
-        safe_details = {
+        }
+        if event_type not in stages:
+            raise ValueError("unsupported Microsoft directory usage event type")
+
+        # Only explicitly approved accounting fields can cross into durable audit.
+        # Callers cannot smuggle arbitrary provider payload, tokens, or transport
+        # evidence into the orchestration event store through `details`.
+        supplied = dict(details or {})
+        safe_details: dict[str, object] = {
             "provider": "microsoft_graph",
             "product": "Microsoft Graph",
             "operation": "user.profile.read",
             "source_channel": "teams",
             "purpose": "Enrich authenticated Jason human identity with directory email",
         }
-        safe_details.update(dict(details or {}))
+        if "outcome" in supplied:
+            safe_details["outcome"] = str(supplied["outcome"])[:80]
+        if "exception_type" in supplied:
+            safe_details["exception_type"] = str(supplied["exception_type"])[:120]
+        email = str(supplied.get("email_address") or "").strip()
+        if email and _valid_email(email):
+            safe_details["email_address"] = email
+
         self.events.append(
             event_type,
             {
@@ -95,7 +109,7 @@ class SQLiteMicrosoftDirectoryUsageAudit:
                 "organization_id": organization_id,
                 "principal_id": principal_id,
                 "capability_name": "identity.profile.enrich",
-                "stage": stage,
+                "stage": stages[event_type],
                 "client_id": client_id,
                 "requester_kind": "human",
                 "permission_mode": "observe",
@@ -250,6 +264,22 @@ class JasonTeamsIdentityBinder:
                     )
                 raise
             else:
+                if email_address is not None:
+                    email_address = email_address.strip()
+                    if not _valid_email(email_address):
+                        if audit is not None:
+                            audit.record(
+                                "identity.directory.failed",
+                                principal_id=identity.identity_id,
+                                organization_id=identity.organization_id,
+                                client_id=binding.client_id,
+                                evidence=evidence,
+                                details={
+                                    "outcome": "invalid_profile",
+                                    "exception_type": "ValueError",
+                                },
+                            )
+                        raise ValueError("Microsoft directory returned an invalid email address")
                 if audit is not None:
                     audit.record(
                         "identity.directory.completed",
@@ -262,10 +292,6 @@ class JasonTeamsIdentityBinder:
                             "email_address": email_address or "",
                         },
                     )
-            if email_address is not None:
-                email_address = email_address.strip()
-                if not _valid_email(email_address):
-                    raise ValueError("Microsoft directory returned an invalid email address")
 
         return BoundConversationPrincipal(
             principal_id=identity.identity_id,
