@@ -1,0 +1,100 @@
+name: Validate Governed Provider Reads
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/kaseya_resource_catalog.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/orchestrator/provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - '.github/workflows/validate-provider-reads.yml'
+  push:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/kaseya_resource_catalog.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/orchestrator/provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - '.github/workflows/validate-provider-reads.yml'
+
+jobs:
+  governed-provider-reads:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/runtime_service
+      - name: Compile provider-read source boundary
+        run: |
+          python -m compileall -q \
+            implementation/connectors/autotask \
+            implementation/connectors/it_glue \
+            implementation/connectors/provider_resource_adapters.py \
+            implementation/orchestrator/provider_read_argument_adapter.py \
+            implementation/orchestrator/provider_read_capability_catalog.py \
+            implementation/runtime_service/src/jason_runtime/provider_reads.py
+      - name: Test governed provider-read contracts without provider I/O
+        run: |
+          python -m pytest -q \
+            implementation/orchestrator/tests/test_provider_read_foundation.py \
+            implementation/runtime_service/tests/test_provider_reads.py \
+            implementation/connectors/tests/test_autotask_resource_gateway.py \
+            implementation/connectors/tests/test_autotask_operations.py \
+            implementation/connectors/tests/test_it_glue_operations.py
+      - name: Prove source-only cost and safety boundary
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+
+          from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+          from kernel.execution_providers import (
+              ExecutionProviderRegistryService,
+              InMemoryExecutionProviderRegistry,
+              ProviderHealth,
+              ProviderLifecycle,
+          )
+          from orchestrator.provider_read_capability_catalog import (
+              AUTOTASK_PROVIDER,
+              IT_GLUE_PROVIDER,
+              register_provider_read_foundation,
+          )
+
+          capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+          providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+          register_provider_read_foundation(
+              capabilities=capabilities,
+              providers=providers,
+              now=datetime.now(timezone.utc),
+          )
+
+          for provider_id in (IT_GLUE_PROVIDER, AUTOTASK_PROVIDER):
+              provider = providers.get(provider_id)
+              assert provider.lifecycle_status is ProviderLifecycle.PLANNED
+              assert provider.health_status is ProviderHealth.UNKNOWN
+              assert provider.metadata['activation_state'] == 'awaiting_provider_backed_acceptance'
+
+          assert all(
+              str(item.metadata.get('read_only', '')).lower() == 'true'
+              for item in capabilities.list_all()
+          )
+          print('PROVIDER_READ_SOURCE_BOUNDARY=PASS')
+          print('PROVIDER_NETWORK_IO=DISABLED_BY_TEST_DOUBLES')
+          print('HOSTED_MODEL_REQUIRED=NO')
+          print('MCP_ACTIVATION=NOT_YET')
+          PY
