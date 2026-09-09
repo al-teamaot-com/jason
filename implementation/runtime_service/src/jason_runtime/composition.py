@@ -131,6 +131,11 @@ from .dynamic_conversation_cutover import (
 )
 from .http import RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
+from .provider_reads import (
+    build_provider_read_invoker,
+    register_provider_read_invokers,
+    register_provider_read_runtime_foundation,
+)
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
 
@@ -562,6 +567,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     integration_broker.register(
         build_datto_rmm_manifest()
     )
+    register_provider_read_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        integration_broker=integration_broker,
+        now=now,
+    )
 
     identity_authority = IdentityAuthorityService(
         identities=SQLiteIdentityRepository(authority_store),
@@ -720,6 +731,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, MANAGEMENT_SITE_SEARCH): "datto_rmm.site.search",
         },
     )
+    provider_read_invoker = build_provider_read_invoker(
+        secrets=openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
         registry=load_production_system_registry()
     )
@@ -750,6 +766,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_SITE_SEARCH, datto_invoker)
+    register_provider_read_invokers(
+        invokers=invokers,
+        invoker=provider_read_invoker,
+    )
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)
