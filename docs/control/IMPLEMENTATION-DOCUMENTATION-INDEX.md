@@ -69,6 +69,7 @@ If a package README contains a material architecture, authority, security, or op
 | `implementation/decision_memory/README.md` | Evidence-bounded reuse of previously verified conclusions without storing or widening execution authority | `docs/governance/`; `docs/architecture/`; evidence and organizational-memory architecture; identity/authority, approval, verification, and audit controls |
 | `implementation/triage_intelligence/README.md` | Read-oriented triage intelligence that distinguishes faults, expected behavior, known issues, historical patterns, and environmental changes using governed evidence | `docs/architecture/`; `docs/components/`; `docs/engineering/`; applicable evidence, risk, provider, and Central Orchestrator governance |
 | `implementation/usage_ledger/README.md` | Append-only model-usage accounting, correlation, reconciliation, and provider-neutral usage normalization | `docs/governance/`; `docs/architecture/`; `docs/operations/`; execution-policy, audit, privacy, client-isolation, and provider-governance records |
+| `implementation/usage_attribution/README.md` | Provider-neutral actor, purpose, source, and usage-attribution accounting metadata mechanics | `docs/architecture/`; `docs/operations/`; usage/cost, evidence, audit, privacy, client-isolation, and provider-governance records |
 
 ## Connector implementation documentation
 
