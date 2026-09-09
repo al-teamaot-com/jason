@@ -18,6 +18,23 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 10. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
 11. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
+## Current preferred technician architecture
+
+As of 2026-09-09, the accepted preferred technician conversational direction is **ChatGPT Business as the primary conversational surface with Jason exposed through a governed MCP/tool boundary**.
+
+Start with these records for that workstream:
+
+- [`decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`](decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md) — governing architecture decision;
+- [`architecture/J-104-ChatGPT-Jason-Access-Architecture.md`](architecture/J-104-ChatGPT-Jason-Access-Architecture.md) — target technical architecture;
+- [`engineering/interfaces/Jason-MCP-Construction-Guide.md`](engineering/interfaces/Jason-MCP-Construction-Guide.md) — reusable MCP construction guidance;
+- [`roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`](roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md) — active migration roadmap;
+- [`operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`](operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md) — pilot/verification procedure;
+- [`sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`](sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md) — final source-built MCP durability and public acceptance proof;
+- [`sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`](sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md) — accepted Command Center usage/attribution deployment proof;
+- [`sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md`](sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md) — bounded host observation used for current-state reconciliation.
+
+The target principle is: **ChatGPT reasons; Jason governs and executes.** Use `control/CURRENT.md`, the System Registry, and observed host evidence for current-state claims.
+
 ## No-rediscovery rule
 
 Future work must not re-derive Jason's basic architecture from previous chats, memory, or code archaeology.
