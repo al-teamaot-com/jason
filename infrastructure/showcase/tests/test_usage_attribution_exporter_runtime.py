@@ -36,6 +36,51 @@ def create_model_db(path: Path) -> None:
         );
         """
     )
+    classifier = {
+        "entry_id": "model-classifier",
+        "context": {
+            "workflow_id": "conv-2",
+            "request_id": "msg-2",
+            "attempt_id": "attempt-classifier",
+            "organization_id": "aot",
+            "client_id": None,
+            "capability": "conversation.classify",
+            "routing_profile": "teams",
+            "metadata": {
+                "correlation_id": "corr-teams-2",
+                "actor_type": "unknown",
+                "actor_id": "unknown",
+                "source_channel": "teams",
+                "purpose": "Classify Teams turn for governed information handling",
+                "prompt": "never-export-classifier-prompt",
+            },
+        },
+        "provider": "openai",
+        "model": "gpt-5-nano",
+        "outcome": "completed",
+        "usage_source": "provider_reported",
+        "tokens": {
+            "input_tokens": 80,
+            "cached_input_tokens": 0,
+            "output_tokens": 20,
+            "reasoning_tokens": 0,
+            "total_tokens": 100,
+        },
+        "cost": {
+            "provider_reported_cost": None,
+            "calculated_cost": "0.00001200",
+            "currency": "USD",
+        },
+        "completed_at": "2026-09-09T15:04:59+00:00",
+    }
+    connection.execute(
+        "INSERT INTO model_usage_entries VALUES (?, 'aot', ?, ?)",
+        (
+            classifier["entry_id"],
+            classifier["context"]["attempt_id"],
+            json.dumps(classifier),
+        ),
+    )
     connection.commit()
     connection.close()
 
@@ -168,7 +213,7 @@ def create_events_db(path: Path) -> None:
     connection.close()
 
 
-def test_runtime_exporter_traces_graph_and_reuses_directory_email(tmp_path):
+def test_runtime_exporter_correlates_classifier_graph_and_provider_usage(tmp_path):
     module = load_runtime_exporter()
     base = module.base
     base.MODEL_USAGE_DB = tmp_path / "model.sqlite3"
@@ -182,17 +227,23 @@ def test_runtime_exporter_traces_graph_and_reuses_directory_email(tmp_path):
 
     metrics = base.render_metrics(datetime(2026, 9, 9, 16, 0, tzinfo=timezone.utc))
 
-    assert 'jason_usage_observed_events_24h{kind="model"} 0' in metrics
+    assert 'jason_usage_observed_events_24h{kind="model"} 1' in metrics
     assert 'jason_usage_observed_events_24h{kind="provider_api"} 2' in metrics
     assert "jason_usage_unattributed_events_24h 0" in metrics
     assert "jason_usage_attribution_coverage_ratio_24h 1.000000" in metrics
     assert "jason_usage_human_email_coverage_ratio_24h 1.000000" in metrics
     assert 'provider="microsoft_graph",product="Microsoft Graph",billing_class="subscription"' in metrics
     assert 'provider="datto_rmm",product="Datto RMM",billing_class="subscription"' in metrics
+    assert 'provider="openai",product="OpenAI API"' in metrics
     assert 'actor_id="user-al",email="al@teamaot.com"' in metrics
     assert 'source_channel="teams"' in metrics
     assert 'service="user.profile.read"' in metrics
     assert 'correlation_id="teams-directory:conv-1:msg-1"' in metrics
+    assert 'correlation_id="corr-teams-2"' in metrics
+    assert 'purpose="Classify Teams turn for governed information handling"' in metrics
+    assert 'capability="conversation.classify"' in metrics
+    assert 'telemetry_quality="inferred"' in metrics
+    assert "never-export-classifier-prompt" not in metrics
     assert "never-export-token" not in metrics
     assert "never-export-object" not in metrics
     assert "never-export-authorization" not in metrics
