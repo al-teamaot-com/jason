@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Runtime adapter for Jason usage attribution telemetry.
+
+This layer extends the base read-only exporter with safe Microsoft Graph identity
+usage events. It keeps the existing metric contract stable while recognizing
+identity-directory API calls as provider usage and using successful directory
+enrichment to improve friendly human email display metadata.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from http.server import HTTPServer
+
+import usage_attribution_exporter as base
+
+
+def _valid_email(value: object) -> str:
+    text = str(value or "").strip()
+    if not text or "@" not in text or text.startswith("@") or text.endswith("@"):
+        return ""
+    return text
+
+
+def _directory_emails(events: list[dict]) -> dict[str, str]:
+    """Return latest safe directory email enrichment by stable Jason identity."""
+
+    result: dict[str, str] = {}
+    for event in events:
+        if event.get("event_type") != "identity.directory.completed":
+            continue
+        actor_id = str(event.get("principal_id") or "").strip()
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        email = _valid_email(details.get("email_address"))
+        if actor_id and email:
+            result[actor_id] = email
+    return result
+
+
+def _provider_events(events: list[dict], emails: dict[str, str]) -> list[dict]:
+    """Normalize observable external provider request attempts.
+
+    The event parser deliberately reads only an allowlisted set of audit fields.
+    Tokens, provider responses, Microsoft tenant/object identifiers, recipient
+    addresses, raw evidence, and arbitrary payload values are not exported.
+    """
+
+    request_by_correlation: dict[str, dict] = {}
+    for event in events:
+        if event.get("event_type") != "orchestration.request.received":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        request_by_correlation[str(event.get("correlation_id") or "")] = {
+            "actor_type": base._actor_type(payload.get("requester_kind")),
+            "principal_id": str(event.get("principal_id") or "").strip(),
+            "capability": str(event.get("capability") or "").strip(),
+        }
+
+    friendly_emails = dict(emails)
+    friendly_emails.update(_directory_emails(events))
+
+    result: list[dict] = []
+    accepted = {
+        "connector.requested",
+        "email.send.attempted",
+        "identity.directory.requested",
+    }
+
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        if event_type not in accepted:
+            continue
+
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        correlation_id = str(event.get("correlation_id") or "").strip()
+        request = request_by_correlation.get(correlation_id, {})
+
+        actor_id = str(
+            event.get("principal_id")
+            or request.get("principal_id")
+            or "unknown"
+        ).strip() or "unknown"
+
+        actor_type = base._actor_type(
+            request.get("actor_type") or payload.get("requester_kind")
+        )
+        if actor_type == "unknown" and event_type == "identity.directory.requested" and actor_id != "unknown":
+            actor_type = "human"
+        if actor_type == "unknown" and actor_id != "unknown" and correlation_id.startswith("corr_mcp_"):
+            actor_type = "human"
+
+        capability = str(
+            event.get("capability")
+            or request.get("capability")
+            or "unknown"
+        ).strip() or "unknown"
+
+        if event_type == "email.send.attempted":
+            provider = "aws_ses"
+            operation = "email.send"
+            source_channel = str(details.get("source_channel") or "").strip()
+            purpose = str(details.get("purpose") or "Send governed email").strip()
+        elif event_type == "identity.directory.requested":
+            provider = "microsoft_graph"
+            operation = str(details.get("operation") or "user.profile.read").strip()
+            source_channel = str(details.get("source_channel") or "teams").strip() or "teams"
+            purpose = str(
+                details.get("purpose")
+                or "Enrich authenticated Jason human identity with directory email"
+            ).strip()
+        else:
+            provider = str(
+                details.get("provider")
+                or payload.get("provider")
+                or "unknown"
+            ).strip() or "unknown"
+            operation = str(
+                details.get("operation")
+                or payload.get("operation")
+                or capability
+            ).strip() or capability
+            source_channel = str(details.get("source_channel") or "").strip()
+            purpose = str(details.get("purpose") or "").strip()
+
+        if not source_channel:
+            source_channel = base._channel(correlation_id, actor_type)
+        if not purpose:
+            purpose = f"{capability}: {operation}"
+
+        occurred_at = event.get("occurred_at")
+        if occurred_at is None:
+            continue
+
+        email = friendly_emails.get(actor_id, "")
+        attributable = actor_id != "unknown" and actor_type != "unknown"
+
+        result.append(
+            {
+                "kind": "provider_api",
+                "occurred_at": occurred_at,
+                "actor_type": actor_type,
+                "actor_id": actor_id,
+                "email": email,
+                "display_name": "",
+                "workload_name": actor_id if actor_type != "human" else "",
+                "source_channel": source_channel,
+                "purpose": purpose,
+                "capability": capability,
+                "provider": provider,
+                "product": base._provider_product(provider),
+                "service": operation,
+                "billing_class": base._billing_class(provider),
+                "telemetry_quality": "exact",
+                "usage_quantity": 1,
+                "usage_unit": "request",
+                "cost": Decimal("0"),
+                "outcome": "attempted",
+                "correlation_id": correlation_id,
+                "request_id": str(payload.get("request_id") or event.get("execution_id") or ""),
+                "attributable": attributable,
+            }
+        )
+
+    return result
+
+
+# Keep the dashboard's existing metric contract while extending the provider parser.
+base._provider_events = _provider_events
+
+
+if __name__ == "__main__":
+    server = HTTPServer((base.HOST, base.PORT), base.Handler)
+    print(
+        f"Jason usage attribution exporter listening on {base.HOST}:{base.PORT}",
+        flush=True,
+    )
+    server.serve_forever()
