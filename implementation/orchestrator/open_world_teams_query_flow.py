@@ -23,6 +23,9 @@ import sys
 import traceback
 from typing import Any
 
+from usage_attribution.factories import human_attribution
+from usage_attribution.runtime_context import bind_attribution_context
+
 from .dynamic_conversation_kernel import (
     DynamicConversationContext,
 )
@@ -192,79 +195,95 @@ class OpenWorldTeamsQueryFlow:
                 )
             )
 
-            stage = "selector_grounding"
-
-            context = _load_or_create_context(
-                context_store=self.context_store,
-                principal=principal,
-                identity=request.identity,
+            attribution = human_attribution(
+                organization_id=principal.organization_id,
+                correlation_id=correlation_id,
+                request_id=request.identity.message_id,
+                principal_id=principal.principal_id,
+                source_channel="teams",
+                purpose="Resolve governed operational information",
+                capability="conversation.reason",
+                client_id=principal.client_id,
+                email_address=principal.email_address,
+                workflow_id=request.identity.conversation_id,
             )
 
-            grounding = (
-                self.selector_grounder.ground(
-                    human_text=question,
-                    context=context,
-                    catalog=base_catalog,
+            # Accounting/trace context only. This scope is established after Jason
+            # identity binding and never participates in authority or provider choice.
+            with bind_attribution_context(attribution):
+                stage = "selector_grounding"
+
+                context = _load_or_create_context(
+                    context_store=self.context_store,
+                    principal=principal,
+                    identity=request.identity,
                 )
-            )
 
-            stage = "structural_enrichment"
-
-            catalog = self.enricher.enrich(
-                catalog=grounding.catalog,
-                executor=executor,
-                selector_references=(
-                    dict(
-                        grounding.enrichment_selectors
+                grounding = (
+                    self.selector_grounder.ground(
+                        human_text=question,
+                        context=context,
+                        catalog=base_catalog,
                     )
-                ),
-            )
-
-            stage = "query_planning"
-
-            plan = self.planner.plan(
-                human_text=question,
-                catalog=catalog,
-            )
-
-            stage = "selector_binding"
-
-            plan = (
-                self.selector_grounder.bind_plan(
-                    plan=plan,
-                    catalog=catalog,
-                    selectors_by_handle=(
-                        grounding.selectors_by_handle
-                    ),
                 )
-            )
 
-            stage = "governed_execution"
+                stage = "structural_enrichment"
 
-            execution = (
-                self.coordinator.execute(
-                    plan=plan,
-                    catalog=catalog,
+                catalog = self.enricher.enrich(
+                    catalog=grounding.catalog,
                     executor=executor,
-                )
-            )
-
-            stage = "deterministic_rendering"
-
-            response_text = (
-                render_governed_query_result(
-                    result=(
-                        execution.query_result
-                    ),
-                    answer_mode=(
-                        plan.answer_mode
+                    selector_references=(
+                        dict(
+                            grounding.enrichment_selectors
+                        )
                     ),
                 )
-            )
 
-            orchestrations = tuple(
-                execution.orchestrations
-            )
+                stage = "query_planning"
+
+                plan = self.planner.plan(
+                    human_text=question,
+                    catalog=catalog,
+                )
+
+                stage = "selector_binding"
+
+                plan = (
+                    self.selector_grounder.bind_plan(
+                        plan=plan,
+                        catalog=catalog,
+                        selectors_by_handle=(
+                            grounding.selectors_by_handle
+                        ),
+                    )
+                )
+
+                stage = "governed_execution"
+
+                execution = (
+                    self.coordinator.execute(
+                        plan=plan,
+                        catalog=catalog,
+                        executor=executor,
+                    )
+                )
+
+                stage = "deterministic_rendering"
+
+                response_text = (
+                    render_governed_query_result(
+                        result=(
+                            execution.query_result
+                        ),
+                        answer_mode=(
+                            plan.answer_mode
+                        ),
+                    )
+                )
+
+                orchestrations = tuple(
+                    execution.orchestrations
+                )
 
             print(
                 "JASON_OPEN_WORLD_SUCCESS"
