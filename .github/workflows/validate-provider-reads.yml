@@ -30,7 +30,7 @@ jobs:
   governed-provider-reads:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/runtime_service/src
+      PYTHONPATH: implementation:implementation/connectors/openclaw/src:implementation/runtime_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,7 +39,7 @@ jobs:
       - name: Install source test dependencies
         run: |
           python -m pip install --upgrade pip pytest
-          python -m pip install ./implementation ./implementation/runtime_service
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
       - name: Compile provider-read source boundary
         run: |
           python -m compileall -q \
