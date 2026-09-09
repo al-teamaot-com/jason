@@ -45,7 +45,9 @@ class ProviderReadActivationPlan:
     verified_capabilities: tuple[str, ...]
     target_provider_lifecycle: str
     target_provider_health: str
+    target_provider_approval: str
     target_capability_lifecycle: str
+    target_activation_state: str
     evidence_reference: str
     hosted_model_required: bool
 
@@ -103,7 +105,9 @@ def build_provider_read_activation_plan(
         verified_capabilities=tuple(sorted(verified)),
         target_provider_lifecycle="available",
         target_provider_health="healthy",
+        target_provider_approval="approved",
         target_capability_lifecycle="active",
+        target_activation_state="provider_backed_accepted",
         evidence_reference=evidence_reference,
         hosted_model_required=False,
     )
