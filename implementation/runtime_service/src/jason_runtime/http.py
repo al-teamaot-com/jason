@@ -36,6 +36,14 @@ class RuntimeHttpApplication:
     # contract. Conversation Experience may reuse the same already-governed structured
     # reasoning runtime instead of recomposing a provider or resolving secrets again.
     conversation_reasoning_client: Any | None = None
+
+    # Internal composition references for alternate governed ingress adapters.
+    # These are never exposed through the Teams HTTP contract.
+    governed_orchestrator: Any | None = None
+    identity_authority: Any | None = None
+    capabilities: Any | None = None
+    microsoft_identity_bindings: Any | None = None
+
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
 

@@ -13,6 +13,7 @@ from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_rmm.connector import DattoRmmConnector
+from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from jason_cap_007.kernel_registration import register_email_send
 from jason_cap_007.service import CAPABILITY_NAME as EMAIL_CAPABILITY_NAME
 from jason_cap_007.service import EmailSendPolicy, GovernedEmailSendInvoker
@@ -76,6 +77,7 @@ from orchestrator.ollama_reasoning import (
     OllamaResourceInquiryReasoner,
     OllamaStructuredJsonClient,
 )
+from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.resource_capability_catalog import (
     DATTO_RMM_PROVIDER,
     ENDPOINT_ALERT_SEARCH,
@@ -151,9 +153,9 @@ class RuntimeSettings:
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
-    openai_semantic_model: str = "gpt-5.4-mini"
-    openai_conversation_model: str = "gpt-5.4-mini"
-    openai_pricing_model: str = "gpt-5.4-mini"
+    openai_semantic_model: str = "gpt-5-nano"
+    openai_conversation_model: str = "gpt-5-nano"
+    openai_pricing_model: str = "gpt-5-nano"
     openai_input_cost_per_million_tokens: Decimal = Decimal("0.75")
     openai_cached_input_cost_per_million_tokens: Decimal = Decimal("0.075")
     openai_output_cost_per_million_tokens: Decimal = Decimal("4.50")
@@ -251,13 +253,13 @@ class RuntimeSettings:
                 "JASON_HOSTED_CONVERSATION_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
-                "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5.4-mini"
+                "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5-nano"
             ).strip(),
             openai_conversation_model=os.getenv(
-                "JASON_OPENAI_CONVERSATION_MODEL", "gpt-5.4-mini"
+                "JASON_OPENAI_CONVERSATION_MODEL", "gpt-5-nano"
             ).strip(),
             openai_pricing_model=os.getenv(
-                "JASON_OPENAI_PRICING_MODEL", "gpt-5.4-mini"
+                "JASON_OPENAI_PRICING_MODEL", "gpt-5-nano"
             ).strip(),
             openai_input_cost_per_million_tokens=Decimal(
                 os.getenv("JASON_OPENAI_INPUT_COST_PER_MILLION", "0.75")
@@ -481,10 +483,31 @@ def _deterministic_resource_contracts(
         canonical_facts = tuple(
             item.strip() for item in metadata.get("canonical_facts", "").split(",") if item.strip()
         )
-        selector_required = any(
-            item in resource_types
-            for item in ("endpoint", "endpoint_alert", "endpoint_audit", "endpoint_software")
-        )
+        declared_selector_required = str(
+            metadata.get(
+                "selector_required",
+                "",
+            )
+        ).strip().casefold()
+
+        if declared_selector_required in {
+            "true",
+            "false",
+        }:
+            selector_required = (
+                declared_selector_required
+                == "true"
+            )
+        else:
+            selector_required = any(
+                item in resource_types
+                for item in (
+                    "endpoint",
+                    "endpoint_alert",
+                    "endpoint_audit",
+                    "endpoint_software",
+                )
+            )
         contracts.append(
             {
                 "capability_name": capability.capability_name,
@@ -531,6 +554,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_email_send(capabilities=capabilities, providers=providers)
+
+    integration_broker = IntegrationBroker(
+        capabilities=capabilities,
+        providers=providers,
+    )
+    integration_broker.register(
+        build_datto_rmm_manifest()
+    )
 
     identity_authority = IdentityAuthorityService(
         identities=SQLiteIdentityRepository(authority_store),
@@ -797,9 +828,50 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             enabled=settings.conversation_experience_enabled,
             context_db=settings.dynamic_conversation_context_db,
             context_ttl_seconds=settings.dynamic_conversation_context_ttl_seconds,
+            experience_models=(
+                tuple(
+                    item.strip()
+                    for item in os.getenv(
+                        "JASON_CONVERSATION_EXPERIENCE_MODELS",
+                        "",
+                    ).split(",")
+                )
+                if os.getenv(
+                    "JASON_CONVERSATION_EXPERIENCE_MODELS",
+                    "",
+                ).strip()
+                else ()
+            ),
+            work_models=(
+                tuple(
+                    item.strip()
+                    for item in os.getenv(
+                        "JASON_CONVERSATION_WORK_MODELS",
+                        "",
+                    ).split(",")
+                )
+                if os.getenv(
+                    "JASON_CONVERSATION_WORK_MODELS",
+                    "",
+                ).strip()
+                else ()
+            ),
+            reasoning_timeout_seconds=float(
+                os.getenv(
+                    "JASON_CONVERSATION_REASONING_TIMEOUT_SECONDS",
+                    "90",
+                )
+            ),
+            max_specialized_reads_per_need=int(
+                os.getenv(
+                    "JASON_CONVERSATION_MAX_SPECIALIZED_READS_PER_NEED",
+                    "8",
+                )
+            ),
         ),
         fallback_flow=flow,
         capabilities=capabilities,
+        providers=providers,
         ollama_url=settings.ollama_url,
         default_ollama_model=settings.ollama_model,
         identity_binder=identity_binder,
@@ -808,6 +880,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=return_transport,
         http_transport=http_transport,
         structured_client=hosted_conversation_client or ollama_client,
+        integration_broker=integration_broker,
+        investigation_client=hosted_conversation_client,
     )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
@@ -824,4 +898,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             transport=return_transport,
         ),
         conversation_reasoning_client=hosted_conversation_client or ollama_client,
+        governed_orchestrator=orchestrator,
+        identity_authority=identity_authority,
+        capabilities=capabilities,
+        microsoft_identity_bindings=bindings,
     )

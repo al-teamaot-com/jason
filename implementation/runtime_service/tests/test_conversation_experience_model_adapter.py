@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+
 from jason_runtime.conversation_experience_cutover import (
     ConversationExperienceCutoverSettings,
     select_conversation_experience_flow,
@@ -12,6 +14,13 @@ class Dummy:
     pass
 
 
+
+def empty_capability_registry():
+    return CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+
+
 def test_conversation_experience_wraps_each_ollama_backend_in_runtime_schema_adapter(tmp_path):
     selected = select_conversation_experience_flow(
         settings=ConversationExperienceCutoverSettings(
@@ -21,7 +30,8 @@ def test_conversation_experience_wraps_each_ollama_backend_in_runtime_schema_ada
             work_models=("cheap-work",),
         ),
         fallback_flow=Dummy(),
-        capabilities=Dummy(),
+        capabilities=empty_capability_registry(),
+        providers=None,
         ollama_url="http://ollama.invalid:11434",
         default_ollama_model="unused",
         identity_binder=Dummy(),

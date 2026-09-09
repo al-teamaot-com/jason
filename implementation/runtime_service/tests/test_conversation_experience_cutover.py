@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+
 from jason_runtime.conversation_experience_cutover import (
     ConversationExperienceCutoverSettings,
     select_conversation_experience_flow,
@@ -13,6 +15,13 @@ class Dummy:
     pass
 
 
+
+def empty_capability_registry():
+    return CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+
+
 def test_disabled_cutover_returns_exact_existing_flow_without_constructing_new_state(tmp_path):
     fallback = Dummy()
 
@@ -22,7 +31,7 @@ def test_disabled_cutover_returns_exact_existing_flow_without_constructing_new_s
             context_db=tmp_path / "unused.sqlite3",
         ),
         fallback_flow=fallback,
-        capabilities=Dummy(),
+        capabilities=empty_capability_registry(),
         ollama_url="",
         default_ollama_model="",
         identity_binder=Dummy(),
@@ -40,7 +49,7 @@ def test_enabled_cutover_keeps_experience_models_separate_from_backend_work_mode
     factory = Dummy()
     orchestrator = Dummy()
     transport = Dummy()
-    capabilities = Dummy()
+    capabilities = empty_capability_registry()
 
     selected = select_conversation_experience_flow(
         settings=ConversationExperienceCutoverSettings(
@@ -103,7 +112,7 @@ def test_enabled_cutover_defaults_both_roles_to_existing_ollama_model_without_lo
             context_db=tmp_path / "context.sqlite3",
         ),
         fallback_flow=Dummy(),
-        capabilities=Dummy(),
+        capabilities=empty_capability_registry(),
         ollama_url="http://ollama.invalid:11434",
         default_ollama_model="current-runtime-model",
         identity_binder=Dummy(),
@@ -129,7 +138,7 @@ def test_answer_drafting_tries_backend_work_model_before_experience_model(tmp_pa
             work_models=("cheap-work",),
         ),
         fallback_flow=Dummy(),
-        capabilities=Dummy(),
+        capabilities=empty_capability_registry(),
         ollama_url="http://ollama.invalid:11434",
         default_ollama_model="unused",
         identity_binder=Dummy(),
@@ -191,7 +200,7 @@ def test_enabled_cutover_reuses_existing_structured_runtime_client_when_roles_ha
             context_db=tmp_path / "context.sqlite3",
         ),
         fallback_flow=Dummy(),
-        capabilities=Dummy(),
+        capabilities=empty_capability_registry(),
         ollama_url="",
         default_ollama_model="",
         identity_binder=Dummy(),
@@ -208,3 +217,77 @@ def test_enabled_cutover_reuses_existing_structured_runtime_client_when_roles_ha
     assert work_backend.name == "work:hosted-runtime-model"
     assert experience_backend.client is shared
     assert work_backend.client is shared
+
+
+def test_explicit_local_role_models_append_existing_runtime_client_as_final_fallback(
+    tmp_path,
+):
+    class RuntimeClient:
+        model = "hosted-runtime-model"
+        base_url = "https://hosted.invalid"
+
+        def complete(
+            self,
+            *,
+            system,
+            user,
+            schema,
+            max_output_tokens=160,
+        ):
+            raise AssertionError(
+                "composition test must not invoke model"
+            )
+
+    selected = select_conversation_experience_flow(
+        settings=ConversationExperienceCutoverSettings(
+            enabled=True,
+            context_db=tmp_path / "context.sqlite3",
+            experience_models=("quality-local",),
+            work_models=("cheap-local", "strong-local"),
+        ),
+        fallback_flow=Dummy(),
+        capabilities=empty_capability_registry(),
+        ollama_url="http://ollama.invalid:11434",
+        default_ollama_model="unused-default",
+        identity_binder=Dummy(),
+        request_factory=Dummy(),
+        orchestrator=Dummy(),
+        transport=Dummy(),
+        structured_client=RuntimeClient(),
+    )
+
+    experience = (
+        selected.experience.kernel.proposing.backends
+    )
+    assert [item.name for item in experience] == [
+        "experience:hosted-runtime-model",
+        "experience:quality-local",
+    ]
+
+    work = (
+        selected.progressive_reads.gaps.reasoning.backends
+    )
+    assert [item.name for item in work] == [
+        "work:hosted-runtime-model",
+        "work:cheap-local",
+        "work:strong-local",
+    ]
+
+    evidence_selecting = (
+        selected.progressive_reads
+        .evidence.reasoner.selecting.backends
+    )
+    assert [item.name for item in evidence_selecting] == [
+        "work:hosted-runtime-model",
+        "work:cheap-local",
+        "work:strong-local",
+    ]
+
+    evidence_reviewing = (
+        selected.progressive_reads
+        .evidence.reasoner.reviewing.backends
+    )
+    assert [item.name for item in evidence_reviewing] == [
+        "experience:hosted-runtime-model",
+        "experience:quality-local",
+    ]

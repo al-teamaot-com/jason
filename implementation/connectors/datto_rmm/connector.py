@@ -54,7 +54,14 @@ class DattoRmmConnector(ConnectorBase):
         try:
             should_resolve_device = (
                 request.context.capability == "datto_rmm.device.search"
-                and self._requested_facts_present(request.arguments)
+                and (
+                    self._requested_facts_present(
+                        request.arguments
+                    )
+                    or self._has_device_discovery_selector(
+                        request.arguments
+                    )
+                )
             )
             should_resolve_scoped_read = (
                 request.context.capability in self.device_scoped_read_capabilities
@@ -223,7 +230,10 @@ class DattoRmmConnector(ConnectorBase):
         after complete discovery; ambiguity or incomplete discovery fails closed.
         """
 
-        user_reference = self._user_identity_reference(request.arguments)
+        user_reference = self._user_identity_reference(
+            request.arguments
+        )
+
         if user_reference:
             discovery = self._execute_user_identity_discovery(
                 request=request,
@@ -233,6 +243,18 @@ class DattoRmmConnector(ConnectorBase):
                 user_reference=user_reference,
             )
             matches = discovery["resource_matches"]
+
+        elif not self._has_device_discovery_selector(
+            request.arguments
+        ):
+            discovery = self._execute_account_device_collection(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            matches = discovery["resource_matches"]
+
         else:
             search_request = self._prepare_provider_request(
                 capability="datto_rmm.device.search",
@@ -245,7 +267,10 @@ class DattoRmmConnector(ConnectorBase):
                 request=request,
                 prepared=search_request,
             )
-            discovery = self._normalize_result("datto_rmm.device.search", search_payload)
+            discovery = self._normalize_result(
+                "datto_rmm.device.search",
+                search_payload,
+            )
             matches = discovery["resource_matches"]
 
         hostname_reference = self._hostname_reference(request.arguments)
@@ -262,12 +287,34 @@ class DattoRmmConnector(ConnectorBase):
         if len(matches) != 1 or discovery.get("discovery_complete") is False:
             return discovery
 
-        resource_id = str(matches[0].get("resource_id", "")).strip()
+        resource_id = str(
+            matches[0].get(
+                "resource_id",
+                "",
+            )
+        ).strip()
+
         if not resource_id:
-            # Preserve the unique candidate as evidence, but do not issue a second
-            # provider request without a durable provider identity. The response layer
-            # will fail closed if exact resource facts were requested.
+            # Preserve the unique candidate as evidence, but do not issue a
+            # second provider request without durable provider identity.
             return discovery
+
+        # A complete, unique provider discovery may establish durable
+        # resource identity without reading detailed resource facts.
+        #
+        # This is intentionally distinct from promoting the human selector:
+        # the canonical identity is still the provider-returned resource_id.
+        #
+        # Pure discovery therefore returns the provider-neutral resolution
+        # envelope and stops. An exact device GET is performed only when the
+        # governed request actually asks for facts.
+        if not self._requested_facts_present(
+            request.arguments
+        ):
+            return {
+                **dict(discovery),
+                "resolved_resource_id": resource_id,
+            }
 
         read_request = self._prepare_provider_request(
             capability="datto_rmm.device.get",
@@ -427,6 +474,13 @@ class DattoRmmConnector(ConnectorBase):
                     )
                 ).strip()
                 == "complete"
+                or (
+                    request.context.capability
+                    == "datto_rmm.site.search"
+                    and self._site_selector_present(
+                        request.arguments
+                    )
+                )
             ),
         )
 
@@ -453,7 +507,114 @@ class DattoRmmConnector(ConnectorBase):
                 },
             )
 
-        return result.payload
+        payload = result.payload
+
+        if (
+            request.context.capability
+            == "datto_rmm.site.search"
+        ):
+            payload = self._filter_site_search_result(
+                payload=payload,
+                arguments=request.arguments,
+            )
+
+        return payload
+
+
+    @staticmethod
+    def _site_selector_present(
+        arguments: Mapping[str, Any],
+    ) -> bool:
+        return any(
+            str(arguments.get(key) or "").strip()
+            for key in (
+                "name",
+                "site",
+                "site_id",
+                "site_uid",
+            )
+        )
+
+
+    @classmethod
+    def _filter_site_search_result(
+        cls,
+        *,
+        payload: Any,
+        arguments: Mapping[str, Any],
+    ) -> Any:
+        """Apply canonical site selectors to complete provider evidence.
+
+        Datto account site enumeration is used as discovery evidence.
+        Filtering occurs only against provider-returned identifiers and names;
+        no site identity is invented or inferred.
+        """
+
+        if not isinstance(payload, Mapping):
+            return payload
+
+        sites = payload.get("sites")
+
+        if not isinstance(sites, list):
+            return payload
+
+        name_reference = str(
+            arguments.get("name")
+            or arguments.get("site")
+            or ""
+        ).strip()
+
+        id_reference = str(
+            arguments.get("site_id")
+            or arguments.get("site_uid")
+            or ""
+        ).strip()
+
+        matches = []
+
+        for site in sites:
+            if not isinstance(site, Mapping):
+                continue
+
+            if id_reference:
+                provider_ids = {
+                    str(site.get("uid") or "").strip(),
+                    str(site.get("id") or "").strip(),
+                }
+
+                if id_reference not in provider_ids:
+                    continue
+
+            if name_reference:
+                provider_name = str(
+                    site.get("name") or ""
+                ).strip()
+
+                if (
+                    name_reference.casefold()
+                    not in provider_name.casefold()
+                ):
+                    continue
+
+            matches.append(dict(site))
+
+        result = dict(payload)
+        result["sites"] = matches
+
+        details = result.get("pageDetails")
+
+        if isinstance(details, Mapping):
+            result["pageDetails"] = {
+                **dict(details),
+                "count": len(matches),
+                "totalCount": len(matches),
+                "prevPageUrl": None,
+                "nextPageUrl": None,
+            }
+
+        result["discovery_complete"] = True
+
+        return result
 
 
     def _execute_hostname_fragment_discovery(
@@ -525,6 +686,108 @@ class DattoRmmConnector(ConnectorBase):
             "provider_data": {
                 "discovery_mode": "hostname_fragment",
                 "hostname_reference": hostname_reference,
+                "pages": provider_pages,
+            },
+            "discovery_complete": discovery_complete,
+        }
+
+    @staticmethod
+    def _has_device_discovery_selector(
+        arguments: Mapping[str, Any],
+    ) -> bool:
+        """Return whether the request supplies a concrete endpoint selector."""
+
+        return any(
+            str(arguments.get(key) or "").strip()
+            for key in (
+                "hostname",
+                "name",
+                "resource_id",
+                "site",
+                "serial_number",
+                "user_identity",
+            )
+        )
+
+    def _execute_account_device_collection(
+        self,
+        *,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+        access_token: str,
+        token_type: str,
+    ) -> Mapping[str, Any]:
+        """Enumerate the bounded authorized endpoint collection.
+
+        This is the selectorless form of the existing provider-neutral device
+        search. It stays inside the already-authorized Datto account boundary,
+        preserves provider-returned durable identities, de-duplicates results,
+        and explicitly reports whether bounded pagination completed.
+        """
+
+        provider_pages: list[Any] = []
+        matches: list[Mapping[str, str]] = []
+        seen: set[str] = set()
+        discovery_complete = False
+
+        for page in range(
+            1,
+            self.fallback_discovery_max_pages + 1,
+        ):
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.device.search",
+                arguments={
+                    "page": page,
+                    "max": self.fallback_discovery_page_size,
+                },
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
+
+            provider_pages.append(payload)
+
+            records = self._device_records(payload)
+
+            for record in records:
+                match = self._canonical_device_match(record)
+
+                resource_id = str(
+                    match.get("resource_id", "")
+                ).strip()
+
+                key = (
+                    resource_id
+                    or (
+                        f"{match.get('hostname', '').casefold()}"
+                        f"|{match.get('site_id', '')}"
+                    )
+                )
+
+                if key in seen:
+                    continue
+
+                seen.add(key)
+                matches.append(match)
+
+            if (
+                len(records)
+                < self.fallback_discovery_page_size
+            ):
+                discovery_complete = True
+                break
+
+        return {
+            "resource_matches": matches,
+            "provider_data": {
+                "discovery_mode": (
+                    "authorized_account_collection"
+                ),
                 "pages": provider_pages,
             },
             "discovery_complete": discovery_complete,
@@ -789,11 +1052,49 @@ class DattoRmmConnector(ConnectorBase):
             return "/api/v2/account/alerts/open", params
 
         if capability == "datto_rmm.site.search":
-            params = {
-                "page": max(int(arguments.get("page", 1)), 0),
-                "max": max(2, min(int(arguments.get("max", 250)), 250)),
+            selector_present = any(
+                str(arguments.get(key) or "").strip()
+                for key in (
+                    "name",
+                    "site",
+                    "site_id",
+                    "site_uid",
+                )
+            )
+
+            # Datto site pagination is zero-based. A selector-driven discovery
+            # must begin at the first provider page so completeness can be
+            # proven before canonical filtering is applied.
+            page = (
+                0
+                if selector_present
+                else max(
+                    int(arguments.get("page", 0)),
+                    0,
+                )
+            )
+
+            maximum = (
+                250
+                if selector_present
+                else max(
+                    2,
+                    min(
+                        int(
+                            arguments.get(
+                                "max",
+                                250,
+                            )
+                        ),
+                        250,
+                    ),
+                )
+            )
+
+            return "/api/v2/account/sites", {
+                "page": page,
+                "max": maximum,
             }
-            return "/api/v2/account/sites", params
 
         # Legacy provider-specific alias retained until callers converge on the
         # governed provider-neutral alert resource capability.

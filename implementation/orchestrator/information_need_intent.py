@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .conversation_kernel import InformationNeed, ValidatedReasoningPool
 from .information_fulfillment import FulfillmentCapability, FulfillmentStep
+from .semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 from .teams_conversation_flow import ConversationIntent, ConversationIntentPlan
 
 
@@ -127,11 +128,18 @@ class InformationNeedIntentBuilder:
         items: tuple[PlannedInformationNeed, ...],
         capability: FulfillmentCapability,
     ) -> Mapping[str, Any]:
+        requested_facts = _canonical_requested_facts(
+            human_text=human_text,
+            items=items,
+        )
+
         selector_keys = tuple(
             dict.fromkeys(key.strip() for key in capability.selector_keys if key.strip())
         )
         if not selector_keys:
-            return {"requested_facts": [human_text]}
+            return {
+                "requested_facts": list(requested_facts),
+            }
 
         target = items[0].need.target
         if any(item.need.target != target for item in items):
@@ -145,6 +153,16 @@ class InformationNeedIntentBuilder:
                 raise InformationNeedIntentError(
                     "grounded target selector is not supported by selected capability"
                 )
+        elif (
+            not capability.selector_required
+            and capability.collection_scope is not None
+        ):
+            # The capability contract explicitly authorizes a selectorless
+            # collection read. No model may manufacture a selector simply
+            # because selector keys also exist.
+            return {
+                "requested_facts": list(requested_facts),
+            }
         elif len(selector_keys) == 1:
             selector_name = selector_keys[0]
         else:
@@ -193,11 +211,78 @@ class InformationNeedIntentBuilder:
 
         return {
             selector_name: target.reference,
-            # Preserve the original human language. This is not a canonical fact name or
-            # question mapping; it lets governed evidence interpretation answer the turn
-            # that the human actually asked.
-            "requested_facts": [human_text],
+            # requested_facts carries the already-grounded information obligation,
+            # not the entire human utterance. Canonicalization is provider-neutral
+            # and cannot change capability, target, selector, authority, or value.
+            "requested_facts": list(requested_facts),
         }
+
+
+def _canonical_requested_facts(
+    *,
+    human_text: str,
+    items: tuple[PlannedInformationNeed, ...],
+) -> tuple[str, ...]:
+    """Preserve bounded information needs as canonical fact obligations.
+
+    For one information need, the original human sentence may supply an explicit
+    registered semantic term such as "needs to be restarted". For multiple needs,
+    each validated need is canonicalized independently so one explicit term cannot
+    collapse several requested facts into a single obligation.
+
+    Unknown concepts remain conservative passthrough facts.
+    """
+
+    raw = tuple(
+        dict.fromkeys(
+            item.need.need.strip()
+            for item in items
+            if item.need.need.strip()
+        )
+    )
+
+    if not raw:
+        raise InformationNeedIntentError(
+            "planned information need is empty"
+        )
+
+    if len(raw) == 1:
+        canonical = (
+            DEFAULT_SEMANTIC_FACT_RESOLVER
+            .canonicalize_requested_facts(
+                human_text=human_text,
+                requested_facts=raw,
+            )
+        )
+    else:
+        values: list[str] = []
+
+        for fact in raw:
+            resolved = (
+                DEFAULT_SEMANTIC_FACT_RESOLVER
+                .canonicalize_requested_facts(
+                    human_text=fact,
+                    requested_facts=(fact,),
+                )
+            )
+
+            for value in resolved:
+                clean = str(value).strip()
+
+                if (
+                    clean
+                    and clean not in values
+                ):
+                    values.append(clean)
+
+        canonical = tuple(values)
+
+    if not canonical:
+        raise InformationNeedIntentError(
+            "planned information need produced no fact obligation"
+        )
+
+    return tuple(canonical)
 
 
 def _validate_selector(

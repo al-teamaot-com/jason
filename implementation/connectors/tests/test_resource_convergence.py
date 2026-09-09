@@ -257,3 +257,203 @@ def test_provider_neutral_evidence_rejects_naive_timestamp():
             confidence=0.9,
             observed_at=datetime(2026, 8, 9, 19, 0),
         )
+
+
+def test_pure_device_search_can_establish_unique_durable_identity_without_exact_get():
+    """A unique complete discovery resolves identity without reading facts."""
+
+    from unittest.mock import Mock
+
+    from connectors.core.contracts import (
+        ConnectorContext,
+        ConnectorRequest,
+    )
+    from connectors.datto_rmm.connector import DattoRmmConnector
+
+    connector = object.__new__(DattoRmmConnector)
+
+    connector._has_device_discovery_selector = Mock(
+        return_value=True
+    )
+    connector._requested_facts_present = (
+        DattoRmmConnector._requested_facts_present
+    )
+
+    connector._prepare_provider_request = Mock()
+    connector._execute_prepared_request = Mock(
+        return_value={
+            "devices": [
+                {
+                    "uid": "device-50282",
+                    "hostname": "AOT-50282",
+                }
+            ]
+        }
+    )
+
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-pure-search",
+            principal_id="principal-1",
+            organization_id="aot",
+            client_id="aot",
+            capability="datto_rmm.device.search",
+            mode="observe",
+        ),
+        arguments={
+            "hostname": "AOT-50282",
+        },
+    )
+
+    result = connector._execute_device_resolve(
+        request=request,
+        credentials={
+            "api_url": "https://example.invalid",
+        },
+        access_token="token",
+        token_type="Bearer",
+    )
+
+    assert result["resolved_resource_id"] == (
+        "device-50282"
+    )
+
+    assert result["resource_matches"] == [
+        {
+            "resource_id": "device-50282",
+            "hostname": "AOT-50282",
+        }
+    ]
+
+    # Only discovery occurs. Pure identity resolution must not perform
+    # the exact device GET.
+    assert connector._execute_prepared_request.call_count == 1
+
+
+def test_device_search_with_requested_facts_still_performs_exact_read():
+    """Fact-bearing search preserves the existing exact-read behavior."""
+
+    from unittest.mock import Mock
+
+    from connectors.core.contracts import (
+        ConnectorContext,
+        ConnectorRequest,
+    )
+    from connectors.datto_rmm.connector import DattoRmmConnector
+
+    connector = object.__new__(DattoRmmConnector)
+
+    connector._prepare_provider_request = Mock(
+        side_effect=[
+            Mock(),
+            Mock(),
+        ]
+    )
+
+    connector._execute_prepared_request = Mock(
+        side_effect=[
+            {
+                "devices": [
+                    {
+                        "uid": "device-50282",
+                        "hostname": "AOT-50282",
+                    }
+                ]
+            },
+            {
+                "hostname": "AOT-50282",
+                "operatingSystem": "Windows",
+            },
+        ]
+    )
+
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-fact-search",
+            principal_id="principal-1",
+            organization_id="aot",
+            client_id="aot",
+            capability="datto_rmm.device.search",
+            mode="observe",
+        ),
+        arguments={
+            "hostname": "AOT-50282",
+            "requested_facts": [
+                "operating system",
+            ],
+        },
+    )
+
+    result = connector._execute_device_resolve(
+        request=request,
+        credentials={
+            "api_url": "https://example.invalid",
+        },
+        access_token="token",
+        token_type="Bearer",
+    )
+
+    assert result["resolved_resource_id"] == (
+        "device-50282"
+    )
+
+    assert connector._execute_prepared_request.call_count == 2
+
+
+def test_ambiguous_pure_device_search_does_not_resolve_identity():
+    """Multiple candidates remain discovery evidence only."""
+
+    from unittest.mock import Mock
+
+    from connectors.core.contracts import (
+        ConnectorContext,
+        ConnectorRequest,
+    )
+    from connectors.datto_rmm.connector import DattoRmmConnector
+
+    connector = object.__new__(DattoRmmConnector)
+
+    connector._prepare_provider_request = Mock()
+    connector._execute_prepared_request = Mock(
+        return_value={
+            "devices": [
+                {
+                    "uid": "device-1",
+                    "hostname": "LAB-1",
+                },
+                {
+                    "uid": "device-2",
+                    "hostname": "LAB-2",
+                },
+            ]
+        }
+    )
+
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-ambiguous-search",
+            principal_id="principal-1",
+            organization_id="aot",
+            client_id="aot",
+            capability="datto_rmm.device.search",
+            mode="observe",
+        ),
+        arguments={
+            "hostname": "LAB",
+        },
+    )
+
+    result = connector._execute_device_resolve(
+        request=request,
+        credentials={
+            "api_url": "https://example.invalid",
+        },
+        access_token="token",
+        token_type="Bearer",
+    )
+
+    assert len(
+        result["resource_matches"]
+    ) == 2
+
+    assert "resolved_resource_id" not in result

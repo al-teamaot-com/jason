@@ -71,6 +71,14 @@ class StructuredConversationReasoner(Protocol):
 T = TypeVar("T")
 
 
+def _bounded_reasoning_error(error: Exception, max_chars: int = 400) -> str:
+    """Return one bounded single-line internal diagnostic for rejected reasoning."""
+    value = " ".join(str(error).split())
+    if len(value) > max_chars:
+        return value[:max_chars] + "..."
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ReasoningBackend:
     """One replaceable reasoning backend ordered by expected cost."""
@@ -92,6 +100,7 @@ class ReasoningAttempt:
     attempt: int
     outcome: str
     error_type: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +149,7 @@ class ValidatedReasoningPool:
                             attempt=attempt,
                             outcome="rejected",
                             error_type=type(error).__name__,
+                            error_message=_bounded_reasoning_error(error),
                         )
                     )
                     continue
@@ -153,8 +163,14 @@ class ValidatedReasoningPool:
                 return validated, tuple(attempts)
         if last_error is None:
             raise ConversationKernelError("reasoning pool exhausted without a result")
+        detail = _bounded_reasoning_error(last_error)
+        suffix = (
+            f"; last_error={type(last_error).__name__}: {detail}"
+            if detail
+            else f"; last_error={type(last_error).__name__}"
+        )
         raise ConversationKernelError(
-            "all configured reasoning backends failed bounded validation"
+            "all configured reasoning backends failed bounded validation" + suffix
         ) from last_error
 
 
@@ -241,7 +257,7 @@ class ConversationKernelDecision:
             raise ConversationKernelError("only conversation outcome may carry a candidate response")
 
 
-_SYSTEM_INSTRUCTIONS = """You are Jason's Conversation Kernel. Interpret what the human means at the user-experience level. Do not select or name providers, connectors, capabilities, API operations, internal registries, shells, agents, or implementation paths. For information or action requests, describe only the provider-independent target, the information or outcome needed, requested authority, time scope, completeness, and any material relationship. A target may be grounded either in an exact literal from the current human message or in an entity already verified in supplied conversation context. Do not invent, normalize, expand, or transform identifiers. Ask for clarification only when choosing would materially change the target, authority, action, risk, or meaning. Uncertainty about where Jason should obtain evidence is never a reason to ask the human. Return the complete bounded set of information needs when the human asks for several things. Conversation-only text is a candidate response and must still pass Jason's downstream experience/quality controls before reaching a human. Return only the required structured object."""
+_SYSTEM_INSTRUCTIONS = """You are Jason's Conversation Kernel. Interpret what the human means at the user-experience level. Do not select or name providers, connectors, capabilities, API operations, internal registries, shells, agents, or implementation paths. For information or action requests, describe only the provider-independent target, the information or outcome needed, requested authority, time scope, completeness, and any material relationship. A target may be grounded either in an exact literal from the current human message or in an entity already verified in supplied conversation context. Do not invent, normalize, expand, or transform identifiers. For every information need, preserve the human's requested semantic scope and do not add unrequested factual dimensions, records, events, corroboration requirements, causal details, or sub-facts that would make the answer more demanding than the human request. Ask for clarification only when choosing would materially change the target, authority, action, risk, or meaning. Uncertainty about where Jason should obtain evidence is never a reason to ask the human. Return the complete bounded set of information needs when the human asks for several things. When several requested facts are independently verifiable, represent each independently answerable fact as its own information need even when they share a target, authority, or time scope. Keep facts together only when they must be established together as one semantic unit. Conversation-only text is a candidate response and must still pass Jason's downstream experience/quality controls before reaching a human. Return only the required structured object."""
 
 
 @dataclass(frozen=True, slots=True)

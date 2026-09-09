@@ -249,3 +249,39 @@ def test_metadata_reasoner_preserves_semantic_evidence_and_relationship_contract
     }
     assert plan.steps[0].arguments["relationship_type"] == "logged_in_to"
     assert plan.steps[0].arguments["temporal_semantics"] == "most_recent"
+
+
+def test_primary_endpoint_reads_advertise_reboot_required_canonically():
+    capabilities, _ = services()
+
+    search = capabilities.get_current(capability_name=ENDPOINT_DEVICE_SEARCH)
+    read = capabilities.get_current(capability_name=ENDPOINT_DEVICE_READ)
+
+    for definition in (search, read):
+        canonical = {
+            item.strip()
+            for item in definition.metadata["canonical_facts"].split(",")
+            if item.strip()
+        }
+        assert "reboot required" in canonical
+        assert "reboot required" in definition.metadata["fact_hints"]
+
+
+def test_reasoner_routes_reboot_required_through_primary_endpoint_search():
+    capabilities, _ = services()
+    planner = GovernedResourceInquiryPlanner(
+        registry=capabilities,
+        reasoner=MetadataResourceCapabilityReasoner(),
+    )
+
+    plan = planner.plan(
+        ResourceInquiry(
+            resource_type="endpoint",
+            resource_selector={"hostname": "AOT-50282"},
+            requested_facts=("reboot required",),
+        )
+    )
+
+    assert len(plan.steps) == 1
+    assert plan.steps[0].capability_name == ENDPOINT_DEVICE_SEARCH
+    assert plan.steps[0].arguments["requested_facts"] == ("reboot required",)

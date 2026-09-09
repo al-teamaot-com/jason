@@ -91,28 +91,33 @@ def catalog(*specialized):
     )
 
 
-def test_one_remaining_specialized_candidate_needs_no_model_call():
-    client = FakeClient()
+def test_one_remaining_specialized_candidate_may_be_declined_when_not_relevant():
+    candidate = capability(
+        "endpoint.audit.read",
+        types="endpoint_audit,endpoint",
+        role="specialized",
+        purpose="detailed endpoint audit information",
+    )
+
     service = EvidenceGapFulfillmentPlanner(
-        catalog=catalog(
-            capability(
-                "endpoint.history.search",
-                types="endpoint_history,endpoint",
-                role="specialized",
-                purpose="read historical endpoint evidence",
+        catalog=catalog(candidate),
+        reasoning=pool(
+            FakeClient(
+                {
+                    "capability_name": "__none__",
+                }
             )
         ),
-        reasoning=pool(client),
     )
 
     step = service.next_step(
         need=need(),
-        attempted_capabilities=("endpoint.device.search",),
+        attempted_capabilities=(
+            "endpoint.device.search",
+        ),
     )
 
-    assert step.capability_name == "endpoint.history.search"
-    assert step.target_reference == "NODE-77"
-    assert client.calls == []
+    assert step is None
 
 
 def test_multiple_specialized_candidates_allow_model_to_choose_only_one_next_read():
@@ -145,7 +150,11 @@ def test_multiple_specialized_candidates_allow_model_to_choose_only_one_next_rea
 
 
 def test_attempted_specialized_resources_are_excluded_so_bad_order_can_recover_progressively():
-    client = FakeClient()
+    client = FakeClient(
+        {
+            "capability_name": "endpoint.history.search",
+        }
+    )
     service = EvidenceGapFulfillmentPlanner(
         catalog=catalog(
             capability(
@@ -173,7 +182,7 @@ def test_attempted_specialized_resources_are_excluded_so_bad_order_can_recover_p
     )
 
     assert step.capability_name == "endpoint.history.search"
-    assert client.calls == []
+    assert len(client.calls) == 1
 
 
 def test_invalid_cheap_choice_can_fall_back_to_stronger_backend():
@@ -231,3 +240,38 @@ def test_when_all_specialized_resources_are_exhausted_planner_returns_none():
 
     assert step is None
     assert client.calls == []
+
+
+def test_multiple_specialized_candidates_may_all_be_declined():
+    first = capability(
+        "endpoint.alert.search",
+        types="endpoint_alert,endpoint",
+        role="specialized",
+        purpose="endpoint alert information",
+    )
+    second = capability(
+        "endpoint.software.search",
+        types="endpoint_software,endpoint",
+        role="specialized",
+        purpose="installed software inventory",
+    )
+
+    service = EvidenceGapFulfillmentPlanner(
+        catalog=catalog(first, second),
+        reasoning=pool(
+            FakeClient(
+                {
+                    "capability_name": "__none__",
+                }
+            )
+        ),
+    )
+
+    step = service.next_step(
+        need=need(),
+        attempted_capabilities=(
+            "endpoint.device.search",
+        ),
+    )
+
+    assert step is None

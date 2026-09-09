@@ -110,7 +110,7 @@ def test_single_selector_capability_needs_no_model_call():
     assert intent.capability_name == "endpoint.device.search"
     assert intent.arguments == {
         "resource_id": "NODE-77",
-        "requested_facts": ["Inspect NODE-77."],
+        "requested_facts": ["arbitrary endpoint state"],
     }
     assert client.calls == []
 
@@ -126,7 +126,7 @@ def test_multiple_selector_names_use_model_only_for_argument_name_not_target_val
 
     assert isinstance(intent, ConversationIntent)
     assert intent.arguments["hostname"] == "NODE-77"
-    assert intent.arguments["requested_facts"] == ["Inspect NODE-77."]
+    assert intent.arguments["requested_facts"] == ["arbitrary endpoint state"]
     assert len(client.calls) == 1
     call = client.calls[0]
     assert "NODE-77" not in call["user"]
@@ -148,7 +148,7 @@ def test_grounded_selector_is_preserved_without_model_reclassification():
 
     assert isinstance(intent, ConversationIntent)
     assert intent.arguments["hostname"] == "NODE-77"
-    assert intent.arguments["requested_facts"] == ["Inspect NODE-77."]
+    assert intent.arguments["requested_facts"] == ["arbitrary endpoint state"]
     assert client.calls == []
 
 
@@ -235,3 +235,119 @@ def test_model_cannot_change_selected_capability_or_grounded_target_value():
 
     assert intent.capability_name == item.capability.capability_name
     assert intent.arguments["hostname"] == item.need.target.reference
+
+
+def test_single_information_need_canonicalizes_explicit_registered_fact():
+    client = FakeClient()
+    cap = capability(
+        selectors=("hostname",)
+    )
+    builder = InformationNeedIntentBuilder(
+        reasoning=pool(client)
+    )
+
+    intent = builder.build(
+        human_text=(
+            "Does NODE-77 need to be restarted?"
+        ),
+        planned=(
+            planned(
+                information_need=(
+                    "whether the endpoint "
+                    "requires a restart"
+                ),
+                cap=cap,
+                selector="hostname",
+            ),
+        ),
+    )
+
+    assert isinstance(
+        intent,
+        ConversationIntent,
+    )
+
+    assert intent.arguments == {
+        "hostname": "NODE-77",
+        "requested_facts": [
+            "reboot required"
+        ],
+    }
+
+    assert client.calls == []
+
+
+def test_unknown_single_information_need_remains_conservative_passthrough():
+    client = FakeClient()
+    cap = capability(
+        selectors=("hostname",)
+    )
+    builder = InformationNeedIntentBuilder(
+        reasoning=pool(client)
+    )
+
+    intent = builder.build(
+        human_text=(
+            "Tell me the arbitrary endpoint state "
+            "of NODE-77."
+        ),
+        planned=(
+            planned(
+                information_need=(
+                    "arbitrary endpoint state"
+                ),
+                cap=cap,
+                selector="hostname",
+            ),
+        ),
+    )
+
+    assert intent.arguments[
+        "requested_facts"
+    ] == [
+        "arbitrary endpoint state"
+    ]
+
+    assert client.calls == []
+
+
+def test_multiple_information_needs_are_not_collapsed_by_one_explicit_fact():
+    client = FakeClient()
+    cap = capability(
+        selectors=("hostname",)
+    )
+    builder = InformationNeedIntentBuilder(
+        reasoning=pool(client)
+    )
+
+    intent = builder.build(
+        human_text=(
+            "Does NODE-77 need to be restarted "
+            "and what is its arbitrary endpoint state?"
+        ),
+        planned=(
+            planned(
+                information_need=(
+                    "reboot required"
+                ),
+                cap=cap,
+                selector="hostname",
+            ),
+            planned(
+                information_need=(
+                    "arbitrary endpoint state"
+                ),
+                cap=cap,
+                selector="hostname",
+            ),
+        ),
+    )
+
+    assert intent.arguments[
+        "requested_facts"
+    ] == [
+        "reboot required",
+        "arbitrary endpoint state",
+    ]
+
+    assert client.calls == []

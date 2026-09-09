@@ -29,6 +29,8 @@ class FulfillmentCapability:
     permission_mode: str
     risk: str
     description: str
+    selector_required: bool = True
+    collection_scope: str | None = None
 
     def __post_init__(self) -> None:
         if not self.capability_name.strip() or not self.operation.strip():
@@ -37,6 +39,10 @@ class FulfillmentCapability:
             raise ValueError("fulfillment capability requires resource types")
         if self.role not in {"primary", "specialized"}:
             raise ValueError("fulfillment capability role is invalid")
+        if self.collection_scope is not None and not self.collection_scope.strip():
+            raise ValueError(
+                "fulfillment capability collection scope must be non-empty when supplied"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +180,37 @@ def _convert(capability: CapabilityDefinition) -> FulfillmentCapability | None:
         )
     ).strip()
     role = str(metadata.get("resource_role", "")).strip().casefold()
+
+    selector_required = (
+        str(
+            metadata.get(
+                "selector_required",
+                "true",
+            )
+        )
+        .strip()
+        .casefold()
+        not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+    )
+
+    raw_collection_scope = str(
+        metadata.get(
+            "collection_scope",
+            "",
+        )
+    ).strip()
+
+    collection_scope = (
+        raw_collection_scope
+        if raw_collection_scope
+        else None
+    )
+
     if not role:
         # Backward-compatible structural inference while existing registrations are
         # migrated: a capability that declares exactly one resource type is a base
@@ -196,6 +233,8 @@ def _convert(capability: CapabilityDefinition) -> FulfillmentCapability | None:
             )
             if part
         ),
+        selector_required=selector_required,
+        collection_scope=collection_scope,
     )
 
 

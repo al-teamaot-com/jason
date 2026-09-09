@@ -110,3 +110,63 @@ def test_broad_seed_collapses_equivalent_normalized_term_aliases():
     assert spaced is not None and hyphenated is not None
     assert spaced.concept_id == "endpoint.last_seen"
     assert hyphenated.concept_id == "endpoint.last_seen"
+
+
+def test_reboot_required_is_provider_neutral_active_endpoint_fact():
+    registry = build_trusted_semantic_registry()
+
+    for term in (
+        "reboot required",
+        "restart required",
+        "pending reboot",
+        "needs restart",
+    ):
+        concept = registry.resolve_term(term)
+        assert concept is not None
+        assert concept.concept_id == "endpoint.reboot_required"
+        assert concept.canonical_label == "reboot required"
+        assert concept.expected_shape == "boolean"
+        assert concept.evidence_contexts == (
+            "endpoint",
+            "operating_system",
+            "maintenance_state",
+        )
+
+    mapped = registry.resolve_provider_field(
+        provider="datto_rmm",
+        resource_type="endpoint",
+        provider_field="rebootRequired",
+    )
+    assert mapped is not None
+    assert mapped.concept_id == "endpoint.reboot_required"
+    assert mapped.canonical_label == "reboot required"
+    assert mapped.expected_shape == "boolean"
+
+    # Only the field actually proven by live provider evidence is governed here.
+    for provider_field in (
+        "pendingReboot",
+        "reboot_required",
+        "restartRequired",
+    ):
+        assert registry.resolve_provider_field(
+            provider="datto_rmm",
+            resource_type="endpoint",
+            provider_field=provider_field,
+        ) is None
+
+
+def test_reboot_required_recognizes_ordinary_restart_grammar():
+    registry = build_trusted_semantic_registry()
+
+    for term in (
+        "need to be restarted",
+        "needs to be restarted",
+        "need to restart",
+        "needs restart",
+    ):
+        concept = registry.resolve_term(term)
+
+        assert concept is not None
+        assert concept.concept_id == "endpoint.reboot_required"
+        assert concept.canonical_label == "reboot required"
+        assert concept.expected_shape == "boolean"

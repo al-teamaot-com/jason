@@ -42,58 +42,147 @@ def observe_verified_resource(
     result: OrchestrationResult,
 ) -> VerifiedConversationResourceObservation | None:
     target = planned.need.target
+
     if target.source != "literal":
         return None
+
+    return observe_verified_resource_identity(
+        kind=target.kind,
+        mention=target.reference,
+        expected_capability_name=(
+            planned.capability.capability_name
+        ),
+        result=result,
+    )
+
+
+def observe_verified_resource_identity(
+    *,
+    kind: str,
+    mention: str,
+    expected_capability_name: str,
+    result: OrchestrationResult,
+) -> VerifiedConversationResourceObservation | None:
+    """Promote only uniquely corroborated governed resource identity.
+
+    ``mention`` is descriptive conversation context only. It never becomes
+    canonical identity. Canonical identity comes exclusively from the
+    provider-neutral resolved-resource envelope returned by governed
+    orchestration.
+    """
+
+    clean_kind = kind.strip()
+    clean_mention = mention.strip()
+    clean_capability = expected_capability_name.strip()
+
+    if (
+        not clean_kind
+        or not clean_mention
+        or not clean_capability
+    ):
+        raise ValueError(
+            "verified resource observation requires "
+            "kind, mention, and capability"
+        )
+
     if result.status is not OrchestrationStatus.SUCCEEDED:
         return None
-    if result.capability_name != planned.capability.capability_name:
+
+    if result.capability_name != clean_capability:
         raise RuntimeError(
-            "resource observation result does not match planned governed capability"
+            "resource observation result does not match "
+            "planned governed capability"
         )
 
     data = result.output.get("data")
     if not isinstance(data, Mapping):
         return None
 
-    resource_id = str(data.get(RESOLVED_RESOURCE_ID, "")).strip()
+    resource_id = str(
+        data.get(
+            RESOLVED_RESOURCE_ID,
+            "",
+        )
+    ).strip()
+
     if not resource_id:
         return None
 
-    raw_matches = data.get(RESOURCE_MATCHES)
-    if not isinstance(raw_matches, Sequence) or isinstance(raw_matches, (str, bytes)):
-        raise RuntimeError(
-            "resolved resource identity lacks corroborating resource matches"
+    raw_matches = data.get(
+        RESOURCE_MATCHES
+    )
+
+    if (
+        not isinstance(raw_matches, Sequence)
+        or isinstance(
+            raw_matches,
+            (str, bytes),
         )
-    matches = tuple(item for item in raw_matches if isinstance(item, Mapping))
-    if len(matches) != 1 or len(matches) != len(raw_matches):
+    ):
         raise RuntimeError(
-            "resolved conversation resource must have exactly one corroborating match"
-        )
-    match_id = str(matches[0].get(RESOURCE_ID, "")).strip()
-    if not match_id or match_id != resource_id:
-        raise RuntimeError(
-            "resolved resource identity is inconsistent with corroborating match"
+            "resolved resource identity lacks "
+            "corroborating resource matches"
         )
 
-    kind = target.kind.strip()
-    display_name = target.reference.strip()
-    ref = _entity_ref(kind=kind, canonical_id=resource_id)
+    matches = tuple(
+        item
+        for item in raw_matches
+        if isinstance(item, Mapping)
+    )
+
+    if (
+        len(matches) != 1
+        or len(matches) != len(raw_matches)
+    ):
+        raise RuntimeError(
+            "resolved conversation resource must have "
+            "exactly one corroborating match"
+        )
+
+    match_id = str(
+        matches[0].get(
+            RESOURCE_ID,
+            "",
+        )
+    ).strip()
+
+    if (
+        not match_id
+        or match_id != resource_id
+    ):
+        raise RuntimeError(
+            "resolved resource identity is inconsistent "
+            "with corroborating match"
+        )
+
+    ref = _entity_ref(
+        kind=clean_kind,
+        canonical_id=resource_id,
+    )
+
     entity = ConversationEntity(
         ref=ref,
-        kind=kind,
+        kind=clean_kind,
         canonical_id=resource_id,
-        display_name=display_name,
-        provenance=f"governed resource resolution:{result.execution_id}",
+        display_name=clean_mention,
+        provenance=(
+            "governed resource resolution:"
+            f"{result.execution_id}"
+        ),
     )
+
     resolution = ConversationReferenceResolution(
-        mention=display_name,
+        mention=clean_mention,
         entity_ref=ref,
-        basis="governed resource resolved to durable identity",
+        basis=(
+            "governed resource resolved to durable identity"
+        ),
     )
+
     return VerifiedConversationResourceObservation(
         entity=entity,
         resolution=resolution,
-        active_kind=kind,
+        active_kind=clean_kind,
     )
 
 

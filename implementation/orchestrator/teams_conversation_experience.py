@@ -72,14 +72,27 @@ class TeamsConversationExperienceResult:
 
     @property
     def orchestration_status(self) -> str:
-        """Summarize backend execution without inventing an orchestration for chat-only turns."""
+        """Summarize the governed turn while retaining per-read diagnostic detail.
+
+        A successful governed read that contributes to a completed conversational
+        response makes the information turn successful. Failed or denied exploratory
+        reads remain available in ``orchestrations`` for audit and diagnostics; they
+        do not downgrade a successfully completed human-facing turn to ``partial``.
+        """
         if not self.orchestrations:
             return "not_required"
-        statuses = tuple(item.status.value for item in self.orchestrations)
+
+        statuses = tuple(
+            item.status.value
+            for item in self.orchestrations
+        )
+
+        if "succeeded" in statuses:
+            return "succeeded"
+
         if len(set(statuses)) == 1:
             return statuses[0]
-        if "succeeded" in statuses:
-            return "partial"
+
         return statuses[-1]
 
 

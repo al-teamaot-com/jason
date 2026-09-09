@@ -51,9 +51,12 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
         display_name="Search Managed Endpoints",
         lifecycle_status=CapabilityLifecycle.ACTIVE,
         business_purpose=(
-            "Locate managed endpoints by provider-neutral selectors, preserve ambiguity, "
-            "and retrieve an exact read-only device record only after one authorized "
-            "candidate is resolved to durable identity."
+            "Read the authorized managed-endpoint resource set. With a supplied "
+            "provider-neutral selector, locate matching endpoints while preserving "
+            "ambiguity and retrieve an exact read-only device record only after one "
+            "authorized candidate is resolved to durable identity. Without a selector, "
+            "enumerate the bounded authorized endpoint collection so collection-wide "
+            "information requests can begin from the primary endpoint resource evidence."
         ),
         owner_service="Jason Resource Intelligence",
         architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
@@ -103,17 +106,21 @@ def endpoint_device_search(now: datetime) -> CapabilityDefinition:
             "resource_types": "endpoint",
             "operation": "search",
             "selector_keys": "hostname,name,resource_id,site,serial_number,user_identity",
+            "selector_required": "false",
+            "collection_scope": "authorized",
+            "resource_role": "primary",
             "fact_hints": (
                 "hostname,device name,last logged in user,username,site,status,"
                 "online,offline,operating system,ip address,mac address,hardware,"
                 "software,device identifier,serial number,inventory,bitlocker,"
-                "bitlocker status,bitlocker state,udf,user defined field"
+                "bitlocker status,bitlocker state,reboot required,restart required,"
+                "pending reboot,pending restart,udf,user defined field"
             ),
             "canonical_facts": (
                 "hostname,endpoint hostname,LAN IP address,WAN IP address,"
                 "last logged in user,operating system,"
                 "operating system display version,operating system build,"
-                "bitlocker status"
+                "bitlocker status,reboot required"
             ),
             "identity_semantics": (
                 "Human-readable names, hostnames, aliases, labels, serial-like tokens, and "
@@ -181,17 +188,23 @@ def endpoint_device_read(now: datetime) -> CapabilityDefinition:
             "resource_types": "endpoint",
             "operation": "read",
             "selector_keys": "resource_id",
+            "selector_source_policy": {
+                "resource_id": (
+                    "verified_entity_only"
+                ),
+            },
             "fact_hints": (
                 "device details,hostname,last logged in user,site,status,online,offline,"
                 "operating system,ip address,mac address,hardware,software,"
                 "serial number,inventory,bitlocker,bitlocker status,bitlocker state,"
+                "reboot required,restart required,pending reboot,pending restart,"
                 "udf,user defined field"
             ),
             "canonical_facts": (
                 "hostname,endpoint hostname,LAN IP address,WAN IP address,"
                 "last logged in user,operating system,"
                 "operating system display version,operating system build,"
-                "bitlocker status"
+                "bitlocker status,reboot required"
             ),
             "identity_semantics": "resource_id is a durable resolved endpoint identity",
             "planning_guidance": (

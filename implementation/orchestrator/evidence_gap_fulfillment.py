@@ -54,59 +54,70 @@ class EvidenceGapFulfillmentPlanner:
         if not candidates:
             return None
 
-        if len(candidates) == 1:
-            selected = candidates[0]
-        else:
-            selected_name, _ = self.reasoning.complete_validated(
-                system=(
-                    "You are Jason's bounded backend evidence-gap planner. The human "
-                    "target and information need are already fixed, the primary governed "
-                    "resource was insufficient, and every offered candidate is an "
-                    "authorized provider-neutral read. Choose exactly one candidate that "
-                    "is the best next place to look for the missing information. Do not "
-                    "change the target, information need, authority, provider, connector, "
-                    "or API operation. Jason will evaluate the returned evidence before "
-                    "considering any further resource. Return only the required object."
-                ),
-                user=json.dumps(
-                    {
-                        "target_kind": need.target.kind,
-                        "information_need": need.need,
-                        "temporal_scope": need.temporal_scope,
-                        "completeness": need.completeness,
-                        "candidates": [
-                            {
-                                "capability_name": item.capability_name,
-                                "description": item.description,
-                                "resource_types": list(item.resource_types),
-                                "operation": item.operation,
-                            }
-                            for item in candidates
-                        ],
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                ),
-                schema={
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["capability_name"],
-                    "properties": {
-                        "capability_name": {
-                            "type": "string",
-                            "enum": [item.capability_name for item in candidates],
+        selected_name, _ = self.reasoning.complete_validated(
+            system=(
+                "You are Jason's bounded backend evidence-gap planner. The human "
+                "target and information need are already fixed, and the primary governed "
+                "resource was insufficient. Each offered candidate is an authorized "
+                "provider-neutral read, but availability does not imply relevance. "
+                "Choose one candidate only when its governed description makes it a "
+                "plausible source for establishing the missing information. If none of "
+                "the offered capabilities plausibly covers the missing information, "
+                "choose __none__. Do not speculate from resource type alone. Do not "
+                "change the target, information need, authority, provider, connector, "
+                "or API operation. Return only the required object."
+            ),
+            user=json.dumps(
+                {
+                    "target_kind": need.target.kind,
+                    "information_need": need.need,
+                    "temporal_scope": need.temporal_scope,
+                    "completeness": need.completeness,
+                    "candidates": [
+                        {
+                            "capability_name": item.capability_name,
+                            "description": item.description,
+                            "resource_types": list(item.resource_types),
+                            "operation": item.operation,
                         }
-                    },
+                        for item in candidates
+                    ],
                 },
-                max_output_tokens=64,
-                validator=lambda proposal: _validate_choice(
-                    proposal=proposal,
-                    candidates=candidates,
-                ),
-            )
-            selected = next(
-                item for item in candidates if item.capability_name == selected_name
-            )
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            schema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["capability_name"],
+                "properties": {
+                    "capability_name": {
+                        "type": "string",
+                        "enum": [
+                            "__none__",
+                            *[
+                                item.capability_name
+                                for item in candidates
+                            ],
+                        ],
+                    }
+                },
+            },
+            max_output_tokens=64,
+            validator=lambda proposal: _validate_choice(
+                proposal=proposal,
+                candidates=candidates,
+            ),
+        )
+
+        if selected_name is None:
+            return None
+
+        selected = next(
+            item
+            for item in candidates
+            if item.capability_name == selected_name
+        )
 
         return FulfillmentStep(
             capability_name=selected.capability_name,
@@ -121,15 +132,30 @@ def _validate_choice(
     *,
     proposal: Mapping[str, Any],
     candidates: tuple[FulfillmentCapability, ...],
-) -> str:
+) -> str | None:
     if not isinstance(proposal, Mapping) or set(proposal) != {"capability_name"}:
         raise EvidenceGapFulfillmentError(
             "evidence-gap proposal shape is invalid"
         )
-    name = str(proposal.get("capability_name", "")).strip()
-    allowed = {item.capability_name for item in candidates}
+
+    name = str(
+        proposal.get(
+            "capability_name",
+            "",
+        )
+    ).strip()
+
+    if name == "__none__":
+        return None
+
+    allowed = {
+        item.capability_name
+        for item in candidates
+    }
+
     if name not in allowed:
         raise EvidenceGapFulfillmentError(
             "evidence-gap proposal selected an unoffered capability"
         )
+
     return name

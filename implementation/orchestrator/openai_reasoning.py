@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from decimal import Decimal
 from time import monotonic
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from usage_ledger.adapters import from_openai_response
 from usage_ledger.contracts import (
@@ -62,6 +62,7 @@ class OpenAIStructuredJsonClient:
     input_cost_per_million_tokens: Decimal | None = None
     cached_input_cost_per_million_tokens: Decimal | None = None
     output_cost_per_million_tokens: Decimal | None = None
+    reasoning_effort: str | None = "minimal"
 
     def __post_init__(self) -> None:
         if not self.api_key.strip():
@@ -93,56 +94,282 @@ class OpenAIStructuredJsonClient:
         if max_output_tokens < 16 or max_output_tokens > 4096:
             raise ValueError("OpenAI structured reasoning output budget is invalid")
 
+        if self.reasoning_effort not in {
+            None,
+            "minimal",
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError(
+                "OpenAI structured reasoning effort is invalid"
+            )
+
+        output_budget = max_output_tokens
+
+        for attempt in range(2):
+            usage_context = new_attempt_context()
+            started_at = datetime.now(timezone.utc)
+            started_clock = monotonic()
+
+            try:
+                response = self.transport.request(
+                    method="POST",
+                    url=self.endpoint,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "instructions": system,
+                        "input": user,
+                        "text": {
+                            "format": {
+                                "type": "json_schema",
+                                "name": self.response_format_name,
+                                "strict": True,
+                                "schema": dict(schema),
+                            }
+                        },
+                        "max_output_tokens": output_budget,
+                        **(
+                            {
+                                "reasoning": {
+                                    "effort": self.reasoning_effort,
+                                }
+                            }
+                            if self.reasoning_effort
+                            else {}
+                        ),
+                        "store": False,
+                    },
+                    timeout_seconds=self.timeout_seconds,
+                )
+            except Exception as error:
+                self._record_failed_attempt(
+                    context=usage_context,
+                    started_at=started_at,
+                    duration_ms=int(
+                        (monotonic() - started_clock) * 1000
+                    ),
+                    outcome=(
+                        AttemptOutcome.TIMED_OUT
+                        if isinstance(error, TimeoutError)
+                        else AttemptOutcome.FAILED
+                    ),
+                )
+                raise
+
+            if (
+                self.usage_ledger is not None
+                and usage_context is not None
+            ):
+                self.usage_ledger.append(
+                    from_openai_response(
+                        context=usage_context,
+                        model=self.model,
+                        response=response,
+                        started_at=started_at,
+                        duration_ms=int(
+                            (monotonic() - started_clock) * 1000
+                        ),
+                        input_cost_per_million_tokens=(
+                            self.input_cost_per_million_tokens
+                        ),
+                        cached_input_cost_per_million_tokens=(
+                            self.cached_input_cost_per_million_tokens
+                        ),
+                        output_cost_per_million_tokens=(
+                            self.output_cost_per_million_tokens
+                        ),
+                    )
+                )
+
+            incomplete_reason = self._incomplete_reason(
+                response
+            )
+
+            if incomplete_reason is None:
+                return self._decode_output(response)
+
+            if (
+                incomplete_reason
+                in {
+                    "max_tokens",
+                    "max_output_tokens",
+                }
+                and attempt == 0
+            ):
+                output_budget = min(
+                    4096,
+                    max(
+                        output_budget * 2,
+                        256,
+                    ),
+                )
+                continue
+
+            raise ValueError(
+                "OpenAI structured response was incomplete: "
+                + incomplete_reason
+            )
+
+        raise RuntimeError(
+            "OpenAI structured reasoning retry boundary exhausted"
+        )
+
+    def respond_with_tools(
+        self,
+        *,
+        instructions: str,
+        input_items: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]],
+        tool_choice: str = "auto",
+        max_output_tokens: int = 800,
+    ) -> Mapping[str, Any]:
+        """Run one native Responses API turn with governed function tools.
+
+        Tool definitions are model affordances only. Jason remains responsible
+        for validating and executing every requested operation.
+        """
+        if not instructions.strip():
+            raise ValueError(
+                "OpenAI tool reasoning requires instructions"
+            )
+
+        if not input_items:
+            raise ValueError(
+                "OpenAI tool reasoning requires input"
+            )
+
+        if max_output_tokens < 16 or max_output_tokens > 4096:
+            raise ValueError(
+                "OpenAI tool reasoning output budget is invalid"
+            )
+
+        if tool_choice not in {
+            "auto",
+            "required",
+            "none",
+        }:
+            raise ValueError(
+                "OpenAI tool choice is invalid"
+            )
+
+        if self.reasoning_effort not in {
+            None,
+            "minimal",
+            "low",
+            "medium",
+            "high",
+        }:
+            raise ValueError(
+                "OpenAI reasoning effort is invalid"
+            )
+
         usage_context = new_attempt_context()
         started_at = datetime.now(timezone.utc)
         started_clock = monotonic()
+
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "instructions": instructions,
+            "input": [
+                dict(item)
+                for item in input_items
+            ],
+            "max_output_tokens": max_output_tokens,
+            "store": False,
+        }
+
+        if tools:
+            payload["tools"] = [
+                dict(tool)
+                for tool in tools
+            ]
+            payload["tool_choice"] = tool_choice
+
+        if self.reasoning_effort:
+            payload["reasoning"] = {
+                "effort": self.reasoning_effort,
+            }
+
         try:
             response = self.transport.request(
                 method="POST",
                 url=self.endpoint,
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": (
+                        f"Bearer {self.api_key}"
+                    ),
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": self.model,
-                    "instructions": system,
-                    "input": user,
-                    "text": {
-                        "format": {
-                            "type": "json_schema",
-                            "name": self.response_format_name,
-                            "strict": True,
-                            "schema": dict(schema),
-                        }
-                    },
-                    "max_output_tokens": max_output_tokens,
-                    "store": False,
-                },
+                json=payload,
                 timeout_seconds=self.timeout_seconds,
             )
         except Exception as error:
             self._record_failed_attempt(
                 context=usage_context,
                 started_at=started_at,
-                duration_ms=int((monotonic() - started_clock) * 1000),
-                outcome=(AttemptOutcome.TIMED_OUT if isinstance(error, TimeoutError) else AttemptOutcome.FAILED),
+                duration_ms=int(
+                    (
+                        monotonic()
+                        - started_clock
+                    )
+                    * 1000
+                ),
+                outcome=(
+                    AttemptOutcome.TIMED_OUT
+                    if isinstance(
+                        error,
+                        TimeoutError,
+                    )
+                    else AttemptOutcome.FAILED
+                ),
             )
             raise
-        if self.usage_ledger is not None and usage_context is not None:
+
+        if (
+            self.usage_ledger is not None
+            and usage_context is not None
+        ):
             self.usage_ledger.append(
                 from_openai_response(
                     context=usage_context,
                     model=self.model,
                     response=response,
                     started_at=started_at,
-                    duration_ms=int((monotonic() - started_clock) * 1000),
-                    input_cost_per_million_tokens=self.input_cost_per_million_tokens,
-                    cached_input_cost_per_million_tokens=self.cached_input_cost_per_million_tokens,
-                    output_cost_per_million_tokens=self.output_cost_per_million_tokens,
+                    duration_ms=int(
+                        (
+                            monotonic()
+                            - started_clock
+                        )
+                        * 1000
+                    ),
+                    input_cost_per_million_tokens=(
+                        self.input_cost_per_million_tokens
+                    ),
+                    cached_input_cost_per_million_tokens=(
+                        self.cached_input_cost_per_million_tokens
+                    ),
+                    output_cost_per_million_tokens=(
+                        self.output_cost_per_million_tokens
+                    ),
                 )
             )
-        return self._decode_output(response)
+
+        incomplete_reason = self._incomplete_reason(
+            response
+        )
+
+        if incomplete_reason is not None:
+            raise ValueError(
+                "OpenAI tool response was incomplete: "
+                + incomplete_reason
+            )
+
+        return response
 
     def _record_failed_attempt(
         self,
@@ -169,6 +396,37 @@ class OpenAIStructuredJsonClient:
                 confidence=0.0,
             )
         )
+
+    @staticmethod
+    def _incomplete_reason(
+        response: Mapping[str, Any],
+    ) -> str | None:
+        status = str(
+            response.get(
+                "status",
+                "",
+            )
+        ).strip().casefold()
+
+        if status != "incomplete":
+            return None
+
+        details = response.get(
+            "incomplete_details"
+        )
+
+        if isinstance(details, Mapping):
+            reason = str(
+                details.get(
+                    "reason",
+                    "",
+                )
+            ).strip()
+
+            if reason:
+                return reason
+
+        return "unknown"
 
     @staticmethod
     def _decode_output(response: Mapping[str, Any]) -> Mapping[str, Any]:
