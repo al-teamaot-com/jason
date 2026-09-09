@@ -68,6 +68,8 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
     },
 }
 
+_DEFAULT_IT_GLUE_PAGE_SIZE = 100
+_MAX_IT_GLUE_PAGE_SIZE = 1000
 _DEFAULT_AUTOTASK_MAX_RECORDS = 100
 _MAX_AUTOTASK_MAX_RECORDS = 500
 
@@ -113,6 +115,19 @@ def _canonical_filters(
     return result
 
 
+def _it_glue_page_size(arguments: Mapping[str, Any]) -> int:
+    value = arguments.get("page_size", _DEFAULT_IT_GLUE_PAGE_SIZE)
+    if isinstance(value, bool):
+        raise ValueError("page_size must be an integer between 1 and 1000")
+    try:
+        page_size = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("page_size must be an integer between 1 and 1000") from error
+    if not 1 <= page_size <= _MAX_IT_GLUE_PAGE_SIZE:
+        raise ValueError("page_size must be between 1 and 1000")
+    return page_size
+
+
 def adapt_it_glue_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
@@ -140,11 +155,10 @@ def adapt_it_glue_arguments(
     result: dict[str, Any] = {
         "entity": entity,
         "filters": _canonical_filters(arguments),
+        "page_size": _it_glue_page_size(arguments),
     }
     if arguments.get("page_number") is not None:
         result["page_number"] = arguments["page_number"]
-    if arguments.get("page_size") is not None:
-        result["page_size"] = arguments["page_size"]
     return result
 
 
