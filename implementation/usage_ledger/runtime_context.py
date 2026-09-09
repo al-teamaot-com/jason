@@ -31,10 +31,24 @@ def bind_usage_context(context: UsageContext) -> Iterator[None]:
         _CURRENT.reset(token)
 
 
+def _attribution_projection() -> UsageContext | None:
+    """Use the generic attribution scope when no legacy model scope is bound.
+
+    The import is intentionally lazy so the usage-ledger package remains usable on
+    its own and older runtime paths can continue binding UsageContext directly.
+    """
+
+    try:
+        from usage_attribution.runtime_context import model_usage_context
+    except ImportError:
+        return None
+    return model_usage_context()
+
+
 def new_attempt_context(*, parent_attempt_id: str | None = None) -> UsageContext | None:
     """Return the bound scope with a fresh idempotent provider-attempt identity."""
 
-    current = _CURRENT.get()
+    current = _CURRENT.get() or _attribution_projection()
     if current is None:
         return None
     return replace(
