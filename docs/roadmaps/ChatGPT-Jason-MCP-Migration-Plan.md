@@ -1,7 +1,8 @@
 # ChatGPT Business + Jason MCP Migration Plan
 
-**Status:** Active P0 migration roadmap  
+**Status:** Active migration roadmap  
 **Date:** 2026-09-08  
+**Last reconciled:** 2026-09-09  
 **Owner:** Jason Architecture Authority  
 **Governing decision:** `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`  
 **Target architecture:** `docs/architecture/J-104-ChatGPT-Jason-Access-Architecture.md`
@@ -9,6 +10,33 @@
 ## Objective
 
 Move the primary technician experience from a custom Teams/Jason conversational stack toward **ChatGPT Business as the primary conversational surface with Jason exposed as a governed MCP/tool service**, while preserving all constitutional identity, authority, policy, approval, evidence, audit, provider, and Central Orchestrator boundaries.
+
+## Execution status — 2026-09-09
+
+The roadmap has advanced beyond its original planning checklist.
+
+Durable current state:
+
+- **MCP-001 — complete.** ChatGPT Business + Jason read-only MCP foundation is source-durable, publicly reachable through the approved AWS Caddy/ZeroTier edge, authenticated through Microsoft Entra, limited to the exact three-tool governed read-only surface, proven through harmless live reads, and represented as verified System Registry topology.
+- **MCP-002 — active.** Positive ChatGPT/Entra/workspace identity binding is proven. Remaining work is durable negative/isolation evidence for unknown or unbound identity, invalid tenant/workspace context, missing authority, and client/scope isolation where those cases can be safely exercised.
+- **MCP-003 — planned.** Cross-provider ChatGPT technician proof has not yet been completed as the primary workstream.
+- **MCP-004 — planned.** Legacy conversational-stack simplification remains deferred until the replacement path is sufficiently proven.
+
+Accepted MCP source checkpoint:
+
+`727c3fa6cbcb59dab32f77632393bc5407826ed0`
+
+Accepted live MCP image:
+
+`jason-mcp:source-727c3fa`
+
+Accepted observability deployment checkpoint:
+
+`ecc265ee59645154f0bc86b5aa0dc5a2e375f022`
+
+System Registry reconciliation now represents and verifies the MCP service, AWS/ZeroTier public edge, Prometheus, Grafana, usage exporter, usage-attribution exporter, and their deployment extension.
+
+The phase checklists below remain useful as the original governed implementation plan, but they are not a more current source than `docs/control/CURRENT.md`, `docs/roadmaps/Jason-Roadmap-Status.json`, the System Registry, and dated proof records. Do not re-run completed discovery or foundation work merely because an older checkbox remains unchecked.
 
 ## Guiding constraints
 
@@ -22,85 +50,90 @@ Move the primary technician experience from a custom Teams/Jason conversational 
 
 ## P0 — Architecture and documentation freeze
 
-**Status:** In progress
+**Status:** Foundation complete; legacy simplification remains deferred
 
 - [x] Accept ChatGPT Business + Jason MCP as preferred primary conversational architecture.
 - [x] Preserve constitutional boundary: ChatGPT reasons; Jason governs/executes.
 - [x] Define Teams as secondary/fallback rather than preferred full conversational surface.
 - [x] Define OpenClaw as optional/secondary infrastructure rather than primary brain.
 - [x] Define duplicate OpenAI API reasoning as exception, not default.
-- [ ] Stop adding non-critical complexity to the legacy custom conversational state-machine path.
-- [ ] Capture current production state before any topology changes.
+- [x] Stop adding non-critical complexity to the legacy custom conversational state-machine path as the preferred architecture.
+- [x] Capture current production state before further topology changes.
 
 ## P1 — MCP foundation
 
-**Goal:** A minimal local/development Jason MCP service backed by existing governed capabilities.
+**Status:** Complete as MCP-001
 
-- [ ] Select/confirm supported MCP transport for ChatGPT Business custom app connectivity.
-- [ ] Define MCP server component contract.
-- [ ] Define MCP service registration in System Registry.
-- [ ] Implement health/readiness endpoint or equivalent service verification.
-- [ ] Expose capability-derived model-friendly read tools.
-- [ ] Map MCP tool calls to existing Central Orchestrator execution.
-- [ ] Prohibit direct connector/provider invocation from MCP layer.
-- [ ] Preserve capability/resource names and provider neutrality.
-- [ ] Return structured provenance-bearing results.
-- [ ] Implement bounded errors/fail-closed responses.
-- [ ] Add deterministic tests proving no secret/provider bypass.
+**Goal:** A minimal Jason MCP service backed by existing governed capabilities.
 
-### Initial read-only tool candidate set
+- [x] Select/confirm supported MCP transport for ChatGPT Business custom app connectivity.
+- [x] Define MCP server component contract.
+- [x] Define MCP service registration in System Registry.
+- [x] Implement health/readiness endpoint or equivalent service verification.
+- [x] Expose capability-derived model-friendly read tools.
+- [x] Map MCP tool calls to existing Central Orchestrator execution.
+- [x] Prohibit direct connector/provider invocation from MCP layer.
+- [x] Preserve capability/resource names and provider neutrality.
+- [x] Return structured provenance-bearing results.
+- [x] Implement bounded errors/fail-closed responses.
+- [x] Add deterministic tests proving no secret/provider bypass.
 
-Use existing governed capability surfaces where possible:
+### Accepted read-only tool surface
 
-- managed endpoint search/read;
-- endpoint audit/inventory;
-- endpoint alert search/history;
-- management site search;
-- deterministic complete-evidence count/filter/group/list;
-- additional already-governed reads only after contract review.
+The proven MCP surface is exactly:
 
-No action/write tools in this phase.
+- `jason_mcp_status`
+- `discover_capabilities`
+- `execute_read_capability`
+
+No action/write tools exist in this phase.
 
 ## P2 — Identity and workspace binding
 
+**Status:** Active as MCP-002
+
 **Goal:** A ChatGPT Business user invoking Jason can be bound to a Jason principal before execution.
 
-- [ ] Determine supported ChatGPT custom MCP/app authentication mechanism for the AOT workspace.
-- [ ] Establish workspace/app trust configuration.
-- [ ] Map authenticated user identity to Jason principal.
-- [ ] Enforce `teamaot.com` initial access policy where appropriate.
-- [ ] Preserve capability-specific authorization independently of app access.
-- [ ] Preserve organization/client scope.
-- [ ] Define revocation/disable path.
-- [ ] Test unknown user, disabled user, wrong workspace, missing identity, and cross-client attempts.
+- [x] Determine supported ChatGPT custom MCP/app authentication mechanism for the AOT workspace.
+- [x] Establish workspace/app trust configuration.
+- [x] Map the proven authenticated user identity to a Jason principal.
+- [x] Use the AOT Microsoft Entra tenant as the initial authentication boundary.
+- [x] Preserve capability-specific authorization independently of app access.
+- [x] Preserve organization/client scope in governed execution.
+- [x] Define operational disable/rollback paths for the MCP service/app.
+- [ ] Preserve durable negative/isolation proof for unknown/unbound identity, invalid tenant/workspace context, missing authority, and cross-client attempts where safely testable.
 
 ## P3 — ChatGPT Business pilot publication
 
-**Goal:** Approved AOT technicians can add/use Jason from their normal ChatGPT Business workspace.
+**Status:** Positive read-only pilot path proven; cross-provider proof remains
 
-- [ ] Create/configure custom Jason MCP app in ChatGPT Business.
-- [ ] Publish to an approved pilot scope.
-- [ ] Confirm workspace visibility/access behavior.
-- [ ] Prove a normal read-only request end to end.
-- [ ] Prove follow-up conversational context without Jason duplicating chat memory.
-- [ ] Prove multiple tool calls in one ChatGPT conversation.
-- [ ] Prove novel wording without question-specific code.
-- [ ] Prove exact collection-wide answer using deterministic Jason analysis.
-- [ ] Prove cross-provider reasoning once a second provider read surface is ready.
+**Goal:** Approved AOT technicians can use Jason from their normal ChatGPT Business workspace.
+
+- [x] Create/configure custom Jason MCP app in ChatGPT Business.
+- [x] Publish/enable it in the AOT workspace for the current read-only pilot.
+- [x] Confirm workspace visibility/access behavior for the proven pilot identity.
+- [x] Prove a normal read-only request end to end.
+- [x] Prove ordinary follow-up use within the ChatGPT session without Jason duplicating full chat memory.
+- [x] Prove governed tool discovery and repeated tool invocation from ChatGPT.
+- [x] Prove representative operational reads without question-specific MCP tools.
+- [x] Prove exact collection-wide answers where complete governed provider evidence exists.
+- [ ] Prove the formal cross-provider technician scenario required for MCP-003.
 
 ## P4 — Cost optimization
 
+**Status:** Observability foundation deployed; further policy refinement remains
+
 **Goal:** Maximize value from existing ChatGPT Business seats and minimize duplicate API spend.
 
-- [ ] Measure Jason-side OpenAI calls per ChatGPT-originated task.
-- [ ] Target zero additional model calls for ordinary read/tool requests.
+- [x] Measure Jason-side model/provider usage independently from ChatGPT subscription usage.
+- [x] Establish visibility showing zero additional hosted-model usage when ordinary governed reads do not require it.
 - [ ] Keep provider-doc/schema refresh out of per-turn model cost where possible.
-- [ ] Cache stable provider documentation/schema/indexes.
-- [ ] Keep pagination/count/filter/group operations deterministic.
-- [ ] Define explicit capabilities that are permitted to invoke Jason-side models.
-- [ ] Keep `gpt-5-nano` as least-cost default for any remaining routine Jason-side model call unless separately changed by policy.
-- [ ] Define escalation criteria rather than user-visible model guessing.
-- [ ] Add per-capability/provider/task cost telemetry.
+- [ ] Cache stable provider documentation/schema/indexes where appropriate.
+- [x] Keep pagination/count/filter/group operations deterministic where implemented.
+- [ ] Define the complete set of explicit capabilities permitted to invoke Jason-side models.
+- [ ] Maintain least-cost/default and escalation policy for any future governed Jason-side model use.
+- [x] Add capability/provider/task-oriented usage telemetry foundations.
+- [x] Add actor/source attribution telemetry foundations.
 - [ ] Add optional per-tech/per-day/per-client soft/hard budget policy where useful.
 
 ## P5 — Provider expansion
@@ -200,7 +233,7 @@ No retirement occurs until dependency review, tests, rollback, System Registry c
 
 ## Pilot success criteria
 
-The pilot is successful when:
+The broader technician pilot is successful when:
 
 - technicians report the experience as comparably fluid to ordinary ChatGPT use;
 - normal follow-ups work through ChatGPT session context;
@@ -217,13 +250,9 @@ The pilot is successful when:
 
 ## Immediate next implementation sequence
 
-1. Inspect current ChatGPT Business custom MCP/app requirements and supported authentication options.
-2. Define Jason MCP server contract and System Registry entity.
-3. Build read-only MCP adapter over existing Central Orchestrator/capability catalog.
-4. Expose a small meaningful read tool set generated from capability metadata.
-5. Prove locally without ChatGPT publication.
-6. Configure identity binding and workspace trust.
-7. Publish to a limited ChatGPT Business pilot.
-8. Test natural technician conversations and measure cost/quality.
-9. Expand providers only after the foundation is stable.
-10. Simplify legacy conversational infrastructure only after replacement proof.
+1. Finish MCP-002 with durable negative/isolation evidence for the ChatGPT/Entra/workspace identity boundary.
+2. Keep the existing MCP surface read-only while that proof is completed.
+3. Close MCP-002 only when the evidence supports the required identity/authority/client-isolation claims.
+4. Begin MCP-003 cross-provider technician proof using reusable governed capabilities rather than question-specific MCP tools.
+5. Continue usage/cost/actor telemetry as an observational control; treat runtime-side attribution activation as a separate governed deployment decision.
+6. Simplify legacy conversational infrastructure only after replacement proof and dependency review support it.
