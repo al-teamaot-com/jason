@@ -1,0 +1,159 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Usage Attribution & Traceability",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Observable Usage Events — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "sum(jason_usage_observed_events_24h)", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "description": "Model invocations and provider/API request attempts Jason can currently observe."
+    },
+    {
+      "type": "stat",
+      "title": "Attribution Coverage — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "100 * jason_usage_attribution_coverage_ratio_24h", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 90}, {"color": "green", "value": 99}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 5, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "description": "Percent of observable usage events tied to a known human or workload identity."
+    },
+    {
+      "type": "stat",
+      "title": "Unattributed Usage — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_unattributed_events_24h", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 10, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "description": "Observable resource use that Jason retained but could not tie to a known actor. This should trend toward zero."
+    },
+    {
+      "type": "stat",
+      "title": "Human Email Coverage — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "100 * jason_usage_human_email_coverage_ratio_24h", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"},
+      "description": "Human usage events whose stable Jason identity also has trusted email display metadata."
+    },
+    {
+      "type": "stat",
+      "title": "Usage Telemetry Health",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "min(jason_usage_attribution_source_available)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DEGRADED"}, "1": {"text": "READY"}}, "type": "value"}]}, "overrides": []},
+      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 1},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "bargauge",
+      "title": "Who / What Is Consuming Resources — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_actor_events_24h", "instant": true, "legendFormat": "{{actor_type}} · {{email}}{{workload_name}}{{actor_id}} · {{source_channel}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "options": {"displayMode": "gradient", "orientation": "horizontal", "showUnfilled": true, "minVizWidth": 8, "minVizHeight": 16}
+    },
+    {
+      "type": "bargauge",
+      "title": "Provider / Product Usage — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_provider_events_24h", "instant": true, "legendFormat": "{{provider}} · {{product}} · {{billing_class}} · {{telemetry_quality}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"min": 0}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "options": {"displayMode": "gradient", "orientation": "horizontal", "showUnfilled": true, "minVizWidth": 8, "minVizHeight": 16}
+    },
+    {
+      "type": "bargauge",
+      "title": "Known Cost by Provider / Product — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_provider_cost_usd_24h", "instant": true, "legendFormat": "{{provider}} · {{product}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "min": 0}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 13},
+      "options": {"displayMode": "gradient", "orientation": "horizontal", "showUnfilled": true, "minVizWidth": 8, "minVizHeight": 16},
+      "description": "Only cost Jason can calculate or obtain. Subscription/included usage with unavailable cost remains visible in the provider usage panel instead of being assigned a fabricated dollar value."
+    },
+    {
+      "type": "piechart",
+      "title": "Billing Class — 24h",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "sum by (billing_class) (jason_usage_provider_events_24h)", "instant": true, "legendFormat": "{{billing_class}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 13},
+      "options": {"displayLabels": ["name", "percent"], "legend": {"displayMode": "list", "placement": "right", "showLegend": true}, "pieType": "pie", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "tooltip": {"mode": "single", "sort": "none"}}
+    },
+    {
+      "type": "row",
+      "title": "Recent Usage Trace",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 20},
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "Who / Why / Provider / Correlation — Recent 24h",
+      "description": "Bounded recent trace rows. Purpose is structured operational metadata, never raw prompt text. Value is the event timestamp.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_recent_event_info", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true, "request_id": true},
+            "indexByName": {"actor_type": 0, "email": 1, "workload_name": 2, "actor_id": 3, "source_channel": 4, "purpose": 5, "capability": 6, "provider": 7, "product": 8, "service": 9, "billing_class": 10, "telemetry_quality": 11, "usage_unit": 12, "outcome": 13, "correlation_id": 14, "Value": 15},
+            "renameByName": {"actor_type": "Actor Type", "email": "Email", "workload_name": "Workload", "actor_id": "Jason Identity", "source_channel": "Source", "purpose": "Why", "capability": "Capability", "provider": "Provider", "product": "Product", "service": "Service / Model", "billing_class": "Billing", "telemetry_quality": "Quality", "usage_unit": "Usage Unit", "outcome": "Outcome", "correlation_id": "Correlation ID", "Value": "Occurred (Unix)"}
+          }
+        }
+      ],
+      "gridPos": {"h": 13, "w": 24, "x": 0, "y": 21},
+      "options": {"showHeader": true, "cellHeight": "sm"}
+    },
+    {
+      "type": "table",
+      "title": "Attribution Gaps — Recent 24h",
+      "description": "Anything here is observable consumption that Jason retained but cannot yet explain by actor. These rows drive instrumentation cleanup.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_usage_recent_event_info{actor_id=\"unknown\"}", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true, "email": true, "display_name": true, "workload_name": true, "actor_id": true},
+            "indexByName": {"source_channel": 0, "purpose": 1, "capability": 2, "provider": 3, "product": 4, "service": 5, "billing_class": 6, "telemetry_quality": 7, "outcome": 8, "correlation_id": 9, "request_id": 10, "Value": 11},
+            "renameByName": {"source_channel": "Source", "purpose": "Why / Gap", "capability": "Capability", "provider": "Provider", "product": "Product", "service": "Service / Model", "billing_class": "Billing", "telemetry_quality": "Quality", "outcome": "Outcome", "correlation_id": "Correlation ID", "request_id": "Request ID", "Value": "Occurred (Unix)"}
+          }
+        }
+      ],
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 34},
+      "options": {"showHeader": true, "cellHeight": "sm"}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["jason", "usage", "attribution", "cost", "audit"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason Usage & Attribution",
+  "uid": "jason-usage-attribution",
+  "version": 1,
+  "weekStart": ""
+}
