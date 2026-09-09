@@ -45,22 +45,31 @@ _IT_GLUE_ENTITY = {
 
 _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
     SERVICE_COMPANY_SEARCH: {
+        "resource_id": "id",
         "name": "companyName",
     },
     SERVICE_CONTACT_SEARCH: {
+        "resource_id": "id",
         "company_id": "companyID",
+        "first_name": "firstName",
+        "last_name": "lastName",
         "email": "emailAddress",
     },
     SERVICE_TICKET_SEARCH: {
+        "resource_id": "id",
         "ticket_number": "ticketNumber",
         "company_id": "companyID",
         "status": "status",
     },
     SERVICE_CONFIGURATION_SEARCH: {
+        "resource_id": "id",
         "company_id": "companyID",
         "name": "referenceTitle",
     },
 }
+
+_DEFAULT_AUTOTASK_MAX_RECORDS = 100
+_MAX_AUTOTASK_MAX_RECORDS = 500
 
 
 def _resource_id(arguments: Mapping[str, Any]) -> Any:
@@ -138,13 +147,29 @@ def adapt_it_glue_arguments(
     return result
 
 
+def _autotask_max_records(arguments: Mapping[str, Any]) -> int:
+    value = arguments.get("page_size", _DEFAULT_AUTOTASK_MAX_RECORDS)
+    if isinstance(value, bool):
+        raise ValueError("page_size must be an integer between 1 and 500")
+    try:
+        maximum = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("page_size must be an integer between 1 and 500") from error
+    if not 1 <= maximum <= _MAX_AUTOTASK_MAX_RECORDS:
+        raise ValueError("page_size must be between 1 and 500")
+    return maximum
+
+
 def _autotask_search(
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> str:
     explicit = arguments.get("search")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
+    if explicit is not None:
+        raise ValueError(
+            "provider-specific Autotask search expressions are not accepted by the "
+            "canonical read adapter; use canonical selectors or schema-driven filters"
+        )
 
     filters = arguments.get("filters", {})
     if filters is None:
@@ -167,12 +192,16 @@ def _autotask_search(
             clauses.append({"op": "eq", "field": provider_field, "value": value})
 
     if not clauses:
-        # Autotask requires a structured search expression. The empty filter is the
-        # explicit bounded collection-query form used by Jason; pagination remains
-        # governed by the provider response and higher-level completeness handling.
-        return json.dumps({"filter": []}, separators=(",", ":"), sort_keys=True)
+        clauses.append({"op": "exist", "field": "id"})
 
-    return json.dumps({"filter": clauses}, separators=(",", ":"), sort_keys=True)
+    return json.dumps(
+        {
+            "MaxRecords": _autotask_max_records(arguments),
+            "filter": clauses,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def adapt_autotask_arguments(
