@@ -2,9 +2,15 @@
 """Runtime adapter for Jason usage attribution telemetry.
 
 This layer extends the base read-only exporter with safe Microsoft Graph identity
-usage events. It keeps the existing metric contract stable while recognizing
-identity-directory API calls as provider usage and using successful directory
-enrichment to improve friendly human email display metadata.
+usage events and correlation-based actor enrichment. It keeps the existing metric
+contract stable while recognizing identity-directory API calls as provider usage,
+using successful directory enrichment for friendly email display, and associating
+pre-identity model work with the later governed request when both share a correlation
+identifier.
+
+Correlation enrichment is dashboard-time accounting only. It does not rewrite the
+append-only model ledger and it does not create identity, authority, tenant/client
+scope, or provider permissions.
 """
 
 from __future__ import annotations
@@ -13,6 +19,12 @@ from decimal import Decimal
 from http.server import HTTPServer
 
 import usage_attribution_exporter as base
+
+
+_ORIGINAL_ORCHESTRATION_EVENTS = base._orchestration_events
+_ORIGINAL_MODEL_EVENT = base._model_event
+_REQUEST_BY_CORRELATION: dict[str, dict[str, str]] = {}
+_DIRECTORY_EMAILS: dict[str, str] = {}
 
 
 def _valid_email(value: object) -> str:
@@ -38,6 +50,73 @@ def _directory_emails(events: list[dict]) -> dict[str, str]:
     return result
 
 
+def _governed_requests(events: list[dict]) -> dict[str, dict[str, str]]:
+    """Index the minimum safe actor metadata needed for correlation enrichment."""
+
+    result: dict[str, dict[str, str]] = {}
+    for event in events:
+        if event.get("event_type") != "orchestration.request.received":
+            continue
+        correlation_id = str(event.get("correlation_id") or "").strip()
+        if not correlation_id:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        result[correlation_id] = {
+            "actor_type": base._actor_type(payload.get("requester_kind")),
+            "principal_id": str(event.get("principal_id") or "").strip(),
+            "capability": str(event.get("capability") or "").strip(),
+        }
+    return result
+
+
+def _orchestration_events() -> list[dict]:
+    """Load orchestration events and prepare read-only correlation indexes."""
+
+    global _REQUEST_BY_CORRELATION, _DIRECTORY_EMAILS
+    events = _ORIGINAL_ORCHESTRATION_EVENTS()
+    _REQUEST_BY_CORRELATION = _governed_requests(events)
+    _DIRECTORY_EMAILS = _directory_emails(events)
+    return events
+
+
+def _model_event(entry: dict, emails: dict[str, str]) -> dict | None:
+    """Normalize model usage and enrich only otherwise-unknown actors by correlation.
+
+    A model call that occurred before Jason bound a human remains unknown in the
+    immutable ledger. If the same correlation later entered the governed orchestrator,
+    this read-only presentation layer can show that stable Jason principal as inferred
+    attribution while preserving the original model purpose/capability metadata.
+    """
+
+    friendly_emails = dict(emails)
+    friendly_emails.update(_DIRECTORY_EMAILS)
+    normalized = _ORIGINAL_MODEL_EVENT(entry, friendly_emails)
+    if normalized is None or normalized.get("attributable"):
+        return normalized
+
+    correlation_id = str(normalized.get("correlation_id") or "").strip()
+    request = _REQUEST_BY_CORRELATION.get(correlation_id)
+    if not request:
+        return normalized
+
+    actor_id = str(request.get("principal_id") or "").strip()
+    actor_type = base._actor_type(request.get("actor_type"))
+    if not actor_id or actor_type == "unknown":
+        return normalized
+
+    enriched = dict(normalized)
+    enriched["actor_id"] = actor_id
+    enriched["actor_type"] = actor_type
+    enriched["email"] = friendly_emails.get(actor_id, "")
+    enriched["workload_name"] = actor_id if actor_type != "human" else ""
+    enriched["attributable"] = True
+    # The provider-reported token/cost facts remain exact/calculated as before, but
+    # the actor association itself is correlation-derived rather than ledger-native.
+    if enriched.get("telemetry_quality") == "exact":
+        enriched["telemetry_quality"] = "inferred"
+    return enriched
+
+
 def _provider_events(events: list[dict], emails: dict[str, str]) -> list[dict]:
     """Normalize observable external provider request attempts.
 
@@ -46,16 +125,7 @@ def _provider_events(events: list[dict], emails: dict[str, str]) -> list[dict]:
     addresses, raw evidence, and arbitrary payload values are not exported.
     """
 
-    request_by_correlation: dict[str, dict] = {}
-    for event in events:
-        if event.get("event_type") != "orchestration.request.received":
-            continue
-        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-        request_by_correlation[str(event.get("correlation_id") or "")] = {
-            "actor_type": base._actor_type(payload.get("requester_kind")),
-            "principal_id": str(event.get("principal_id") or "").strip(),
-            "capability": str(event.get("capability") or "").strip(),
-        }
+    request_by_correlation = _governed_requests(events)
 
     friendly_emails = dict(emails)
     friendly_emails.update(_directory_emails(events))
@@ -166,7 +236,9 @@ def _provider_events(events: list[dict], emails: dict[str, str]) -> list[dict]:
     return result
 
 
-# Keep the dashboard's existing metric contract while extending the provider parser.
+# Keep the dashboard's existing metric contract while extending safe runtime parsing.
+base._orchestration_events = _orchestration_events
+base._model_event = _model_event
 base._provider_events = _provider_events
 
 
