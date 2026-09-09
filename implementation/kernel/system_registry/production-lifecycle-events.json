@@ -181,6 +181,120 @@
       ],
       "verification_method": "production-host-proof",
       "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175233z.resource.aws-zerotier-relay.verified",
+      "registry_id": "resource.aws-zerotier-relay",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:33+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-009", "ADR-010"],
+      "reason": "Durable MCP acceptance and edge proof established the declared AWS Caddy and ZeroTier relay identity, public MCP route, and hostile-Host rejection behavior without exposing provider credentials.",
+      "evidence_references": [
+        "docs/sessions/Existing-AWS-ZeroTier-Relay-MCP-Reuse-Assessment-2026-09-08.md",
+        "docs/sessions/MCP-Edge-Discovery-2026-09-08.md",
+        "docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md"
+      ],
+      "verification_method": "public-caddy-host-route-and-rejection-proof-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175234z.component.jason-mcp.verified",
+      "registry_id": "component.jason-mcp",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:34+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article VI", "J-002 Article XIX", "J-103", "J-104", "ADR-010"],
+      "reason": "Fresh source-built MCP durability, public OAuth/transport acceptance, exact three-tool read-only surface, and governed live-read proof satisfied the declared MCP service state.",
+      "evidence_references": [
+        "docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "mcp-source-durability-and-public-acceptance-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175235z.component.jason-usage-exporter.verified",
+      "registry_id": "component.jason-usage-exporter",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:35+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-010"],
+      "reason": "Accepted telemetry deployment proof plus fresh host observation established the declared usage exporter service as active and observable without changing runtime execution authority.",
+      "evidence_references": [
+        "docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "systemd-active-and-prometheus-target-proof-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175236z.component.jason-usage-attribution-exporter.verified",
+      "registry_id": "component.jason-usage-attribution-exporter",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:36+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "ADR-010"],
+      "reason": "Accepted attribution deployment proof plus fresh host observation established the declared attribution exporter service as active and observational, with no action authority added.",
+      "evidence_references": [
+        "docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "systemd-active-and-prometheus-target-proof-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175237z.component.jason-prometheus.verified",
+      "registry_id": "component.jason-prometheus",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:37+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Accepted Command Center deployment evidence established the Prometheus container and both Jason usage telemetry targets as healthy, with fresh host observation confirming the service remained running.",
+      "evidence_references": [
+        "docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "docker-container-and-target-health-proof-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175238z.component.jason-grafana.verified",
+      "registry_id": "component.jason-grafana",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:38+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103"],
+      "reason": "Accepted dashboard deployment and fresh Grafana health evidence established the declared Grafana service, database health, and Jason Command Center provisioning state.",
+      "evidence_references": [
+        "docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "grafana-health-and-dashboard-provisioning-proof-v1",
+      "verification_outcome": "verified"
+    },
+    {
+      "event_id": "lifecycle.2026-09-09t175239z.deployment.jason-chatgpt-mcp-observability-pilot.verified",
+      "registry_id": "deployment.jason-chatgpt-mcp-observability-pilot",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-09T17:52:39+00:00",
+      "principal_id": "person-al",
+      "authority_references": ["J-002 Article XIX", "J-103", "J-104", "ADR-010"],
+      "reason": "Combined durable MCP acceptance, Command Center deployment proof, and fresh host reconciliation satisfied the declared ChatGPT MCP and observability extension without a runtime rebuild or service restart.",
+      "evidence_references": [
+        "docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md",
+        "docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md",
+        "docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md"
+      ],
+      "verification_method": "mcp-observability-production-pilot-proof-v1",
+      "verification_outcome": "verified"
     }
   ]
 }
