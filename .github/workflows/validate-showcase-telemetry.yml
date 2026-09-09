@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "infrastructure/showcase/**"
+      - "implementation/orchestrator/open_world_teams_query_flow.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -12,6 +13,7 @@ on:
       - "feature/jason-dashboard-usage-telemetry-20260909"
     paths:
       - "infrastructure/showcase/**"
+      - "implementation/orchestrator/open_world_teams_query_flow.py"
       - "implementation/usage_attribution/**"
       - "implementation/usage_ledger/**"
       - ".github/workflows/validate-showcase-telemetry.yml"
@@ -29,13 +31,14 @@ jobs:
           python-version: "3.12"
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest
-      - name: Compile exporters, attribution, and preflight
+      - name: Compile exporters, attribution, runtime binding, and preflight
         run: |
           python -m compileall -q \
             infrastructure/showcase/status_exporter.py \
             infrastructure/showcase/usage_exporter.py \
             infrastructure/showcase/usage_attribution_exporter.py \
             infrastructure/showcase/usage_telemetry_preflight.py \
+            implementation/orchestrator/open_world_teams_query_flow.py \
             implementation/usage_attribution \
             implementation/usage_ledger/runtime_context.py
       - name: Test showcase exporters and attribution context
@@ -50,4 +53,6 @@ jobs:
       - name: Validate installer shell syntax
         run: bash -n infrastructure/showcase/install_showcase.sh
       - name: Validate Grafana dashboard JSON
-        run: python -m json.tool infrastructure/showcase/grafana/dashboards/jason-command-center.json >/dev/null
+        run: |
+          python -m json.tool infrastructure/showcase/grafana/dashboards/jason-command-center.json >/dev/null
+          python -m json.tool infrastructure/showcase/grafana/dashboards/jason-usage-attribution.json >/dev/null
