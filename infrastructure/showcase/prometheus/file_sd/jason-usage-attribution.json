@@ -1,0 +1,8 @@
+[
+  {
+    "targets": ["host.docker.internal:9466"],
+    "labels": {
+      "job": "jason-usage-attribution"
+    }
+  }
+]
