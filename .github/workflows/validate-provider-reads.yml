@@ -9,7 +9,7 @@ on:
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
       - 'implementation/orchestrator/provider_read_*.py'
-      - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/orchestrator/tests/test_provider_read_*.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
@@ -22,7 +22,7 @@ on:
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
       - 'implementation/orchestrator/provider_read_*.py'
-      - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/orchestrator/tests/test_provider_read_*.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
@@ -48,6 +48,7 @@ jobs:
             implementation/connectors/autotask \
             implementation/connectors/it_glue \
             implementation/connectors/provider_resource_adapters.py \
+            implementation/orchestrator/provider_read_acceptance.py \
             implementation/orchestrator/provider_read_argument_adapter.py \
             implementation/orchestrator/provider_read_capability_catalog.py \
             implementation/runtime_service/src/jason_runtime/composition.py \
@@ -56,6 +57,7 @@ jobs:
         run: |
           python -m pytest -q \
             implementation/orchestrator/tests/test_provider_read_foundation.py \
+            implementation/orchestrator/tests/test_provider_read_acceptance.py \
             implementation/runtime_service/tests/test_provider_reads.py \
             implementation/connectors/tests/test_autotask_resource_gateway.py \
             implementation/connectors/tests/test_autotask_operations.py \
