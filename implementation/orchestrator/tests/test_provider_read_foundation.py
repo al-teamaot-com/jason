@@ -51,6 +51,14 @@ def _services():
     return capabilities, providers
 
 
+def _manifest_operation_selectors(manifest) -> dict[str, set[str]]:
+    return {
+        operation.capability_name: set(operation.selector_names)
+        for resource in manifest.resources
+        for operation in resource.operations
+    }
+
+
 def test_provider_read_foundation_is_read_only_pilot_until_live_acceptance() -> None:
     capabilities, providers = _services()
 
@@ -113,6 +121,27 @@ def test_integration_broker_accepts_it_glue_and_autotask_manifests() -> None:
     assert not broker.get("autotask").operational
 
 
+def test_search_discovery_metadata_matches_manifest_selectors() -> None:
+    capabilities, _ = _services()
+    manifests = (build_it_glue_manifest(), build_autotask_manifest())
+
+    for manifest in manifests:
+        operation_selectors = _manifest_operation_selectors(manifest)
+        for capability_name, manifest_selectors in operation_selectors.items():
+            if not capability_name.endswith(".search"):
+                continue
+            capability = capabilities.get_current(
+                capability_name=capability_name,
+                allow_pilot=True,
+            )
+            discovered = {
+                item.strip()
+                for item in capability.metadata["selector_keys"].split(",")
+                if item.strip()
+            }
+            assert discovered == manifest_selectors
+
+
 def test_it_glue_adapter_injects_only_approved_noncredential_entity_families() -> None:
     organization = adapt_it_glue_arguments(
         DOCUMENTATION_ORGANIZATION_SEARCH,
@@ -136,8 +165,25 @@ def test_it_glue_adapter_injects_only_approved_noncredential_entity_families() -
     assert configuration == {
         "entity": "Configurations",
         "filters": {"organization_id": "208", "name": "AOT-50282"},
+        "page_size": 100,
     }
     assert "Passwords" not in {organization["entity"], contact["entity"], configuration["entity"]}
+
+
+def test_it_glue_collection_search_is_bounded_by_default() -> None:
+    adapted = adapt_it_glue_arguments(DOCUMENTATION_ORGANIZATION_SEARCH, {})
+    assert adapted == {
+        "entity": "Organizations",
+        "filters": {},
+        "page_size": 100,
+    }
+
+    for invalid_size in (0, 1001, True, "not-an-integer"):
+        with pytest.raises(ValueError, match="page_size"):
+            adapt_it_glue_arguments(
+                DOCUMENTATION_ORGANIZATION_SEARCH,
+                {"page_size": invalid_size},
+            )
 
 
 def test_autotask_adapter_builds_deterministic_structured_search() -> None:
@@ -225,6 +271,26 @@ def test_autotask_search_maps_durable_resource_identity_and_contact_fields() -> 
     ]
 
 
+def test_autotask_continuation_uses_durable_id_without_provider_url() -> None:
+    continued = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_TICKET_SEARCH,
+            {
+                "company_id": 77,
+                "after_resource_id": "900",
+                "page_size": 50,
+            },
+        )["search"]
+    )
+    assert continued == {
+        "MaxRecords": 50,
+        "filter": [
+            {"op": "gt", "field": "id", "value": 900},
+            {"op": "eq", "field": "companyID", "value": 77},
+        ],
+    }
+
+
 def test_autotask_search_rejects_unbounded_or_provider_specific_escape_hatches() -> None:
     for invalid_size in (0, 501, True, "not-an-integer"):
         with pytest.raises(ValueError, match="page_size"):
@@ -232,6 +298,19 @@ def test_autotask_search_rejects_unbounded_or_provider_specific_escape_hatches()
                 SERVICE_TICKET_SEARCH,
                 {"page_size": invalid_size},
             )
+
+    for invalid_after in (0, -1, True, "not-an-integer"):
+        with pytest.raises(ValueError, match="after_resource_id"):
+            adapt_autotask_arguments(
+                SERVICE_TICKET_SEARCH,
+                {"after_resource_id": invalid_after},
+            )
+
+    with pytest.raises(ValueError, match="after_resource_id cannot be combined"):
+        adapt_autotask_arguments(
+            SERVICE_TICKET_SEARCH,
+            {"resource_id": 100, "after_resource_id": 99},
+        )
 
     with pytest.raises(ValueError, match="provider-specific Autotask search"):
         adapt_autotask_arguments(
