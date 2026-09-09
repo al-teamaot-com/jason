@@ -110,10 +110,10 @@ def _model_event(entry: dict, emails: dict[str, str]) -> dict | None:
     enriched["email"] = friendly_emails.get(actor_id, "")
     enriched["workload_name"] = actor_id if actor_type != "human" else ""
     enriched["attributable"] = True
-    # The provider-reported token/cost facts remain exact/calculated as before, but
-    # the actor association itself is correlation-derived rather than ledger-native.
-    if enriched.get("telemetry_quality") == "exact":
-        enriched["telemetry_quality"] = "inferred"
+    # The underlying token/cost facts remain unchanged, but the exported event
+    # is correlation-attributed rather than ledger-native, so its overall
+    # telemetry quality is conservatively reported as inferred.
+    enriched["telemetry_quality"] = "inferred"
     return enriched
 
 
