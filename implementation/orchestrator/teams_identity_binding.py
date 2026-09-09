@@ -7,12 +7,15 @@ authority, organization, or client scope from transport claims.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-from typing import Protocol
+from functools import lru_cache
+from typing import Mapping, Protocol
 
 from connectors.core.contracts import ConnectorTransportError
 from kernel.identity_authority import IdentityRecord
 
+from .event_store import SQLiteOrchestrationEventStore
 from .teams_conversation_flow import (
     BoundConversationPrincipal,
     TeamsConversationPrincipalEvidence,
@@ -32,6 +35,96 @@ class MicrosoftUserDirectoryReader(Protocol):
         microsoft_tenant_id: str,
         microsoft_object_id: str,
     ) -> str | None: ...
+
+
+class MicrosoftDirectoryUsageAudit(Protocol):
+    """Record external directory consumption after Jason identity is established."""
+
+    def record(
+        self,
+        event_type: str,
+        *,
+        principal_id: str,
+        organization_id: str,
+        client_id: str | None,
+        evidence: TeamsConversationPrincipalEvidence,
+        details: Mapping[str, object] | None = None,
+    ) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SQLiteMicrosoftDirectoryUsageAudit:
+    """Append safe Microsoft Graph usage events to Jason's orchestration audit store.
+
+    The audit event contains the stable Jason principal and transport message scope,
+    but never the Graph access token, Microsoft object ID, tenant ID, provider response,
+    or user prompt. The `requested` event is written before Graph is called, so an API
+    request remains observable even if completion logging or the provider later fails.
+    """
+
+    events: SQLiteOrchestrationEventStore
+
+    def record(
+        self,
+        event_type: str,
+        *,
+        principal_id: str,
+        organization_id: str,
+        client_id: str | None,
+        evidence: TeamsConversationPrincipalEvidence,
+        details: Mapping[str, object] | None = None,
+    ) -> None:
+        stage = {
+            "identity.directory.requested": "invoking",
+            "identity.directory.completed": "completed",
+            "identity.directory.failed": "failed",
+        }.get(event_type, "observed")
+        safe_details = {
+            "provider": "microsoft_graph",
+            "product": "Microsoft Graph",
+            "operation": "user.profile.read",
+            "source_channel": "teams",
+            "purpose": "Enrich authenticated Jason human identity with directory email",
+        }
+        safe_details.update(dict(details or {}))
+        self.events.append(
+            event_type,
+            {
+                "execution_id": f"directory:{evidence.message_id}",
+                "correlation_id": f"teams-directory:{evidence.conversation_id}:{evidence.message_id}",
+                "organization_id": organization_id,
+                "principal_id": principal_id,
+                "capability_name": "identity.profile.enrich",
+                "stage": stage,
+                "client_id": client_id,
+                "requester_kind": "human",
+                "permission_mode": "observe",
+                "request_id": evidence.message_id,
+                "details": safe_details,
+            },
+        )
+
+
+@lru_cache(maxsize=4)
+def _environment_directory_audit(path: str) -> SQLiteMicrosoftDirectoryUsageAudit:
+    """Reuse one append-only audit connection per configured runtime event store."""
+
+    return SQLiteMicrosoftDirectoryUsageAudit(
+        SQLiteOrchestrationEventStore(path)
+    )
+
+
+def _default_directory_audit() -> MicrosoftDirectoryUsageAudit | None:
+    """Enable durable directory accounting when the runtime event DB is configured.
+
+    Unit/library callers that do not configure a runtime event store keep the historical
+    no-audit behavior. Production Jason already supplies JASON_ORCHESTRATION_EVENTS_DB.
+    """
+
+    path = os.getenv("JASON_ORCHESTRATION_EVENTS_DB", "").strip()
+    if not path:
+        return None
+    return _environment_directory_audit(path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +178,7 @@ class JasonTeamsIdentityBinder:
     bindings: MicrosoftIdentityBindingReader
     identities: IdentityRecordReader
     directory: MicrosoftUserDirectoryReader | None = None
+    directory_audit: MicrosoftDirectoryUsageAudit | None = None
     required_authentication_assurance: str = "botframework-authenticated"
 
     def bind(
@@ -107,17 +201,67 @@ class JasonTeamsIdentityBinder:
 
         email_address = binding.email_address
         if self.directory is not None:
+            audit = self.directory_audit or _default_directory_audit()
+            if audit is not None:
+                # Fail before provider execution if the required usage audit cannot be
+                # written. Jason should not knowingly consume an external API invisibly.
+                audit.record(
+                    "identity.directory.requested",
+                    principal_id=identity.identity_id,
+                    organization_id=identity.organization_id,
+                    client_id=binding.client_id,
+                    evidence=evidence,
+                )
             try:
                 email_address = self.directory.resolve_email(
                     microsoft_tenant_id=evidence.microsoft_tenant_id,
                     microsoft_object_id=evidence.microsoft_object_id,
                 )
-            except ConnectorTransportError:
+            except ConnectorTransportError as error:
+                if audit is not None:
+                    audit.record(
+                        "identity.directory.failed",
+                        principal_id=identity.identity_id,
+                        organization_id=identity.organization_id,
+                        client_id=binding.client_id,
+                        evidence=evidence,
+                        details={
+                            "outcome": "transport_failed",
+                            "exception_type": type(error).__name__,
+                        },
+                    )
                 # Directory email is enrichment, not identity authority. Do not fall
                 # back to potentially stale cached profile data when live enrichment
                 # is unavailable; omit the mutable attribute and continue with the
                 # already authenticated and Jason-bound principal.
                 email_address = None
+            except Exception as error:
+                if audit is not None:
+                    audit.record(
+                        "identity.directory.failed",
+                        principal_id=identity.identity_id,
+                        organization_id=identity.organization_id,
+                        client_id=binding.client_id,
+                        evidence=evidence,
+                        details={
+                            "outcome": "failed",
+                            "exception_type": type(error).__name__,
+                        },
+                    )
+                raise
+            else:
+                if audit is not None:
+                    audit.record(
+                        "identity.directory.completed",
+                        principal_id=identity.identity_id,
+                        organization_id=identity.organization_id,
+                        client_id=binding.client_id,
+                        evidence=evidence,
+                        details={
+                            "outcome": "completed",
+                            "email_address": email_address or "",
+                        },
+                    )
             if email_address is not None:
                 email_address = email_address.strip()
                 if not _valid_email(email_address):
