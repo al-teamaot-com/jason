@@ -7,6 +7,11 @@ from typing import Any, Mapping
 from connectors.core.resource_gateway import ResourceOperation, ResourceQuery
 
 
+_DEFAULT_COLLECTION_PAGE_SIZE = 100
+_MAX_AUTOTASK_PAGE_SIZE = 500
+_MAX_IT_GLUE_PAGE_SIZE = 1000
+
+
 @dataclass(frozen=True)
 class ConnectorInvocation:
     capability: str
@@ -20,14 +25,54 @@ def _require_filter(query: ResourceQuery, name: str) -> Any:
     return filters[name]
 
 
-def _autotask_search(filters: Mapping[str, Any]) -> str:
+def _bounded_page_size(
+    value: int | None,
+    *,
+    maximum: int,
+) -> int:
+    page_size = _DEFAULT_COLLECTION_PAGE_SIZE if value is None else value
+    if isinstance(page_size, bool) or not isinstance(page_size, int):
+        raise ValueError("page_size must be an integer")
+    if not 1 <= page_size <= maximum:
+        raise ValueError(f"page_size must be between 1 and {maximum}")
+    return page_size
+
+
+def _positive_cursor(value: str | None, *, name: str) -> int | None:
+    if value is None:
+        return None
+    try:
+        cursor = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} cursor must be a positive integer") from error
+    if cursor < 1:
+        raise ValueError(f"{name} cursor must be a positive integer")
+    return cursor
+
+
+def _autotask_search(
+    filters: Mapping[str, Any],
+    *,
+    maximum_records: int,
+    after_resource_id: int | None,
+) -> str:
     clauses = [
         {"op": "eq", "field": str(field), "value": value}
         for field, value in filters.items()
         if str(field).strip()
     ]
+    if after_resource_id is not None:
+        if any(item["field"] == "id" for item in clauses):
+            raise ValueError(
+                "Autotask continuation cannot be combined with an exact id filter"
+            )
+        clauses.append(
+            {"op": "gt", "field": "id", "value": after_resource_id}
+        )
+    if not clauses:
+        clauses.append({"op": "exist", "field": "id"})
     return json.dumps(
-        {"filter": clauses},
+        {"MaxRecords": maximum_records, "filter": clauses},
         separators=(",", ":"),
         sort_keys=True,
     )
@@ -53,9 +98,14 @@ def translate_it_glue_resource(query: ResourceQuery) -> ConnectorInvocation:
             arguments: dict[str, Any] = {
                 "entity": entity,
                 "filters": filters,
+                "page_size": _bounded_page_size(
+                    query.page_size,
+                    maximum=_MAX_IT_GLUE_PAGE_SIZE,
+                ),
             }
-            if query.page_size is not None:
-                arguments["page_size"] = query.page_size
+            page_number = _positive_cursor(query.cursor, name="IT Glue page")
+            if page_number is not None:
+                arguments["page_number"] = page_number
             return ConnectorInvocation(
                 capability="it_glue.entity.query",
                 arguments=arguments,
@@ -111,7 +161,17 @@ def translate_autotask_resource(query: ResourceQuery) -> ConnectorInvocation:
                 capability="autotask.entity.query",
                 arguments={
                     "entity": entity,
-                    "search": _autotask_search(filters),
+                    "search": _autotask_search(
+                        filters,
+                        maximum_records=_bounded_page_size(
+                            query.page_size,
+                            maximum=_MAX_AUTOTASK_PAGE_SIZE,
+                        ),
+                        after_resource_id=_positive_cursor(
+                            query.cursor,
+                            name="Autotask resource id",
+                        ),
+                    ),
                 },
             )
 
