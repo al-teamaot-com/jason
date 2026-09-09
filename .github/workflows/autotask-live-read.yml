@@ -1,0 +1,60 @@
+name: Validate Autotask Live Read Foundation
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/tests/test_autotask_live_read.py'
+      - 'implementation/connectors/tests/test_autotask_operations.py'
+      - 'tools/autotask_live_read.py'
+      - '.github/workflows/autotask-live-read.yml'
+  push:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/tests/test_autotask_live_read.py'
+      - 'implementation/connectors/tests/test_autotask_operations.py'
+      - 'tools/autotask_live_read.py'
+      - '.github/workflows/autotask-live-read.yml'
+
+jobs:
+  validate-autotask-live-read:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cli/src:implementation/cap-001/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation
+      - name: Compile Autotask live-read boundary
+        run: |
+          python -m py_compile implementation/connectors/autotask/connector.py
+          python -m py_compile implementation/connectors/autotask/operations.py
+          python -m py_compile implementation/connectors/autotask/live_read.py
+          python -m py_compile tools/autotask_live_read.py
+      - name: Run Autotask operation and live-read contract tests
+        run: |
+          python -m pytest -q \
+            implementation/connectors/tests/test_autotask_operations.py \
+            implementation/connectors/tests/test_autotask_live_read.py
+      - name: Verify credential-safe Autotask live-read preflight
+        run: |
+          rm -f /tmp/jason-autotask-live-read-check.json
+          python tools/autotask_live_read.py \
+            --ticket-number T20260909.0001 \
+            --scope aot-validation \
+            --allowed-scope aot-validation \
+            --principal-id operator-al \
+            --organization-id team-aot \
+            --correlation-id ci-autotask-live-read-preflight \
+            --evidence-output /tmp/jason-autotask-live-read-check.json \
+            --check-only \
+            > /tmp/autotask-live-preflight.txt
+          grep -F 'APPROVED: Canonical Autotask live-read configuration validated' /tmp/autotask-live-preflight.txt
+          test ! -e /tmp/jason-autotask-live-read-check.json
+          echo 'AUTOTASK_PROVIDER_NETWORK_IO=NO'
+          echo 'AUTOTASK_PROVIDER_SECRET_RESOLUTION=NO'
