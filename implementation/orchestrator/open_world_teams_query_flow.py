@@ -19,11 +19,12 @@ Ordinary conversation falls through unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import sys
 import traceback
 from typing import Any
 
-from usage_attribution.factories import human_attribution
+from usage_attribution.factories import human_attribution, unknown_attribution
 from usage_attribution.runtime_context import bind_attribution_context
 
 from .dynamic_conversation_kernel import (
@@ -132,18 +133,41 @@ class OpenWorldTeamsQueryFlow:
         executor = None
 
         try:
+            # Allocate a trace identifier before any model-backed classification.
+            # A correlation identifier grants no authority. It lets later governed
+            # identity binding connect pre-identity resource consumption to the same
+            # turn without pretending Jason already knows who the actor is.
+            correlation_id = (
+                self.fallback.request_factory
+                .new_correlation_id()
+            )
+
             base_catalog = (
                 self.discovery.discover()
             )
 
             stage = "classification"
 
-            classification = (
-                self.classifier.map(
-                    human_text=question,
-                    catalog=base_catalog,
-                )
+            provisional = unknown_attribution(
+                organization_id=(
+                    os.getenv("JASON_ORGANIZATION_ID", "aot").strip()
+                    or "aot"
+                ),
+                correlation_id=correlation_id,
+                request_id=request.identity.message_id,
+                source_channel="teams",
+                purpose="Classify Teams turn for governed information handling",
+                capability="conversation.classify",
+                workflow_id=request.identity.conversation_id,
             )
+
+            with bind_attribution_context(provisional):
+                classification = (
+                    self.classifier.map(
+                        human_text=question,
+                        catalog=base_catalog,
+                    )
+                )
 
             if not classification.information_request:
                 print(
@@ -173,13 +197,6 @@ class OpenWorldTeamsQueryFlow:
                     "Teams identity is not bound to "
                     "a governed Jason principal"
                 )
-
-            stage = "correlation"
-
-            correlation_id = (
-                self.fallback.request_factory
-                .new_correlation_id()
-            )
 
             executor = (
                 BoundTeamsConversationIntentExecutor(
