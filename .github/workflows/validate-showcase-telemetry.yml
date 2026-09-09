@@ -58,8 +58,10 @@ jobs:
             infrastructure/showcase/tests/test_usage_attribution_exporter_runtime.py \
             implementation/orchestrator/tests/test_teams_identity_usage_audit.py \
             implementation/usage_attribution/test_runtime_context.py
-      - name: Validate installer shell syntax
-        run: bash -n infrastructure/showcase/install_showcase.sh
+      - name: Validate showcase shell syntax
+        run: |
+          bash -n infrastructure/showcase/install_showcase.sh
+          bash -n infrastructure/showcase/deploy_usage_dashboard.sh
       - name: Validate Grafana dashboard JSON
         run: |
           python -m json.tool infrastructure/showcase/grafana/dashboards/jason-command-center.json >/dev/null
