@@ -32,7 +32,7 @@ jobs:
   governed-provider-reads:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/connectors/openclaw/src:implementation/runtime_service/src
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
