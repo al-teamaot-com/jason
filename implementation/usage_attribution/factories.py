@@ -1,7 +1,10 @@
 """Safe factories for request-scoped usage attribution.
 
 Factories accept only already-authenticated/bound identity or explicit workload
-identity. They do not perform authentication or grant authority.
+identity. They do not perform authentication or grant authority. The provisional
+unknown factory exists only for pre-identity accounting boundaries; callers may
+later correlate the same request to a governed Jason principal without rewriting
+historical usage records.
 """
 
 from __future__ import annotations
@@ -35,6 +38,37 @@ def human_attribution(
         client_id=client_id,
         display_name=display_name,
         email_address=email_address,
+        workflow_id=workflow_id,
+    )
+
+
+def unknown_attribution(
+    *,
+    organization_id: str,
+    correlation_id: str,
+    request_id: str,
+    source_channel: str,
+    purpose: str,
+    capability: str,
+    workflow_id: str | None = None,
+) -> AttributionContext:
+    """Create traceable accounting context before a governed actor is established.
+
+    This is intentionally non-authoritative. It records that resource consumption
+    happened and gives it a stable correlation key, but it never asserts a person,
+    tenant/client authorization scope, or workload identity that Jason has not yet
+    established.
+    """
+
+    return AttributionContext(
+        organization_id=organization_id,
+        correlation_id=correlation_id,
+        request_id=request_id,
+        actor_type=ActorType.UNKNOWN,
+        actor_id="unknown",
+        source_channel=source_channel,
+        purpose=purpose,
+        capability=capability,
         workflow_id=workflow_id,
     )
 
