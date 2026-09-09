@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -17,6 +18,19 @@ def _require_filter(query: ResourceQuery, name: str) -> Any:
     if name not in filters:
         raise ValueError(f"Required resource filter is missing: {name}")
     return filters[name]
+
+
+def _autotask_search(filters: Mapping[str, Any]) -> str:
+    clauses = [
+        {"op": "eq", "field": str(field), "value": value}
+        for field, value in filters.items()
+        if str(field).strip()
+    ]
+    return json.dumps(
+        {"filter": clauses},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def translate_it_glue_resource(query: ResourceQuery) -> ConnectorInvocation:
@@ -67,6 +81,52 @@ def translate_it_glue_resource(query: ResourceQuery) -> ConnectorInvocation:
 
     raise ValueError(
         f"No IT Glue resource translation exists for "
+        f"{query.resource_type}.{query.operation.value}"
+    )
+
+
+def translate_autotask_resource(query: ResourceQuery) -> ConnectorInvocation:
+    if query.provider != "autotask":
+        raise ValueError("Autotask adapter received a query for another provider")
+
+    if query.resource_type == "entity":
+        entity = _require_filter(query, "entity")
+        if query.operation is ResourceOperation.DESCRIBE:
+            return ConnectorInvocation(
+                capability="autotask.entity.describe",
+                arguments={"entity": entity},
+            )
+        if query.operation is ResourceOperation.GET:
+            return ConnectorInvocation(
+                capability="autotask.entity.get",
+                arguments={
+                    "entity": entity,
+                    "entity_id": query.resource_id,
+                },
+            )
+        if query.operation is ResourceOperation.QUERY:
+            filters = dict(query.filters or {})
+            filters.pop("entity", None)
+            return ConnectorInvocation(
+                capability="autotask.entity.query",
+                arguments={
+                    "entity": entity,
+                    "search": _autotask_search(filters),
+                },
+            )
+
+    if query.resource_type == "ticket_note" and query.operation in {
+        ResourceOperation.GET,
+        ResourceOperation.QUERY,
+    }:
+        ticket_id = query.resource_id or _require_filter(query, "ticket_id")
+        return ConnectorInvocation(
+            capability="autotask.ticket.notes.list",
+            arguments={"ticket_id": ticket_id},
+        )
+
+    raise ValueError(
+        f"No Autotask resource translation exists for "
         f"{query.resource_type}.{query.operation.value}"
     )
 
