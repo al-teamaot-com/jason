@@ -8,6 +8,7 @@ on:
       - 'implementation/connectors/kaseya_resource_catalog.py'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
@@ -21,6 +22,7 @@ on:
       - 'implementation/connectors/kaseya_resource_catalog.py'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
@@ -60,6 +62,7 @@ jobs:
             implementation/orchestrator/tests/test_provider_read_acceptance.py \
             implementation/runtime_service/tests/test_provider_reads.py \
             implementation/connectors/tests/test_autotask_resource_gateway.py \
+            implementation/connectors/tests/test_provider_resource_adapters.py \
             implementation/connectors/tests/test_autotask_operations.py \
             implementation/connectors/tests/test_it_glue_operations.py
       - name: Prove source-only cost and safety boundary
