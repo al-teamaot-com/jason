@@ -10,6 +10,7 @@ on:
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
       - '.github/workflows/validate-provider-reads.yml'
@@ -22,6 +23,7 @@ on:
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_foundation.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
       - '.github/workflows/validate-provider-reads.yml'
@@ -48,6 +50,7 @@ jobs:
             implementation/connectors/provider_resource_adapters.py \
             implementation/orchestrator/provider_read_argument_adapter.py \
             implementation/orchestrator/provider_read_capability_catalog.py \
+            implementation/runtime_service/src/jason_runtime/composition.py \
             implementation/runtime_service/src/jason_runtime/provider_reads.py
       - name: Test governed provider-read contracts without provider I/O
         run: |
