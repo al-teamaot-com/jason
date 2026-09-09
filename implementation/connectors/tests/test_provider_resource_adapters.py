@@ -53,6 +53,53 @@ def test_it_glue_generic_entity_query_translation_preserves_filters() -> None:
     assert invocation.arguments["page_size"] == 100
 
 
+def test_it_glue_generic_entity_query_is_bounded_and_pages_without_provider_url() -> None:
+    first = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="entity",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"entity": "Organizations"},
+        )
+    )
+    next_page = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="entity",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"entity": "Organizations"},
+            page_size=25,
+            cursor="2",
+        )
+    )
+
+    assert first.arguments == {
+        "entity": "Organizations",
+        "filters": {},
+        "page_size": 100,
+    }
+    assert next_page.arguments == {
+        "entity": "Organizations",
+        "filters": {},
+        "page_size": 25,
+        "page_number": 2,
+    }
+
+    with pytest.raises(ValueError, match="positive integer"):
+        translate_it_glue_resource(
+            ResourceQuery(
+                provider="it_glue",
+                resource_type="entity",
+                operation=ResourceOperation.QUERY,
+                organization_id="208",
+                filters={"entity": "Organizations"},
+                cursor="not-a-page",
+            )
+        )
+
+
 def test_it_glue_relationship_translation_is_generic() -> None:
     invocation = translate_it_glue_resource(
         ResourceQuery(
