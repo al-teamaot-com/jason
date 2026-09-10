@@ -82,20 +82,36 @@ def register_provider_read_runtime_foundation(
 
 def build_provider_read_invoker(
     *,
-    secrets: SecretResolver,
     transport: HttpTransport,
     audit: AuditSink,
+    secrets: SecretResolver | None = None,
+    it_glue_secrets: SecretResolver | None = None,
+    autotask_secrets: SecretResolver | None = None,
 ) -> GovernedProviderReadConnectorInvoker:
-    """Compose IT Glue and Autotask behind the same governed connector seam as DRMM."""
+    """Compose governed provider reads while preserving provider identities.
+
+    Production composition should supply distinct IT Glue and Autotask secret
+    resolvers so each connector authenticates with its own least-privilege
+    OpenBao AppRole. ``secrets`` remains as a compatibility seam for bounded
+    single-provider acceptance/test composition; it must not be used to justify
+    a broader production AppRole.
+    """
+
+    it_glue_resolver = it_glue_secrets or secrets
+    autotask_resolver = autotask_secrets or secrets
+    if it_glue_resolver is None or autotask_resolver is None:
+        raise ValueError(
+            "IT Glue and Autotask secret resolvers are required for provider reads"
+        )
 
     connectors = {
         IT_GLUE_PROVIDER: ItGlueConnector(
-            secrets=secrets,
+            secrets=it_glue_resolver,
             transport=transport,
             audit=audit,
         ),
         AUTOTASK_PROVIDER: AutotaskConnector(
-            secrets=secrets,
+            secrets=autotask_resolver,
             transport=transport,
             audit=audit,
         ),
