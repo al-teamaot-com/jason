@@ -1,0 +1,55 @@
+name: Validate Microsoft Metadata Resource Reads
+
+on:
+  push:
+    paths:
+      - "implementation/connectors/core/resource_catalog.py"
+      - "implementation/connectors/microsoft_graph/platform.py"
+      - "implementation/connectors/microsoft_graph/resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/resource_read.py"
+      - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/test_resource_read.py"
+      - "implementation/orchestrator/open_world_schema.py"
+      - "implementation/orchestrator/open_world_execution.py"
+      - "implementation/orchestrator/provider_resource_open_world.py"
+      - "implementation/orchestrator/test_provider_resource_open_world.py"
+      - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
+      - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
+      - ".github/workflows/microsoft-metadata-resource-read.yml"
+  pull_request:
+    paths:
+      - "implementation/connectors/core/resource_catalog.py"
+      - "implementation/connectors/microsoft_graph/platform.py"
+      - "implementation/connectors/microsoft_graph/resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/resource_read.py"
+      - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/test_resource_read.py"
+      - "implementation/orchestrator/open_world_schema.py"
+      - "implementation/orchestrator/open_world_execution.py"
+      - "implementation/orchestrator/provider_resource_open_world.py"
+      - "implementation/orchestrator/test_provider_resource_open_world.py"
+      - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
+      - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
+      - ".github/workflows/microsoft-metadata-resource-read.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  microsoft-metadata-resource-read:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tests
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile metadata-driven resource foundation
+        run: python -m compileall -q implementation/connectors/core/resource_catalog.py implementation/connectors/microsoft_graph/platform.py implementation/connectors/microsoft_graph/resource_metadata.py implementation/connectors/microsoft_graph/resource_read.py implementation/orchestrator/open_world_schema.py implementation/orchestrator/open_world_execution.py implementation/orchestrator/provider_resource_open_world.py
+      - name: Test Microsoft metadata discovery and governed read compiler
+        run: python -m pytest implementation/connectors/microsoft_graph/test_resource_metadata.py implementation/connectors/microsoft_graph/test_resource_read.py -q
+      - name: Test provider-neutral open-world bridge
+        run: python -m pytest implementation/orchestrator/test_provider_resource_open_world.py implementation/orchestrator/test_open_world_provider_resource_execution.py -q
