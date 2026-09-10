@@ -9,12 +9,27 @@ from typing import Callable, Mapping
 from connectors.core.contracts import (
     ConnectorConfigurationError,
     ConnectorContext,
+    ConnectorCredentialUnavailableError,
     SecretResolver,
 )
 
 
 class OpenBaoSecretResolutionError(RuntimeError):
     """Safe secret-resolution failure that must not contain secret values."""
+
+    error_code = "OPENBAO_SECRET_RESOLUTION_FAILED"
+
+
+class OpenBaoAuthenticationError(OpenBaoSecretResolutionError):
+    """OpenBao AppRole authentication failed before provider credentials were read."""
+
+    error_code = "OPENBAO_AUTH_FAILED"
+
+
+class OpenBaoTransportError(OpenBaoSecretResolutionError):
+    """OpenBao could not be reached or completed a bounded request."""
+
+    error_code = "OPENBAO_TRANSPORT_FAILURE"
 
 
 DEFAULT_MAPPINGS: Mapping[str, str] = {
@@ -161,12 +176,12 @@ class OpenBaoSecretResolver(SecretResolver):
         try:
             value = path.read_text(encoding="utf-8").strip()
         except OSError as error:
-            raise ConnectorConfigurationError(
+            raise ConnectorCredentialUnavailableError(
                 f"{label} file is unavailable."
             ) from error
 
         if not value:
-            raise ConnectorConfigurationError(
+            raise ConnectorCredentialUnavailableError(
                 f"{label} file is empty."
             )
 
@@ -178,24 +193,29 @@ class OpenBaoSecretResolver(SecretResolver):
         role_id: str,
         secret_id: str,
     ) -> str:
-        response = self._request_json(
-            path="v1/auth/approle/login",
-            method="POST",
-            payload={
-                "role_id": role_id,
-                "secret_id": secret_id,
-            },
-        )
+        try:
+            response = self._request_json(
+                path="v1/auth/approle/login",
+                method="POST",
+                payload={
+                    "role_id": role_id,
+                    "secret_id": secret_id,
+                },
+            )
+        except OpenBaoTransportError as error:
+            raise OpenBaoAuthenticationError(
+                "OpenBao AppRole authentication failed."
+            ) from error
 
         try:
             token = response["auth"]["client_token"]
         except (KeyError, TypeError) as error:
-            raise OpenBaoSecretResolutionError(
+            raise OpenBaoAuthenticationError(
                 "OpenBao AppRole authentication returned an invalid response."
             ) from error
 
         if not isinstance(token, str) or not token:
-            raise OpenBaoSecretResolutionError(
+            raise OpenBaoAuthenticationError(
                 "OpenBao AppRole authentication did not return a token."
             )
 
@@ -260,8 +280,8 @@ class OpenBaoSecretResolver(SecretResolver):
             with self._opener(request, timeout=self._timeout_seconds) as response:
                 raw = response.read()
         except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise OpenBaoSecretResolutionError(
-                "OpenBao secret resolution failed."
+            raise OpenBaoTransportError(
+                "OpenBao secret resolution transport failed."
             ) from error
         if not raw:
             if allow_empty:
