@@ -111,11 +111,29 @@ def translate_it_glue_resource(query: ResourceQuery) -> ConnectorInvocation:
                 arguments=arguments,
             )
 
-    if query.resource_type == "document" and query.operation is ResourceOperation.GET:
-        return ConnectorInvocation(
-            capability="it_glue.document.get",
-            arguments={"document_id": query.resource_id},
-        )
+    if query.resource_type == "document":
+        if query.operation is ResourceOperation.GET:
+            return ConnectorInvocation(
+                capability="it_glue.document.get",
+                arguments={"document_id": query.resource_id},
+            )
+        if query.operation is ResourceOperation.QUERY:
+            filters = dict(query.filters or {})
+            arguments = {
+                "entity": "Documents",
+                "filters": filters,
+                "page_size": _bounded_page_size(
+                    query.page_size,
+                    maximum=_MAX_IT_GLUE_PAGE_SIZE,
+                ),
+            }
+            page_number = _positive_cursor(query.cursor, name="IT Glue page")
+            if page_number is not None:
+                arguments["page_number"] = page_number
+            return ConnectorInvocation(
+                capability="it_glue.entity.query",
+                arguments=arguments,
+            )
 
     if query.resource_type == "relationship" and query.operation in {
         ResourceOperation.QUERY,
