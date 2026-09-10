@@ -57,6 +57,7 @@ class MicrosoftGraphMetadataCatalogSource:
     timeout_seconds: float = 20.0
     cache_ttl_seconds: int = 3600
     clock: Callable[[], float] = monotonic
+    provider_id: str = field(default="microsoft_graph", init=False)
     _cache: dict[str, _CachedCatalog] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -87,9 +88,6 @@ class MicrosoftGraphMetadataCatalogSource:
         if cached is not None and cached.expires_at > now:
             return cached.catalog
 
-        # Token acquisition resolves and validates the client -> tenant/application
-        # boundary through the existing Microsoft credential architecture. The
-        # metadata document itself remains provider-global structural evidence.
         token = self.tokens.acquire_for_client(
             client_id=client,
             correlation_id=correlation,
@@ -134,8 +132,6 @@ class MicrosoftGraphMetadataCatalogSource:
         client_id: str,
         correlation_id: str,
     ) -> ProviderResourceCatalog:
-        """Expose the same provider metadata through Jason's generic catalog contract."""
-
         return self.catalog_for_client(
             client_id=client_id,
             correlation_id=correlation_id,
