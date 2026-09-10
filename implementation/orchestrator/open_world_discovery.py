@@ -163,6 +163,11 @@ class OpenWorldResourceDiscovery:
                 continue
             if not _truthy(metadata.get("read_only", "false")):
                 continue
+            if _truthy(metadata.get("dynamic_schema_required", "false")):
+                # These are generic execution contracts. Their concrete resource
+                # inventory must come from a trusted provider catalog, not from the
+                # capability's placeholder resource type.
+                continue
 
             operation = str(metadata.get("operation", "")).strip().casefold()
             if operation not in {"read", "search"}:
