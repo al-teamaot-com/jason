@@ -1,17 +1,19 @@
 """Governed Microsoft Graph structural catalog source.
 
-The source fetches the provider-published Graph CSDL document from the fixed governed
-Graph metadata endpoint and converts it to Jason's bounded resource catalog. Tenant
-application identity is used only to prove a configured client boundary and authenticate
-the provider request. Entity-set and field names are learned from Microsoft metadata;
-none are enumerated here.
+Microsoft publishes the Graph CSDL metadata document at the fixed service root.  This
+source treats that document as provider-global structural metadata, not tenant data.
+No client token is required to learn entity-set/field structure. Tenant authorization
+is still mandatory later, inside the actual resource connector, before any operational
+Microsoft data is read.
+
+Entity-set and field names are learned from Microsoft metadata; none are enumerated here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any, Callable, Protocol
+from typing import Callable, Protocol
 
 from connectors.core.contracts import ConnectorAuthorizationError
 from connectors.core.resource_catalog import ProviderResourceCatalog
@@ -32,15 +34,6 @@ class MicrosoftGraphMetadataTextTransport(Protocol):
     ) -> str: ...
 
 
-class MicrosoftGraphClientApplicationTokenProvider(Protocol):
-    def acquire_for_client(
-        self,
-        *,
-        client_id: str,
-        correlation_id: str,
-    ) -> Any: ...
-
-
 @dataclass(frozen=True, slots=True)
 class _CachedCatalog:
     catalog: MicrosoftGraphResourceCatalog
@@ -49,16 +42,15 @@ class _CachedCatalog:
 
 @dataclass(slots=True)
 class MicrosoftGraphMetadataCatalogSource:
-    """Resolve a bounded provider schema for an already-governed client boundary."""
+    """Resolve bounded provider-global Graph schema from Microsoft's metadata root."""
 
-    tokens: MicrosoftGraphClientApplicationTokenProvider
     transport: MicrosoftGraphMetadataTextTransport
     permission_profile_name: str = "directory-read"
     timeout_seconds: float = 20.0
     cache_ttl_seconds: int = 3600
     clock: Callable[[], float] = monotonic
     provider_id: str = field(default="microsoft_graph", init=False)
-    _cache: dict[str, _CachedCatalog] = field(default_factory=dict, init=False, repr=False)
+    _cache: _CachedCatalog | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.permission_profile_name.strip():
@@ -68,35 +60,17 @@ class MicrosoftGraphMetadataCatalogSource:
         if self.cache_ttl_seconds < 60 or self.cache_ttl_seconds > 86400:
             raise ValueError("Microsoft metadata cache ttl must be between 60 and 86400 seconds")
 
-    def catalog_for_client(
-        self,
-        *,
-        client_id: str,
-        correlation_id: str,
-    ) -> MicrosoftGraphResourceCatalog:
-        client = str(client_id).strip()
+    def catalog(self, *, correlation_id: str) -> MicrosoftGraphResourceCatalog:
+        """Return provider-global structural metadata without accessing tenant data."""
+
         correlation = str(correlation_id).strip()
-        if not client:
-            raise ConnectorAuthorizationError(
-                "Microsoft Graph metadata discovery requires a governed client boundary."
-            )
         if not correlation:
             raise ValueError("Microsoft Graph metadata correlation id is required")
 
         now = float(self.clock())
-        cached = self._cache.get(client)
+        cached = self._cache
         if cached is not None and cached.expires_at > now:
             return cached.catalog
-
-        token = self.tokens.acquire_for_client(
-            client_id=client,
-            correlation_id=correlation,
-        )
-        access_token = str(getattr(token, "access_token", "")).strip()
-        if not access_token or any(character.isspace() for character in access_token):
-            raise ConnectorAuthorizationError(
-                "Microsoft Graph metadata token is unavailable or malformed."
-            )
 
         request = build_governed_request(
             MicrosoftCloudRequest(
@@ -110,21 +84,42 @@ class MicrosoftGraphMetadataCatalogSource:
         metadata = self.transport.request_text(
             method=request.method,
             url=request.url,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/xml",
-            },
+            headers={"Accept": "application/xml"},
             timeout_seconds=self.timeout_seconds,
         )
         catalog = discover_graph_resources(
             metadata,
             source_reference="microsoft-graph:v1.0:$metadata",
         )
-        self._cache[client] = _CachedCatalog(
+        self._cache = _CachedCatalog(
             catalog=catalog,
             expires_at=now + self.cache_ttl_seconds,
         )
         return catalog
+
+    def provider_catalog(self, *, correlation_id: str) -> ProviderResourceCatalog:
+        """Expose provider-global structure through Jason's generic catalog contract."""
+
+        return self.catalog(correlation_id=correlation_id).provider_resource_catalog()
+
+    def catalog_for_client(
+        self,
+        *,
+        client_id: str,
+        correlation_id: str,
+    ) -> MicrosoftGraphResourceCatalog:
+        """Return structure for a data read that already named a governed client.
+
+        This validates only that the caller supplied a client scope.  The connector's
+        token provider validates the actual client -> tenant/application boundary before
+        operational data is accessed.
+        """
+
+        if not str(client_id).strip():
+            raise ConnectorAuthorizationError(
+                "Microsoft Graph resource reads require a governed client boundary."
+            )
+        return self.catalog(correlation_id=correlation_id)
 
     def provider_catalog_for_client(
         self,
@@ -137,7 +132,11 @@ class MicrosoftGraphMetadataCatalogSource:
             correlation_id=correlation_id,
         ).provider_resource_catalog()
 
+    def invalidate(self) -> None:
+        self._cache = None
+
     def invalidate_client(self, client_id: str) -> None:
-        client = str(client_id).strip()
-        if client:
-            self._cache.pop(client, None)
+        # Metadata is provider-global; invalidating one tenant boundary invalidates the
+        # structural cache without retaining any client identifier.
+        if str(client_id).strip():
+            self.invalidate()
