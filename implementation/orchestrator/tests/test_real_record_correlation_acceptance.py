@@ -98,6 +98,30 @@ def test_company_and_endpoint_names_require_exact_normalized_agreement() -> None
     assert endpoint_matched_attributes(autotask, it_glue) == ("name", "serial_number")
 
 
+def test_autotask_exact_read_singular_item_envelope_is_normalized() -> None:
+    assert extract_autotask_company_name(
+        {"item": {"id": 42, "companyName": "HER Shelter"}}
+    ) == "HER Shelter"
+    assert extract_autotask_endpoint_hint(
+        {
+            "item": {
+                "id": 50282,
+                "referenceTitle": "AOT-50282",
+                "serialNumber": "ABC123",
+            }
+        }
+    ) == EndpointIdentityHint(name="AOT-50282", serial_number="ABC123")
+
+
+def test_malformed_or_conflicting_autotask_exact_read_envelope_fails_closed() -> None:
+    with pytest.raises(CorrelationAcceptanceError, match="singular item envelope"):
+        extract_autotask_company_name({"item": None})
+    with pytest.raises(CorrelationAcceptanceError, match="conflicting"):
+        extract_autotask_company_name(
+            {"item": {"companyName": "A"}, "items": [{"companyName": "A"}]}
+        )
+
+
 def test_ambiguous_stage_never_silently_selects_one_candidate() -> None:
     stage = safe_stage(
         stage="organization_correlation",
