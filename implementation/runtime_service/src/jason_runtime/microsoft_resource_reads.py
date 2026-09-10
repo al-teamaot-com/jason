@@ -45,12 +45,7 @@ def register_microsoft_resource_read_foundation(
     providers: ExecutionProviderRegistryService,
     now: datetime,
 ) -> None:
-    """Register generic PILOT capabilities plus a non-operational Microsoft provider.
-
-    The Microsoft provider remains PLANNED/UNKNOWN until a separate production
-    activation explicitly changes lifecycle/health/approval after live acceptance.
-    Registering this source foundation therefore does not make Microsoft data readable.
-    """
+    """Register generic PILOT capabilities plus a non-operational Microsoft provider."""
 
     register_provider_resource_capabilities(capabilities=capabilities, now=now)
     providers.register(build_microsoft_graph_resource_provider(now=now))
@@ -105,8 +100,10 @@ def build_microsoft_resource_read_runtime(
         profile_name=profile,
     )
 
+    # Structural Graph metadata is provider-global and does not consume tenant data.
+    # Tenant/client authorization still occurs in ``tokens.acquire_for_client`` when
+    # the actual connector executes a governed resource read.
     catalog_source = MicrosoftGraphMetadataCatalogSource(
-        tokens=tokens,
         transport=metadata_transport or UrlLibBoundedTextHttpTransport(),
         permission_profile_name=profile,
     )
