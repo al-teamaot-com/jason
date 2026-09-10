@@ -17,7 +17,12 @@ from kernel.resolution import (
     CapabilityResolutionStatus,
     ResolutionOutcome,
 )
-from orchestrator import CentralOrchestrator, OrchestrationRequest, OrchestrationStatus
+from orchestrator import (
+    CentralOrchestrator,
+    OrchestrationMode,
+    OrchestrationRequest,
+    OrchestrationStatus,
+)
 
 
 class Resolution:
@@ -60,7 +65,8 @@ def _request():
         organization_id="aot",
         capability_name="autotask.ticket.search",
         capability_version=None,
-        requested_mode="observe",
+        requested_mode="deterministic",
+        orchestration_mode=OrchestrationMode.EXECUTE,
         authority_allowed=True,
         approval_present=False,
         risk="low",
