@@ -9,6 +9,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from kernel.capabilities import (
     CapabilityLifecycle,
     CapabilityRegistryService,
@@ -28,6 +29,7 @@ from jason_runtime.provider_reads import (
     build_provider_read_invoker,
     register_provider_read_invokers,
     register_provider_read_runtime_foundation,
+    scope_runtime_provider_secret_resolvers,
 )
 
 
@@ -122,6 +124,69 @@ def test_provider_read_runtime_registers_canonical_invokers_without_io() -> None
     registered = set(invokers.registered_capabilities())
     assert DOCUMENTATION_ORGANIZATION_SEARCH in registered
     assert SERVICE_TICKET_SEARCH in registered
+
+
+def test_runtime_openbao_identity_is_split_by_provider_without_reading_credentials() -> None:
+    resolver = OpenBaoSecretResolver(
+        base_url="http://openbao.invalid:8200",
+        role_id_path=Path("/run/jason-secrets/openbao/role_id"),
+        secret_id_path=Path("/run/jason-secrets/openbao/secret_id"),
+    )
+
+    it_glue, autotask = scope_runtime_provider_secret_resolvers(resolver)
+
+    assert isinstance(it_glue, OpenBaoSecretResolver)
+    assert isinstance(autotask, OpenBaoSecretResolver)
+    assert it_glue is not resolver
+    assert autotask is not resolver
+    assert it_glue.role_id_path == Path(
+        "/run/jason-secrets/openbao/it-glue/role_id"
+    )
+    assert it_glue.secret_id_path == Path(
+        "/run/jason-secrets/openbao/it-glue/secret_id"
+    )
+    assert autotask.role_id_path == Path(
+        "/run/jason-secrets/openbao/autotask/role_id"
+    )
+    assert autotask.secret_id_path == Path(
+        "/run/jason-secrets/openbao/autotask/secret_id"
+    )
+    assert resolver.role_id_path == Path("/run/jason-secrets/openbao/role_id")
+
+
+def test_acceptance_openbao_identity_is_not_rewritten() -> None:
+    resolver = OpenBaoSecretResolver(
+        base_url="http://127.0.0.1:8200",
+        role_id_path=Path(
+            "/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/role-id"
+        ),
+        secret_id_path=Path(
+            "/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/secret-id"
+        ),
+    )
+
+    it_glue, autotask = scope_runtime_provider_secret_resolvers(resolver)
+
+    assert it_glue is resolver
+    assert autotask is resolver
+
+
+def test_explicit_provider_resolvers_do_not_require_shared_secret_identity() -> None:
+    build_provider_read_invoker(
+        it_glue_secrets=_Secrets(),
+        autotask_secrets=_Secrets(),
+        transport=_Transport(),
+        audit=_Audit(),
+    )
+
+
+def test_provider_read_invoker_requires_both_provider_identities_without_compatibility() -> None:
+    with pytest.raises(ValueError, match="IT Glue and Autotask secret resolvers"):
+        build_provider_read_invoker(
+            it_glue_secrets=_Secrets(),
+            transport=_Transport(),
+            audit=_Audit(),
+        )
 
 
 def test_full_runtime_composes_provider_reads_but_keeps_them_out_of_active_surface(
