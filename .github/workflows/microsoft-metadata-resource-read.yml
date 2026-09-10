@@ -7,8 +7,16 @@ on:
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
+      - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
+      - "implementation/connectors/microsoft_graph/test_resource_connector.py"
+      - "implementation/kernel/execution_providers/contracts.py"
+      - "implementation/kernel/execution_providers/repository.py"
+      - "implementation/kernel/execution_providers/test_provider_affinity.py"
+      - "implementation/kernel/resolution/contracts.py"
+      - "implementation/kernel/resolution/service.py"
+      - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/open_world_schema.py"
       - "implementation/orchestrator/open_world_execution.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
@@ -22,8 +30,16 @@ on:
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
+      - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
+      - "implementation/connectors/microsoft_graph/test_resource_connector.py"
+      - "implementation/kernel/execution_providers/contracts.py"
+      - "implementation/kernel/execution_providers/repository.py"
+      - "implementation/kernel/execution_providers/test_provider_affinity.py"
+      - "implementation/kernel/resolution/contracts.py"
+      - "implementation/kernel/resolution/service.py"
+      - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/open_world_schema.py"
       - "implementation/orchestrator/open_world_execution.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
@@ -48,8 +64,32 @@ jobs:
       - name: Install tests
         run: python -m pip install --upgrade pip pytest
       - name: Compile metadata-driven resource foundation
-        run: python -m compileall -q implementation/connectors/core/resource_catalog.py implementation/connectors/microsoft_graph/platform.py implementation/connectors/microsoft_graph/resource_metadata.py implementation/connectors/microsoft_graph/resource_read.py implementation/orchestrator/open_world_schema.py implementation/orchestrator/open_world_execution.py implementation/orchestrator/provider_resource_open_world.py
-      - name: Test Microsoft metadata discovery and governed read compiler
-        run: python -m pytest implementation/connectors/microsoft_graph/test_resource_metadata.py implementation/connectors/microsoft_graph/test_resource_read.py -q
-      - name: Test provider-neutral open-world bridge
-        run: python -m pytest implementation/orchestrator/test_provider_resource_open_world.py implementation/orchestrator/test_open_world_provider_resource_execution.py -q
+        run: >-
+          python -m compileall -q
+          implementation/connectors/core/resource_catalog.py
+          implementation/connectors/microsoft_graph/platform.py
+          implementation/connectors/microsoft_graph/resource_metadata.py
+          implementation/connectors/microsoft_graph/resource_read.py
+          implementation/connectors/microsoft_graph/resource_connector.py
+          implementation/kernel/execution_providers/contracts.py
+          implementation/kernel/execution_providers/repository.py
+          implementation/kernel/resolution/contracts.py
+          implementation/kernel/resolution/service.py
+          implementation/orchestrator/contracts.py
+          implementation/orchestrator/open_world_schema.py
+          implementation/orchestrator/open_world_execution.py
+          implementation/orchestrator/provider_resource_open_world.py
+      - name: Test Microsoft metadata discovery and governed resource connector
+        run: >-
+          python -m pytest
+          implementation/connectors/microsoft_graph/test_resource_metadata.py
+          implementation/connectors/microsoft_graph/test_resource_read.py
+          implementation/connectors/microsoft_graph/test_resource_connector.py
+          -q
+      - name: Test provider-neutral open-world bridge and provider affinity
+        run: >-
+          python -m pytest
+          implementation/orchestrator/test_provider_resource_open_world.py
+          implementation/orchestrator/test_open_world_provider_resource_execution.py
+          implementation/kernel/execution_providers/test_provider_affinity.py
+          -q
