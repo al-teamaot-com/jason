@@ -1,9 +1,9 @@
 """Governed Microsoft Graph structural catalog source.
 
 The source fetches the provider-published Graph CSDL document from the fixed governed
-Graph metadata endpoint and converts it to Jason's bounded resource catalog.  Tenant
+Graph metadata endpoint and converts it to Jason's bounded resource catalog. Tenant
 application identity is used only to prove a configured client boundary and authenticate
-the provider request.  Entity-set and field names are learned from Microsoft metadata;
+the provider request. Entity-set and field names are learned from Microsoft metadata;
 none are enumerated here.
 """
 
@@ -14,6 +14,7 @@ from time import monotonic
 from typing import Any, Callable, Protocol
 
 from connectors.core.contracts import ConnectorAuthorizationError
+from connectors.core.resource_catalog import ProviderResourceCatalog
 
 from .platform import MicrosoftCloudRequest, build_governed_request
 from .resource_metadata import MicrosoftGraphResourceCatalog, discover_graph_resources
@@ -87,7 +88,7 @@ class MicrosoftGraphMetadataCatalogSource:
             return cached.catalog
 
         # Token acquisition resolves and validates the client -> tenant/application
-        # boundary through the existing Microsoft credential architecture.  The
+        # boundary through the existing Microsoft credential architecture. The
         # metadata document itself remains provider-global structural evidence.
         token = self.tokens.acquire_for_client(
             client_id=client,
@@ -126,6 +127,19 @@ class MicrosoftGraphMetadataCatalogSource:
             expires_at=now + self.cache_ttl_seconds,
         )
         return catalog
+
+    def provider_catalog_for_client(
+        self,
+        *,
+        client_id: str,
+        correlation_id: str,
+    ) -> ProviderResourceCatalog:
+        """Expose the same provider metadata through Jason's generic catalog contract."""
+
+        return self.catalog_for_client(
+            client_id=client_id,
+            correlation_id=correlation_id,
+        ).provider_resource_catalog()
 
     def invalidate_client(self, client_id: str) -> None:
         client = str(client_id).strip()
