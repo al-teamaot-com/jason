@@ -12,7 +12,7 @@ from connectors.core.contracts import (
 from kernel.resolution import CapabilityResolutionResult
 
 from .contracts import OrchestrationRequest
-from .service import InvocationResult
+from .service import InvocationResult, InvocationTelemetry
 
 
 _DEFAULT_EXTERNAL_CONNECTOR_EXECUTION_SECONDS = 30.0
@@ -96,6 +96,14 @@ class GovernedConnectorCapabilityInvoker:
                 "warnings": result.warnings,
             },
             attempts=1,
+            telemetry=InvocationTelemetry(
+                provider_resources=(f"{result.provider}:{result.capability}",),
+                evidence_references=result.evidence_ids,
+                hosted_model_used=False,
+                hosted_model_input_tokens=0,
+                hosted_model_output_tokens=0,
+                hosted_model_cost_usd="0",
+            ),
         )
 
     def _maximum_execution_seconds(
