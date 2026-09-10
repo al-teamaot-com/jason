@@ -165,9 +165,23 @@ Fresh MCP status remained:
 
 The active MCP capability registry now exposes the initial approved IT Glue/Autotask reads alongside the existing governed read capabilities without adding provider-specific MCP tools.
 
-## Evidence-shaping observation
+## Evidence-shaping observation and source hardening
 
-The live zero-result IT Glue organization search also returned provider filter/permitted-value metadata that was larger than needed for the user-facing answer. This did not expose credentials or enable any write path, and it does not invalidate the live provider-read proof. It is recorded as a separate evidence-minimization hardening item rather than being treated as a failure of the initial production read activation.
+The live zero-result IT Glue organization search returned provider filter/permitted-value metadata that was larger than needed for the user-facing answer. This did not expose credentials or enable any write path and did not invalidate the production read proof.
+
+Source-side hardening was subsequently added on the same feature branch. Canonical IT Glue search results now preserve:
+
+- the provider record collection;
+- optional included records when present; and
+- bounded pagination facts needed to continue a search.
+
+The canonical evidence result now omits provider navigation links, filter catalogs, permitted-value catalogs, and other provider metadata that is unnecessary for technician-facing reasoning. The hardening remains inside the governed provider-read adapter, so it does not alter provider credentials, authority, provider write state, or the MCP tool surface.
+
+Scoped `Validate Governed Provider Reads` CI passed for this change at commit:
+
+`344e4d12326665eb4c1a1621d94eabaf9adbba93`
+
+This hardening is **source-complete but not yet deployed to the production runtime**. Production remains pinned to deployment source commit `ea9d8a095b3539d9d35d08959f3b6e652922f960` until a separate production deployment is explicitly approved.
 
 ## Remaining boundaries
 
@@ -193,4 +207,5 @@ The initial IT Glue + Autotask governed provider-read production activation is c
 - ChatGPT -> Jason MCP -> Central Orchestrator -> Autotask: live verified;
 - provider writes: disabled;
 - MCP write tools: disabled;
+- evidence-minimization hardening: source-complete, production deployment pending separate approval;
 - PR #171: remains draft and unmerged pending separate decision.
