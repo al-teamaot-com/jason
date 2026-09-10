@@ -61,6 +61,10 @@ services:
       - ${JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/secret_id:ro
       - ${JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/role_id:ro
       - ${JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/secret_id:ro
+      - ${JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/it-glue/role_id:ro
+      - ${JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/it-glue/secret_id:ro
+      - ${JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/role_id:ro
+      - ${JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/secret_id:ro
     networks:
       - openclaw
       - core

@@ -42,7 +42,7 @@ Jason does not publish port 8080 to the host. The runtime joins only the existin
 - OpenClaw private signing keys are never mounted into the Jason runtime.
 - Only active public keys from the governed trusted-key registry authenticate OpenClaw machine envelopes.
 - OpenBao AppRole credential files are mounted read-only and used only by the applicable provider secret resolver.
-- Datto, Microsoft, and AWS credential values and access tokens are not exposed to the reasoning layer.
+- Datto, Microsoft, AWS, IT Glue, Autotask, and OpenAI credential values and access tokens are not exposed to the reasoning layer.
 - Hosted conversation rollout is independently controlled by
   `JASON_HOSTED_CONVERSATION_ENABLED`; the initial model is selected through
   `JASON_OPENAI_CONVERSATION_MODEL` and every hosted attempt is written to the
@@ -62,10 +62,18 @@ The compose deployment requires the following host-side environment variables be
 - `JASON_SES_OPENBAO_SECRET_ID_HOST_PATH` — host path to the AWS SES AppRole SecretID file.
 - `JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH` — host path to the Microsoft Graph AppRole RoleID file.
 - `JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH` — host path to the Microsoft Graph AppRole SecretID file.
+- `JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH` — host path to the OpenAI AppRole RoleID file.
+- `JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH` — host path to the OpenAI AppRole SecretID file.
+- `JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH` — host path to the IT Glue read-only AppRole RoleID runtime file.
+- `JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH` — host path to the IT Glue read-only AppRole SecretID runtime file.
+- `JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH` — host path to the Autotask read-only AppRole RoleID runtime file.
+- `JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH` — host path to the Autotask read-only AppRole SecretID runtime file.
 
 The compose file is authoritative for the current required variable set. If this list differs from `compose.yaml`, treat that as documentation drift and correct the documentation before relying on it.
 
-Do not place RoleIDs, SecretIDs, Datto credentials, Microsoft tokens, AWS credentials, signing private keys, or other secret values directly in Compose environment values. The host-side variables above identify protected files; they do not contain the credential values themselves.
+Do not place RoleIDs, SecretIDs, Datto credentials, Microsoft tokens, AWS credentials, OpenAI credentials, or other secret values directly in Compose environment values. The host-side variables above identify protected files; they do not contain the credential values themselves.
+
+For IT Glue and Autotask, `tools/stage_provider_read_runtime_credentials.py --check-only` validates the protected bootstrap metadata without opening credential content. Actual `--stage` is a separate root-only production action and is not implied by source deployment or provider-read acceptance. See `docs/sessions/IT-Glue-Autotask-Runtime-Credential-Staging-2026-09-10.md`.
 
 For an in-place upgrade of an already running pilot, the current container's mount sources and non-secret `JASON_OLLAMA_MODEL` setting may be inspected and reused as deployment inputs without reading or printing the mounted credential-file contents.
 
