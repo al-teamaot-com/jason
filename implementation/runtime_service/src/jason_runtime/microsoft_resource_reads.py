@@ -1,7 +1,7 @@
 """Source-only composition for metadata-driven Microsoft Graph reads.
 
 This module intentionally does not choose Microsoft entities, fields, or business
-question routes.  It composes the existing client-boundary/token architecture with the
+question routes. It composes the existing client-boundary/token architecture with the
 provider metadata catalog and generic ``provider.resource.search/read`` connector.
 The permission profile and logical secret are explicit governance inputs supplied by
 the runtime activation layer; they are not inferred by a model or conversation.
@@ -10,6 +10,7 @@ the runtime activation layer; they are not inferred by a model or conversation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
@@ -17,12 +18,16 @@ from connectors.core.text_http_transport import UrlLibBoundedTextHttpTransport
 from connectors.microsoft_graph.openbao_credentials import OpenBaoMicrosoftCredentialSource
 from connectors.microsoft_graph.resource_catalog_source import MicrosoftGraphMetadataCatalogSource
 from connectors.microsoft_graph.resource_connector import MicrosoftGraphResourceConnector
+from connectors.microsoft_graph.resource_provider import build_microsoft_graph_resource_provider
 from connectors.microsoft_graph.token import MsalCertificateTokenProvider, default_msal_application_factory
 from kernel.client_boundaries import SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore
+from kernel.capabilities import CapabilityRegistryService
+from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.provider_resource_capability_catalog import (
     PROVIDER_RESOURCE_READ,
     PROVIDER_RESOURCE_SEARCH,
+    register_provider_resource_capabilities,
 )
 
 
@@ -32,6 +37,34 @@ class MicrosoftResourceReadRuntime:
     catalog_source: MicrosoftGraphMetadataCatalogSource
     connector: MicrosoftGraphResourceConnector
     invoker: GovernedConnectorCapabilityInvoker
+
+
+def register_microsoft_resource_read_foundation(
+    *,
+    capabilities: CapabilityRegistryService,
+    providers: ExecutionProviderRegistryService,
+    now: datetime,
+) -> None:
+    """Register generic PILOT capabilities plus a non-operational Microsoft provider.
+
+    The Microsoft provider remains PLANNED/UNKNOWN until a separate production
+    activation explicitly changes lifecycle/health/approval after live acceptance.
+    Registering this source foundation therefore does not make Microsoft data readable.
+    """
+
+    register_provider_resource_capabilities(capabilities=capabilities, now=now)
+    providers.register(build_microsoft_graph_resource_provider(now=now))
+
+
+def register_microsoft_resource_read_invokers(
+    *,
+    invokers,
+    runtime: MicrosoftResourceReadRuntime,
+) -> None:
+    """Bind both generic resource operations to one governed connector invoker."""
+
+    invokers.register(PROVIDER_RESOURCE_SEARCH, runtime.invoker)
+    invokers.register(PROVIDER_RESOURCE_READ, runtime.invoker)
 
 
 def build_microsoft_resource_read_runtime(
