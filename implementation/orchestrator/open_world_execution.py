@@ -72,6 +72,7 @@ class OpenWorldExecutionCoordinator:
                 selector_reference=(
                     source.selector_reference
                 ),
+                field_paths=source.field_paths,
             )
 
             result = executor.execute(
@@ -111,6 +112,7 @@ class OpenWorldExecutionCoordinator:
         *,
         resource: DiscoveredResourceSchema,
         selector_reference: str | None,
+        field_paths: tuple[str, ...] = (),
     ) -> ConversationIntent:
         arguments: dict[
             str,
@@ -137,6 +139,31 @@ class OpenWorldExecutionCoordinator:
             arguments[
                 "selector"
             ] = reference
+
+        # Provider-discovered resources carry an opaque binding that came from
+        # trusted connector metadata, never from model output.  The selected
+        # field paths were already validated against the opaque resource schema
+        # by the open-world planner.  Pass both forward only for that generic
+        # resource contract; legacy capability-backed intents remain unchanged.
+        if resource.provider_resource_handle is not None:
+            if not field_paths:
+                raise OpenWorldExecutionError(
+                    "provider-discovered resource requires a bounded field projection"
+                )
+            available_fields = {field.path for field in resource.fields}
+            invalid_fields = tuple(
+                path for path in field_paths if path not in available_fields
+            )
+            if invalid_fields:
+                raise OpenWorldExecutionError(
+                    "provider-discovered execution references fields outside the governed schema"
+                )
+            arguments[
+                "provider_resource_handle"
+            ] = resource.provider_resource_handle
+            arguments[
+                "field_paths"
+            ] = tuple(dict.fromkeys(field_paths))
 
         return ConversationIntent(
             capability_name=(
