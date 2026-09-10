@@ -47,6 +47,37 @@ _IT_GLUE_ENTITY = {
     DOCUMENTATION_DOCUMENT_READ: "Documents",
 }
 
+_IT_GLUE_SEARCH_CAPABILITIES = frozenset(
+    {
+        DOCUMENTATION_ORGANIZATION_SEARCH,
+        DOCUMENTATION_CONTACT_SEARCH,
+        DOCUMENTATION_LOCATION_SEARCH,
+        DOCUMENTATION_CONFIGURATION_SEARCH,
+        DOCUMENTATION_DOCUMENT_SEARCH,
+    }
+)
+
+_IT_GLUE_SAFE_PAGINATION_META_KEYS = frozenset(
+    {
+        "current-page",
+        "current_page",
+        "next-page",
+        "next_page",
+        "prev-page",
+        "prev_page",
+        "previous-page",
+        "previous_page",
+        "total-pages",
+        "total_pages",
+        "total-count",
+        "total_count",
+        "page-size",
+        "page_size",
+        "per-page",
+        "per_page",
+    }
+)
+
 _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
     SERVICE_COMPANY_SEARCH: {
         "resource_id": "id",
@@ -291,6 +322,60 @@ def adapt_provider_read_arguments(
     raise ValueError(f"No provider-read argument adapter for provider: {provider_id}")
 
 
+def _minimize_it_glue_search_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep record evidence and bounded pagination facts, not provider filter catalogs.
+
+    IT Glue may include response metadata describing available filters or permitted
+    values. Those details are useful to provider tooling but are not needed for a
+    technician-facing evidence result and can be much larger than the actual records.
+    Canonical search output therefore preserves the JSON:API records, optional
+    included records, and only small pagination metadata. Provider links and all other
+    metadata are deliberately omitted from the returned evidence package.
+    """
+
+    minimized: dict[str, Any] = {}
+    if "data" in payload:
+        minimized["data"] = payload["data"]
+
+    included = payload.get("included")
+    if isinstance(included, list):
+        minimized["included"] = included
+
+    meta = payload.get("meta")
+    if isinstance(meta, Mapping):
+        pagination = {
+            str(key): value
+            for key, value in meta.items()
+            if str(key) in _IT_GLUE_SAFE_PAGINATION_META_KEYS
+        }
+        if pagination:
+            minimized["meta"] = pagination
+
+    return minimized
+
+
+def _minimize_provider_read_output(
+    *,
+    provider_id: str,
+    capability_name: str,
+    invocation: InvocationResult,
+) -> InvocationResult:
+    if provider_id != IT_GLUE_PROVIDER or capability_name not in _IT_GLUE_SEARCH_CAPABILITIES:
+        return invocation
+
+    output = dict(invocation.output)
+    payload = output.get("data")
+    if not isinstance(payload, Mapping):
+        return invocation
+
+    output["data"] = _minimize_it_glue_search_payload(payload)
+    return InvocationResult(
+        output=output,
+        artifact_references=invocation.artifact_references,
+        attempts=invocation.attempts,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class GovernedProviderReadConnectorInvoker:
     """Adapt canonical read arguments only after governed provider selection."""
@@ -312,7 +397,12 @@ class GovernedProviderReadConnectorInvoker:
             capability_name=resolution.capability_name,
             arguments=request.arguments,
         )
-        return self.delegate.invoke(
+        invocation = self.delegate.invoke(
             request=replace(request, arguments=adapted),
             resolution=resolution,
+        )
+        return _minimize_provider_read_output(
+            provider_id=provider_id,
+            capability_name=resolution.capability_name,
+            invocation=invocation,
         )
