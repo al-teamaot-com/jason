@@ -40,6 +40,7 @@ from .service import (
     CapabilityInvoker,
     CentralOrchestrator,
     InvocationResult,
+    InvocationTelemetry,
     OrchestrationAuditSink,
 )
 
@@ -60,6 +61,7 @@ __all__ = [
     "GovernedResourceInquiryPlanner",
     "InterruptedExecutionAssessor",
     "InvocationResult",
+    "InvocationTelemetry",
     "OrchestrationAuditSink",
     "OrchestrationEvent",
     "OrchestrationEventReader",
