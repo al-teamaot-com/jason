@@ -41,6 +41,8 @@ from orchestrator.provider_read_capability_catalog import (
     register_provider_read_foundation,
 )
 
+from .provider_read_activation import apply_provider_read_activation_from_env
+
 
 _PROVIDER_CAPABILITY_MAP = {
     (IT_GLUE_PROVIDER, DOCUMENTATION_ORGANIZATION_SEARCH): "it_glue.entity.query",
@@ -79,7 +81,7 @@ def register_provider_read_runtime_foundation(
     integration_broker: IntegrationBroker,
     now: datetime,
 ) -> None:
-    """Register provider-read contracts before any connector can execute them."""
+    """Register provider-read contracts and apply only an explicit activation profile."""
 
     register_provider_read_foundation(
         capabilities=capabilities,
@@ -88,6 +90,10 @@ def register_provider_read_runtime_foundation(
     )
     integration_broker.register(build_it_glue_manifest())
     integration_broker.register(build_autotask_manifest())
+    apply_provider_read_activation_from_env(
+        capabilities=capabilities,
+        providers=providers,
+    )
 
 
 def scope_runtime_provider_secret_resolvers(
