@@ -19,16 +19,29 @@ from kernel.execution_providers import (
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
     AUTOTASK_PROVIDER,
+    DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
+    SERVICE_COMPANY_READ,
+    SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
 from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ACTIVATION_ENV,
+    PROVIDER_READ_PRODUCTION_CAPABILITIES,
     PROVIDER_READ_PRODUCTION_PROFILE,
     ProviderReadActivationError,
     apply_provider_read_activation_from_env,
     apply_provider_read_activation_profile,
+)
+
+
+EXPECTED_INITIAL_CAPABILITIES = frozenset(
+    {
+        DOCUMENTATION_ORGANIZATION_SEARCH,
+        SERVICE_COMPANY_READ,
+        SERVICE_TICKET_SEARCH,
+    }
 )
 
 
@@ -98,7 +111,7 @@ def test_unknown_profile_fails_before_any_registry_mutation() -> None:
         assert provider.approval_status is ProviderApproval.PILOT
 
 
-def test_approved_profile_activates_only_exact_read_only_catalog() -> None:
+def test_initial_profile_activates_exactly_three_proven_reads() -> None:
     capabilities, providers = _registries()
 
     state = apply_provider_read_activation_profile(
@@ -107,13 +120,14 @@ def test_approved_profile_activates_only_exact_read_only_catalog() -> None:
         profile=PROVIDER_READ_PRODUCTION_PROFILE,
     )
 
-    expected = _all_provider_read_capabilities()
+    assert PROVIDER_READ_PRODUCTION_CAPABILITIES == EXPECTED_INITIAL_CAPABILITIES
     assert state.enabled is True
     assert state.profile == PROVIDER_READ_PRODUCTION_PROFILE
     assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
-    assert set(state.capability_names) == expected
+    assert set(state.capability_names) == EXPECTED_INITIAL_CAPABILITIES
+    assert len(state.capability_names) == 3
 
-    for provider_id, expected_capabilities in (
+    for provider_id, expected_catalog in (
         (IT_GLUE_PROVIDER, IT_GLUE_CAPABILITIES),
         (AUTOTASK_PROVIDER, AUTOTASK_CAPABILITIES),
     ):
@@ -122,19 +136,47 @@ def test_approved_profile_activates_only_exact_read_only_catalog() -> None:
         assert provider.health_status is ProviderHealth.HEALTHY
         assert provider.approval_status is ProviderApproval.APPROVED
         assert provider.execution_modes == frozenset({"deterministic"})
-        assert provider.capabilities == expected_capabilities
+        assert provider.capabilities == expected_catalog
         assert provider.pricing_profile_id == "zero-cost-foundation"
 
-    for capability_name in expected:
+    for capability_name in _all_provider_read_capabilities():
         capability = capabilities.get(
             capability_name=capability_name,
             version="1.0",
         )
-        assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+        expected_lifecycle = (
+            CapabilityLifecycle.ACTIVE
+            if capability_name in EXPECTED_INITIAL_CAPABILITIES
+            else CapabilityLifecycle.PILOT
+        )
+        assert capability.lifecycle_status is expected_lifecycle
         assert capability.metadata["provider_neutral"] == "true"
         assert capability.metadata["read_only"] == "true"
         assert capability.permitted_execution_modes == frozenset({"deterministic"})
         assert capability.approval.required is False
+
+
+def test_no_fourth_provider_read_is_activated() -> None:
+    capabilities, providers = _registries()
+
+    apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_PRODUCTION_PROFILE,
+    )
+
+    active = {
+        capability_name
+        for capability_name in _all_provider_read_capabilities()
+        if capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        ).lifecycle_status
+        is CapabilityLifecycle.ACTIVE
+    }
+
+    assert active == EXPECTED_INITIAL_CAPABILITIES
+    assert len(active) == 3
 
 
 def test_catalog_drift_fails_closed_before_provider_availability() -> None:
@@ -179,5 +221,6 @@ def test_profile_name_is_restart_persistable_environment_contract(
 
     assert state.enabled is True
     assert state.profile == PROVIDER_READ_PRODUCTION_PROFILE
+    assert set(state.capability_names) == EXPECTED_INITIAL_CAPABILITIES
     assert providers.get(IT_GLUE_PROVIDER).lifecycle_status is ProviderLifecycle.AVAILABLE
     assert providers.get(AUTOTASK_PROVIDER).lifecycle_status is ProviderLifecycle.AVAILABLE
