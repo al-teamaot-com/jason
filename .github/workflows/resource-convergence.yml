@@ -1,10 +1,11 @@
-name: Validate IT Glue Datto Resource Convergence
+name: Validate Cross-Provider Resource Convergence
 
 on:
   pull_request:
     paths:
       - 'implementation/connectors/resource_convergence.py'
       - 'implementation/connectors/tests/test_resource_convergence.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/core/relationships.py'
       - 'tools/resource_convergence_preflight.py'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'implementation/connectors/resource_convergence.py'
       - 'implementation/connectors/tests/test_resource_convergence.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/core/relationships.py'
       - 'tools/resource_convergence_preflight.py'
@@ -36,6 +38,7 @@ jobs:
           PYTHONPATH: implementation
         run: |
           python -m pytest implementation/connectors/tests/test_resource_convergence.py -q
+          python -m pytest implementation/connectors/tests/test_autotask_resource_convergence.py -q
           python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
           python -m pytest implementation/connectors/tests/test_relationships.py -q
       - name: Verify no-network bounded preflight
