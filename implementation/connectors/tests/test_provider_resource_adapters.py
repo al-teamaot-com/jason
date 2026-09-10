@@ -100,6 +100,37 @@ def test_it_glue_generic_entity_query_is_bounded_and_pages_without_provider_url(
         )
 
 
+def test_it_glue_document_get_and_query_use_generic_read_boundary() -> None:
+    exact = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="document",
+            operation=ResourceOperation.GET,
+            organization_id="208",
+            resource_id="42",
+        )
+    )
+    search = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="document",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"organization_id": "208", "name": "Remote Access Policy"},
+            page_size=25,
+        )
+    )
+
+    assert exact.capability == "it_glue.document.get"
+    assert exact.arguments == {"document_id": "42"}
+    assert search.capability == "it_glue.entity.query"
+    assert search.arguments == {
+        "entity": "Documents",
+        "filters": {"organization_id": "208", "name": "Remote Access Policy"},
+        "page_size": 25,
+    }
+
+
 def test_it_glue_relationship_translation_is_generic() -> None:
     invocation = translate_it_glue_resource(
         ResourceQuery(
