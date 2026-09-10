@@ -14,6 +14,8 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_CONFIGURATION_SEARCH,
     DOCUMENTATION_CONTACT_READ,
     DOCUMENTATION_CONTACT_SEARCH,
+    DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_LOCATION_READ,
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
@@ -41,6 +43,8 @@ _IT_GLUE_ENTITY = {
     DOCUMENTATION_LOCATION_READ: "Locations",
     DOCUMENTATION_CONFIGURATION_SEARCH: "Configurations",
     DOCUMENTATION_CONFIGURATION_READ: "Configurations",
+    DOCUMENTATION_DOCUMENT_SEARCH: "Documents",
+    DOCUMENTATION_DOCUMENT_READ: "Documents",
 }
 
 _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
@@ -141,6 +145,8 @@ def adapt_it_glue_arguments(
 
     if capability_name == DOCUMENTATION_ORGANIZATION_READ:
         return {"organization_id": _resource_id(arguments)}
+    if capability_name == DOCUMENTATION_DOCUMENT_READ:
+        return {"document_id": _resource_id(arguments)}
 
     entity = _IT_GLUE_ENTITY.get(capability_name)
     if entity is None:
