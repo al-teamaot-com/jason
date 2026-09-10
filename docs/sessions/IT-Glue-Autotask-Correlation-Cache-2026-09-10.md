@@ -34,6 +34,22 @@ Both proofs were read-only, bounded to one returned record, used the OpenBao log
 
 The source defaults remain fail-closed. The successful acceptance does not authorize production activation and does not prove every declared read capability.
 
+## Real-record cross-provider acceptance
+
+A subsequent bounded live proof at feature commit `bdaea309cba4ee6842e0c0a3c36505766e806104` sampled at most 25 real Autotask tickets and selected one configuration-linked candidate deterministically without printing or persisting the ticket identifier.
+
+The proof ran under one correlation ID and executed read-only Autotask, IT Glue, and Datto RMM capabilities. It established an unambiguous real-record cross-provider organization relationship from the selected Autotask ticket/company to one IT Glue organization.
+
+Observed endpoint outcomes were intentionally fail-closed:
+
+- the ticket's explicit Autotask configuration relationship was proven;
+- two IT Glue configuration records matched the provider-reported configuration name, so no IT Glue endpoint mapping was selected;
+- no Datto RMM device matched the provider-reported Autotask configuration hostname, so no Datto endpoint mapping was created.
+
+The complete proof used no hosted model and reported `$0` Jason-side hosted-model cost. Raw provider records were not printed or persisted, no provider data changed, and no durable activation occurred.
+
+See `docs/sessions/IT-Glue-Autotask-Real-Record-Correlation-Acceptance-2026-09-10.md`.
+
 ## Safe failure classification
 
 Shared provider-read failures now carry bounded machine classifications through Central Orchestrator instead of collapsing all failures into a generic invocation error.
@@ -180,11 +196,15 @@ The resource-convergence workflow now validates Autotask alongside the existing 
 
 ## Production boundary / remaining checkpoint
 
-Source work does not change production activation state. The following remain explicit later checkpoints rather than implicit consequences of this PR:
+Source implementation, provider-backed acceptance, and a real-record cross-provider correlation proof are now complete for this workstream. Production state remains unchanged.
 
-1. Run one bounded provider-backed acceptance against the final PR head to prove the new diagnostic path without changing provider data or durable activation.
-2. Preferably run one targeted real-record correlation proof under a single correlation ID (for example a known Autotask ticket/configuration item correlated to IT Glue and/or Datto RMM) before production activation.
-3. Verify how the production runtime identity will safely consume the root-owned AppRole bootstrap material without broadening credential exposure.
-4. Obtain explicit approval before any production deployment, service restart, provider/capability activation, or PR merge.
+The remaining governed checkpoint before production enablement is:
+
+1. run the non-root runtime credential-staging `--check-only` preflight against the final feature head;
+2. obtain explicit production approval;
+3. stage the provider-specific read-only runtime credential files without changing bootstrap ownership/mode;
+4. render and recreate only `jason-runtime` with the provider-specific read-only mounts;
+5. verify runtime health and provider-read behavior;
+6. keep durable capability activation, MCP exposure, PR readiness/merge, and any provider write capability as separate explicit decisions.
 
 IT Glue password/credential-vault secrets remain outside this workstream and outside the initial read surface.
