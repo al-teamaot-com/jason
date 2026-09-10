@@ -54,6 +54,12 @@ class InMemoryExecutionProviderRegistry:
         matches: list[ExecutionProvider] = []
 
         for provider in self._providers.values():
+            if (
+                query.required_provider_id is not None
+                and provider.provider_id != query.required_provider_id
+            ):
+                continue
+
             if query.capability not in provider.capabilities:
                 continue
 
