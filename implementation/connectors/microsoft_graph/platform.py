@@ -15,6 +15,24 @@ from .service_catalog import (
 
 
 _ALLOWED_METHODS = {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}
+_ALLOWED_QUERY_KEYS = frozenset(
+    {
+        "$select",
+        "$filter",
+        "$top",
+        "$orderby",
+        "$expand",
+        "$count",
+        "$search",
+        "$skip",
+        "$skiptoken",
+    }
+)
+_MODE_RANK = {
+    MicrosoftOperationMode.READ: 0,
+    MicrosoftOperationMode.WRITE: 1,
+    MicrosoftOperationMode.ADMIN: 2,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +53,29 @@ class MicrosoftCloudRequest:
         if "//" in self.path or ".." in self.path:
             raise ValueError("Microsoft request path contains an unsafe segment.")
         if "?" in self.path or "#" in self.path:
-            raise ValueError("Query strings and fragments must not be embedded in the Microsoft request path.")
+            raise ValueError(
+                "Query strings and fragments must not be embedded in the Microsoft request path."
+            )
+        if len(self.path) > 2048:
+            raise ValueError("Microsoft request path exceeds the governed length bound.")
+
+        if self.query is not None:
+            if len(self.query) > 16:
+                raise ValueError("Microsoft request query exceeds the governed key bound.")
+            for raw_key, raw_value in self.query.items():
+                key = str(raw_key).strip()
+                value = str(raw_value)
+                if key not in _ALLOWED_QUERY_KEYS:
+                    raise ValueError(f"Unsupported Microsoft query option: {key!r}.")
+                if not value or len(value) > 4096:
+                    raise ValueError(
+                        f"Microsoft query option {key!r} is empty or exceeds the governed length bound."
+                    )
+                if any(ord(char) < 32 for char in value):
+                    raise ValueError(
+                        f"Microsoft query option {key!r} contains control characters."
+                    )
+
         object.__setattr__(self, "method", method)
 
 
@@ -56,28 +96,27 @@ class MicrosoftRequestPolicyError(PermissionError):
 def build_governed_request(request: MicrosoftCloudRequest) -> GovernedMicrosoftRequest:
     endpoint = endpoint_for(request.service)
     profile = permission_profile(request.permission_profile_name)
-    validate_profile_for_services(profile, {request.service})
+    validate_profile_for_services(profile, frozenset({request.service}))
 
-    if not endpoint.supports(request.mode):
+    if request.mode not in endpoint.supported_modes:
         raise MicrosoftRequestPolicyError(
-            f"Microsoft service {request.service.value!r} does not support requested mode {request.mode.value!r}."
+            f"Microsoft service {request.service.value!r} does not support requested mode "
+            f"{request.mode.value!r}."
         )
 
-    if request.mode is MicrosoftOperationMode.READ and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        raise MicrosoftRequestPolicyError("Read mode permits only GET, HEAD, and OPTIONS requests.")
-
-    if request.mode is MicrosoftOperationMode.RECOMMEND and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        raise MicrosoftRequestPolicyError("Recommend mode cannot perform Microsoft mutations.")
-
-    if request.mode is MicrosoftOperationMode.WRITE_WITH_APPROVAL:
-        if profile.maximum_mode is not MicrosoftOperationMode.WRITE_WITH_APPROVAL:
-            raise MicrosoftRequestPolicyError(
-                "Microsoft permission profile does not authorize write-with-approval operations."
-            )
-
-    if request.mode is MicrosoftOperationMode.BOUNDED_AUTOMATION:
+    if _MODE_RANK[request.mode] > _MODE_RANK[profile.maximum_mode]:
         raise MicrosoftRequestPolicyError(
-            "Microsoft bounded autonomous execution is not enabled by this foundation."
+            f"Microsoft permission profile {profile.name!r} does not authorize requested mode "
+            f"{request.mode.value!r}."
+        )
+
+    if request.mode is MicrosoftOperationMode.READ and request.method not in {
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    }:
+        raise MicrosoftRequestPolicyError(
+            "Read mode permits only GET, HEAD, and OPTIONS requests."
         )
 
     version_prefix = f"/{endpoint.default_api_version}" if endpoint.default_api_version else ""
