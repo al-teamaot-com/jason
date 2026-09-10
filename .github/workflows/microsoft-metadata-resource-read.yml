@@ -24,11 +24,13 @@ on:
       - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/open_world_schema.py"
+      - "implementation/orchestrator/open_world_discovery.py"
       - "implementation/orchestrator/open_world_execution.py"
       - "implementation/orchestrator/provider_resource_capability_catalog.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
       - "implementation/orchestrator/test_provider_resource_capability_catalog.py"
       - "implementation/orchestrator/test_provider_resource_open_world.py"
+      - "implementation/orchestrator/test_open_world_provider_catalog_discovery.py"
       - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
       - "implementation/orchestrator/test_provider_affinity_orchestration.py"
       - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
@@ -56,11 +58,13 @@ on:
       - "implementation/orchestrator/contracts.py"
       - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/open_world_schema.py"
+      - "implementation/orchestrator/open_world_discovery.py"
       - "implementation/orchestrator/open_world_execution.py"
       - "implementation/orchestrator/provider_resource_capability_catalog.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
       - "implementation/orchestrator/test_provider_resource_capability_catalog.py"
       - "implementation/orchestrator/test_provider_resource_open_world.py"
+      - "implementation/orchestrator/test_open_world_provider_catalog_discovery.py"
       - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
       - "implementation/orchestrator/test_provider_affinity_orchestration.py"
       - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
@@ -99,6 +103,7 @@ jobs:
           implementation/orchestrator/contracts.py
           implementation/orchestrator/service.py
           implementation/orchestrator/open_world_schema.py
+          implementation/orchestrator/open_world_discovery.py
           implementation/orchestrator/open_world_execution.py
           implementation/orchestrator/provider_resource_capability_catalog.py
           implementation/orchestrator/provider_resource_open_world.py
@@ -111,11 +116,12 @@ jobs:
           implementation/connectors/microsoft_graph/test_resource_read.py
           implementation/connectors/microsoft_graph/test_resource_connector.py
           -q
-      - name: Test provider-neutral open-world bridge and provider affinity
+      - name: Test provider-neutral open-world bridge, discovery, and provider affinity
         run: >-
           python -m pytest
           implementation/orchestrator/test_provider_resource_capability_catalog.py
           implementation/orchestrator/test_provider_resource_open_world.py
+          implementation/orchestrator/test_open_world_provider_catalog_discovery.py
           implementation/orchestrator/test_open_world_provider_resource_execution.py
           implementation/orchestrator/test_provider_affinity_orchestration.py
           implementation/kernel/execution_providers/test_provider_affinity.py
