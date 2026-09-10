@@ -8,10 +8,12 @@ on:
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
       - "implementation/connectors/microsoft_graph/resource_catalog_source.py"
+      - "implementation/connectors/microsoft_graph/resource_provider.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
       - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
       - "implementation/connectors/microsoft_graph/test_resource_catalog_source.py"
+      - "implementation/connectors/microsoft_graph/test_resource_provider.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
       - "implementation/connectors/microsoft_graph/test_resource_connector.py"
       - "implementation/kernel/execution_providers/contracts.py"
@@ -20,11 +22,15 @@ on:
       - "implementation/kernel/resolution/contracts.py"
       - "implementation/kernel/resolution/service.py"
       - "implementation/orchestrator/contracts.py"
+      - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/open_world_schema.py"
       - "implementation/orchestrator/open_world_execution.py"
+      - "implementation/orchestrator/provider_resource_capability_catalog.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
+      - "implementation/orchestrator/test_provider_resource_capability_catalog.py"
       - "implementation/orchestrator/test_provider_resource_open_world.py"
       - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
+      - "implementation/orchestrator/test_provider_affinity_orchestration.py"
       - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
       - ".github/workflows/microsoft-metadata-resource-read.yml"
   pull_request:
@@ -34,10 +40,12 @@ on:
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
       - "implementation/connectors/microsoft_graph/resource_catalog_source.py"
+      - "implementation/connectors/microsoft_graph/resource_provider.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
       - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
       - "implementation/connectors/microsoft_graph/test_resource_catalog_source.py"
+      - "implementation/connectors/microsoft_graph/test_resource_provider.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
       - "implementation/connectors/microsoft_graph/test_resource_connector.py"
       - "implementation/kernel/execution_providers/contracts.py"
@@ -46,11 +54,15 @@ on:
       - "implementation/kernel/resolution/contracts.py"
       - "implementation/kernel/resolution/service.py"
       - "implementation/orchestrator/contracts.py"
+      - "implementation/orchestrator/service.py"
       - "implementation/orchestrator/open_world_schema.py"
       - "implementation/orchestrator/open_world_execution.py"
+      - "implementation/orchestrator/provider_resource_capability_catalog.py"
       - "implementation/orchestrator/provider_resource_open_world.py"
+      - "implementation/orchestrator/test_provider_resource_capability_catalog.py"
       - "implementation/orchestrator/test_provider_resource_open_world.py"
       - "implementation/orchestrator/test_open_world_provider_resource_execution.py"
+      - "implementation/orchestrator/test_provider_affinity_orchestration.py"
       - "docs/components/infrastructure/INF-010-Microsoft-Cloud-Platform-Foundation.md"
       - ".github/workflows/microsoft-metadata-resource-read.yml"
 
@@ -77,6 +89,7 @@ jobs:
           implementation/connectors/microsoft_graph/platform.py
           implementation/connectors/microsoft_graph/resource_metadata.py
           implementation/connectors/microsoft_graph/resource_catalog_source.py
+          implementation/connectors/microsoft_graph/resource_provider.py
           implementation/connectors/microsoft_graph/resource_read.py
           implementation/connectors/microsoft_graph/resource_connector.py
           implementation/kernel/execution_providers/contracts.py
@@ -84,21 +97,26 @@ jobs:
           implementation/kernel/resolution/contracts.py
           implementation/kernel/resolution/service.py
           implementation/orchestrator/contracts.py
+          implementation/orchestrator/service.py
           implementation/orchestrator/open_world_schema.py
           implementation/orchestrator/open_world_execution.py
+          implementation/orchestrator/provider_resource_capability_catalog.py
           implementation/orchestrator/provider_resource_open_world.py
       - name: Test Microsoft metadata discovery and governed resource connector
         run: >-
           python -m pytest
           implementation/connectors/microsoft_graph/test_resource_metadata.py
           implementation/connectors/microsoft_graph/test_resource_catalog_source.py
+          implementation/connectors/microsoft_graph/test_resource_provider.py
           implementation/connectors/microsoft_graph/test_resource_read.py
           implementation/connectors/microsoft_graph/test_resource_connector.py
           -q
       - name: Test provider-neutral open-world bridge and provider affinity
         run: >-
           python -m pytest
+          implementation/orchestrator/test_provider_resource_capability_catalog.py
           implementation/orchestrator/test_provider_resource_open_world.py
           implementation/orchestrator/test_open_world_provider_resource_execution.py
+          implementation/orchestrator/test_provider_affinity_orchestration.py
           implementation/kernel/execution_providers/test_provider_affinity.py
           -q
