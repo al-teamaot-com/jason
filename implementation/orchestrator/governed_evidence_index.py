@@ -7,6 +7,7 @@ from typing import Callable
 
 from .governed_evidence_cache import (
     CacheAccessContext,
+    FreshnessClass,
     GovernedEvidenceCache,
     GovernedEvidenceCacheEntry,
 )
@@ -37,6 +38,8 @@ class EvidenceIndexRecord:
     resource_type: str
     external_id: str
     source_reference: str
+    source_version: str | None
+    source_hash: str | None
     term_hashes: frozenset[str]
 
 
@@ -47,6 +50,7 @@ class EvidenceIndexHit:
 
 
 CacheAuthorizer = Callable[[GovernedEvidenceCacheEntry, CacheAccessContext], None]
+SourceIdentityResolver = Callable[[EvidenceIndexRecord], tuple[str | None, str | None]]
 
 
 class GovernedEvidenceIndex:
@@ -55,7 +59,12 @@ class GovernedEvidenceIndex:
     The index stores scope, source identity, cache keys, and hashed normalized terms.
     It deliberately does not duplicate document bodies. A search result is returned
     only after the underlying cache entry passes exact current organization/client
-    scope and the caller-supplied current authorization callback.
+    scope, current authorization, and current source version/hash validation.
+
+    The source-identity resolver may use a cheap provider metadata observation,
+    webhook-maintained version ledger, or another governed source of current version
+    identity. It must not return protected content. Static search fails closed when
+    current source identity cannot be established.
     """
 
     def __init__(self, *, cache: GovernedEvidenceCache) -> None:
@@ -68,7 +77,7 @@ class GovernedEvidenceIndex:
         entry: GovernedEvidenceCacheEntry,
         searchable_text: str,
     ) -> EvidenceIndexRecord:
-        if entry.freshness.value != "static":
+        if entry.freshness is not FreshnessClass.STATIC:
             raise ValueError("only static governed evidence may enter the static evidence index")
         if not searchable_text.strip():
             raise ValueError("searchable_text must be non-empty")
@@ -80,6 +89,8 @@ class GovernedEvidenceIndex:
             resource_type=entry.source.resource_type,
             external_id=entry.source.external_id,
             source_reference=entry.source.source_reference,
+            source_version=entry.source.source_version,
+            source_hash=entry.source.source_hash,
             term_hashes=_terms(searchable_text),
         )
         self._records[entry.cache_key] = record
@@ -94,6 +105,7 @@ class GovernedEvidenceIndex:
         query: str,
         context: CacheAccessContext,
         authorize: CacheAuthorizer,
+        source_identity: SourceIdentityResolver,
         maximum_results: int = 10,
     ) -> tuple[EvidenceIndexHit, ...]:
         query_terms = _terms(query)
@@ -115,10 +127,16 @@ class GovernedEvidenceIndex:
         candidates.sort(key=lambda item: (-item[0], item[1]))
         hits: list[EvidenceIndexHit] = []
         for overlap, cache_key in candidates:
+            record = self._records[cache_key]
+            current_version, current_hash = source_identity(record)
+            if current_version is None and current_hash is None:
+                raise ValueError("current source version or hash is required for static evidence search")
             entry = self._cache.get(
                 cache_key=cache_key,
                 context=context,
                 authorize=authorize,
+                current_source_version=current_version,
+                current_source_hash=current_hash,
             )
             if entry is None:
                 continue
