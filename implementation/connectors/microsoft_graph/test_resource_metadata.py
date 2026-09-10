@@ -74,6 +74,33 @@ def test_model_context_is_structural_and_does_not_include_provider_credentials()
     assert "credential" not in repr(context).casefold()
 
 
+def test_provider_neutral_catalog_is_derived_from_metadata_not_a_fixed_entity_list():
+    novel = CSDL.replace(
+        '<EntityContainer Name="GraphService">',
+        '''<EntityType Name="futureThing" BaseType="microsoft.graph.entity">
+        <Property Name="friendlyName" Type="Edm.String" />
+        <Property Name="enabled" Type="Edm.Boolean" Nullable="false" />
+      </EntityType>
+      <EntityContainer Name="GraphService">''',
+    ).replace(
+        '<EntitySet Name="users" EntityType="microsoft.graph.user" />',
+        '''<EntitySet Name="users" EntityType="microsoft.graph.user" />
+        <EntitySet Name="futureThings" EntityType="microsoft.graph.futureThing" />''',
+    )
+
+    graph_catalog = discover_graph_resources(novel, source_reference="graph-metadata-vnext")
+    provider_catalog = graph_catalog.provider_resource_catalog()
+
+    future = provider_catalog.get("microsoft_graph:futureThings")
+    assert future.provider_id == "microsoft_graph"
+    assert future.resource_type == "futureThing"
+    assert future.operations == ("search", "read")
+    assert future.collection_supported is True
+    assert future.selector_keys == ("id",)
+    assert {field.path for field in future.fields} == {"id", "friendlyName", "enabled"}
+    assert next(field for field in future.fields if field.path == "enabled").value_type == "boolean"
+
+
 def test_unknown_resource_handle_fails_closed():
     catalog = discover_graph_resources(CSDL, source_reference="graph-metadata")
     with pytest.raises(MicrosoftGraphMetadataError, match="unknown governed"):
