@@ -57,21 +57,32 @@ jobs:
           print('MCP_PROVIDER_SPECIFIC_TOOLS=NO')
           print('MCP_CANONICAL_READ_SURFACE=PASS')
           PY
-      - name: Prove production profile is deterministic read-only and zero-cost
+      - name: Prove initial production profile is exact read-only and zero-cost
         run: |
           python - <<'PY'
           from datetime import datetime, timezone
 
-          from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
-          from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
+          from kernel.capabilities import (
+              CapabilityLifecycle,
+              CapabilityRegistryService,
+              InMemoryCapabilityRegistry,
+          )
+          from kernel.execution_providers import (
+              ExecutionProviderRegistryService,
+              InMemoryExecutionProviderRegistry,
+          )
           from orchestrator.provider_read_capability_catalog import (
               AUTOTASK_CAPABILITIES,
               AUTOTASK_PROVIDER,
+              DOCUMENTATION_ORGANIZATION_SEARCH,
               IT_GLUE_CAPABILITIES,
               IT_GLUE_PROVIDER,
+              SERVICE_COMPANY_READ,
+              SERVICE_TICKET_SEARCH,
               register_provider_read_foundation,
           )
           from jason_runtime.provider_read_activation import (
+              PROVIDER_READ_PRODUCTION_CAPABILITIES,
               PROVIDER_READ_PRODUCTION_PROFILE,
               apply_provider_read_activation_profile,
           )
@@ -88,18 +99,38 @@ jobs:
               providers=providers,
               profile=PROVIDER_READ_PRODUCTION_PROFILE,
           )
-          expected = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+
+          expected = {
+              DOCUMENTATION_ORGANIZATION_SEARCH,
+              SERVICE_COMPANY_READ,
+              SERVICE_TICKET_SEARCH,
+          }
+          all_provider_reads = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+
+          assert PROVIDER_READ_PRODUCTION_CAPABILITIES == frozenset(expected)
           assert set(state.capability_names) == expected
+          assert len(state.capability_names) == 3
           assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
-          for name in expected:
+
+          for name in all_provider_reads:
               capability = capabilities.get(capability_name=name, version='1.0')
+              expected_lifecycle = (
+                  CapabilityLifecycle.ACTIVE
+                  if name in expected
+                  else CapabilityLifecycle.PILOT
+              )
+              assert capability.lifecycle_status is expected_lifecycle
               assert capability.metadata.get('read_only') == 'true'
               assert capability.permitted_execution_modes == frozenset({'deterministic'})
+
           for provider_id in state.provider_ids:
               provider = providers.get(provider_id)
               assert provider.pricing_profile_id == 'zero-cost-foundation'
               assert provider.execution_modes == frozenset({'deterministic'})
-          print('PROVIDER_READ_ACTIVATION_PROFILE=PASS')
+
+          print('PROVIDER_READ_INITIAL_ACTIVATION_PROFILE=PASS')
+          print('ACTIVE_PROVIDER_READ_CAPABILITIES=3')
+          print('UNAPPROVED_PROVIDER_READS_REMAIN_PILOT=TRUE')
           print('READ_ONLY=TRUE')
           print('DETERMINISTIC_ONLY=TRUE')
           print('JASON_SIDE_MODEL_COST=0')
