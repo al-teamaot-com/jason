@@ -13,6 +13,8 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_CONFIGURATION_SEARCH,
     DOCUMENTATION_CONTACT_READ,
     DOCUMENTATION_CONTACT_SEARCH,
+    DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_LOCATION_READ,
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
@@ -185,6 +187,35 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     ResourceObservation("inventory", "Documented asset/configuration attributes."),
                 ),
                 relationships=("configuration -> organization", "configuration -> related resource"),
+            ),
+            ResourceDefinition(
+                resource_type="documentation_document",
+                description="Client documentation records, including policies and SOPs, documented in IT Glue.",
+                selectors=selectors,
+                operations=(
+                    _search_operation(
+                        "documentation.document.search",
+                        DOCUMENTATION_DOCUMENT_SEARCH,
+                        (
+                            "organization_id",
+                            "name",
+                            "filters",
+                            "page_number",
+                            "page_size",
+                            "resource_id",
+                        ),
+                    ),
+                    _read_operation(
+                        "documentation.document.read",
+                        DOCUMENTATION_DOCUMENT_READ,
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("identity", "Document identity, title, and organization context."),
+                    ResourceObservation("content", "Sanitized document content and metadata."),
+                    ResourceObservation("version", "Provider source version/hash evidence when available."),
+                ),
+                relationships=("document -> organization",),
             ),
         ),
         metadata={
