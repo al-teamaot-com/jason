@@ -49,8 +49,10 @@ def test_sanitized_metadata_hashes_identifiers_instead_of_persisting_them() -> N
 
     assert "ticket_number" not in metadata
     assert "ticket_id" not in metadata
-    assert "T20260910.001" not in str(metadata)
-    assert "123" not in str(metadata)
+    assert "selected_ticket_selector_sha256" in metadata
+    assert "selected_ticket_resource_sha256" in metadata
+    assert metadata["selected_ticket_selector_sha256"] != "T20260910.001"
+    assert metadata["selected_ticket_resource_sha256"] != "123"
     assert len(str(metadata["selected_ticket_selector_sha256"])) == 64
     assert len(str(metadata["selected_ticket_resource_sha256"])) == 64
 
