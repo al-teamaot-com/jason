@@ -2,7 +2,11 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from connectors.core.contracts import ConnectorContext, ConnectorRequest
+from connectors.core.contracts import (
+    ConnectorAuthorizationError,
+    ConnectorContext,
+    ConnectorRequest,
+)
 from connectors.microsoft_graph.resource_connector import (
     MicrosoftGraphResourceConnector,
     PROVIDER_RESOURCE_READ,
@@ -171,7 +175,7 @@ def test_missing_client_boundary_fails_before_catalog_token_or_transport():
         audit=Audit(),
     )
 
-    with pytest.raises(PermissionError, match="client boundary"):
+    with pytest.raises(ConnectorAuthorizationError, match="client boundary"):
         connector.execute(
             ConnectorRequest(
                 context=context(PROVIDER_RESOURCE_SEARCH, client_id=None),
@@ -238,7 +242,7 @@ def test_non_observe_mode_is_denied_by_connector_contract():
         capability=PROVIDER_RESOURCE_SEARCH,
         mode="execute",
     )
-    with pytest.raises(PermissionError, match="read-only"):
+    with pytest.raises(ConnectorAuthorizationError, match="read-only"):
         connector.execute(
             ConnectorRequest(
                 context=bad_context,
