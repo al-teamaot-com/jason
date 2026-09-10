@@ -19,6 +19,7 @@ on:
       - 'implementation/orchestrator/canonical_entity_correlation.py'
       - 'implementation/orchestrator/cross_provider_evidence.py'
       - 'implementation/orchestrator/governed_evidence_cache.py'
+      - 'implementation/orchestrator/governed_evidence_index.py'
       - 'implementation/orchestrator/real_record_correlation_acceptance.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
@@ -27,10 +28,13 @@ on:
       - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
       - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
       - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_index.py'
+      - 'implementation/orchestrator/tests/test_document_read_foundation.py'
       - 'implementation/orchestrator/tests/test_real_record_correlation_acceptance.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'implementation/runtime_service/tests/test_document_provider_reads.py'
       - 'tools/provider_read_live_acceptance.py'
       - 'tools/provider_cross_correlation_live_acceptance.py'
       - '.github/workflows/validate-provider-reads.yml'
@@ -52,6 +56,7 @@ on:
       - 'implementation/orchestrator/canonical_entity_correlation.py'
       - 'implementation/orchestrator/cross_provider_evidence.py'
       - 'implementation/orchestrator/governed_evidence_cache.py'
+      - 'implementation/orchestrator/governed_evidence_index.py'
       - 'implementation/orchestrator/real_record_correlation_acceptance.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
@@ -60,10 +65,13 @@ on:
       - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
       - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
       - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_index.py'
+      - 'implementation/orchestrator/tests/test_document_read_foundation.py'
       - 'implementation/orchestrator/tests/test_real_record_correlation_acceptance.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'implementation/runtime_service/tests/test_document_provider_reads.py'
       - 'tools/provider_read_live_acceptance.py'
       - 'tools/provider_cross_correlation_live_acceptance.py'
       - '.github/workflows/validate-provider-reads.yml'
@@ -96,6 +104,7 @@ jobs:
             implementation/orchestrator/canonical_entity_correlation.py \
             implementation/orchestrator/cross_provider_evidence.py \
             implementation/orchestrator/governed_evidence_cache.py \
+            implementation/orchestrator/governed_evidence_index.py \
             implementation/orchestrator/real_record_correlation_acceptance.py \
             implementation/orchestrator/provider_read_acceptance.py \
             implementation/orchestrator/provider_read_argument_adapter.py \
@@ -114,8 +123,11 @@ jobs:
             implementation/orchestrator/tests/test_canonical_entity_correlation.py \
             implementation/orchestrator/tests/test_cross_provider_evidence.py \
             implementation/orchestrator/tests/test_governed_evidence_cache.py \
+            implementation/orchestrator/tests/test_governed_evidence_index.py \
+            implementation/orchestrator/tests/test_document_read_foundation.py \
             implementation/orchestrator/tests/test_real_record_correlation_acceptance.py \
             implementation/runtime_service/tests/test_provider_reads.py \
+            implementation/runtime_service/tests/test_document_provider_reads.py \
             implementation/connectors/tests/test_autotask_resource_gateway.py \
             implementation/connectors/tests/test_autotask_resource_convergence.py \
             implementation/connectors/tests/test_provider_resource_adapters.py \
