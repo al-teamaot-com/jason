@@ -165,6 +165,10 @@ Fresh MCP status remained:
 
 The active MCP capability registry now exposes the initial approved IT Glue/Autotask reads alongside the existing governed read capabilities without adding provider-specific MCP tools.
 
+## Evidence-shaping observation
+
+The live zero-result IT Glue organization search also returned provider filter/permitted-value metadata that was larger than needed for the user-facing answer. This did not expose credentials or enable any write path, and it does not invalidate the live provider-read proof. It is recorded as a separate evidence-minimization hardening item rather than being treated as a failure of the initial production read activation.
+
 ## Remaining boundaries
 
 This checkpoint does **not** activate:
