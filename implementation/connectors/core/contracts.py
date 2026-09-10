@@ -10,13 +10,15 @@ from typing import Any, Iterator, Mapping, Protocol
 class ConnectorError(RuntimeError):
     """Base error safe for internal classification, not direct user display."""
 
+    error_code = "CONNECTOR_FAILURE"
+
 
 class ConnectorAuthorizationError(ConnectorError):
-    pass
+    error_code = "CONNECTOR_AUTHORIZATION_DENIED"
 
 
 class ConnectorConfigurationError(ConnectorError):
-    pass
+    error_code = "CONNECTOR_CONFIGURATION_ERROR"
 
 
 class ConnectorTransportError(ConnectorError):
@@ -27,6 +29,8 @@ class ConnectorTransportError(ConnectorError):
     operator presentation, but raw HTTP response bodies, headers, credentials,
     and tokens are never retained on the exception.
     """
+
+    error_code = "PROVIDER_TRANSPORT_FAILURE"
 
     def __init__(
         self,
@@ -48,6 +52,8 @@ class ConnectorTransportError(ConnectorError):
         self.provider_error_code = provider_error_code
         self.provider_error_param = provider_error_param
         self.provider_error_message = provider_error_message
+        if status_code is not None and type(self) is ConnectorTransportError:
+            self.error_code = "PROVIDER_HTTP_ERROR"
 
 
 class ConnectorExecutionDeadlineExceeded(ConnectorTransportError):
