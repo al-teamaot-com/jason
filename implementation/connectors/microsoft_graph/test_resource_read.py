@@ -8,7 +8,10 @@ from connectors.microsoft_graph.platform import (
     MicrosoftRequestPolicyError,
     build_governed_request,
 )
-from connectors.microsoft_graph.resource_metadata import discover_graph_resources
+from connectors.microsoft_graph.resource_metadata import (
+    MicrosoftGraphMetadataError,
+    discover_graph_resources,
+)
 from connectors.microsoft_graph.resource_read import (
     MicrosoftGraphFilter,
     MicrosoftGraphOrder,
@@ -86,7 +89,7 @@ def test_exact_item_read_uses_discovered_collection_path_and_escaped_identifier(
 
 
 def test_unknown_resource_or_field_cannot_be_used_as_an_escape_hatch():
-    with pytest.raises(Exception, match="unknown governed"):
+    with pytest.raises(MicrosoftGraphMetadataError, match="unknown governed"):
         compiler().compile(
             intent=MicrosoftGraphReadIntent(
                 resource_handle="microsoft_graph:/me/messages",
@@ -106,6 +109,7 @@ def test_unknown_resource_or_field_cannot_be_used_as_an_escape_hatch():
 
 
 def test_filter_values_are_literals_not_raw_odata_fragments():
+    attempted_injection = "O'Brien') or accountEnabled eq false or ('x' eq 'x"
     compiled = compiler().compile(
         intent=MicrosoftGraphReadIntent(
             resource_handle="microsoft_graph:users",
@@ -114,7 +118,7 @@ def test_filter_values_are_literals_not_raw_odata_fragments():
                 MicrosoftGraphFilter(
                     "displayName",
                     "contains",
-                    "O'Brien') or accountEnabled eq false or ('x' eq 'x",
+                    attempted_injection,
                 ),
             ),
             top=10,
@@ -122,8 +126,11 @@ def test_filter_values_are_literals_not_raw_odata_fragments():
         permission_profile_name="directory-read",
     )
     value = parse_qs(urlsplit(compiled.request.url).query)["$filter"][0]
-    assert value.startswith("contains(displayName,'O''Brien'')")
-    assert "O''Brien" in value
+    assert value == (
+        "contains(displayName,'O''Brien'') or accountEnabled eq false "
+        "or (''x'' eq ''x')"
+    )
+    assert value.count("'") == 12
 
 
 def test_raw_query_options_and_mutating_read_requests_fail_closed():
