@@ -32,6 +32,18 @@ class OpenBaoTransportError(OpenBaoSecretResolutionError):
     error_code = "OPENBAO_TRANSPORT_FAILURE"
 
 
+class OpenBaoHttpError(OpenBaoSecretResolutionError):
+    """OpenBao returned a bounded HTTP failure without retaining its response body."""
+
+    error_code = "OPENBAO_HTTP_ERROR"
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        if status_code is not None and 100 <= status_code <= 599:
+            self.error_code = f"OPENBAO_HTTP_STATUS_{status_code}"
+
+
 DEFAULT_MAPPINGS: Mapping[str, str] = {
     "openai.semantic_intent": (
         "secret/data/providers/openai/production/semantic-intent"
@@ -202,7 +214,7 @@ class OpenBaoSecretResolver(SecretResolver):
                     "secret_id": secret_id,
                 },
             )
-        except OpenBaoTransportError as error:
+        except OpenBaoHttpError as error:
             raise OpenBaoAuthenticationError(
                 "OpenBao AppRole authentication failed."
             ) from error
@@ -279,6 +291,11 @@ class OpenBaoSecretResolver(SecretResolver):
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
                 raw = response.read()
+        except urllib.error.HTTPError as error:
+            raise OpenBaoHttpError(
+                "OpenBao returned an HTTP error.",
+                status_code=int(error.code),
+            ) from error
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             raise OpenBaoTransportError(
                 "OpenBao secret resolution transport failed."
