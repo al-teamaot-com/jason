@@ -46,6 +46,10 @@ def static_entry(cache, *, key="itglue:document:42", client="client-a"):
     return entry
 
 
+def current_identity(record):
+    return record.source_version, record.source_hash
+
+
 def test_static_index_returns_authorized_policy_without_duplicating_content() -> None:
     cache = GovernedEvidenceCache()
     entry = static_entry(cache)
@@ -67,6 +71,7 @@ def test_static_index_returns_authorized_policy_without_duplicating_content() ->
         query="remote access policy",
         context=context(principal="reader-b"),
         authorize=authorize,
+        source_identity=current_identity,
     )
 
     assert len(hits) == 1
@@ -84,6 +89,7 @@ def test_static_index_never_crosses_client_scope() -> None:
         query="remote access",
         context=context(client="client-b"),
         authorize=lambda entry, access: None,
+        source_identity=current_identity,
     ) == ()
 
 
@@ -102,7 +108,37 @@ def test_static_index_honors_revoked_current_authorization() -> None:
             query="remote access",
             context=context(),
             authorize=deny,
+            source_identity=current_identity,
         )
+
+
+def test_static_index_fails_closed_without_current_source_identity() -> None:
+    cache = GovernedEvidenceCache()
+    entry = static_entry(cache)
+    index = GovernedEvidenceIndex(cache=cache)
+    index.index_static_entry(entry=entry, searchable_text="Remote Access Policy")
+
+    with pytest.raises(ValueError, match="current source version or hash"):
+        index.search(
+            query="remote access",
+            context=context(),
+            authorize=lambda entry, access: None,
+            source_identity=lambda record: (None, None),
+        )
+
+
+def test_static_index_discards_stale_source_hash() -> None:
+    cache = GovernedEvidenceCache()
+    entry = static_entry(cache)
+    index = GovernedEvidenceIndex(cache=cache)
+    index.index_static_entry(entry=entry, searchable_text="Remote Access Policy")
+
+    assert index.search(
+        query="remote access",
+        context=context(),
+        authorize=lambda entry, access: None,
+        source_identity=lambda record: (None, "sha256:document-v2"),
+    ) == ()
 
 
 def test_nonstatic_evidence_cannot_enter_static_index() -> None:
