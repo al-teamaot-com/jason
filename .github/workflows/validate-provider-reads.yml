@@ -5,12 +5,27 @@ on:
     paths:
       - 'implementation/connectors/autotask/**'
       - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/core/contracts.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
       - 'implementation/connectors/kaseya_resource_catalog.py'
       - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/resource_convergence.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_safe_failure_classification.py'
+      - 'implementation/orchestrator/connector_invoker.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/canonical_entity_correlation.py'
+      - 'implementation/orchestrator/cross_provider_evidence.py'
+      - 'implementation/orchestrator/governed_evidence_cache.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_connector_invoker.py'
+      - 'implementation/orchestrator/tests/test_safe_provider_failure_classification.py'
+      - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
+      - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
@@ -20,12 +35,27 @@ on:
     paths:
       - 'implementation/connectors/autotask/**'
       - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/core/contracts.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
       - 'implementation/connectors/kaseya_resource_catalog.py'
       - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/resource_convergence.py'
       - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_safe_failure_classification.py'
+      - 'implementation/orchestrator/connector_invoker.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/canonical_entity_correlation.py'
+      - 'implementation/orchestrator/cross_provider_evidence.py'
+      - 'implementation/orchestrator/governed_evidence_cache.py'
       - 'implementation/orchestrator/provider_read_*.py'
       - 'implementation/orchestrator/tests/test_provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_connector_invoker.py'
+      - 'implementation/orchestrator/tests/test_safe_provider_failure_classification.py'
+      - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
+      - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_reads.py'
@@ -51,7 +81,15 @@ jobs:
           python -m compileall -q \
             implementation/connectors/autotask \
             implementation/connectors/it_glue \
+            implementation/connectors/core/contracts.py \
+            implementation/connectors/core/openbao_secrets.py \
             implementation/connectors/provider_resource_adapters.py \
+            implementation/connectors/resource_convergence.py \
+            implementation/orchestrator/connector_invoker.py \
+            implementation/orchestrator/service.py \
+            implementation/orchestrator/canonical_entity_correlation.py \
+            implementation/orchestrator/cross_provider_evidence.py \
+            implementation/orchestrator/governed_evidence_cache.py \
             implementation/orchestrator/provider_read_acceptance.py \
             implementation/orchestrator/provider_read_argument_adapter.py \
             implementation/orchestrator/provider_read_capability_catalog.py \
@@ -64,9 +102,16 @@ jobs:
             implementation/orchestrator/tests/test_provider_read_foundation.py \
             implementation/orchestrator/tests/test_provider_read_acceptance.py \
             implementation/orchestrator/tests/test_provider_read_central_orchestrator.py \
+            implementation/orchestrator/tests/test_connector_invoker.py \
+            implementation/orchestrator/tests/test_safe_provider_failure_classification.py \
+            implementation/orchestrator/tests/test_canonical_entity_correlation.py \
+            implementation/orchestrator/tests/test_cross_provider_evidence.py \
+            implementation/orchestrator/tests/test_governed_evidence_cache.py \
             implementation/runtime_service/tests/test_provider_reads.py \
             implementation/connectors/tests/test_autotask_resource_gateway.py \
+            implementation/connectors/tests/test_autotask_resource_convergence.py \
             implementation/connectors/tests/test_provider_resource_adapters.py \
+            implementation/connectors/tests/test_safe_failure_classification.py \
             implementation/connectors/tests/test_autotask_operations.py \
             implementation/connectors/tests/test_it_glue_operations.py
       - name: Verify Central Orchestrator live-read preflight is credential safe
