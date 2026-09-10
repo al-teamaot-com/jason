@@ -13,6 +13,12 @@ import re
 from typing import Iterable, Mapping
 from xml.etree import ElementTree
 
+from connectors.core.resource_catalog import (
+    ProviderFieldDefinition,
+    ProviderResourceCatalog,
+    ProviderResourceDefinition,
+)
+
 
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _MAX_METADATA_BYTES = 20 * 1024 * 1024
@@ -86,7 +92,7 @@ class MicrosoftGraphResource:
         return tuple(field.name for field in self.fields)
 
     def as_context(self) -> Mapping[str, object]:
-        """Return model-safe structural context without credentials or raw metadata."""
+        """Return bounded provider-local structural context without credentials."""
 
         return {
             "resource_handle": self.resource_handle,
@@ -102,7 +108,7 @@ class MicrosoftGraphResource:
                 for field in self.fields
             ),
             "key_fields": self.key_fields,
-            "operations": ("search", "read"),
+            "operations": ("search", "read") if self.key_fields else ("search",),
         }
 
 
@@ -133,6 +139,44 @@ class MicrosoftGraphResourceCatalog:
 
     def model_context(self) -> tuple[Mapping[str, object], ...]:
         return tuple(resource.as_context() for resource in self.resources)
+
+    def provider_resource_catalog(self) -> ProviderResourceCatalog:
+        """Publish provider metadata through Jason's provider-neutral contract.
+
+        The list of resources and fields comes entirely from the parsed CSDL.  The
+        connector contributes only Microsoft Graph protocol semantics and the
+        provider identifier; no Microsoft business entity names are enumerated here.
+        """
+
+        resources = tuple(
+            ProviderResourceDefinition(
+                provider_id="microsoft_graph",
+                provider_resource_handle=resource.resource_handle,
+                resource_type=resource.resource_type,
+                operations=("search", "read") if resource.key_fields else ("search",),
+                collection_supported=True,
+                selector_keys=tuple(resource.key_fields),
+                fields=tuple(
+                    ProviderFieldDefinition(
+                        name=field.name,
+                        path=field.name,
+                        value_type=_provider_value_type(field),
+                    )
+                    for field in resource.fields
+                ),
+                source_reference=self.source_reference,
+                metadata={
+                    "schema_kind": "odata-csdl",
+                    "provider_protocol": "microsoft-graph-v1",
+                },
+            )
+            for resource in self.resources
+        )
+        return ProviderResourceCatalog(
+            provider_id="microsoft_graph",
+            resources=resources,
+            source_reference=self.source_reference,
+        )
 
 
 def discover_graph_resources(
@@ -214,6 +258,25 @@ def discover_graph_resources(
         resources=tuple(resources),
         source_reference=source_reference,
     )
+
+
+def _provider_value_type(field: MicrosoftGraphField) -> str:
+    if field.collection:
+        return "array"
+    value = field.type_name.casefold()
+    if value == "edm.boolean":
+        return "boolean"
+    if value in {
+        "edm.byte",
+        "edm.sbyte",
+        "edm.int16",
+        "edm.int32",
+        "edm.int64",
+    }:
+        return "integer"
+    if value in {"edm.single", "edm.double", "edm.decimal"}:
+        return "number"
+    return "string"
 
 
 def _resolve_entity_shape(
