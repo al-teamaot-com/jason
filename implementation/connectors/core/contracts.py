@@ -21,6 +21,12 @@ class ConnectorConfigurationError(ConnectorError):
     error_code = "CONNECTOR_CONFIGURATION_ERROR"
 
 
+class ConnectorCredentialUnavailableError(ConnectorConfigurationError):
+    """Local credential bootstrap material is unavailable to this process."""
+
+    error_code = "CONNECTOR_CREDENTIAL_UNAVAILABLE"
+
+
 class ConnectorTransportError(ConnectorError):
     """Transport failure with bounded, non-secret diagnostic metadata.
 
@@ -53,7 +59,10 @@ class ConnectorTransportError(ConnectorError):
         self.provider_error_param = provider_error_param
         self.provider_error_message = provider_error_message
         if status_code is not None and type(self) is ConnectorTransportError:
-            self.error_code = "PROVIDER_HTTP_ERROR"
+            if 100 <= status_code <= 599:
+                self.error_code = f"PROVIDER_HTTP_STATUS_{status_code}"
+            else:
+                self.error_code = "PROVIDER_HTTP_ERROR"
 
 
 class ConnectorExecutionDeadlineExceeded(ConnectorTransportError):
