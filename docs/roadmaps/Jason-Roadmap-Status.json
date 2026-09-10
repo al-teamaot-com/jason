@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-09",
+  "updated": "2026-09-10",
   "milestones": [
     {"id": "FOUNDATION", "title": "Constitution and governance foundation", "status": "complete", "phase": "Foundation"},
     {"id": "INF-001", "title": "OpenBao runtime foundation", "status": "complete", "phase": "Infrastructure"},
@@ -27,6 +27,7 @@
     {"id": "MCP-001", "title": "ChatGPT Business + Jason read-only MCP foundation", "status": "complete", "phase": "Technician Experience"},
     {"id": "MCP-002", "title": "ChatGPT Business identity/workspace binding pilot", "status": "active", "phase": "Technician Experience"},
     {"id": "MCP-003", "title": "Cross-provider ChatGPT technician pilot", "status": "planned", "phase": "Technician Experience"},
-    {"id": "MCP-004", "title": "Legacy conversational-stack simplification after MCP proof", "status": "planned", "phase": "Technician Experience"}
+    {"id": "MCP-004", "title": "Legacy conversational-stack simplification after MCP proof", "status": "planned", "phase": "Technician Experience"},
+    {"id": "REFLECT-001", "title": "Governed reflection and continuous-improvement loop", "status": "planned", "phase": "Reasoning Quality"}
   ]
 }
