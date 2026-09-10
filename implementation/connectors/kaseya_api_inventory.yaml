@@ -1,0 +1,305 @@
+schema_version: "0.1"
+research_date: "2026-09-10"
+intent: governed_provider_read_discovery
+principles:
+  - provider_neutral_capabilities
+  - read_first
+  - no_secrets_in_source_control
+  - client_scoped_authorization
+  - evidence_provenance_required
+  - connectors_normalize_facts_but_do_not_make_decisions
+  - webhook_ingest_is_preferred_when_supported_and_useful
+
+products:
+  autotask:
+    display_name: Autotask
+    api_status: ready
+    implementation_status: foundation_built
+    auth: api_user_headers
+    credential_fields:
+      - username
+      - secret
+      - api_integration_code
+    tenant_fields:
+      - zone_or_discovered_api_url
+    documentation:
+      - https://ww1.autotask.net/help/DeveloperHelp/Content/APIs/REST/REST_API_Home.htm
+      - https://ww1.autotask.net/help/DeveloperHelp/Content/APIs/REST/General_Topics/REST_Security_Auth.htm
+    notes:
+      - Use a dedicated API-only user with a copied/restricted security level.
+      - Discover the correct Autotask zone before normal API traffic.
+
+  datto_rmm:
+    display_name: Datto RMM
+    api_status: ready
+    implementation_status: foundation_built
+    auth: oauth2_with_api_key_and_secret
+    credential_fields:
+      - api_key
+      - api_secret
+    tenant_fields:
+      - api_url
+    documentation:
+      - https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm
+    notes:
+      - API access must be enabled globally and for the API user.
+      - API Security Level and API Component Level constrain access.
+      - OpenAPI is exposed by the tenant API URL.
+
+  it_glue:
+    display_name: IT Glue
+    api_status: ready_if_entitled
+    implementation_status: foundation_built
+    auth: x_api_key
+    credential_fields:
+      - api_key
+    tenant_fields:
+      - region
+    entitlement:
+      - current_enterprise_plan_api_access
+    documentation:
+      - https://api.itglue.com/developer/
+      - https://help.itglue.kaseya.com/help/Content/1-admin/it-glue-api/getting-started-with-the-it-glue-api.html
+    notes:
+      - Keep Password Access disabled for Jason's initial read provider unless separately approved.
+
+  datto_edr:
+    display_name: Datto EDR
+    api_status: ready
+    implementation_status: planned
+    auth: api_token
+    credential_fields:
+      - api_token
+    tenant_fields:
+      - instance_url
+    documentation:
+      - https://edr.datto.com/help/Content/09-navigating-admin-options/api-generate-token.htm
+      - https://edr.datto.com/help/Content/09-navigating-admin-options/api-loopback-explorer.html
+    notes:
+      - API tokens expire one year after creation.
+      - API Explorer is hosted at the customer's EDR instance under /explorer/.
+      - Webhooks are a candidate for event ingestion in addition to read queries.
+
+  datto_portal:
+    display_name: Datto Portal
+    api_status: no_generic_partner_data_api_verified
+    implementation_status: deferred
+    missing:
+      - partner_facing_api_reference_for_the_specific_portal_data_required
+    notes:
+      - Treat APIs for individual Datto services separately rather than assuming the portal tile is a data API.
+
+  saas_alerts:
+    display_name: SaaS Alerts
+    api_status: ready
+    implementation_status: resource_family_declared_connector_not_built
+    auth: api_key
+    credential_fields:
+      - api_key
+      - partner_id_if_required_by_endpoint
+    documentation:
+      - https://help.saasalerts.kaseya.com/help/Content/How-To/using-the-saas-alerts-api.htm
+    notes:
+      - Reports API is suitable for governed event retrieval.
+      - Evaluate webhooks for near-real-time evidence ingestion.
+
+  rocketcyber:
+    display_name: RocketCyber
+    api_status: ready
+    implementation_status: resource_family_declared_connector_not_built
+    auth: provider_access_token
+    credential_fields:
+      - provider_access_token
+    documentation:
+      - https://help.rocketcyber.kaseya.com/help/Content/general/customer-api-finding-access-token.html
+      - https://api-doc.rocketcyber.com/
+    notes:
+      - Provider token is provider-wide, so Jason must enforce client scope after provider retrieval.
+
+  uniview:
+    display_name: UniView
+    api_status: ready
+    implementation_status: planned
+    auth: oauth2_client_credentials
+    credential_fields:
+      - client_id
+      - client_secret
+    documentation:
+      - https://helpdesk.kaseya.com/hc/en-gb/articles/7006294343313-How-to-get-a-bearer-token-for-the-MSP-portal-API
+      - https://apidoc-public-api.backup.net/swagger-ui-v2/index.html
+    notes:
+      - Token endpoint is https://login.backup.net/connect/token.
+      - Public API host is public-api.backup.net.
+
+  graphus:
+    display_name: Graphus
+    api_status: product_eol
+    implementation_status: deprioritized
+    documentation:
+      - https://help.graphus.kaseya.com/help/Content/graphus-eol.htm
+    notes:
+      - Support ends 2026-12-31 and service EOL is 2027-06-30.
+      - Prefer INKY and/or downstream Kaseya SIEM/SaaS Alerts evidence instead of a new Graphus-specific connector.
+
+  dark_web_id:
+    display_name: Dark Web ID
+    api_status: ready_with_network_prerequisite
+    implementation_status: resource_family_declared_as_id_agent_connector_not_built
+    auth: product_credentials_with_web_services_permission
+    credential_fields:
+      - api_username
+      - api_password
+    tenant_fields:
+      - static_jason_egress_ipv4
+    documentation:
+      - https://help.darkwebid.kaseya.com/help/Content/how-to/how-can-i-enable-api-access-for-id-agent.html
+    notes:
+      - Enable Permit access to web services for the partner user.
+      - API access requires a static public IPv4 allowlist entry.
+      - KaseyaOne-only login is not sufficient; the API user needs a Dark Web ID-specific password.
+
+  msp_success_digital:
+    display_name: MSP Success Digital
+    api_status: no_partner_api_verified
+    implementation_status: blocked_on_vendor_information
+    missing:
+      - confirmation_that_partner_api_exists
+      - developer_reference_or_openapi
+      - authentication_method
+      - base_url
+
+  connectbooster:
+    display_name: ConnectBooster
+    api_status: partial_evidence_only
+    implementation_status: blocked_on_developer_reference
+    documentation:
+      - https://docs.connectbooster.com/help/api-keys
+    missing:
+      - current_partner_facing_rest_api_reference
+      - base_url
+      - endpoint_and_scope_catalog
+    notes:
+      - ConnectBooster exposes API-key administration, but current public operational endpoint documentation was not verified during this research pass.
+
+  kaseya_quote_manager:
+    display_name: Kaseya Quote Manager
+    api_status: ready
+    implementation_status: planned
+    auth: api_key
+    credential_fields:
+      - api_key
+    documentation:
+      - https://help.quotemanager.kaseya.com/help/Content/2-integrate/api.htm
+    notes:
+      - API is explicitly read-only, which is a strong fit for Jason's initial provider mode.
+      - Public examples use https://api.kaseyaquotemanager.com/v1/.
+
+  bullphish_id:
+    display_name: BullPhish ID
+    api_status: no_general_partner_api_verified
+    implementation_status: blocked_on_vendor_information
+    documentation:
+      - https://help.bullphishid.kaseya.com/help/Content/11_Integrations/integrating-with-it-glue.html
+    missing:
+      - general_external_api_reference_or_openapi
+      - base_url
+      - authentication_for_direct_jason_access
+      - endpoint_and_scope_catalog
+    notes:
+      - Published integration docs prove BullPhish ID participates in API-driven integrations but do not establish a general external BullPhish REST API for Jason.
+
+  myitprocess:
+    display_name: myITprocess
+    api_status: ready
+    implementation_status: planned
+    auth: api_key
+    credential_fields:
+      - api_key
+    documentation:
+      - https://help.myitprocess.kaseya.com/help/Content/setup-admin/myitprocess-api.html
+    notes:
+      - REST API is documented with Swagger.
+      - Published limit is 50 requests per minute per IT provider.
+
+  vpentest:
+    display_name: vPenTest
+    api_status: ready
+    implementation_status: planned
+    auth: bearer_api_key
+    credential_fields:
+      - api_key
+    tenant_fields:
+      - region_if_not_default
+    documentation:
+      - https://help.vonahi.kaseya.com/help-wip/Content/5-Integrations/vpentest-api.htm
+      - https://app.vpentest.io/api/v3/docs
+    notes:
+      - API is available to all vPenTest customers.
+      - Supports organizations, assessments, findings, schedules, and report-download metadata.
+
+  rapidfire_tools:
+    display_name: RapidFire Tools
+    api_status: product_family_requires_sku_resolution
+    implementation_status: blocked_on_installed_subproducts
+    known_api_capable_subproducts:
+      - Network Detective Pro
+      - Compliance Manager GRC
+    missing:
+      - exact_rapidfire_products_licensed_by_aot
+      - current_api_reference_for_each_selected_subproduct
+    notes:
+      - The KaseyaOne tile represents a family, not a single API surface.
+
+  inky:
+    display_name: INKY
+    api_status: event_feed_available_broad_rest_api_not_verified
+    implementation_status: partial
+    auth: integration_api_key
+    credential_fields:
+      - integration_api_key
+    tenant_fields:
+      - region
+    documentation:
+      - https://help.saasalerts.kaseya.com/help/Content/Integrations/inky-integration.htm
+      - https://help.siem.kaseya.com/help/Content/integrations-and-data-sources/saas-and-cloud-sources/inky-integration.htm
+    notes:
+      - INKY Advanced or Pro with API access can stream email-security events into SaaS Alerts/Kaseya SIEM.
+      - Prefer consuming normalized INKY events through SaaS Alerts or Kaseya SIEM unless a direct Jason use case requires a separate API surface.
+
+  kaseya_siem:
+    display_name: Kaseya SIEM
+    api_status: api_credentials_and_webhooks_verified_endpoints_not_yet_verified
+    implementation_status: blocked_on_endpoint_reference
+    auth: api_key
+    credential_fields:
+      - api_key
+    tenant_fields:
+      - partner_id
+      - approved_jason_webhook_domain
+    documentation:
+      - https://help.siem.kaseya.com/help/Content/administration-and-configuration/api-access-and-webhook-governance.htm
+    missing:
+      - direct_query_api_endpoint_reference_or_openapi
+      - supported_resource_and_filter_catalog
+    notes:
+      - API Policy must be accepted before API and webhook features are enabled.
+      - The public governance page explicitly warns that an API key does not imply every API capability is supported.
+
+  kaseya_mdr:
+    display_name: Kaseya MDR
+    api_status: api_credentials_and_webhooks_verified_endpoints_not_yet_verified
+    implementation_status: blocked_on_endpoint_reference
+    auth: api_key
+    credential_fields:
+      - api_key
+    tenant_fields:
+      - partner_id
+      - approved_jason_webhook_domain
+    documentation:
+      - https://help.mdr.kaseya.com/help/Content/account-access-governance/api-access-and-webhook-governance.htm
+    missing:
+      - direct_query_api_endpoint_reference_or_openapi
+      - supported_resource_and_filter_catalog
+    notes:
+      - API Policy must be accepted before API and webhook features are enabled.
+      - The public governance page explicitly warns that an API key does not imply every API capability is supported.
