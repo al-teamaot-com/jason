@@ -4,11 +4,14 @@ on:
   push:
     paths:
       - "implementation/connectors/core/resource_catalog.py"
+      - "implementation/connectors/core/text_http_transport.py"
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/resource_catalog_source.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
       - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/test_resource_catalog_source.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
       - "implementation/connectors/microsoft_graph/test_resource_connector.py"
       - "implementation/kernel/execution_providers/contracts.py"
@@ -27,11 +30,14 @@ on:
   pull_request:
     paths:
       - "implementation/connectors/core/resource_catalog.py"
+      - "implementation/connectors/core/text_http_transport.py"
       - "implementation/connectors/microsoft_graph/platform.py"
       - "implementation/connectors/microsoft_graph/resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/resource_catalog_source.py"
       - "implementation/connectors/microsoft_graph/resource_read.py"
       - "implementation/connectors/microsoft_graph/resource_connector.py"
       - "implementation/connectors/microsoft_graph/test_resource_metadata.py"
+      - "implementation/connectors/microsoft_graph/test_resource_catalog_source.py"
       - "implementation/connectors/microsoft_graph/test_resource_read.py"
       - "implementation/connectors/microsoft_graph/test_resource_connector.py"
       - "implementation/kernel/execution_providers/contracts.py"
@@ -67,8 +73,10 @@ jobs:
         run: >-
           python -m compileall -q
           implementation/connectors/core/resource_catalog.py
+          implementation/connectors/core/text_http_transport.py
           implementation/connectors/microsoft_graph/platform.py
           implementation/connectors/microsoft_graph/resource_metadata.py
+          implementation/connectors/microsoft_graph/resource_catalog_source.py
           implementation/connectors/microsoft_graph/resource_read.py
           implementation/connectors/microsoft_graph/resource_connector.py
           implementation/kernel/execution_providers/contracts.py
@@ -83,6 +91,7 @@ jobs:
         run: >-
           python -m pytest
           implementation/connectors/microsoft_graph/test_resource_metadata.py
+          implementation/connectors/microsoft_graph/test_resource_catalog_source.py
           implementation/connectors/microsoft_graph/test_resource_read.py
           implementation/connectors/microsoft_graph/test_resource_connector.py
           -q
