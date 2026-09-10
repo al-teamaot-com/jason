@@ -103,7 +103,22 @@ class _Transport:
                         "attributes": {"name": "Hitt Electric"},
                     }
                 ],
-                "meta": {"current-page": 1, "total-pages": 1},
+                "meta": {
+                    "current-page": 1,
+                    "total-pages": 1,
+                    "total-count": 1,
+                    "permitted-values": {
+                        "organization-type": ["Customer", "Prospect", "Vendor"]
+                    },
+                    "available-filters": {
+                        "name": "filter[name]",
+                        "status": "filter[organization_status_id]",
+                    },
+                },
+                "links": {
+                    "self": "https://api.itglue.com/organizations?filter[name]=Hitt%20Electric",
+                    "first": "https://api.itglue.com/organizations?page[number]=1",
+                },
             }
         if url == "https://example.autotask.invalid/atservicesrest/V1.0/Tickets/query":
             return {
@@ -253,6 +268,14 @@ def test_it_glue_read_runs_chatgpt_ready_canonical_path_through_central_orchestr
     assert result.output["provider"] == IT_GLUE_PROVIDER
     assert result.output["provider_capability"] == "it_glue.entity.query"
     assert result.output["data"]["data"][0]["attributes"]["name"] == "Hitt Electric"
+    assert result.output["data"]["meta"] == {
+        "current-page": 1,
+        "total-pages": 1,
+        "total-count": 1,
+    }
+    assert "links" not in result.output["data"]
+    assert "permitted-values" not in result.output["data"]["meta"]
+    assert "available-filters" not in result.output["data"]["meta"]
     assert secrets.resolutions == [
         (
             "it_glue.readonly",
