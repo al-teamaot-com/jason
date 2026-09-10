@@ -6,12 +6,14 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/provider_read_activation.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_read_activation.py'
+      - 'infrastructure/jason-runtime/compose.yaml'
       - '.github/workflows/provider-read-runtime-activation.yml'
   push:
     paths:
       - 'implementation/runtime_service/src/jason_runtime/provider_read_activation.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_provider_read_activation.py'
+      - 'infrastructure/jason-runtime/compose.yaml'
       - '.github/workflows/provider-read-runtime-activation.yml'
 
 jobs:
@@ -38,6 +40,26 @@ jobs:
           python -m pytest -q \
             implementation/runtime_service/tests/test_provider_read_activation.py \
             implementation/runtime_service/tests/test_provider_reads.py
+      - name: Prove activation profile crosses the Compose boundary
+        run: |
+          grep -F 'JASON_PROVIDER_READ_ACTIVATION_PROFILE: ${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}' infrastructure/jason-runtime/compose.yaml
+          export JASON_PROVIDER_READ_ACTIVATION_PROFILE=itglue-autotask-initial-read-v1
+          export JASON_OLLAMA_MODEL=ci-local-model
+          export JASON_OPENBAO_ROLE_ID_HOST_PATH=/tmp/base-role-id
+          export JASON_OPENBAO_SECRET_ID_HOST_PATH=/tmp/base-secret-id
+          export JASON_SES_OPENBAO_ROLE_ID_HOST_PATH=/tmp/ses-role-id
+          export JASON_SES_OPENBAO_SECRET_ID_HOST_PATH=/tmp/ses-secret-id
+          export JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH=/tmp/microsoft-role-id
+          export JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH=/tmp/microsoft-secret-id
+          export JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH=/tmp/openai-role-id
+          export JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH=/tmp/openai-secret-id
+          export JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH=/tmp/itglue-role-id
+          export JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH=/tmp/itglue-secret-id
+          export JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH=/tmp/autotask-role-id
+          export JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH=/tmp/autotask-secret-id
+          docker compose -f infrastructure/jason-runtime/compose.yaml config > /tmp/jason-runtime-rendered.yaml
+          grep -F 'JASON_PROVIDER_READ_ACTIVATION_PROFILE: itglue-autotask-initial-read-v1' /tmp/jason-runtime-rendered.yaml
+          echo 'PROVIDER_READ_ACTIVATION_COMPOSE_BOUNDARY=PASS'
       - name: Prove no provider-specific MCP tools were introduced
         run: |
           python - <<'PY'
