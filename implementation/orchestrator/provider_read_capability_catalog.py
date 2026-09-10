@@ -36,6 +36,8 @@ DOCUMENTATION_LOCATION_SEARCH = "documentation.location.search"
 DOCUMENTATION_LOCATION_READ = "documentation.location.read"
 DOCUMENTATION_CONFIGURATION_SEARCH = "documentation.configuration.search"
 DOCUMENTATION_CONFIGURATION_READ = "documentation.configuration.read"
+DOCUMENTATION_DOCUMENT_SEARCH = "documentation.document.search"
+DOCUMENTATION_DOCUMENT_READ = "documentation.document.read"
 
 SERVICE_COMPANY_SEARCH = "service.company.search"
 SERVICE_COMPANY_READ = "service.company.read"
@@ -59,6 +61,8 @@ IT_GLUE_CAPABILITIES = frozenset(
         DOCUMENTATION_LOCATION_READ,
         DOCUMENTATION_CONFIGURATION_SEARCH,
         DOCUMENTATION_CONFIGURATION_READ,
+        DOCUMENTATION_DOCUMENT_SEARCH,
+        DOCUMENTATION_DOCUMENT_READ,
     }
 )
 
@@ -278,6 +282,36 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints=(
                 "configuration,device,asset,serial number,model,manufacturer,"
                 "operating system,organization"
+            ),
+            authoritative_change_sources=itg,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_DOCUMENT_SEARCH,
+            display_name="Search Documented Policies and Procedures",
+            business_purpose="Search authorized IT Glue documents, policies, standards, and SOPs.",
+            resource_types="documentation_document,document,policy,procedure,sop",
+            operation="search",
+            selector_keys=(
+                "organization_id,name,resource_id,filters,page_number,page_size"
+            ),
+            fact_hints=(
+                "document,documents,policy,policies,procedure,procedures,sop,standard,"
+                "guideline,documentation,title,organization"
+            ),
+            authoritative_change_sources=itg,
+            collection_fact="documents",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_DOCUMENT_READ,
+            display_name="Read Documented Policy or Procedure",
+            business_purpose="Read one authorized IT Glue document by durable identifier.",
+            resource_types="documentation_document,document,policy,procedure,sop",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints=(
+                "document,policy,procedure,sop,standard,guideline,documentation,content,title"
             ),
             authoritative_change_sources=itg,
         ),
