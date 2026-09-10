@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any, Mapping, Protocol
 
 from kernel.resolution import (
@@ -29,10 +30,38 @@ class AuthorityContextEnforcer(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class InvocationTelemetry:
+    """Bounded accountability metadata for one capability invocation."""
+
+    provider_resources: tuple[str, ...] = ()
+    mapping_references: tuple[str, ...] = ()
+    evidence_references: tuple[str, ...] = ()
+    hosted_model_used: bool = False
+    hosted_model_name: str | None = None
+    hosted_model_input_tokens: int = 0
+    hosted_model_output_tokens: int = 0
+    hosted_model_cost_usd: str = "0"
+
+    def __post_init__(self) -> None:
+        if self.hosted_model_input_tokens < 0 or self.hosted_model_output_tokens < 0:
+            raise ValueError("hosted model token counts must not be negative")
+        if not self.hosted_model_cost_usd.strip():
+            raise ValueError("hosted_model_cost_usd must be non-empty")
+        if not self.hosted_model_used:
+            if self.hosted_model_name is not None:
+                raise ValueError("hosted_model_name requires hosted_model_used")
+            if self.hosted_model_input_tokens or self.hosted_model_output_tokens:
+                raise ValueError("hosted model tokens require hosted_model_used")
+            if self.hosted_model_cost_usd not in {"0", "0.0", "0.00", "0.000000"}:
+                raise ValueError("hosted model cost must be zero when no hosted model was used")
+
+
+@dataclass(frozen=True, slots=True)
 class InvocationResult:
     output: Mapping[str, Any] = field(default_factory=dict)
     artifact_references: tuple[ArtifactReference, ...] = ()
     attempts: int = 1
+    telemetry: InvocationTelemetry | None = None
 
 
 class CapabilityInvoker(Protocol):
@@ -160,9 +189,11 @@ class CentralOrchestrator:
             details={"provider_id": resolution.selected_provider_id},
         )
 
+        invocation_started = monotonic()
         try:
             invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
+            duration_ms = round((monotonic() - invocation_started) * 1000, 3)
             safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
             result = OrchestrationResult(
                 execution_id=request.execution_id,
@@ -181,10 +212,16 @@ class CentralOrchestrator:
                 "orchestration.capability.failed",
                 request,
                 stage=ExecutionStage.FAILED,
-                details={"error_code": result.error_code},
+                details={
+                    "error_code": result.error_code,
+                    "provider_id": resolution.selected_provider_id,
+                    "duration_ms": duration_ms,
+                    "status": result.status.value,
+                },
             )
             return result
 
+        duration_ms = round((monotonic() - invocation_started) * 1000, 3)
         result = OrchestrationResult(
             execution_id=request.execution_id,
             correlation_id=request.correlation_id,
@@ -198,14 +235,36 @@ class CentralOrchestrator:
             attempts=invocation.attempts,
             provider_id=resolution.selected_provider_id,
         )
+        details: dict[str, Any] = {
+            "attempts": invocation.attempts,
+            "artifact_reference_count": len(result.artifact_references),
+            "provider_id": resolution.selected_provider_id,
+            "provider_capability": invocation.output.get("provider_capability"),
+            "duration_ms": duration_ms,
+            "status": result.status.value,
+        }
+        telemetry = invocation.telemetry
+        if telemetry is not None:
+            details.update(
+                {
+                    "provider_resources": telemetry.provider_resources,
+                    "mapping_references": telemetry.mapping_references,
+                    "evidence_references": telemetry.evidence_references,
+                    "hosted_model_used": telemetry.hosted_model_used,
+                    "hosted_model_name": telemetry.hosted_model_name,
+                    "hosted_model_input_tokens": telemetry.hosted_model_input_tokens,
+                    "hosted_model_output_tokens": telemetry.hosted_model_output_tokens,
+                    "hosted_model_cost_usd": telemetry.hosted_model_cost_usd,
+                }
+            )
+        else:
+            details["invocation_telemetry"] = "not_reported"
+
         self._record(
             "orchestration.capability.completed",
             request,
             stage=ExecutionStage.COMPLETED,
-            details={
-                "attempts": invocation.attempts,
-                "artifact_reference_count": len(result.artifact_references),
-            },
+            details=details,
         )
         return result
 
@@ -258,6 +317,7 @@ class CentralOrchestrator:
             "correlation_id": request.correlation_id,
             "principal_id": request.principal_id,
             "organization_id": request.organization_id,
+            "client_id": request.client_id,
             "capability_name": request.capability_name,
             "stage": stage.value,
             "requester_kind": request.requester_kind,
