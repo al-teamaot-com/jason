@@ -17,20 +17,6 @@ CSDL = """<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/
 
 
 @dataclass
-class Token:
-    access_token: str = "test-token"
-
-
-@dataclass
-class Tokens:
-    calls: list[tuple[str, str]] = field(default_factory=list)
-
-    def acquire_for_client(self, *, client_id: str, correlation_id: str):
-        self.calls.append((client_id, correlation_id))
-        return Token()
-
-
-@dataclass
 class TextTransport:
     calls: list[dict] = field(default_factory=list)
 
@@ -47,69 +33,54 @@ class Clock:
         return self.now
 
 
-def test_catalog_source_discovers_unprogrammed_resource_from_provider_metadata():
-    tokens = Tokens()
+def test_catalog_source_discovers_unprogrammed_resource_without_tenant_data_access():
     transport = TextTransport()
-    clock = Clock()
-    source = MicrosoftGraphMetadataCatalogSource(
-        tokens=tokens,
-        transport=transport,
-        cache_ttl_seconds=60,
-        clock=clock,
-    )
+    source = MicrosoftGraphMetadataCatalogSource(transport=transport)
 
-    catalog = source.catalog_for_client(client_id="client-1", correlation_id="corr-1")
+    catalog = source.catalog(correlation_id="corr-1")
 
     resource = catalog.get("microsoft_graph:newProviderObjects")
     assert resource.resource_type == "newProviderObject"
     assert resource.field_names == ("id", "label")
     assert transport.calls[0]["url"] == "https://graph.microsoft.com/v1.0/$metadata"
     assert transport.calls[0]["method"] == "GET"
-    assert transport.calls[0]["headers"]["Accept"] == "application/xml"
-    assert transport.calls[0]["headers"]["Authorization"].startswith("Bearer ")
-    assert tokens.calls == [("client-1", "corr-1")]
+    assert transport.calls[0]["headers"] == {"Accept": "application/xml"}
+    assert "Authorization" not in transport.calls[0]["headers"]
 
 
-def test_catalog_source_cache_is_client_scoped_and_bounded_by_ttl():
-    tokens = Tokens()
+def test_provider_global_metadata_cache_is_shared_and_ttl_bounded():
     transport = TextTransport()
     clock = Clock()
     source = MicrosoftGraphMetadataCatalogSource(
-        tokens=tokens,
         transport=transport,
         cache_ttl_seconds=60,
         clock=clock,
     )
 
-    first = source.catalog_for_client(client_id="client-1", correlation_id="corr-1")
+    first = source.catalog(correlation_id="corr-1")
     second = source.catalog_for_client(client_id="client-1", correlation_id="corr-2")
+    third = source.provider_catalog(correlation_id="corr-3")
     assert first is second
-    assert len(tokens.calls) == 1
+    assert third.provider_id == "microsoft_graph"
     assert len(transport.calls) == 1
 
-    source.catalog_for_client(client_id="client-2", correlation_id="corr-3")
-    assert len(tokens.calls) == 2
+    clock.now += 61
+    source.catalog(correlation_id="corr-4")
     assert len(transport.calls) == 2
 
-    clock.now += 61
-    source.catalog_for_client(client_id="client-1", correlation_id="corr-4")
-    assert len(tokens.calls) == 3
-    assert len(transport.calls) == 3
 
-
-def test_catalog_source_requires_client_boundary_before_token_or_transport():
-    tokens = Tokens()
+def test_client_scoped_catalog_entry_point_still_requires_a_named_client():
     transport = TextTransport()
-    source = MicrosoftGraphMetadataCatalogSource(tokens=tokens, transport=transport)
+    source = MicrosoftGraphMetadataCatalogSource(transport=transport)
 
     with pytest.raises(ConnectorAuthorizationError, match="client boundary"):
         source.catalog_for_client(client_id="", correlation_id="corr-1")
 
-    assert tokens.calls == []
     assert transport.calls == []
 
 
 def test_catalog_source_does_not_accept_a_conversation_supplied_metadata_url():
-    source = MicrosoftGraphMetadataCatalogSource(tokens=Tokens(), transport=TextTransport())
+    source = MicrosoftGraphMetadataCatalogSource(transport=TextTransport())
+    assert source.provider_id == "microsoft_graph"
     assert not hasattr(source, "metadata_url")
     assert not hasattr(source, "url")
