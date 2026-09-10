@@ -332,6 +332,14 @@ def _write_evidence(destination: Path, evidence: Mapping[str, Any]) -> None:
     temporary.replace(destination)
 
 
+def _bounded_failure(result) -> str:
+    error_code = str(result.error_code or "CAPABILITY_INVOCATION_FAILED").strip()
+    reason_codes = ", ".join(str(item) for item in result.reason_codes if str(item).strip())
+    if reason_codes:
+        return f"{error_code} ({reason_codes})"
+    return error_code
+
+
 def run(args: argparse.Namespace) -> Path | None:
     destination, selector_argument, selector_value = validate_configuration(args)
     config = _PROVIDER_CONFIG[args.provider]
@@ -372,7 +380,7 @@ def run(args: argparse.Namespace) -> Path | None:
     if result.status is not OrchestrationStatus.SUCCEEDED:
         raise RuntimeError(
             "Central Orchestrator provider-read acceptance did not succeed: "
-            + ", ".join(result.reason_codes)
+            + _bounded_failure(result)
         )
     if result.provider_id != args.provider:
         raise RuntimeError("Resolved provider changed during acceptance.")
