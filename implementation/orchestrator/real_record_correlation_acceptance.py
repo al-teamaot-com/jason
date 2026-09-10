@@ -149,6 +149,7 @@ def collection_count(output: Mapping[str, Any], *, provider: str) -> int:
 
 
 def extract_autotask_ticket_links(record: Mapping[str, Any]) -> AutotaskTicketLinks:
+    record = _autotask_provider_object(record)
     ticket_id = _required_scalar(record, ("id",), "Autotask ticket id")
     company_id = _required_scalar(record, ("companyID", "companyId"), "Autotask company id")
     contact_id = _optional_scalar(record, ("contactID", "contactId"))
@@ -170,10 +171,12 @@ def extract_autotask_ticket_links(record: Mapping[str, Any]) -> AutotaskTicketLi
 
 
 def extract_autotask_company_name(record: Mapping[str, Any]) -> str:
+    record = _autotask_provider_object(record)
     return _required_scalar(record, ("companyName", "name"), "Autotask company name")
 
 
 def extract_autotask_endpoint_hint(record: Mapping[str, Any]) -> EndpointIdentityHint:
+    record = _autotask_provider_object(record)
     name = _required_scalar(
         record,
         ("referenceTitle", "referenceName", "name"),
@@ -258,6 +261,27 @@ def safe_stage(
         resource_hashes=tuple(sha256_text(item) for item in resource_ids if str(item).strip()),
         note=note,
     )
+
+
+def _autotask_provider_object(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Normalize Autotask exact-read wrappers without selecting among candidates.
+
+    Query responses use an ``items`` collection and are handled separately by
+    ``require_single_autotask_item``. Exact-ID GET responses may use a singular
+    ``item`` wrapper. Accept that wrapper only when it contains exactly one mapping;
+    malformed or conflicting collection envelopes remain fail-closed.
+    """
+
+    if "item" not in record:
+        return record
+    if "items" in record:
+        raise CorrelationAcceptanceError(
+            "Autotask record exposed conflicting singular and collection envelopes"
+        )
+    item = record.get("item")
+    if not isinstance(item, Mapping):
+        raise CorrelationAcceptanceError("Autotask singular item envelope is malformed")
+    return item
 
 
 def _required_scalar(
