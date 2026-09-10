@@ -29,12 +29,13 @@ class OpenWorldResourceDiscovery:
         client_id: str | None = None,
         correlation_id: str | None = None,
     ) -> OpenWorldResourceCatalog:
-        """Discover static governed resources plus eligible provider-published schemas.
+        """Discover static resources plus eligible provider-published schemas.
 
-        Provider catalog sources are consulted only when their execution provider is
-        currently eligible and an already-bound client/correlation scope is supplied.
-        This keeps structural discovery from inventing authority or probing a provider
-        before Jason knows which governed client boundary applies.
+        A catalog source may publish provider-global structural metadata (for example,
+        an API service metadata document) before a target client is known. Sources that
+        require tenant/client scope are consulted only after a non-empty client scope is
+        supplied. In both cases the execution provider and generic read capabilities
+        must already be eligible in Jason's governed registries.
         """
 
         available_providers = tuple(
@@ -61,32 +62,39 @@ class OpenWorldResourceDiscovery:
         )
 
         provider_catalogs = []
-        if client_id is not None and correlation_id is not None:
-            client = str(client_id).strip()
-            correlation = str(correlation_id).strip()
-            if client and correlation:
-                for source in self.provider_catalog_sources:
-                    provider_id = str(getattr(source, "provider_id", "")).strip()
-                    if not provider_id:
-                        raise OpenWorldSchemaError(
-                            "provider catalog source does not declare provider identity"
-                        )
-                    if provider_id not in available_provider_ids:
-                        continue
-                    if not self._generic_provider_resource_capabilities_are_eligible(
-                        provider_id
-                    ):
-                        continue
+        correlation = str(correlation_id or "").strip()
+        client = str(client_id or "").strip()
+        if correlation:
+            for source in self.provider_catalog_sources:
+                provider_id = str(getattr(source, "provider_id", "")).strip()
+                if not provider_id:
+                    raise OpenWorldSchemaError(
+                        "provider catalog source does not declare provider identity"
+                    )
+                if provider_id not in available_provider_ids:
+                    continue
+                if not self._generic_provider_resource_capabilities_are_eligible(
+                    provider_id
+                ):
+                    continue
 
-                    catalog = source.provider_catalog_for_client(
+                provider_global = getattr(source, "provider_catalog", None)
+                provider_scoped = getattr(source, "provider_catalog_for_client", None)
+                if callable(provider_global):
+                    catalog = provider_global(correlation_id=correlation)
+                elif client and callable(provider_scoped):
+                    catalog = provider_scoped(
                         client_id=client,
                         correlation_id=correlation,
                     )
-                    if catalog.provider_id != provider_id:
-                        raise OpenWorldSchemaError(
-                            "provider catalog identity does not match its registered source"
-                        )
-                    provider_catalogs.append(catalog)
+                else:
+                    continue
+
+                if catalog.provider_id != provider_id:
+                    raise OpenWorldSchemaError(
+                        "provider catalog identity does not match its registered source"
+                    )
+                provider_catalogs.append(catalog)
 
         if provider_catalogs:
             bridge = ProviderResourceOpenWorldBridge()
@@ -164,9 +172,6 @@ class OpenWorldResourceDiscovery:
             if not _truthy(metadata.get("read_only", "false")):
                 continue
             if _truthy(metadata.get("dynamic_schema_required", "false")):
-                # These are generic execution contracts. Their concrete resource
-                # inventory must come from a trusted provider catalog, not from the
-                # capability's placeholder resource type.
                 continue
 
             operation = str(metadata.get("operation", "")).strip().casefold()
@@ -221,11 +226,7 @@ class OpenWorldResourceDiscovery:
         self,
         metadata: Mapping[str, Any],
     ) -> tuple[DiscoveredField, ...]:
-        """Use structural schema already exposed by a capability.
-
-        ``canonical_facts`` remain optional semantic hints, never the information
-        boundary for provider-published resources.
-        """
+        """Use structural schema already exposed by a capability."""
 
         fields = []
         schema = metadata.get("resource_schema")
