@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from connectors.core.contracts import ConnectorTransportError
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.resolution import CapabilityResolutionResult, CapabilityResolutionStatus, ResolutionOutcome
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
@@ -10,6 +11,9 @@ from orchestrator.provider_read_capability_catalog import DOCUMENTATION_DOCUMENT
 from orchestrator.provider_read_information_authorizer import ProviderReadInformationAuthorizingInvoker
 from orchestrator.service import InvocationResult
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
+from orchestrator.teams_identity_binding_sqlite import (
+    DirectoryEnrichedMicrosoftIdentityBindingResolver,
+)
 from jason_runtime.provider_reads import runtime_principal_bindings_from_env
 
 
@@ -31,6 +35,24 @@ class _BindingResolver:
         if self.binding.jason_identity_id != jason_identity_id:
             return None
         return self.binding
+
+
+class _Directory:
+    def __init__(self, *, email: str | None = "al@example.com", error: Exception | None = None):
+        self.email = email
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    def resolve_email(
+        self,
+        *,
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+    ) -> str | None:
+        self.calls.append((microsoft_tenant_id, microsoft_object_id))
+        if self.error is not None:
+            raise self.error
+        return self.email
 
 
 def _request(*, email: str | None = None) -> OrchestrationRequest:
@@ -104,7 +126,7 @@ def _document_payload(email: str = "al@example.com") -> dict:
     }
 
 
-def _binding(email: str = "al@example.com") -> MicrosoftIdentityBinding:
+def _binding(email: str | None = "al@example.com") -> MicrosoftIdentityBinding:
     return MicrosoftIdentityBinding(
         microsoft_tenant_id="tenant-aot",
         microsoft_object_id="object-al",
@@ -154,6 +176,61 @@ def test_runtime_binding_store_fails_closed_on_ambiguous_active_bindings(monkeyp
         assert store.find_active_by_jason_identity(jason_identity_id="person-al") is None
     finally:
         store.close()
+
+
+def test_directory_enriched_binding_resolves_email_when_durable_row_has_none() -> None:
+    directory = _Directory(email="AL@Example.com")
+    resolver = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=_BindingResolver(_binding(None)),
+        directory=directory,
+    )
+
+    resolved = resolver.find_active_by_jason_identity(jason_identity_id="person-al")
+
+    assert resolved is not None
+    assert resolved.email_address == "al@example.com"
+    assert directory.calls == [("tenant-aot", "object-al")]
+
+
+def test_directory_enriched_binding_uses_live_email_instead_of_stale_stored_email() -> None:
+    resolver = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=_BindingResolver(_binding("old@example.com")),
+        directory=_Directory(email="current@example.com"),
+    )
+
+    resolved = resolver.find_active_by_jason_identity(jason_identity_id="person-al")
+
+    assert resolved is not None
+    assert resolved.email_address == "current@example.com"
+
+
+def test_directory_enriched_binding_fails_closed_when_directory_email_missing() -> None:
+    resolver = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=_BindingResolver(_binding(None)),
+        directory=_Directory(email=None),
+    )
+
+    assert resolver.find_active_by_jason_identity(jason_identity_id="person-al") is None
+
+
+def test_directory_enriched_binding_fails_closed_on_directory_transport_failure() -> None:
+    resolver = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=_BindingResolver(_binding(None)),
+        directory=_Directory(error=ConnectorTransportError("directory unavailable")),
+    )
+
+    assert resolver.find_active_by_jason_identity(jason_identity_id="person-al") is None
+
+
+def test_directory_enriched_binding_does_not_call_directory_without_unique_binding() -> None:
+    directory = _Directory()
+    resolver = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=_BindingResolver(None),
+        directory=directory,
+    )
+
+    assert resolver.find_active_by_jason_identity(jason_identity_id="person-al") is None
+    assert directory.calls == []
 
 
 def test_trusted_binding_overrides_untrusted_request_email_for_acl_decision() -> None:
