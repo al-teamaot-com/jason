@@ -5,7 +5,11 @@ from decimal import Decimal
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.resolution import CapabilityResolutionResult, CapabilityResolutionStatus, ResolutionOutcome
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
-from orchestrator.information_authorization import InformationAction, InformationRemediation
+from orchestrator.information_authorization import (
+    InformationAction,
+    InformationHandlingClass,
+    InformationRemediation,
+)
 from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
@@ -77,12 +81,15 @@ def _authorized_document_payload(email="al@example.com"):
                 "attributes": {
                     "name": "Network Notes",
                     "restricted": True,
-                    "sections": [{"attributes": {"content": "body"}}],
+                    "sections": [{"attributes": {"content": "Printer is configured by IP."}}],
                 },
                 "relationships": {
                     "authorized-users": {
                         "data": [{"id": "35", "type": "users"}],
-                    }
+                    },
+                    "organization": {
+                        "data": {"id": "42", "type": "organizations"},
+                    },
                 },
             },
             "included": [
@@ -106,8 +113,37 @@ def test_exact_it_glue_document_read_allows_matching_effective_authorized_user()
 
     envelope = invocation.information_authorization
     assert envelope is not None
+    assert envelope.handling_class is InformationHandlingClass.RELEASABLE
     assert all(envelope.require_allowed(action).allowed for action in InformationAction)
     assert "acl_mirrored" in envelope.require_allowed(InformationAction.RELEASE).authorization_basis
+    assert "included" not in invocation.output["data"]
+    relationships = invocation.output["data"]["data"]["relationships"]
+    assert "authorized-users" not in relationships
+    assert relationships == {
+        "organization": {"data": {"id": "42", "type": "organizations"}}
+    }
+
+
+def test_source_authorized_sensitive_document_is_derived_output_only() -> None:
+    output = _authorized_document_payload()
+    output["data"]["data"]["attributes"]["sections"] = [
+        {"attributes": {"content": "appliance password: example-sensitive-value"}}
+    ]
+
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output)
+    ).invoke(
+        request=_request(DOCUMENTATION_DOCUMENT_READ),
+        resolution=_resolution(DOCUMENTATION_DOCUMENT_READ),
+    )
+
+    envelope = invocation.information_authorization
+    assert envelope is not None
+    assert envelope.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
+    assert all(envelope.require_allowed(action).allowed for action in InformationAction)
+    basis = envelope.require_allowed(InformationAction.RELEASE).authorization_basis
+    assert "sensitivity:credential_assignment" in basis
+    assert "example-sensitive-value" not in repr(envelope)
 
 
 def test_it_glue_document_read_denies_when_principal_is_not_authorized() -> None:
