@@ -11,6 +11,7 @@ class OperationDefinition:
     path_arguments: tuple[str, ...] = ()
     parameter_mappings: Mapping[str, str] | None = None
     optional_parameters: frozenset[str] = frozenset()
+    static_parameters: Mapping[str, Any] | None = None
 
 
 APPROVED_IT_GLUE_ENTITIES: Mapping[str, str] = {
@@ -69,6 +70,9 @@ IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
         method="GET",
         path_template="/documents/{document_id}",
         path_arguments=("document_id",),
+        static_parameters={
+            "include": "authorized_users,user_resource_accesses,group_resource_accesses",
+        },
     ),
     "it_glue.relationships.list": OperationDefinition(
         method="GET",
@@ -133,7 +137,7 @@ def resolve_operation(
         **path_values
     )
 
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = dict(definition.static_parameters or {})
 
     for argument_name, provider_name in (
         definition.parameter_mappings or {}
