@@ -4,7 +4,7 @@
 
 Jason provider credentials are execution credentials, not requester disclosure authority. A provider read may therefore be technically fetchable while still being unavailable for use, processing, or release to the authenticated human.
 
-This workstream adds a fail-closed information-authorization boundary between provider execution and evidence release. Production MCP remains intentionally stopped while provider-specific requester authorization is completed and provider-backed acceptance is performed.
+This workstream adds a fail-closed information-authorization boundary between provider execution and evidence release. Production activation and provider-specific requester authorization are separate concerns; current production claims must be established from fresh operational evidence rather than this narrative record alone.
 
 ## Invariants
 
@@ -65,7 +65,20 @@ Initial canonical set:
 
 The provider operations corresponding to that set are `autotask.company.get`, `autotask.company.search`, `autotask.ticket.get`, and `autotask.ticket.search`. Contacts, configurations, ticket notes, schema description, and all other Autotask capabilities remain service-only until independently proven.
 
-This is still source-only authorization. Before production release, bounded provider-backed acceptance must prove that the AOT Autotask API-only security level permits resource impersonation for the selected query operations and that the trusted Jason principal maps uniquely to an active Autotask Resource. Jason will not change Autotask security-level configuration as part of acceptance.
+### Provider-backed acceptance result
+
+Bounded production diagnostics on 2026-09-11 established that the trusted requester maps uniquely to one active Autotask Resource and that Jason constructs the documented `ImpersonationResourceId` header path. A service-account control query succeeded without requester impersonation, while requester-impersonated Ticket and Company reads returned provider HTTP 500.
+
+Because the failure occurs across both Company and Ticket while the same underlying service-account query path is functional, the remaining blocker is classified as Autotask requester-impersonation configuration/enforcement rather than a ticket-specific lookup problem. No provider payload, resource identifier, or credential value is retained in this record.
+
+The approved least-privilege remediation is limited to:
+
+- allowing the authenticated requester's normal Autotask security level to be impersonated; and
+- allowing Jason's API-only integration security level to impersonate only the required Company/Ticket read/query operations.
+
+This approval does **not** authorize Add/Edit/Delete permissions, unrelated entities, provider writes, or a service-account disclosure fallback. If Autotask cannot express the required read/query-only impersonation scope without materially broader rights, stop before broadening authority and obtain a separate decision.
+
+After configuration is changed, acceptance must be repeated through the governed Jason path. Success requires the provider request to succeed under requester impersonation and the information-release boundary to remain authoritative. A successful service-account read alone is not acceptance.
 
 ## Sensitive evidence
 
@@ -83,22 +96,38 @@ At commit `92bdbd32a07153107f892dbbf0079f9755205048`, focused run `34599450212` 
 
 Broad repository workflows contain unrelated pre-existing Conversation Experience/runtime test failures. Those are not being repaired or masked by this security workstream.
 
-## Production state
+### MCP capability-discovery correction
 
-- Production MCP remains intentionally stopped.
-- No provider write was performed.
-- No authority grant was broadened.
-- No provider credential was changed.
-- No provider payload or secret was committed.
-- No production activation was performed from this security branch.
-- Provider-read PR #171 remains draft and unmerged.
-- Information-release PR #174 remains draft and unmerged.
+A separate model-facing discovery defect was identified during the Autotask investigation. `discover_capabilities` treated the requested operation as an exact registry metadata filter, so a conversational request interpreted as `ticket/read` could return zero exact matches even though active `service.ticket.search` was the supported exact-ticket lookup path.
+
+Source commit `b36d39ff044ea9eec4b371b0d0010ef00264ca9e` adds fail-closed same-resource alternative guidance without activating a new capability or bypassing execution authorization. Exact operation matching remains exact; alternatives are discovery guidance only.
+
+This discovery correction does not resolve the Autotask provider HTTP 500. The provider impersonation acceptance gate remains independent.
+
+## Production observation — 2026-09-11
+
+Fresh read-only host inspection observed the MCP service running as container `jason-mcp-pilot` from image `jason-mcp:information-auth-568a9b984ad7`. The container had restart policy `no` and no Docker healthcheck. Its Docker labels exposed a Compose project/service name but no Compose working-directory or Compose-file path. The separate `jason-runtime` container was healthy and Compose-managed from a deployment snapshot under `/home/al/jason-deployments/`.
+
+The protected primary worktree `/home/al/projects/jason` was dirty and is not an approved deployment source. An isolated worktree contained the MCP discovery source commit. Existing rollback MCP containers/images remained preserved.
+
+These are point-in-time observations, not permanent topology authority. Future deployment must re-derive current state. The operational reconstruction/recovery rules are documented in `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`.
+
+At this observation point:
+
+- provider writes: none;
+- direct provider disclosure fallback: none;
+- authority broadening by Jason source: none;
+- IT Glue restricted-document release: still fail closed;
+- Autotask Company/Ticket requester impersonation: blocked by provider HTTP 500 pending least-privilege Autotask security configuration;
+- MCP capability-discovery fix at `b36d39ff044ea9eec4b371b0d0010ef00264ca9e`: source-durable but not yet proven as the running production MCP image.
 
 ## Remaining release gates
 
 Jason needs a positive requester-authorization basis for every provider/resource class before those results may be released.
 
-For the initial Autotask Company/Ticket set, the source architecture now has a documented provider-enforced impersonation basis, but production acceptance is still required. For IT Glue restricted documents, no positively verified per-document requester-authorization read source has been established.
+For the initial Autotask Company/Ticket set, the source architecture now has a documented provider-enforced impersonation basis, but production acceptance still requires successful requester-impersonated reads after the approved least-privilege Autotask configuration is applied.
+
+For IT Glue restricted documents, no positively verified per-document requester-authorization read source has been established.
 
 An IT Glue release path therefore still requires either a documented provider-enforced/delegated authorization mechanism that can be proven against the actual requester, or an explicitly governed Jason-managed authorization model designated as authoritative disclosure policy with scope, ownership, synchronization, exceptions, audit, and fail-closed behavior defined before activation.
 
