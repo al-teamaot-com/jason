@@ -20,6 +20,7 @@ from .contracts import (
     OrchestrationStatus,
 )
 from .information_authorization import (
+    FailClosedInformationReleaseAuthorizer,
     InformationAuthorizationEnvelope,
     InformationReleaseAuthorizer,
     InformationRemediation,
@@ -83,9 +84,9 @@ class CentralOrchestrator:
     """Coordinate governed capability execution without provider logic.
 
     Information release authorization is deliberately separate from capability and
-    provider execution authorization. When enforcement is enabled, provider output
-    cannot cross the orchestration boundary unless an explicit information envelope
-    authorizes FETCH, USE, PROCESS, and RELEASE for that evidence.
+    provider execution authorization. Any invocation that carries an information
+    authorization envelope is automatically release-gated. Callers may also require
+    the gate for every invocation; in that mode a missing envelope fails closed.
     """
 
     def __init__(
@@ -104,16 +105,14 @@ class CentralOrchestrator:
         self._audit = audit
         self._authority_context = authority_context
         self._require_authority_context = require_authority_context
-        self._information_release = information_release
+        self._information_release = (
+            information_release or FailClosedInformationReleaseAuthorizer()
+        )
         self._require_information_release_authorization = (
             require_information_release_authorization
         )
         if require_authority_context and authority_context is None:
             raise ValueError("authority_context enforcer is required when enforcement is enabled")
-        if require_information_release_authorization and information_release is None:
-            raise ValueError(
-                "information_release authorizer is required when release enforcement is enabled"
-            )
 
     def execute(self, request: OrchestrationRequest) -> OrchestrationResult:
         self._record("orchestration.request.received", request, stage=ExecutionStage.RECEIVED)
@@ -245,8 +244,11 @@ class CentralOrchestrator:
 
         duration_ms = round((monotonic() - invocation_started) * 1000, 3)
         release_output = dict(invocation.output)
-        if self._require_information_release_authorization:
-            assert self._information_release is not None
+        release_gate_applies = (
+            self._require_information_release_authorization
+            or invocation.information_authorization is not None
+        )
+        if release_gate_applies:
             release = self._information_release.authorize_release(
                 request=request,
                 resolution=resolution,
@@ -309,6 +311,7 @@ class CentralOrchestrator:
             "provider_capability": invocation.output.get("provider_capability"),
             "duration_ms": duration_ms,
             "status": result.status.value,
+            "information_release_gate_applied": release_gate_applies,
         }
         telemetry = invocation.telemetry
         if telemetry is not None:
