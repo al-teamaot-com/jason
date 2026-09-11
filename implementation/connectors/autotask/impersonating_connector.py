@@ -43,9 +43,9 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
     `ImpersonationResourceId` header on the provider read.
 
     The mapping lookup is internal evidence used only to establish the provider
-    enforcement identity. Zero or multiple matching resources fail closed before the
-    requested provider read is sent. Caller-provided arguments can never choose the
-    impersonated resource.
+    enforcement identity. Missing or ambiguous trusted bindings, and zero or multiple
+    matching Autotask resources, fail closed before the requested provider read is
+    sent. Caller-provided arguments can never choose the impersonated resource.
     """
 
     def __init__(self, *, bindings: TrustedPrincipalBindingResolver | None = None, **kwargs) -> None:
@@ -134,7 +134,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
 
         email = self._trusted_email(request)
         if email is None:
-            return prepared
+            raise PermissionError("AUTOTASK_TRUSTED_PRINCIPAL_BINDING_REQUIRED")
 
         resource_id = self._resolve_impersonation_resource_id(
             prepared=prepared,
