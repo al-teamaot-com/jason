@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.resolution import CapabilityResolutionResult, CapabilityResolutionStatus, ResolutionOutcome
 from orchestrator.autotask_information_authorizer import AutotaskImpersonationInformationAuthorizer
@@ -13,7 +15,18 @@ from orchestrator.information_authorization import (
     InformationHandlingClass,
     InformationRemediation,
 )
-from orchestrator.provider_read_capability_catalog import SERVICE_COMPANY_READ, SERVICE_TICKET_SEARCH
+from orchestrator.provider_read_capability_catalog import (
+    SERVICE_COMPANY_READ,
+    SERVICE_COMPANY_SEARCH,
+    SERVICE_CONFIGURATION_READ,
+    SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_CONTACT_READ,
+    SERVICE_CONTACT_SEARCH,
+    SERVICE_ENTITY_DESCRIBE,
+    SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_READ,
+    SERVICE_TICKET_SEARCH,
+)
 from orchestrator.service import InvocationResult
 
 
@@ -108,13 +121,29 @@ def _resolution(capability: str, provider: str = "autotask") -> CapabilityResolu
     )
 
 
-def test_supported_autotask_read_is_releasable_after_trusted_impersonated_execution() -> None:
+REQUESTER_ENFORCED_AUTOTASK_READS = (
+    SERVICE_COMPANY_READ,
+    SERVICE_COMPANY_SEARCH,
+    SERVICE_CONTACT_READ,
+    SERVICE_CONTACT_SEARCH,
+    SERVICE_CONFIGURATION_READ,
+    SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_TICKET_READ,
+    SERVICE_TICKET_SEARCH,
+    SERVICE_TICKET_NOTES_SEARCH,
+)
+
+
+@pytest.mark.parametrize("capability", REQUESTER_ENFORCED_AUTOTASK_READS)
+def test_supported_autotask_read_is_releasable_after_trusted_impersonated_execution(
+    capability: str,
+) -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
         delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 2}}}),
         bindings=_Bindings(),
     ).invoke(
-        request=_request(SERVICE_COMPANY_READ),
-        resolution=_resolution(SERVICE_COMPANY_READ),
+        request=_request(capability),
+        resolution=_resolution(capability),
     )
 
     envelope = invocation.information_authorization
@@ -139,14 +168,27 @@ def test_missing_trusted_binding_preserves_service_only_denial() -> None:
     assert release.remediation is InformationRemediation.REQUEST_ACCESS
 
 
-def test_unapproved_autotask_canonical_capability_stays_service_only() -> None:
-    capability = "service.contact.read"
+def test_non_impersonated_autotask_capability_stays_service_only() -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
-        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"name": "Ticket"}}}),
         bindings=_Bindings(),
     ).invoke(
-        request=_request(capability),
-        resolution=_resolution(capability),
+        request=_request(SERVICE_ENTITY_DESCRIBE),
+        resolution=_resolution(SERVICE_ENTITY_DESCRIBE),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is False
+    assert release.remediation is InformationRemediation.REQUEST_ACCESS
+
+
+def test_non_autotask_provider_never_receives_impersonated_release_upgrade() -> None:
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "other", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(SERVICE_CONTACT_READ),
+        resolution=_resolution(SERVICE_CONTACT_READ, provider="other"),
     )
 
     assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
