@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
+from connectors.autotask.impersonating_connector import (
+    AUTOTASK_AUTH_MODE_IMPERSONATED,
+    AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+)
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.resolution import CapabilityResolutionResult, CapabilityResolutionStatus, ResolutionOutcome
 from orchestrator.autotask_information_authorizer import AutotaskImpersonationInformationAuthorizer
@@ -13,7 +20,11 @@ from orchestrator.information_authorization import (
     InformationHandlingClass,
     InformationRemediation,
 )
-from orchestrator.provider_read_capability_catalog import SERVICE_COMPANY_READ, SERVICE_TICKET_SEARCH
+from orchestrator.provider_read_capability_catalog import (
+    SERVICE_COMPANY_READ,
+    SERVICE_CONTACT_READ,
+    SERVICE_TICKET_SEARCH,
+)
 from orchestrator.service import InvocationResult
 
 
@@ -68,7 +79,22 @@ class _Bindings:
         return self.value if jason_identity_id == "person-al" else None
 
 
-def _request(capability: str) -> OrchestrationRequest:
+@pytest.fixture(autouse=True)
+def _jason_managed_mode(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+
+
+def _request(
+    capability: str,
+    *,
+    authority_allowed: bool = True,
+    authority_context_id: str | None = "ctx-autotask-info",
+    permission_mode: str = "observe",
+    requester_kind: str = "human",
+) -> OrchestrationRequest:
     return OrchestrationRequest(
         execution_id="exec-autotask-info",
         correlation_id="corr-autotask-info",
@@ -79,7 +105,7 @@ def _request(capability: str) -> OrchestrationRequest:
         capability_version="1.0",
         requested_mode="deterministic",
         orchestration_mode=OrchestrationMode.EXECUTE,
-        authority_allowed=True,
+        authority_allowed=authority_allowed,
         approval_present=False,
         risk="low",
         data_handling=DataHandlingPolicy(
@@ -90,7 +116,9 @@ def _request(capability: str) -> OrchestrationRequest:
             maximum_estimated_cost=Decimal("0"),
             maximum_attempts=1,
         ),
-        authority_context_id="ctx-autotask-info",
+        requester_kind=requester_kind,
+        permission_mode=permission_mode,
+        authority_context_id=authority_context_id,
     )
 
 
@@ -108,7 +136,7 @@ def _resolution(capability: str, provider: str = "autotask") -> CapabilityResolu
     )
 
 
-def test_supported_autotask_read_is_releasable_after_trusted_impersonated_execution() -> None:
+def test_jason_managed_autotask_read_is_releasable_after_trusted_authority_context() -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
         delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 2}}}),
         bindings=_Bindings(),
@@ -121,8 +149,25 @@ def test_supported_autotask_read_is_releasable_after_trusted_impersonated_execut
     assert envelope is not None
     assert envelope.handling_class is InformationHandlingClass.RELEASABLE
     assert all(envelope.require_allowed(action).allowed for action in InformationAction)
-    assert "impersonated" in envelope.require_allowed(InformationAction.RELEASE).authorization_basis
-    assert "provider_enforced_resource_security" in envelope.require_allowed(InformationAction.RELEASE).authorization_basis
+    release = envelope.require_allowed(InformationAction.RELEASE)
+    assert "jason_managed" in release.authorization_basis
+    assert "jkd001_authority_context" in release.authorization_basis
+    assert "central_orchestrator_governed_read" in release.authorization_basis
+    assert "provider_enforced_resource_security" not in release.authorization_basis
+
+
+def test_jason_managed_mode_uses_registered_autotask_catalog_not_resource_allowlist() -> None:
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(SERVICE_CONTACT_READ),
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is True
+    assert "jason_managed" in release.authorization_basis
 
 
 def test_missing_trusted_binding_preserves_service_only_denial() -> None:
@@ -139,20 +184,30 @@ def test_missing_trusted_binding_preserves_service_only_denial() -> None:
     assert release.remediation is InformationRemediation.REQUEST_ACCESS
 
 
-def test_unapproved_autotask_canonical_capability_stays_service_only() -> None:
-    capability = "service.contact.read"
+@pytest.mark.parametrize(
+    "request",
+    [
+        _request(SERVICE_TICKET_SEARCH, authority_allowed=False),
+        _request(SERVICE_TICKET_SEARCH, authority_context_id=None),
+        _request(SERVICE_TICKET_SEARCH, permission_mode="execute"),
+        _request(SERVICE_TICKET_SEARCH, requester_kind="service"),
+    ],
+)
+def test_jason_managed_mode_fails_closed_without_positive_requester_authority(
+    request: OrchestrationRequest,
+) -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
-        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
         bindings=_Bindings(),
     ).invoke(
-        request=_request(capability),
-        resolution=_resolution(capability),
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_SEARCH),
     )
 
     assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
 
 
-def test_sensitive_impersonated_output_is_derived_only() -> None:
+def test_sensitive_jason_managed_output_is_derived_only() -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
         delegate=_Delegate(
             {
@@ -167,3 +222,42 @@ def test_sensitive_impersonated_output_is_derived_only() -> None:
     )
 
     assert invocation.information_authorization.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
+
+
+def test_explicit_impersonated_mode_preserves_provider_enforced_release_basis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_IMPERSONATED,
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 2}}}),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(SERVICE_COMPANY_READ),
+        resolution=_resolution(SERVICE_COMPANY_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is True
+    assert "impersonated" in release.authorization_basis
+    assert "provider_enforced_resource_security" in release.authorization_basis
+
+
+def test_explicit_impersonated_mode_keeps_other_autotask_reads_service_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_IMPERSONATED,
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(SERVICE_CONTACT_READ),
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+
+    assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
