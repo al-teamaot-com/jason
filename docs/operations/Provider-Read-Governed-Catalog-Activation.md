@@ -37,43 +37,64 @@ Legacy profiles remain available only for rollback compatibility:
 
 Those profiles contain historical per-capability subsets. They are not the desired production architecture.
 
-The governed-catalog profile removes the second per-resource activation allowlist. All currently registered IT Glue and Autotask governed read capabilities become discoverable when the profile is selected, subject to normal identity, client/tenant scope, provider enforcement, Central Orchestrator policy, and information-release authorization.
+The governed-catalog profile removes the second per-resource activation allowlist. All currently registered IT Glue and Autotask governed read capabilities become discoverable when the profile is selected, subject to normal identity, client/tenant scope, Central Orchestrator policy, provider boundaries, and information-release authorization.
 
 Adding a new read capability to an already trusted provider's registered catalog therefore does not require another production activation list entry. Adding a new provider still requires an explicit provider-trust decision.
 
+## Temporary Autotask requester authorization mode
+
+Autotask provider-native requester impersonation is currently blocked by an HTTP 500 after the requester identity mapping succeeds. To restore read availability without broadening Autotask permissions, Jason temporarily supports requester authorization mode:
+
+`JASON_AUTOTASK_REQUESTER_AUTH_MODE=jason_managed`
+
+This temporary mode means:
+
+- the dedicated Autotask API-only service identity performs the provider read;
+- Jason does **not** add `ImpersonationResourceId` to that request;
+- service-account fetch authority does not automatically become requester release authority;
+- release is allowed only for a registered Autotask read capability after Jason has a positive authenticated human binding, an allowed JKD-001 authority decision, a validated authority context, observe-only permission mode, and Central-Orchestrator-governed execution;
+- sensitive evidence remains subject to the existing information-sensitivity and derived-output controls;
+- provider writes remain disabled.
+
+The legacy provider-native mode remains available as:
+
+`JASON_AUTOTASK_REQUESTER_AUTH_MODE=impersonated`
+
+Unknown requester-authorization mode values fail closed.
+
+## Priority long-term fix
+
+**Priority:** replace the temporary Jason-managed Autotask requester-authorization mode with a durable provider-native/delegated authorization design. This work is tracked in GitHub issue #175.
+
+The long-term work must determine and correct the Autotask impersonation HTTP 500 root cause, including the provider security-level/impersonation contract and requester identity-alias handling. Microsoft tenant/object identity should remain the stable authenticated identity; mutable email aliases should be mapping data rather than the root authority. The final design should restore provider-enforced requester authorization where practical without requiring broad Add/Edit/Delete permissions and without making matching ChatGPT, Microsoft, and Autotask email strings a prerequisite.
+
+Until that work is complete, `jason_managed` is a compatibility mode, not the intended permanent architecture.
+
 ## What this does not change
 
-This profile does **not**:
+This profile and temporary requester mode do **not**:
 
 - enable provider writes;
 - enable Add/Edit/Delete operations;
 - bypass Microsoft/Jason identity binding;
-- bypass Autotask requester impersonation requirements;
+- bypass JKD-001 requester authority;
+- bypass client/tenant scope;
 - bypass IT Glue or other source-native authorization;
 - bypass information-release authorization;
 - permit direct MCP-to-provider execution;
 - change Central Orchestrator as the execution authority;
 - authorize a new provider merely because connector code exists.
 
-## Autotask current blocker
-
-As of 2026-09-11, Autotask service-account reads succeed but requester-impersonated Company/Ticket reads return HTTP 500. The evidence isolates the failure to the requester impersonation path rather than MCP capability discovery or provider credentials.
-
-The approved least-privilege remediation is to configure Autotask so that:
-
-1. the normal requester Resource security level allows that resource to be impersonated; and
-2. the Jason API-only Resource security level permits impersonation for the required read/query entity operations.
-
-Do not grant Add/Edit/Delete solely to make read access work. If Autotask's UI forces broader authority than the approved read/query scope, stop and obtain a new explicit approval instead of broadening permissions.
-
 ## Production acceptance
 
-Before selecting `itglue-autotask-governed-catalog-v3` in production:
+Before selecting `itglue-autotask-governed-catalog-v3` and the temporary Jason-managed Autotask requester mode in production:
 
 - focused provider-read activation tests must pass;
 - capability discovery tests must pass;
 - governed provider-read tests must pass;
 - information-authorization boundary tests must pass;
+- Autotask requester-mode tests must prove no impersonation header/resource lookup occurs in `jason_managed` mode;
+- tests must prove release remains denied when trusted binding, authority allowance, validated authority context, human requester, or observe permission is absent;
 - the current production image/container must remain available for rollback;
 - production deployment must preserve all existing identity, OpenBao, network, and secret boundaries.
 
@@ -85,7 +106,8 @@ After deployment, verify:
 - `write_tools_enabled=false`;
 - execution remains Central-Orchestrator governed;
 - an exact ticket request can resolve to the appropriate ticket search/read path without requiring a new hard-coded conversational capability;
-- provider-native authorization still fails closed when requester authority cannot be proven.
+- Autotask reads no longer fail because of requester impersonation in `jason_managed` mode;
+- requester release still fails closed when Jason authority cannot be proven.
 
 ## Design intent
 
