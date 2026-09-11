@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
 from orchestrator.provider_read_information_authorizer import (
     ProviderReadInformationAuthorizingInvoker,
+    TrustedPrincipalBindingResolver,
 )
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
@@ -45,6 +47,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
+from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
 
 from .provider_read_activation import apply_provider_read_activation_from_env
 
@@ -79,6 +82,7 @@ _RUNTIME_PROVIDER_CREDENTIALS = {
     IT_GLUE_PROVIDER: _RUNTIME_OPENBAO_ROOT / "it-glue",
     AUTOTASK_PROVIDER: _RUNTIME_OPENBAO_ROOT / "autotask",
 }
+_RUNTIME_BINDINGS_ENV = "JASON_TEAMS_IDENTITY_BINDINGS_DB"
 
 
 def register_provider_read_runtime_foundation(
@@ -141,6 +145,22 @@ def scope_runtime_provider_secret_resolvers(
     )
 
 
+def runtime_principal_bindings_from_env() -> TrustedPrincipalBindingResolver | None:
+    """Open the canonical durable identity-binding store only when runtime config names it.
+
+    Production compose already supplies JASON_TEAMS_IDENTITY_BINDINGS_DB. Provider
+    source-authorization therefore resolves the requester from the same durable
+    Microsoft->Jason binding used by conversational ingress instead of trusting a
+    caller-supplied provider identity. Acceptance/library callers that do not set the
+    runtime variable retain their explicit test seam.
+    """
+
+    configured = os.getenv(_RUNTIME_BINDINGS_ENV, "").strip()
+    if not configured:
+        return None
+    return SQLiteMicrosoftIdentityBindingStore(Path(configured))
+
+
 def build_provider_read_invoker(
     *,
     transport: HttpTransport,
@@ -148,6 +168,7 @@ def build_provider_read_invoker(
     secrets: SecretResolver | None = None,
     it_glue_secrets: SecretResolver | None = None,
     autotask_secrets: SecretResolver | None = None,
+    bindings: TrustedPrincipalBindingResolver | None = None,
 ) -> ProviderReadInformationAuthorizingInvoker:
     """Compose governed provider reads with source-aware release authorization.
 
@@ -157,9 +178,10 @@ def build_provider_read_invoker(
     split into provider-specific runtime AppRole identities.
 
     Every provider read is wrapped by a source-aware information authorizer.
-    Providers/resources without a positive requester authorization adapter are
-    classified service-only and therefore cannot be released when the runtime
-    release boundary is enforced.
+    Production runtime also resolves the authenticated Jason principal through the
+    durable Microsoft identity-binding store when that store is configured. Providers
+    or resources without a positive requester authorization adapter remain service-only
+    and therefore cannot be released when the information-release gate is enforced.
     """
 
     if secrets is not None and it_glue_secrets is None and autotask_secrets is None:
@@ -191,7 +213,11 @@ def build_provider_read_invoker(
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
     )
     canonical = GovernedProviderReadConnectorInvoker(delegate=delegate)
-    return ProviderReadInformationAuthorizingInvoker(delegate=canonical)
+    effective_bindings = bindings if bindings is not None else runtime_principal_bindings_from_env()
+    return ProviderReadInformationAuthorizingInvoker(
+        delegate=canonical,
+        bindings=effective_bindings,
+    )
 
 
 def register_provider_read_invokers(
