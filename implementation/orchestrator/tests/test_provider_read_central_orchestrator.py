@@ -339,7 +339,7 @@ def test_it_glue_read_fetches_but_fails_closed_without_requester_source_authoriz
     assert result.resolution.execution_plan.estimated_cost.total_estimated_cost == Decimal("0")
     assert any(
         event_type == "orchestration.information_release.decided"
-        and payload.get("details", {}).get("allowed") is False
+        and payload.get("allowed") is False
         for event_type, payload in audit.orchestration_events
     )
     assert not any(
@@ -426,7 +426,7 @@ def test_autotask_read_runs_same_governed_path_with_bounded_impersonated_query()
     assert result.resolution.execution_plan.estimated_cost.total_estimated_cost == Decimal("0")
     assert any(
         event_type == "orchestration.information_release.decided"
-        and payload.get("details", {}).get("allowed") is True
+        and payload.get("allowed") is True
         for event_type, payload in audit.orchestration_events
     )
     assert any(
