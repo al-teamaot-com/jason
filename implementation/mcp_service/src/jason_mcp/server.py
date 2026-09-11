@@ -976,18 +976,12 @@ def _project_dynamic_evidence(
 
 
 
-@mcp.tool()
-def discover_capabilities(
+def _filter_discoverable_capabilities(
     resource_type: str = "",
     operation: str = "",
     facts: str = "",
 ) -> dict[str, Any]:
-    """Discover Jason's currently active governed read capabilities.
-
-    Use this before choosing an operation when the available resource,
-    provider, facts, or environment may have changed. Results come from
-    Jason's live capability registry rather than a fixed MCP task list.
-    """
+    """Apply strict registry filters and retain safe same-resource alternatives."""
 
     resource_filter = str(resource_type).strip().casefold()
     operation_filter = str(operation).strip().casefold()
@@ -998,9 +992,10 @@ def discover_capabilities(
         if term.strip()
     }
 
+    available = _discoverable_capabilities()
     matches = []
 
-    for item in _discoverable_capabilities():
+    for item in available:
         if resource_filter:
             resource_types = {
                 value.casefold()
@@ -1048,12 +1043,82 @@ def discover_capabilities(
 
         matches.append(item)
 
-    return {
+    result: dict[str, Any] = {
         "status": "succeeded",
         "capability_count": len(matches),
         "capabilities": matches,
         "source": "jason_live_capability_registry",
+        "exact_filter_match": bool(matches),
+        "filter_semantics": {
+            "resource_type": "exact_when_supplied",
+            "operation": "exact_registry_operation_when_supplied",
+            "facts": "capability_hint_filter_when_supplied",
+        },
     }
+
+    if matches:
+        if resource_filter:
+            result["resource_capability_available"] = True
+        return result
+
+    if not resource_filter:
+        return result
+
+    alternatives = []
+
+    for item in available:
+        resource_types = {
+            value.casefold()
+            for value in item["resource_types"]
+        }
+
+        if resource_filter in resource_types:
+            alternatives.append(item)
+
+    result["resource_capability_available"] = bool(alternatives)
+    result["alternative_count"] = len(alternatives)
+    result["alternatives"] = alternatives
+
+    if alternatives:
+        result["selection_guidance"] = (
+            "No exact registry filter match was found, but active governed "
+            "read capabilities exist for this resource type. Evaluate the "
+            "listed alternatives before concluding that the resource cannot "
+            "be read. A search operation can be the supported lookup path "
+            "for an exact identifier or number."
+        )
+    else:
+        result["selection_guidance"] = (
+            "No active governed read capability is registered for this "
+            "resource type."
+        )
+
+    return result
+
+
+@mcp.tool()
+def discover_capabilities(
+    resource_type: str = "",
+    operation: str = "",
+    facts: str = "",
+) -> dict[str, Any]:
+    """Discover Jason's currently active governed read capabilities.
+
+    resource_type, operation, and facts are registry filters. In particular,
+    operation is an exact registry operation and must not be inferred directly
+    from conversational verbs such as read, get, or show. A request to read a
+    known object may be satisfiable through an active search capability.
+
+    When exact filters produce no match, same-resource active governed read
+    alternatives are returned when available. Evaluate those alternatives
+    before concluding that Jason lacks a capability for the resource.
+    """
+
+    return _filter_discoverable_capabilities(
+        resource_type=resource_type,
+        operation=operation,
+        facts=facts,
+    )
 
 
 @mcp.tool()
