@@ -15,6 +15,9 @@ from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
+from orchestrator.provider_read_information_authorizer import (
+    ProviderReadInformationAuthorizingInvoker,
+)
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
     AUTOTASK_PROVIDER,
@@ -145,13 +148,18 @@ def build_provider_read_invoker(
     secrets: SecretResolver | None = None,
     it_glue_secrets: SecretResolver | None = None,
     autotask_secrets: SecretResolver | None = None,
-) -> GovernedProviderReadConnectorInvoker:
-    """Compose governed provider reads while preserving provider identities.
+) -> ProviderReadInformationAuthorizingInvoker:
+    """Compose governed provider reads with source-aware release authorization.
 
     Explicit provider resolvers take precedence. The compatibility ``secrets``
     seam remains for bounded single-provider acceptance and tests. In normal
     runtime composition the known generic OpenBao bootstrap is deterministically
     split into provider-specific runtime AppRole identities.
+
+    Every provider read is wrapped by a source-aware information authorizer.
+    Providers/resources without a positive requester authorization adapter are
+    classified service-only and therefore cannot be released when the runtime
+    release boundary is enforced.
     """
 
     if secrets is not None and it_glue_secrets is None and autotask_secrets is None:
@@ -182,13 +190,14 @@ def build_provider_read_invoker(
         connectors=connectors,
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
     )
-    return GovernedProviderReadConnectorInvoker(delegate=delegate)
+    canonical = GovernedProviderReadConnectorInvoker(delegate=delegate)
+    return ProviderReadInformationAuthorizingInvoker(delegate=canonical)
 
 
 def register_provider_read_invokers(
     *,
     invokers: CapabilityInvokerRegistry,
-    invoker: GovernedProviderReadConnectorInvoker,
+    invoker: ProviderReadInformationAuthorizingInvoker,
 ) -> None:
     for capability in sorted(IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES):
         invokers.register(capability, invoker)
