@@ -14,6 +14,8 @@ from kernel.execution_providers import (
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
     AUTOTASK_PROVIDER,
+    DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
@@ -23,11 +25,14 @@ from orchestrator.provider_read_capability_catalog import (
 
 
 PROVIDER_READ_ACTIVATION_ENV = "JASON_PROVIDER_READ_ACTIVATION_PROFILE"
+
+# Immutable activation profile retained for rollback and compatibility.
 PROVIDER_READ_PRODUCTION_PROFILE = "itglue-autotask-initial-read-v1"
 
-# Initial production exposure is deliberately narrower than the implemented
-# provider catalogs. Only reads with provider-backed live acceptance evidence
-# are promoted to ACTIVE. The remaining catalog stays PILOT and undiscoverable.
+# Expanded profile adds only the IT Glue document reads that completed
+# bounded provider-backed acceptance on 2026-09-11.
+PROVIDER_READ_DOCUMENT_PROFILE = "itglue-autotask-document-read-v2"
+
 PROVIDER_READ_PRODUCTION_CAPABILITIES = frozenset(
     {
         DOCUMENTATION_ORGANIZATION_SEARCH,
@@ -36,14 +41,46 @@ PROVIDER_READ_PRODUCTION_CAPABILITIES = frozenset(
     }
 )
 
+PROVIDER_READ_DOCUMENT_CAPABILITIES = frozenset(
+    {
+        *PROVIDER_READ_PRODUCTION_CAPABILITIES,
+        DOCUMENTATION_DOCUMENT_SEARCH,
+        DOCUMENTATION_DOCUMENT_READ,
+    }
+)
+
 _EXPECTED_PROVIDER_CATALOGS = {
     IT_GLUE_PROVIDER: IT_GLUE_CAPABILITIES,
     AUTOTASK_PROVIDER: AUTOTASK_CAPABILITIES,
 }
 
+# v1 remains byte-for-byte equivalent in authority: one IT Glue organization
+# read and two Autotask reads.
 _PRODUCTION_PROVIDER_CAPABILITIES = {
     IT_GLUE_PROVIDER: frozenset({DOCUMENTATION_ORGANIZATION_SEARCH}),
     AUTOTASK_PROVIDER: frozenset({SERVICE_COMPANY_READ, SERVICE_TICKET_SEARCH}),
+}
+
+_DOCUMENT_PROVIDER_CAPABILITIES = {
+    IT_GLUE_PROVIDER: frozenset(
+        {
+            DOCUMENTATION_ORGANIZATION_SEARCH,
+            DOCUMENTATION_DOCUMENT_SEARCH,
+            DOCUMENTATION_DOCUMENT_READ,
+        }
+    ),
+    AUTOTASK_PROVIDER: frozenset({SERVICE_COMPANY_READ, SERVICE_TICKET_SEARCH}),
+}
+
+_ACTIVATION_PROFILES = {
+    PROVIDER_READ_PRODUCTION_PROFILE: (
+        PROVIDER_READ_PRODUCTION_CAPABILITIES,
+        _PRODUCTION_PROVIDER_CAPABILITIES,
+    ),
+    PROVIDER_READ_DOCUMENT_PROFILE: (
+        PROVIDER_READ_DOCUMENT_CAPABILITIES,
+        _DOCUMENT_PROVIDER_CAPABILITIES,
+    ),
 }
 
 
@@ -67,25 +104,27 @@ def _validate_exact_provider_read_contract(
     *,
     capabilities: CapabilityRegistryService,
     providers: ExecutionProviderRegistryService,
+    approved_capabilities: frozenset[str],
+    provider_capabilities: dict[str, frozenset[str]],
 ) -> None:
-    """Prove the catalog and approved subset before any lifecycle mutation."""
+    """Prove the catalog and selected profile before any lifecycle mutation."""
 
-    if set(_EXPECTED_PROVIDER_CATALOGS) != set(_PRODUCTION_PROVIDER_CAPABILITIES):
+    if set(_EXPECTED_PROVIDER_CATALOGS) != set(provider_capabilities):
         raise ProviderReadActivationError("provider activation catalog identity drifted")
 
-    approved_union = frozenset().union(*_PRODUCTION_PROVIDER_CAPABILITIES.values())
-    if approved_union != PROVIDER_READ_PRODUCTION_CAPABILITIES:
+    approved_union = frozenset().union(*provider_capabilities.values())
+    if approved_union != approved_capabilities:
         raise ProviderReadActivationError("production capability allowlist drifted")
 
     for provider_id, expected_catalog in _EXPECTED_PROVIDER_CATALOGS.items():
         provider = providers.get(provider_id)
-        approved_capabilities = _PRODUCTION_PROVIDER_CAPABILITIES[provider_id]
+        provider_approved_capabilities = provider_capabilities[provider_id]
 
-        if not approved_capabilities:
+        if not provider_approved_capabilities:
             raise ProviderReadActivationError(
                 f"provider {provider_id!r} has no approved production capability"
             )
-        if not approved_capabilities.issubset(expected_catalog):
+        if not provider_approved_capabilities.issubset(expected_catalog):
             raise ProviderReadActivationError(
                 f"provider {provider_id!r} production allowlist exceeds its catalog"
             )
@@ -157,9 +196,9 @@ def apply_provider_read_activation_profile(
 ) -> ProviderReadActivationState:
     """Activate only the exact approved provider-read subset or remain fail-closed.
 
-    Empty/unset means no activation. The only accepted non-empty profile is a
-    source-controlled, exact capability allowlist. Unknown profiles fail startup
-    rather than partially activating provider access.
+    Empty/unset means no activation. Accepted non-empty profiles are
+    source-controlled immutable capability allowlists. Unknown profiles fail
+    startup rather than partially activating provider access.
     """
 
     normalized = _normalized_profile(profile)
@@ -171,18 +210,23 @@ def apply_provider_read_activation_profile(
             capability_names=(),
         )
 
-    if normalized != PROVIDER_READ_PRODUCTION_PROFILE:
+    profile_contract = _ACTIVATION_PROFILES.get(normalized)
+    if profile_contract is None:
         raise ProviderReadActivationError(
             "unsupported provider-read activation profile"
         )
 
+    approved_capabilities, provider_capabilities = profile_contract
+
     _validate_exact_provider_read_contract(
         capabilities=capabilities,
         providers=providers,
+        approved_capabilities=approved_capabilities,
+        provider_capabilities=provider_capabilities,
     )
 
-    activated_capabilities = tuple(sorted(PROVIDER_READ_PRODUCTION_CAPABILITIES))
-    activated_providers = tuple(sorted(_PRODUCTION_PROVIDER_CAPABILITIES))
+    activated_capabilities = tuple(sorted(approved_capabilities))
+    activated_providers = tuple(sorted(provider_capabilities))
 
     # Registry state is in-memory and rebuilt on process start. All validation
     # occurs before these mutations, and provider availability is changed last.
@@ -208,7 +252,7 @@ def apply_provider_read_activation_profile(
         )
 
     return ProviderReadActivationState(
-        profile=PROVIDER_READ_PRODUCTION_PROFILE,
+        profile=normalized,
         enabled=True,
         provider_ids=activated_providers,
         capability_names=activated_capabilities,
