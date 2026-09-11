@@ -5,7 +5,10 @@ from typing import Any, Mapping
 
 import pytest
 
-from connectors.autotask.impersonating_connector import AutotaskImpersonatingConnector
+from connectors.autotask.impersonating_connector import (
+    AutotaskImpersonatingConnector,
+    autotask_operation_is_requester_impersonated,
+)
 from connectors.core.contracts import ConnectorContext, ConnectorRequest
 
 
@@ -69,37 +72,58 @@ class _Transport:
             }
         if url.endswith("/V1.0/Resources/query"):
             return {"items": list(self.resource_items)}
-        return {"item": {"id": 12345, "title": "Synthetic ticket"}}
+        return {"item": {"id": 12345, "title": "Synthetic provider record"}}
 
 
-def _request() -> ConnectorRequest:
+_OPERATION_ARGUMENTS = {
+    "autotask.company.get": {"company_id": 12345},
+    "autotask.company.search": {"search": '{"MaxRecords":1,"filter":[]}'},
+    "autotask.contact.get": {"contact_id": 12345},
+    "autotask.contact.search": {"search": '{"MaxRecords":1,"filter":[]}'},
+    "autotask.configuration.get": {"configuration_item_id": 12345},
+    "autotask.configuration.search": {"search": '{"MaxRecords":1,"filter":[]}'},
+    "autotask.ticket.get": {"ticket_id": 12345},
+    "autotask.ticket.search": {"search": '{"MaxRecords":1,"filter":[]}'},
+    "autotask.ticket.notes.list": {"ticket_id": 12345},
+}
+
+
+def _request(
+    capability: str = "autotask.ticket.get",
+    arguments: Mapping[str, Any] | None = None,
+) -> ConnectorRequest:
     return ConnectorRequest(
         context=ConnectorContext(
             correlation_id="corr-impersonation",
             principal_id="person-al",
             organization_id="aot",
             client_id=None,
-            capability="autotask.ticket.get",
+            capability=capability,
             mode="observe",
         ),
-        arguments={"ticket_id": 12345},
+        arguments=dict(arguments or _OPERATION_ARGUMENTS.get(capability, {})),
     )
 
 
-def test_supported_read_maps_trusted_email_and_applies_impersonation_header() -> None:
-    transport = _Transport(
-        [{"id": 77, "email": "AL@example.com", "isActive": True}]
-    )
-    connector = AutotaskImpersonatingConnector(
+def _connector(transport: _Transport, bindings=_Bindings()):
+    return AutotaskImpersonatingConnector(
         secrets=_Secrets(),
         transport=transport,
         audit=_Audit(),
-        bindings=_Bindings(),
+        bindings=bindings,
     )
 
-    result = connector.execute(_request())
+
+@pytest.mark.parametrize("operation", sorted(_OPERATION_ARGUMENTS))
+def test_supported_entity_reads_apply_trusted_requester_impersonation(operation: str) -> None:
+    transport = _Transport(
+        [{"id": 77, "email": "AL@example.com", "isActive": True}]
+    )
+
+    result = _connector(transport).execute(_request(operation))
 
     assert result.data["item"]["id"] == 12345
+    assert autotask_operation_is_requester_impersonated(operation) is True
     assert len(transport.requests) == 3
     lookup = transport.requests[1]
     target = transport.requests[2]
@@ -109,14 +133,26 @@ def test_supported_read_maps_trusted_email_and_applies_impersonation_header() ->
     assert target["headers"]["ImpersonationResourceId"] == "77"
 
 
+def test_entity_description_stays_outside_requester_impersonation_boundary() -> None:
+    transport = _Transport(
+        [{"id": 77, "email": "al@example.com", "isActive": True}]
+    )
+
+    result = _connector(transport).execute(
+        _request("autotask.entity.describe", {"entity": "Tickets"})
+    )
+
+    assert result.data["item"]["id"] == 12345
+    assert autotask_operation_is_requester_impersonated("autotask.entity.describe") is False
+    assert len(transport.requests) == 2
+    target = transport.requests[1]
+    assert "/Resources/query" not in target["url"]
+    assert "ImpersonationResourceId" not in target["headers"]
+
+
 def test_missing_trusted_binding_fails_closed_before_requested_read() -> None:
     transport = _Transport([])
-    connector = AutotaskImpersonatingConnector(
-        secrets=_Secrets(),
-        transport=transport,
-        audit=_Audit(),
-        bindings=_Bindings(None),
-    )
+    connector = _connector(transport, _Bindings(None))
 
     with pytest.raises(PermissionError, match="AUTOTASK_TRUSTED_PRINCIPAL_BINDING_REQUIRED"):
         connector.execute(_request())
@@ -127,12 +163,7 @@ def test_missing_trusted_binding_fails_closed_before_requested_read() -> None:
 
 def test_zero_matching_autotask_resources_fails_before_requested_read() -> None:
     transport = _Transport([])
-    connector = AutotaskImpersonatingConnector(
-        secrets=_Secrets(),
-        transport=transport,
-        audit=_Audit(),
-        bindings=_Bindings(),
-    )
+    connector = _connector(transport)
 
     with pytest.raises(PermissionError, match="AUTOTASK_REQUESTER_RESOURCE_NOT_UNIQUE"):
         connector.execute(_request())
@@ -147,12 +178,7 @@ def test_multiple_matching_autotask_resources_fail_before_requested_read() -> No
             {"id": 88, "email": "al@example.com", "isActive": True},
         ]
     )
-    connector = AutotaskImpersonatingConnector(
-        secrets=_Secrets(),
-        transport=transport,
-        audit=_Audit(),
-        bindings=_Bindings(),
-    )
+    connector = _connector(transport)
 
     with pytest.raises(PermissionError, match="AUTOTASK_REQUESTER_RESOURCE_NOT_UNIQUE"):
         connector.execute(_request())
@@ -164,12 +190,7 @@ def test_inactive_resource_is_not_accepted_as_requester_identity() -> None:
     transport = _Transport(
         [{"id": 77, "email": "al@example.com", "isActive": False}]
     )
-    connector = AutotaskImpersonatingConnector(
-        secrets=_Secrets(),
-        transport=transport,
-        audit=_Audit(),
-        bindings=_Bindings(),
-    )
+    connector = _connector(transport)
 
     with pytest.raises(PermissionError, match="AUTOTASK_REQUESTER_RESOURCE_NOT_UNIQUE"):
         connector.execute(_request())
