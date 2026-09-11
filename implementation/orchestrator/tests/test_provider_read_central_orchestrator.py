@@ -38,6 +38,7 @@ from orchestrator.provider_read_capability_catalog import (
     register_provider_read_foundation,
 )
 from orchestrator.service import CentralOrchestrator
+from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from jason_runtime.provider_reads import build_provider_read_invoker
 
 
@@ -120,6 +121,16 @@ class _Transport:
                     "first": "https://api.itglue.com/organizations?page[number]=1",
                 },
             }
+        if url == "https://example.autotask.invalid/atservicesrest/V1.0/Resources/query":
+            return {
+                "items": [
+                    {
+                        "id": 42,
+                        "email": "al@example.invalid",
+                        "isActive": True,
+                    }
+                ]
+            }
         if url == "https://example.autotask.invalid/atservicesrest/V1.0/Tickets/query":
             return {
                 "items": [
@@ -145,6 +156,29 @@ class _Audit:
 
     def append(self, event_type, payload):
         self.orchestration_events.append((event_type, dict(payload)))
+
+
+class _BindingResolver:
+    def __init__(self, binding: MicrosoftIdentityBinding | None) -> None:
+        self.binding = binding
+
+    def find_active_by_jason_identity(self, *, jason_identity_id: str):
+        if self.binding is None:
+            return None
+        if self.binding.jason_identity_id != jason_identity_id:
+            return None
+        return self.binding
+
+
+def _trusted_binding() -> MicrosoftIdentityBinding:
+    return MicrosoftIdentityBinding(
+        microsoft_tenant_id="tenant-aot",
+        microsoft_object_id="object-al",
+        jason_identity_id="person-al",
+        client_id="client-aot-internal",
+        email_address="al@example.invalid",
+        status="active",
+    )
 
 
 def _foundation():
@@ -178,7 +212,15 @@ def _activate_in_memory(capabilities, providers, *, provider_id: str, capability
     )
 
 
-def _orchestrator(capabilities, providers, secrets, transport, audit) -> CentralOrchestrator:
+def _orchestrator(
+    capabilities,
+    providers,
+    secrets,
+    transport,
+    audit,
+    *,
+    bindings=None,
+) -> CentralOrchestrator:
     resolution = GovernedCapabilityResolutionEngine(
         capabilities=capabilities,
         providers=providers,
@@ -192,6 +234,7 @@ def _orchestrator(capabilities, providers, secrets, transport, audit) -> Central
             secrets=secrets,
             transport=transport,
             audit=audit,
+            bindings=bindings,
         ),
         audit=audit,
     )
@@ -244,7 +287,7 @@ def test_source_defaults_fail_closed_before_provider_backed_activation() -> None
     assert transport.requests == []
 
 
-def test_it_glue_read_runs_chatgpt_ready_canonical_path_through_central_orchestrator() -> None:
+def test_it_glue_read_fetches_but_fails_closed_without_requester_source_authorization() -> None:
     capabilities, providers = _foundation()
     _activate_in_memory(
         capabilities,
@@ -263,19 +306,15 @@ def test_it_glue_read_runs_chatgpt_ready_canonical_path_through_central_orchestr
         )
     )
 
-    assert result.status is OrchestrationStatus.SUCCEEDED
+    assert result.status is OrchestrationStatus.DENIED
     assert result.provider_id == IT_GLUE_PROVIDER
-    assert result.output["provider"] == IT_GLUE_PROVIDER
-    assert result.output["provider_capability"] == "it_glue.entity.query"
-    assert result.output["data"]["data"][0]["attributes"]["name"] == "Hitt Electric"
-    assert result.output["data"]["meta"] == {
-        "current-page": 1,
-        "total-pages": 1,
-        "total-count": 1,
-    }
-    assert "links" not in result.output["data"]
-    assert "permitted-values" not in result.output["data"]["meta"]
-    assert "available-filters" not in result.output["data"]["meta"]
+    assert result.error_code == "INFORMATION_RELEASE_DENIED"
+    assert result.reason_codes == (
+        "SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED",
+        "REQUEST_ACCESS",
+    )
+    assert result.output == {}
+    assert result.attempts == 1
     assert secrets.resolutions == [
         (
             "it_glue.readonly",
@@ -298,9 +337,18 @@ def test_it_glue_read_runs_chatgpt_ready_canonical_path_through_central_orchestr
     assert result.resolution.execution_plan is not None
     assert result.resolution.execution_plan.model_id is None
     assert result.resolution.execution_plan.estimated_cost.total_estimated_cost == Decimal("0")
+    assert any(
+        event_type == "orchestration.information_release.decided"
+        and payload.get("details", {}).get("allowed") is False
+        for event_type, payload in audit.orchestration_events
+    )
+    assert not any(
+        event_type == "orchestration.capability.completed"
+        for event_type, _ in audit.orchestration_events
+    )
 
 
-def test_autotask_read_runs_same_governed_path_with_bounded_structured_query() -> None:
+def test_autotask_read_runs_same_governed_path_with_bounded_impersonated_query() -> None:
     capabilities, providers = _foundation()
     _activate_in_memory(
         capabilities,
@@ -312,7 +360,14 @@ def test_autotask_read_runs_same_governed_path_with_bounded_structured_query() -
     transport = _Transport()
     audit = _Audit()
 
-    result = _orchestrator(capabilities, providers, secrets, transport, audit).execute(
+    result = _orchestrator(
+        capabilities,
+        providers,
+        secrets,
+        transport,
+        audit,
+        bindings=_BindingResolver(_trusted_binding()),
+    ).execute(
         _request(
             SERVICE_TICKET_SEARCH,
             {
@@ -336,14 +391,28 @@ def test_autotask_read_runs_same_governed_path_with_bounded_structured_query() -
             "observe",
         )
     ]
-    assert len(transport.requests) == 2
+    assert len(transport.requests) == 3
     assert transport.requests[0]["url"].endswith("/zoneInformation")
     assert transport.requests[0]["params"] == {"user": "test-only-user@example.invalid"}
-    provider_request = transport.requests[1]
+
+    resource_lookup = transport.requests[1]
+    assert resource_lookup["method"] == "GET"
+    assert resource_lookup["url"] == (
+        "https://example.autotask.invalid/atservicesrest/V1.0/Resources/query"
+    )
+    assert "ImpersonationResourceId" not in resource_lookup["header_names"]
+    resource_search = json.loads(resource_lookup["params"]["search"])
+    assert resource_search["MaxRecords"] == 2
+    assert resource_search["filter"] == [
+        {"op": "eq", "field": "email", "value": "al@example.invalid"}
+    ]
+
+    provider_request = transport.requests[2]
     assert provider_request["method"] == "GET"
     assert provider_request["url"] == (
         "https://example.autotask.invalid/atservicesrest/V1.0/Tickets/query"
     )
+    assert "ImpersonationResourceId" in provider_request["header_names"]
     assert json.loads(provider_request["params"]["search"]) == {
         "MaxRecords": 50,
         "filter": [
@@ -355,6 +424,11 @@ def test_autotask_read_runs_same_governed_path_with_bounded_structured_query() -
     assert result.resolution.execution_plan is not None
     assert result.resolution.execution_plan.model_id is None
     assert result.resolution.execution_plan.estimated_cost.total_estimated_cost == Decimal("0")
+    assert any(
+        event_type == "orchestration.information_release.decided"
+        and payload.get("details", {}).get("allowed") is True
+        for event_type, payload in audit.orchestration_events
+    )
     assert any(
         event_type == "orchestration.capability.completed"
         for event_type, _ in audit.orchestration_events
