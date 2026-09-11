@@ -5,7 +5,12 @@ from typing import Any, Mapping
 
 import pytest
 
-from connectors.autotask.impersonating_connector import AutotaskImpersonatingConnector
+from connectors.autotask.impersonating_connector import (
+    AUTOTASK_AUTH_MODE_IMPERSONATED,
+    AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+    AutotaskImpersonatingConnector,
+)
 from connectors.core.contracts import ConnectorContext, ConnectorRequest
 
 
@@ -72,6 +77,14 @@ class _Transport:
         return {"item": {"id": 12345, "title": "Synthetic ticket"}}
 
 
+@pytest.fixture(autouse=True)
+def _provider_native_mode(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_IMPERSONATED,
+    )
+
+
 def _request() -> ConnectorRequest:
     return ConnectorRequest(
         context=ConnectorContext(
@@ -107,6 +120,54 @@ def test_supported_read_maps_trusted_email_and_applies_impersonation_header() ->
     assert "ImpersonationResourceId" not in lookup["headers"]
     assert "al@example.com" in lookup["params"]["search"]
     assert target["headers"]["ImpersonationResourceId"] == "77"
+
+
+def test_jason_managed_mode_uses_service_account_without_impersonation_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+
+    result = connector.execute(_request())
+
+    assert result.data["item"]["id"] == 12345
+    assert len(transport.requests) == 2
+    assert transport.requests[0]["url"].endswith("/v1.0/zoneInformation")
+    assert not any(
+        request["url"].endswith("/V1.0/Resources/query")
+        for request in transport.requests
+    )
+    assert all(
+        "ImpersonationResourceId" not in request["headers"]
+        for request in transport.requests
+    )
+
+
+def test_invalid_requester_authorization_mode_fails_before_provider_io(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(AUTOTASK_REQUESTER_AUTH_MODE_ENV, "invalid-mode")
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(),
+    )
+
+    with pytest.raises(RuntimeError, match="AUTOTASK_REQUESTER_AUTH_MODE_INVALID"):
+        connector.execute(_request())
+
+    assert transport.requests == []
 
 
 def test_missing_trusted_binding_fails_closed_before_requested_read() -> None:
