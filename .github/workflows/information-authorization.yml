@@ -23,6 +23,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/tests/test_provider_read_information_binding.py'
+      - 'tools/autotask_impersonation_live_acceptance.py'
       - '.github/workflows/information-authorization.yml'
   push:
     paths:
@@ -46,6 +47,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/tests/test_provider_read_information_binding.py'
+      - 'tools/autotask_impersonation_live_acceptance.py'
       - '.github/workflows/information-authorization.yml'
 
 jobs:
@@ -83,7 +85,8 @@ jobs:
             implementation/orchestrator/tests/test_autotask_information_authorizer.py \
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
             implementation/connectors/tests/test_it_glue_operations.py \
-            implementation/connectors/tests/test_autotask_impersonating_connector.py
+            implementation/connectors/tests/test_autotask_impersonating_connector.py \
+            tools/autotask_impersonation_live_acceptance.py
       - name: Test fail-closed information authorization contract
         run: |
           python -m pytest -q \
@@ -95,3 +98,10 @@ jobs:
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
             implementation/connectors/tests/test_it_glue_operations.py \
             implementation/connectors/tests/test_autotask_impersonating_connector.py
+      - name: Preflight live acceptance harness without network or credentials
+        run: |
+          python tools/autotask_impersonation_live_acceptance.py \
+            --principal-id synthetic-principal \
+            --correlation-id ci-preflight \
+            --evidence-output /tmp/autotask-impersonation-ci.json \
+            --check-only
