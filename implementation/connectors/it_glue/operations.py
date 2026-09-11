@@ -70,9 +70,6 @@ IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
         method="GET",
         path_template="/documents/{document_id}",
         path_arguments=("document_id",),
-        static_parameters={
-            "include": "authorized_users,user_resource_accesses,group_resource_accesses",
-        },
     ),
     "it_glue.relationships.list": OperationDefinition(
         method="GET",
