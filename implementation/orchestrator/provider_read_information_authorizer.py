@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from kernel.resolution import CapabilityResolutionResult
 
@@ -29,6 +29,10 @@ class SourceAuthorizationMode(str, Enum):
     ACL_MIRRORED = "acl_mirrored"
     JASON_MANAGED = "jason_managed"
     SERVICE_ONLY = "service_only"
+
+
+class TrustedPrincipalBindingResolver(Protocol):
+    def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
 
 _SENSITIVE_DOCUMENT_SEARCH_ATTRIBUTE_KEYS = frozenset(
@@ -160,18 +164,50 @@ def _relationship_data(resource: Mapping[str, Any], *names: str) -> list[Mapping
     return None
 
 
+def _trusted_principal_email(
+    *,
+    request: OrchestrationRequest,
+    bindings: TrustedPrincipalBindingResolver | None,
+) -> tuple[str, str] | None:
+    """Return a normalized email and its trust basis for source ACL evaluation.
+
+    Runtime source authorization prefers the durable Microsoft->Jason binding keyed
+    by the already-authenticated Jason principal. Request attributes are only a
+    compatibility seam for tests/non-runtime callers that do not provide a binding
+    resolver. This prevents a caller-supplied email from overriding trusted identity.
+    """
+
+    if bindings is not None:
+        binding = bindings.find_active_by_jason_identity(
+            jason_identity_id=request.principal_id
+        )
+        if binding is None:
+            return None
+        email = str(getattr(binding, "email_address", "") or "").strip().casefold()
+        if not email:
+            return None
+        return email, "trusted_microsoft_identity_binding"
+
+    email = request.principal_attributes.get("email", "").strip().casefold()
+    if not email:
+        return None
+    return email, "trusted_request_principal_attribute"
+
+
 def _it_glue_document_acl_envelope(
     *,
     request: OrchestrationRequest,
     payload: Mapping[str, Any],
+    bindings: TrustedPrincipalBindingResolver | None,
 ) -> InformationAuthorizationEnvelope:
-    email = request.principal_attributes.get("email", "").strip().casefold()
-    if not email:
+    resolved_principal = _trusted_principal_email(request=request, bindings=bindings)
+    if resolved_principal is None:
         return _service_only_envelope(
             provider_id=IT_GLUE_PROVIDER,
             resource_type="document",
             reason_code="SOURCE_PRINCIPAL_EMAIL_REQUIRED",
         )
+    email, principal_basis = resolved_principal
 
     resource = payload.get("data")
     if not isinstance(resource, Mapping):
@@ -246,6 +282,7 @@ def _it_glue_document_acl_envelope(
         basis=(
             SourceAuthorizationMode.ACL_MIRRORED.value,
             "it_glue_authorized_users",
+            principal_basis,
             "authenticated_principal_email_match",
         ) + sensitivity_basis,
     )
@@ -324,6 +361,7 @@ class ProviderReadInformationAuthorizingInvoker:
     """
 
     delegate: CapabilityInvoker
+    bindings: TrustedPrincipalBindingResolver | None = None
 
     def invoke(
         self,
@@ -337,7 +375,11 @@ class ProviderReadInformationAuthorizingInvoker:
         if provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_READ:
             payload = invocation.output.get("data")
             authorization = (
-                _it_glue_document_acl_envelope(request=request, payload=payload)
+                _it_glue_document_acl_envelope(
+                    request=request,
+                    payload=payload,
+                    bindings=self.bindings,
+                )
                 if isinstance(payload, Mapping)
                 else _service_only_envelope(
                     provider_id=provider_id,
