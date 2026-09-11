@@ -21,11 +21,22 @@ from connectors.autotask.impersonating_connector import AutotaskImpersonatingCon
 from connectors.core.contracts import ConnectorContext, ConnectorRequest, ConnectorTransportError
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
-from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
+from orchestrator.teams_identity_binding_sqlite import (
+    DirectoryEnrichedMicrosoftIdentityBindingResolver,
+    SQLiteMicrosoftIdentityBindingStore,
+)
+from jason_runtime.microsoft_directory import build_microsoft_directory_runtime
 
 
 DEFAULT_OPENBAO_URL = "http://127.0.0.1:8200"
 DEFAULT_BINDINGS_DB = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
+DEFAULT_MICROSOFT_BOUNDARY_DB = Path("/var/lib/jason/authority/client-boundaries.sqlite3")
+DEFAULT_MICROSOFT_ROLE_ID_PATH = Path(
+    "/run/jason-secrets/openbao/microsoft-graph/role_id"
+)
+DEFAULT_MICROSOFT_SECRET_ID_PATH = Path(
+    "/run/jason-secrets/openbao/microsoft-graph/secret_id"
+)
 DEFAULT_AUTOTASK_ROLE_ID_PATH = Path(
     "/run/jason-secrets/openbao/autotask/role_id"
 )
@@ -102,6 +113,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-output", type=Path, required=True)
     parser.add_argument("--bindings-db", type=Path, default=DEFAULT_BINDINGS_DB)
     parser.add_argument(
+        "--microsoft-boundary-db",
+        type=Path,
+        default=DEFAULT_MICROSOFT_BOUNDARY_DB,
+    )
+    parser.add_argument(
+        "--microsoft-role-id-path",
+        type=Path,
+        default=DEFAULT_MICROSOFT_ROLE_ID_PATH,
+    )
+    parser.add_argument(
+        "--microsoft-secret-id-path",
+        type=Path,
+        default=DEFAULT_MICROSOFT_SECRET_ID_PATH,
+    )
+    parser.add_argument("--expected-principal-email")
+    parser.add_argument(
         "--role-id-path",
         type=Path,
         default=DEFAULT_AUTOTASK_ROLE_ID_PATH,
@@ -138,6 +165,13 @@ def _validate(args: argparse.Namespace) -> Path:
     }.items():
         if not str(value).strip():
             raise ValueError(f"{label} must be non-empty")
+    expected_email = str(args.expected_principal_email or "").strip()
+    if expected_email and (
+        "@" not in expected_email
+        or expected_email.startswith("@")
+        or expected_email.endswith("@")
+    ):
+        raise ValueError("expected-principal-email must be a valid address when supplied")
     return _destination(args.evidence_output)
 
 
@@ -177,15 +211,41 @@ def _resolver(args: argparse.Namespace) -> OpenBaoSecretResolver:
     )
 
 
-def _verify_binding(args: argparse.Namespace) -> SQLiteMicrosoftIdentityBindingStore:
+def _verify_binding(
+    args: argparse.Namespace,
+) -> tuple[SQLiteMicrosoftIdentityBindingStore, DirectoryEnrichedMicrosoftIdentityBindingResolver]:
     store = SQLiteMicrosoftIdentityBindingStore(args.bindings_db.expanduser().resolve())
-    binding = store.find_active_by_jason_identity(
+    base_binding = store.find_active_by_jason_identity(
         jason_identity_id=str(args.principal_id).strip()
     )
-    if binding is None or not str(binding.email_address or "").strip():
+    if base_binding is None:
         store.close()
-        raise PermissionError("TRUSTED_PRINCIPAL_BINDING_NOT_UNIQUE_OR_EMAIL_MISSING")
-    return store
+        raise PermissionError("TRUSTED_PRINCIPAL_BINDING_NOT_UNIQUE")
+
+    directory_runtime = build_microsoft_directory_runtime(
+        boundary_db=args.microsoft_boundary_db.expanduser().resolve(),
+        openbao_url=str(args.openbao_url).strip(),
+        role_id_path=args.microsoft_role_id_path.expanduser().resolve(),
+        secret_id_path=args.microsoft_secret_id_path.expanduser().resolve(),
+        transport=UrlLibJsonHttpTransport(),
+    )
+    enriched = DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=store,
+        directory=directory_runtime.directory,
+    )
+    resolved = enriched.find_active_by_jason_identity(
+        jason_identity_id=str(args.principal_id).strip()
+    )
+    if resolved is None or not str(resolved.email_address or "").strip():
+        store.close()
+        raise PermissionError("TRUSTED_PRINCIPAL_DIRECTORY_EMAIL_UNAVAILABLE")
+
+    expected_email = str(args.expected_principal_email or "").strip().casefold()
+    if expected_email and str(resolved.email_address).strip().casefold() != expected_email:
+        store.close()
+        raise PermissionError("TRUSTED_PRINCIPAL_DIRECTORY_EMAIL_MISMATCH")
+
+    return store, enriched
 
 
 def _run_negative_control(
@@ -265,6 +325,7 @@ def run(args: argparse.Namespace) -> Path | None:
             json.dumps(
                 {
                     "provider": "autotask",
+                    "principal_profile_source": "microsoft_graph",
                     "probe_operations": ["ticket.search", "company.search"],
                     "negative_control": "impossible_impersonation_resource_id",
                     "provider_write": False,
@@ -280,7 +341,7 @@ def run(args: argparse.Namespace) -> Path | None:
         )
         return None
 
-    bindings = _verify_binding(args)
+    store, bindings = _verify_binding(args)
     try:
         (
             negative_rejected,
@@ -307,7 +368,7 @@ def run(args: argparse.Namespace) -> Path | None:
 
         observed_at = datetime.now(timezone.utc).isoformat()
         evidence = {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "provider": "autotask",
             "observed_at": observed_at,
             "provider_backed": True,
@@ -315,6 +376,7 @@ def run(args: argparse.Namespace) -> Path | None:
             "provider_writes": False,
             "trusted_principal_binding_unique": True,
             "trusted_principal_email_present": True,
+            "trusted_principal_email_source": "microsoft_graph",
             "principal_identity_printed": False,
             "principal_identity_persisted": False,
             "autotask_resource_id_printed": False,
@@ -334,6 +396,8 @@ def run(args: argparse.Namespace) -> Path | None:
             "provider_payload_persisted": False,
             "provider_credentials_printed": False,
             "provider_credentials_persisted": False,
+            "microsoft_profile_payload_printed": False,
+            "microsoft_profile_payload_persisted": False,
             "hosted_model_used": False,
             "durable_activation_mutated": False,
             "authority_mutated": False,
@@ -342,7 +406,7 @@ def run(args: argparse.Namespace) -> Path | None:
         _write(destination, evidence)
         return destination
     finally:
-        bindings.close()
+        store.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
