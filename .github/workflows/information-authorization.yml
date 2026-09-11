@@ -1,0 +1,43 @@
+name: Validate Information Authorization Boundary
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/orchestrator/information_authorization.py'
+      - 'implementation/orchestrator/tests/test_information_authorization.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/contracts.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - '.github/workflows/information-authorization.yml'
+  push:
+    paths:
+      - 'implementation/orchestrator/information_authorization.py'
+      - 'implementation/orchestrator/tests/test_information_authorization.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/contracts.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - '.github/workflows/information-authorization.yml'
+
+jobs:
+  validate-information-authorization:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/runtime_service
+      - name: Compile information authorization boundary
+        run: |
+          python -m py_compile \
+            implementation/orchestrator/information_authorization.py \
+            implementation/orchestrator/tests/test_information_authorization.py
+      - name: Test fail-closed information authorization contract
+        run: |
+          python -m pytest -q \
+            implementation/orchestrator/tests/test_information_authorization.py
