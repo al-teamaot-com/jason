@@ -109,7 +109,7 @@ def test_supported_read_maps_trusted_email_and_applies_impersonation_header() ->
     assert target["headers"]["ImpersonationResourceId"] == "77"
 
 
-def test_missing_trusted_binding_does_not_claim_or_apply_impersonation() -> None:
+def test_missing_trusted_binding_fails_closed_before_requested_read() -> None:
     transport = _Transport([])
     connector = AutotaskImpersonatingConnector(
         secrets=_Secrets(),
@@ -118,10 +118,11 @@ def test_missing_trusted_binding_does_not_claim_or_apply_impersonation() -> None
         bindings=_Bindings(None),
     )
 
-    connector.execute(_request())
+    with pytest.raises(PermissionError, match="AUTOTASK_TRUSTED_PRINCIPAL_BINDING_REQUIRED"):
+        connector.execute(_request())
 
-    assert len(transport.requests) == 2
-    assert "ImpersonationResourceId" not in transport.requests[-1]["headers"]
+    assert len(transport.requests) == 1
+    assert transport.requests[0]["url"].endswith("/v1.0/zoneInformation")
 
 
 def test_zero_matching_autotask_resources_fails_before_requested_read() -> None:
