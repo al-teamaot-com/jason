@@ -185,7 +185,7 @@ def test_missing_trusted_binding_preserves_service_only_denial() -> None:
 
 
 @pytest.mark.parametrize(
-    "request",
+    "orchestration_request",
     [
         _request(SERVICE_TICKET_SEARCH, authority_allowed=False),
         _request(SERVICE_TICKET_SEARCH, authority_context_id=None),
@@ -194,13 +194,13 @@ def test_missing_trusted_binding_preserves_service_only_denial() -> None:
     ],
 )
 def test_jason_managed_mode_fails_closed_without_positive_requester_authority(
-    request: OrchestrationRequest,
+    orchestration_request: OrchestrationRequest,
 ) -> None:
     invocation = AutotaskImpersonationInformationAuthorizer(
         delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
         bindings=_Bindings(),
     ).invoke(
-        request=request,
+        request=orchestration_request,
         resolution=_resolution(SERVICE_TICKET_SEARCH),
     )
 
