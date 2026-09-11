@@ -55,6 +55,17 @@ class SQLiteMicrosoftIdentityBindingStore:
                 "ALTER TABLE microsoft_identity_bindings ADD COLUMN email_address TEXT"
             )
 
+    @staticmethod
+    def _from_row(row) -> MicrosoftIdentityBinding:
+        return MicrosoftIdentityBinding(
+            microsoft_tenant_id=str(row[0]),
+            microsoft_object_id=str(row[1]),
+            jason_identity_id=str(row[2]),
+            client_id=None if row[3] is None else str(row[3]),
+            email_address=None if row[4] is None else str(row[4]),
+            status=str(row[5]),
+        )
+
     def find(
         self,
         *,
@@ -72,14 +83,34 @@ class SQLiteMicrosoftIdentityBindingStore:
         ).fetchone()
         if row is None:
             return None
-        return MicrosoftIdentityBinding(
-            microsoft_tenant_id=str(row[0]),
-            microsoft_object_id=str(row[1]),
-            jason_identity_id=str(row[2]),
-            client_id=None if row[3] is None else str(row[3]),
-            email_address=None if row[4] is None else str(row[4]),
-            status=str(row[5]),
-        )
+        return self._from_row(row)
+
+    def find_active_by_jason_identity(
+        self,
+        *,
+        jason_identity_id: str,
+    ) -> MicrosoftIdentityBinding | None:
+        """Resolve one trusted active Microsoft binding for an authenticated identity.
+
+        Source authorization must not guess when more than one active Microsoft
+        binding exists for the same Jason identity. Ambiguity therefore returns None
+        and causes the downstream information-release policy to fail closed.
+        """
+
+        rows = self._connection.execute(
+            """
+            SELECT microsoft_tenant_id, microsoft_object_id, jason_identity_id,
+                   client_id, email_address, status
+            FROM microsoft_identity_bindings
+            WHERE jason_identity_id = ? AND status = 'active'
+            ORDER BY microsoft_tenant_id, microsoft_object_id
+            LIMIT 2
+            """,
+            (jason_identity_id,),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._from_row(rows[0])
 
     def put(self, binding: MicrosoftIdentityBinding) -> None:
         with self._connection:
