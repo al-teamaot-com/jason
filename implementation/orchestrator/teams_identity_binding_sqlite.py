@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 import os
 import sqlite3
 from pathlib import Path
+from typing import Protocol
 
+from connectors.core.contracts import ConnectorTransportError
 from kernel.identity_authority import IdentityRecord
 
-from .teams_identity_binding import MicrosoftIdentityBinding
+from .teams_identity_binding import (
+    MicrosoftIdentityBinding,
+    MicrosoftUserDirectoryReader,
+)
 
 
 _SCHEMA = """
@@ -22,6 +28,14 @@ CREATE TABLE IF NOT EXISTS microsoft_identity_bindings (
 CREATE INDEX IF NOT EXISTS ix_microsoft_identity_binding_jason_identity
   ON microsoft_identity_bindings(jason_identity_id);
 """
+
+
+class ActiveJasonIdentityBindingReader(Protocol):
+    def find_active_by_jason_identity(
+        self,
+        *,
+        jason_identity_id: str,
+    ) -> MicrosoftIdentityBinding | None: ...
 
 
 class SQLiteMicrosoftIdentityBindingStore:
@@ -138,6 +152,58 @@ class SQLiteMicrosoftIdentityBindingStore:
 
     def close(self) -> None:
         self._connection.close()
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryEnrichedMicrosoftIdentityBindingResolver:
+    """Resolve current provider-mapping email from authenticated Microsoft identity.
+
+    The durable Microsoft tenant/object -> Jason identity binding remains the
+    authority anchor. Email is mutable profile data, so source authorization resolves
+    the current value from Microsoft Graph instead of requiring it to have been
+    copied into the binding database. The directory lookup is keyed only by the
+    already-bound Microsoft tenant/object identity; caller-supplied email values are
+    never consulted.
+
+    Any missing/ambiguous binding, disabled/mismatched Microsoft identity, invalid
+    directory profile, missing email, or provider transport failure returns no
+    enriched binding. Downstream source authorization therefore fails closed rather
+    than falling back to a stale stored address or the provider service identity.
+    """
+
+    bindings: ActiveJasonIdentityBindingReader
+    directory: MicrosoftUserDirectoryReader
+
+    def find_active_by_jason_identity(
+        self,
+        *,
+        jason_identity_id: str,
+    ) -> MicrosoftIdentityBinding | None:
+        principal_id = str(jason_identity_id).strip()
+        if not principal_id:
+            return None
+
+        binding = self.bindings.find_active_by_jason_identity(
+            jason_identity_id=principal_id
+        )
+        if binding is None:
+            return None
+        if binding.status != "active" or binding.jason_identity_id != principal_id:
+            return None
+
+        try:
+            email = self.directory.resolve_email(
+                microsoft_tenant_id=binding.microsoft_tenant_id,
+                microsoft_object_id=binding.microsoft_object_id,
+            )
+        except (ConnectorTransportError, PermissionError, ValueError):
+            return None
+
+        normalized = str(email or "").strip().casefold()
+        if not normalized:
+            return None
+
+        return replace(binding, email_address=normalized)
 
 
 class AuthorityIdentityRecordReader:
