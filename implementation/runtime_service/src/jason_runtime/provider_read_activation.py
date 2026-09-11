@@ -26,12 +26,16 @@ from orchestrator.provider_read_capability_catalog import (
 
 PROVIDER_READ_ACTIVATION_ENV = "JASON_PROVIDER_READ_ACTIVATION_PROFILE"
 
-# Immutable activation profile retained for rollback and compatibility.
+# Immutable activation profiles retained for rollback and compatibility.
 PROVIDER_READ_PRODUCTION_PROFILE = "itglue-autotask-initial-read-v1"
-
-# Expanded profile adds only the IT Glue document reads that completed
-# bounded provider-backed acceptance on 2026-09-11.
 PROVIDER_READ_DOCUMENT_PROFILE = "itglue-autotask-document-read-v2"
+
+# Production profile for provider-level authorization. Once a provider is
+# explicitly admitted here, every capability in that provider's registered
+# catalog is activated only if the capability independently proves the strict
+# governed read contract below. This avoids per-resource activation lists while
+# keeping provider trust an explicit security decision.
+PROVIDER_READ_GOVERNED_CATALOG_PROFILE = "itglue-autotask-governed-catalog-v3"
 
 PROVIDER_READ_PRODUCTION_CAPABILITIES = frozenset(
     {
@@ -53,6 +57,17 @@ _EXPECTED_PROVIDER_CATALOGS = {
     IT_GLUE_PROVIDER: IT_GLUE_CAPABILITIES,
     AUTOTASK_PROVIDER: AUTOTASK_CAPABILITIES,
 }
+
+# Provider trust remains explicit. Capability/resource discovery within each
+# trusted provider is derived from the registered catalog rather than from a
+# second hard-coded per-capability allowlist.
+_GOVERNED_CATALOG_PROVIDER_IDS = frozenset(_EXPECTED_PROVIDER_CATALOGS)
+PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES = frozenset().union(
+    *(
+        _EXPECTED_PROVIDER_CATALOGS[provider_id]
+        for provider_id in sorted(_GOVERNED_CATALOG_PROVIDER_IDS)
+    )
+)
 
 # v1 remains byte-for-byte equivalent in authority: one IT Glue organization
 # read and two Autotask reads.
@@ -98,6 +113,26 @@ class ProviderReadActivationState:
 
 def _normalized_profile(profile: str | None) -> str:
     return str(profile or "").strip().casefold()
+
+
+def _governed_catalog_contract() -> tuple[
+    frozenset[str],
+    dict[str, frozenset[str]],
+]:
+    """Derive the read surface from explicitly trusted provider catalogs.
+
+    Provider admission is the security boundary. Individual resource reads are
+    not separately activated by source code. A newly registered capability is
+    therefore discoverable automatically only when it belongs to an already
+    trusted provider and still satisfies the validation contract.
+    """
+
+    provider_capabilities = {
+        provider_id: frozenset(_EXPECTED_PROVIDER_CATALOGS[provider_id])
+        for provider_id in sorted(_GOVERNED_CATALOG_PROVIDER_IDS)
+    }
+    approved_capabilities = frozenset().union(*provider_capabilities.values())
+    return approved_capabilities, provider_capabilities
 
 
 def _validate_exact_provider_read_contract(
@@ -158,7 +193,7 @@ def _validate_exact_provider_read_contract(
             )
 
         # Validate the entire implemented catalog remains fail-closed before
-        # selectively promoting the approved initial production subset.
+        # promoting the selected provider read surface.
         for capability_name in sorted(expected_catalog):
             capability = capabilities.get(
                 capability_name=capability_name,
@@ -194,11 +229,13 @@ def apply_provider_read_activation_profile(
     providers: ExecutionProviderRegistryService,
     profile: str | None,
 ) -> ProviderReadActivationState:
-    """Activate only the exact approved provider-read subset or remain fail-closed.
+    """Activate a proven governed provider-read surface or remain fail-closed.
 
-    Empty/unset means no activation. Accepted non-empty profiles are
-    source-controlled immutable capability allowlists. Unknown profiles fail
-    startup rather than partially activating provider access.
+    Empty/unset means no activation. Legacy non-empty profiles retain immutable
+    capability allowlists for rollback. The governed-catalog profile admits the
+    explicitly trusted providers and then derives their read capabilities from
+    the registered provider catalogs, eliminating per-resource activation.
+    Unknown profiles fail startup rather than partially activating provider access.
     """
 
     normalized = _normalized_profile(profile)
@@ -210,13 +247,15 @@ def apply_provider_read_activation_profile(
             capability_names=(),
         )
 
-    profile_contract = _ACTIVATION_PROFILES.get(normalized)
-    if profile_contract is None:
-        raise ProviderReadActivationError(
-            "unsupported provider-read activation profile"
-        )
-
-    approved_capabilities, provider_capabilities = profile_contract
+    if normalized == PROVIDER_READ_GOVERNED_CATALOG_PROFILE:
+        approved_capabilities, provider_capabilities = _governed_catalog_contract()
+    else:
+        profile_contract = _ACTIVATION_PROFILES.get(normalized)
+        if profile_contract is None:
+            raise ProviderReadActivationError(
+                "unsupported provider-read activation profile"
+            )
+        approved_capabilities, provider_capabilities = profile_contract
 
     _validate_exact_provider_read_contract(
         capabilities=capabilities,
