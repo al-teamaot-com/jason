@@ -1,0 +1,221 @@
+name: Validate Governed Provider Reads
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/core/contracts.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - 'implementation/connectors/kaseya_resource_catalog.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/resource_convergence.py'
+      - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_safe_failure_classification.py'
+      - 'implementation/orchestrator/connector_invoker.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/canonical_entity_correlation.py'
+      - 'implementation/orchestrator/cross_provider_evidence.py'
+      - 'implementation/orchestrator/governed_evidence_cache.py'
+      - 'implementation/orchestrator/governed_evidence_index.py'
+      - 'implementation/orchestrator/real_record_correlation_acceptance.py'
+      - 'implementation/orchestrator/provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_connector_invoker.py'
+      - 'implementation/orchestrator/tests/test_safe_provider_failure_classification.py'
+      - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
+      - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_index.py'
+      - 'implementation/orchestrator/tests/test_document_read_foundation.py'
+      - 'implementation/orchestrator/tests/test_real_record_correlation_acceptance.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'implementation/runtime_service/tests/test_document_provider_reads.py'
+      - 'tools/provider_read_live_acceptance.py'
+      - 'tools/provider_cross_correlation_live_acceptance.py'
+      - '.github/workflows/validate-provider-reads.yml'
+  push:
+    paths:
+      - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/it_glue/**'
+      - 'implementation/connectors/core/contracts.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - 'implementation/connectors/kaseya_resource_catalog.py'
+      - 'implementation/connectors/provider_resource_adapters.py'
+      - 'implementation/connectors/resource_convergence.py'
+      - 'implementation/connectors/tests/test_autotask_resource_gateway.py'
+      - 'implementation/connectors/tests/test_autotask_resource_convergence.py'
+      - 'implementation/connectors/tests/test_provider_resource_adapters.py'
+      - 'implementation/connectors/tests/test_safe_failure_classification.py'
+      - 'implementation/orchestrator/connector_invoker.py'
+      - 'implementation/orchestrator/service.py'
+      - 'implementation/orchestrator/canonical_entity_correlation.py'
+      - 'implementation/orchestrator/cross_provider_evidence.py'
+      - 'implementation/orchestrator/governed_evidence_cache.py'
+      - 'implementation/orchestrator/governed_evidence_index.py'
+      - 'implementation/orchestrator/real_record_correlation_acceptance.py'
+      - 'implementation/orchestrator/provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_provider_read_*.py'
+      - 'implementation/orchestrator/tests/test_connector_invoker.py'
+      - 'implementation/orchestrator/tests/test_safe_provider_failure_classification.py'
+      - 'implementation/orchestrator/tests/test_canonical_entity_correlation.py'
+      - 'implementation/orchestrator/tests/test_cross_provider_evidence.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_cache.py'
+      - 'implementation/orchestrator/tests/test_governed_evidence_index.py'
+      - 'implementation/orchestrator/tests/test_document_read_foundation.py'
+      - 'implementation/orchestrator/tests/test_real_record_correlation_acceptance.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/tests/test_provider_reads.py'
+      - 'implementation/runtime_service/tests/test_document_provider_reads.py'
+      - 'tools/provider_read_live_acceptance.py'
+      - 'tools/provider_cross_correlation_live_acceptance.py'
+      - '.github/workflows/validate-provider-reads.yml'
+
+jobs:
+  governed-provider-reads:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Compile provider-read source boundary
+        run: |
+          python -m compileall -q \
+            implementation/connectors/autotask \
+            implementation/connectors/it_glue \
+            implementation/connectors/core/contracts.py \
+            implementation/connectors/core/openbao_secrets.py \
+            implementation/connectors/provider_resource_adapters.py \
+            implementation/connectors/resource_convergence.py \
+            implementation/orchestrator/connector_invoker.py \
+            implementation/orchestrator/service.py \
+            implementation/orchestrator/canonical_entity_correlation.py \
+            implementation/orchestrator/cross_provider_evidence.py \
+            implementation/orchestrator/governed_evidence_cache.py \
+            implementation/orchestrator/governed_evidence_index.py \
+            implementation/orchestrator/real_record_correlation_acceptance.py \
+            implementation/orchestrator/provider_read_acceptance.py \
+            implementation/orchestrator/provider_read_argument_adapter.py \
+            implementation/orchestrator/provider_read_capability_catalog.py \
+            implementation/runtime_service/src/jason_runtime/composition.py \
+            implementation/runtime_service/src/jason_runtime/provider_reads.py
+          python -m py_compile tools/provider_read_live_acceptance.py tools/provider_cross_correlation_live_acceptance.py
+      - name: Test governed provider-read contracts without provider I/O
+        run: |
+          python -m pytest -q \
+            implementation/orchestrator/tests/test_provider_read_foundation.py \
+            implementation/orchestrator/tests/test_provider_read_acceptance.py \
+            implementation/orchestrator/tests/test_provider_read_central_orchestrator.py \
+            implementation/orchestrator/tests/test_connector_invoker.py \
+            implementation/orchestrator/tests/test_safe_provider_failure_classification.py \
+            implementation/orchestrator/tests/test_canonical_entity_correlation.py \
+            implementation/orchestrator/tests/test_cross_provider_evidence.py \
+            implementation/orchestrator/tests/test_governed_evidence_cache.py \
+            implementation/orchestrator/tests/test_governed_evidence_index.py \
+            implementation/orchestrator/tests/test_document_read_foundation.py \
+            implementation/orchestrator/tests/test_real_record_correlation_acceptance.py \
+            implementation/runtime_service/tests/test_provider_reads.py \
+            implementation/runtime_service/tests/test_document_provider_reads.py \
+            implementation/connectors/tests/test_autotask_resource_gateway.py \
+            implementation/connectors/tests/test_autotask_resource_convergence.py \
+            implementation/connectors/tests/test_provider_resource_adapters.py \
+            implementation/connectors/tests/test_safe_failure_classification.py \
+            implementation/connectors/tests/test_autotask_operations.py \
+            implementation/connectors/tests/test_it_glue_operations.py
+      - name: Verify provider live-read preflights are credential safe
+        run: |
+          rm -f /tmp/jason-itg-provider-read-acceptance.json /tmp/jason-autotask-provider-read-acceptance.json /tmp/jason-cross-correlation-acceptance.json
+          python tools/provider_read_live_acceptance.py \
+            --provider it_glue \
+            --organization-name 'AOT Test Organization' \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-itg-provider-read-acceptance \
+            --evidence-output /tmp/jason-itg-provider-read-acceptance.json \
+            --check-only \
+            > /tmp/jason-itg-provider-read-preflight.txt
+          python tools/provider_read_live_acceptance.py \
+            --provider autotask \
+            --ticket-number T20260909.0001 \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-autotask-provider-read-acceptance \
+            --evidence-output /tmp/jason-autotask-provider-read-acceptance.json \
+            --check-only \
+            > /tmp/jason-autotask-provider-read-preflight.txt
+          python tools/provider_cross_correlation_live_acceptance.py \
+            --ticket-number T20260909.0001 \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-cross-correlation-acceptance \
+            --evidence-output /tmp/jason-cross-correlation-acceptance.json \
+            --check-only \
+            > /tmp/jason-cross-correlation-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"provider_credentials_used": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-itg-provider-read-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"provider_credentials_used": false' /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-autotask-provider-read-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-cross-correlation-preflight.txt
+          grep -F '"ambiguity_detection_enabled": true' /tmp/jason-cross-correlation-preflight.txt
+          grep -F '"raw_provider_payload_persisted": false' /tmp/jason-cross-correlation-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-cross-correlation-preflight.txt
+          test ! -e /tmp/jason-itg-provider-read-acceptance.json
+          test ! -e /tmp/jason-autotask-provider-read-acceptance.json
+          test ! -e /tmp/jason-cross-correlation-acceptance.json
+          echo 'PROVIDER_READ_ACCEPTANCE_PREFLIGHT=PASS'
+          echo 'CROSS_PROVIDER_CORRELATION_PREFLIGHT=PASS'
+      - name: Prove source-only cost and safety boundary
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+
+          from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+          from kernel.execution_providers import (
+              ExecutionProviderRegistryService,
+              InMemoryExecutionProviderRegistry,
+              ProviderHealth,
+              ProviderLifecycle,
+          )
+          from orchestrator.provider_read_capability_catalog import (
+              AUTOTASK_PROVIDER,
+              IT_GLUE_PROVIDER,
+              register_provider_read_foundation,
+          )
+
+          capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+          providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+          register_provider_read_foundation(
+              capabilities=capabilities,
+              providers=providers,
+              now=datetime.now(timezone.utc),
+          )
+
+          for provider_id in (IT_GLUE_PROVIDER, AUTOTASK_PROVIDER):
+              provider = providers.get(provider_id)
+              assert provider.lifecycle_status is ProviderLifecycle.PLANNED
+              assert provider.health_status is ProviderHealth.UNKNOWN
+              assert provider.metadata['activation_state'] == 'awaiting_provider_backed_acceptance'
+
+          assert all(
+              str(item.metadata.get('read_only', '')).lower() == 'true'
+              for item in capabilities.list_all()
+          )
+          print('PROVIDER_READ_SOURCE_BOUNDARY=PASS')
+          print('PROVIDER_NETWORK_IO=DISABLED_BY_TEST_DOUBLES')
+          print('HOSTED_MODEL_REQUIRED=NO')
+          print('MCP_ACTIVATION=NOT_YET')
+          PY

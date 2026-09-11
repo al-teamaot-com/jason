@@ -9,12 +9,39 @@ from typing import Callable, Mapping
 from connectors.core.contracts import (
     ConnectorConfigurationError,
     ConnectorContext,
+    ConnectorCredentialUnavailableError,
     SecretResolver,
 )
 
 
 class OpenBaoSecretResolutionError(RuntimeError):
     """Safe secret-resolution failure that must not contain secret values."""
+
+    error_code = "OPENBAO_SECRET_RESOLUTION_FAILED"
+
+
+class OpenBaoAuthenticationError(OpenBaoSecretResolutionError):
+    """OpenBao AppRole authentication failed before provider credentials were read."""
+
+    error_code = "OPENBAO_AUTH_FAILED"
+
+
+class OpenBaoTransportError(OpenBaoSecretResolutionError):
+    """OpenBao could not be reached or completed a bounded request."""
+
+    error_code = "OPENBAO_TRANSPORT_FAILURE"
+
+
+class OpenBaoHttpError(OpenBaoSecretResolutionError):
+    """OpenBao returned a bounded HTTP failure without retaining its response body."""
+
+    error_code = "OPENBAO_HTTP_ERROR"
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        if status_code is not None and 100 <= status_code <= 599:
+            self.error_code = f"OPENBAO_HTTP_STATUS_{status_code}"
 
 
 DEFAULT_MAPPINGS: Mapping[str, str] = {
@@ -39,36 +66,11 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
-    "openai.semantic_intent": frozenset(
-        {
-            "api_key",
-        }
-    ),
-    "autotask.readonly": frozenset(
-        {
-            "username",
-            "secret",
-            "integration_code",
-        }
-    ),
-    "it_glue.readonly": frozenset(
-        {
-            "api_key",
-        }
-    ),
-    "datto_rmm.readonly": frozenset(
-        {
-            "api_url",
-            "api_key",
-            "api_secret",
-        }
-    ),
-    "aws_ses.sendmail": frozenset(
-        {
-            "access_key_id",
-            "secret_access_key",
-        }
-    ),
+    "openai.semantic_intent": frozenset({"api_key"}),
+    "autotask.readonly": frozenset({"username", "secret", "integration_code"}),
+    "it_glue.readonly": frozenset({"api_key"}),
+    "datto_rmm.readonly": frozenset({"api_url", "api_key", "api_secret"}),
+    "aws_ses.sendmail": frozenset({"access_key_id", "secret_access_key"}),
     "microsoft_graph.directory_read": frozenset(
         {
             "private_key_pem",
@@ -100,6 +102,40 @@ class OpenBaoSecretResolver(SecretResolver):
         self._opener = opener
         self._timeout_seconds = timeout_seconds
 
+    @property
+    def role_id_path(self) -> Path:
+        """Return only the bootstrap file location, never its protected value."""
+
+        return self._role_id_path
+
+    @property
+    def secret_id_path(self) -> Path:
+        """Return only the bootstrap file location, never its protected value."""
+
+        return self._secret_id_path
+
+    def with_credential_paths(
+        self,
+        *,
+        role_id_path: Path,
+        secret_id_path: Path,
+    ) -> "OpenBaoSecretResolver":
+        """Clone resolver policy/transport settings with another AppRole identity.
+
+        This copies configuration only. It does not read either bootstrap file,
+        authenticate to OpenBao, contact a provider, or expose a credential value.
+        """
+
+        return OpenBaoSecretResolver(
+            base_url=self._base_url,
+            role_id_path=role_id_path,
+            secret_id_path=secret_id_path,
+            mappings=self._mappings,
+            allowed_fields=self._allowed_fields,
+            opener=self._opener,
+            timeout_seconds=self._timeout_seconds,
+        )
+
     def resolve(
         self,
         logical_name: str,
@@ -122,83 +158,59 @@ class OpenBaoSecretResolver(SecretResolver):
                 f"No approved field contract exists for {logical_name!r}."
             )
 
-        role_id = self._read_credential_file(
-            self._role_id_path,
-            "RoleID",
-        )
-        secret_id = self._read_credential_file(
-            self._secret_id_path,
-            "SecretID",
-        )
-
-        token = self._login_approle(
-            role_id=role_id,
-            secret_id=secret_id,
-        )
+        role_id = self._read_credential_file(self._role_id_path, "RoleID")
+        secret_id = self._read_credential_file(self._secret_id_path, "SecretID")
+        token = self._login_approle(role_id=role_id, secret_id=secret_id)
 
         try:
-            secret_data = self._read_kv_v2(
-                provider_path=provider_path,
-                token=token,
-            )
+            secret_data = self._read_kv_v2(provider_path=provider_path, token=token)
         finally:
             self._revoke_token(token)
 
         missing = sorted(required_fields.difference(secret_data))
         if missing:
             raise OpenBaoSecretResolutionError(
-                "Resolved secret is missing required fields: "
-                + ", ".join(missing)
+                "Resolved secret is missing required fields: " + ", ".join(missing)
             )
 
-        return {
-            field: str(secret_data[field])
-            for field in sorted(required_fields)
-        }
+        return {field: str(secret_data[field]) for field in sorted(required_fields)}
 
     @staticmethod
     def _read_credential_file(path: Path, label: str) -> str:
         try:
             value = path.read_text(encoding="utf-8").strip()
         except OSError as error:
-            raise ConnectorConfigurationError(
+            raise ConnectorCredentialUnavailableError(
                 f"{label} file is unavailable."
             ) from error
 
         if not value:
-            raise ConnectorConfigurationError(
-                f"{label} file is empty."
-            )
-
+            raise ConnectorCredentialUnavailableError(f"{label} file is empty.")
         return value
 
-    def _login_approle(
-        self,
-        *,
-        role_id: str,
-        secret_id: str,
-    ) -> str:
-        response = self._request_json(
-            path="v1/auth/approle/login",
-            method="POST",
-            payload={
-                "role_id": role_id,
-                "secret_id": secret_id,
-            },
-        )
+    def _login_approle(self, *, role_id: str, secret_id: str) -> str:
+        try:
+            response = self._request_json(
+                path="v1/auth/approle/login",
+                method="POST",
+                payload={"role_id": role_id, "secret_id": secret_id},
+            )
+        except OpenBaoHttpError as error:
+            raise OpenBaoAuthenticationError(
+                "OpenBao AppRole authentication failed."
+            ) from error
 
         try:
             token = response["auth"]["client_token"]
         except (KeyError, TypeError) as error:
-            raise OpenBaoSecretResolutionError(
+            raise OpenBaoAuthenticationError(
                 "OpenBao AppRole authentication returned an invalid response."
             ) from error
 
         if not isinstance(token, str) or not token:
-            raise OpenBaoSecretResolutionError(
+            raise OpenBaoAuthenticationError(
                 "OpenBao AppRole authentication did not return a token."
             )
-
         return token
 
     def _revoke_token(self, token: str) -> None:
@@ -220,19 +232,14 @@ class OpenBaoSecretResolver(SecretResolver):
             method="GET",
             token=token,
         )
-
         try:
             values = response["data"]["data"]
         except (KeyError, TypeError) as error:
             raise OpenBaoSecretResolutionError(
                 "OpenBao returned an invalid KV v2 response."
             ) from error
-
         if not isinstance(values, Mapping):
-            raise OpenBaoSecretResolutionError(
-                "OpenBao returned invalid secret data."
-            )
-
+            raise OpenBaoSecretResolutionError("OpenBao returned invalid secret data.")
         return values
 
     def _request_json(
@@ -259,16 +266,19 @@ class OpenBaoSecretResolver(SecretResolver):
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
                 raw = response.read()
+        except urllib.error.HTTPError as error:
+            raise OpenBaoHttpError(
+                "OpenBao returned an HTTP error.",
+                status_code=int(error.code),
+            ) from error
         except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise OpenBaoSecretResolutionError(
-                "OpenBao secret resolution failed."
+            raise OpenBaoTransportError(
+                "OpenBao secret resolution transport failed."
             ) from error
         if not raw:
             if allow_empty:
                 return {}
-            raise OpenBaoSecretResolutionError(
-                "OpenBao returned an empty response."
-            )
+            raise OpenBaoSecretResolutionError("OpenBao returned an empty response.")
         try:
             parsed = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:

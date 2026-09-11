@@ -1,6 +1,8 @@
 *
 !implementation/
 !implementation/**
+!config/
+!config/**
 !infrastructure/
 !infrastructure/jason-mcp/
 !infrastructure/jason-mcp/Dockerfile

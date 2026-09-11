@@ -23,6 +23,7 @@ class FakeConnector:
             capability=request.context.capability,
             provider=self.provider_name,
             data={"devices": [{"hostname": "AOT-50282", "deviceUid": "dev-1"}]},
+            evidence_ids=("evidence://datto/device/dev-1",),
         )
 
 
@@ -74,6 +75,17 @@ def test_invoker_preserves_identity_scope_authority_and_maps_canonical_capabilit
     assert connector.received.context.capability == "datto_rmm.device.search"
     assert connector.received.context.mode == "observe"
     assert result.output["provider"] == "datto_rmm"
+    assert result.telemetry is not None
+    assert result.telemetry.provider_resources == (
+        "datto_rmm:datto_rmm.device.search",
+    )
+    assert result.telemetry.evidence_references == (
+        "evidence://datto/device/dev-1",
+    )
+    assert result.telemetry.hosted_model_used is False
+    assert result.telemetry.hosted_model_input_tokens == 0
+    assert result.telemetry.hosted_model_output_tokens == 0
+    assert result.telemetry.hosted_model_cost_usd == "0"
 
 
 def test_invoker_fails_closed_when_provider_mapping_is_missing() -> None:
