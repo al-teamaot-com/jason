@@ -6,16 +6,20 @@ on:
       - 'implementation/orchestrator/information_authorization.py'
       - 'implementation/orchestrator/information_sensitivity.py'
       - 'implementation/orchestrator/provider_read_information_authorizer.py'
+      - 'implementation/orchestrator/autotask_information_authorizer.py'
       - 'implementation/orchestrator/teams_identity_binding_sqlite.py'
       - 'implementation/orchestrator/tests/test_information_authorization.py'
       - 'implementation/orchestrator/tests/test_information_sensitivity.py'
       - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/tests/test_provider_read_information_authorizer.py'
+      - 'implementation/orchestrator/tests/test_autotask_information_authorizer.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
       - 'implementation/orchestrator/teams_request_factory.py'
       - 'implementation/connectors/it_glue/operations.py'
+      - 'implementation/connectors/autotask/impersonating_connector.py'
       - 'implementation/connectors/tests/test_it_glue_operations.py'
+      - 'implementation/connectors/tests/test_autotask_impersonating_connector.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/tests/test_provider_read_information_binding.py'
@@ -25,16 +29,20 @@ on:
       - 'implementation/orchestrator/information_authorization.py'
       - 'implementation/orchestrator/information_sensitivity.py'
       - 'implementation/orchestrator/provider_read_information_authorizer.py'
+      - 'implementation/orchestrator/autotask_information_authorizer.py'
       - 'implementation/orchestrator/teams_identity_binding_sqlite.py'
       - 'implementation/orchestrator/tests/test_information_authorization.py'
       - 'implementation/orchestrator/tests/test_information_sensitivity.py'
       - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/tests/test_provider_read_information_authorizer.py'
+      - 'implementation/orchestrator/tests/test_autotask_information_authorizer.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
       - 'implementation/orchestrator/teams_request_factory.py'
       - 'implementation/connectors/it_glue/operations.py'
+      - 'implementation/connectors/autotask/impersonating_connector.py'
       - 'implementation/connectors/tests/test_it_glue_operations.py'
+      - 'implementation/connectors/tests/test_autotask_impersonating_connector.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/tests/test_provider_read_information_binding.py'
@@ -60,18 +68,22 @@ jobs:
             implementation/orchestrator/information_authorization.py \
             implementation/orchestrator/information_sensitivity.py \
             implementation/orchestrator/provider_read_information_authorizer.py \
+            implementation/orchestrator/autotask_information_authorizer.py \
             implementation/orchestrator/teams_identity_binding_sqlite.py \
             implementation/orchestrator/service.py \
             implementation/orchestrator/contracts.py \
             implementation/orchestrator/teams_request_factory.py \
             implementation/connectors/it_glue/operations.py \
+            implementation/connectors/autotask/impersonating_connector.py \
             implementation/runtime_service/src/jason_runtime/provider_reads.py \
             implementation/orchestrator/tests/test_information_authorization.py \
             implementation/orchestrator/tests/test_information_sensitivity.py \
             implementation/orchestrator/tests/test_information_release_boundary.py \
             implementation/orchestrator/tests/test_provider_read_information_authorizer.py \
+            implementation/orchestrator/tests/test_autotask_information_authorizer.py \
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
-            implementation/connectors/tests/test_it_glue_operations.py
+            implementation/connectors/tests/test_it_glue_operations.py \
+            implementation/connectors/tests/test_autotask_impersonating_connector.py
       - name: Test fail-closed information authorization contract
         run: |
           python -m pytest -q \
@@ -79,5 +91,7 @@ jobs:
             implementation/orchestrator/tests/test_information_sensitivity.py \
             implementation/orchestrator/tests/test_information_release_boundary.py \
             implementation/orchestrator/tests/test_provider_read_information_authorizer.py \
+            implementation/orchestrator/tests/test_autotask_information_authorizer.py \
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
-            implementation/connectors/tests/test_it_glue_operations.py
+            implementation/connectors/tests/test_it_glue_operations.py \
+            implementation/connectors/tests/test_autotask_impersonating_connector.py
