@@ -32,6 +32,7 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ACTIVATION_ENV,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
+    PROVIDER_READ_DYNAMIC_PROFILE,
     PROVIDER_READ_PRODUCTION_CAPABILITIES,
     PROVIDER_READ_PRODUCTION_PROFILE,
     ProviderReadActivationError,
@@ -203,6 +204,64 @@ def test_document_profile_activates_exactly_five_proven_reads() -> None:
         assert capability.lifecycle_status is expected_lifecycle
 
 
+def test_dynamic_profile_activates_complete_safe_provider_catalog() -> None:
+    capabilities, providers = _registries()
+    expected = _all_provider_read_capabilities()
+
+    state = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_DYNAMIC_PROFILE,
+    )
+
+    assert state.enabled is True
+    assert state.profile == PROVIDER_READ_DYNAMIC_PROFILE
+    assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
+    assert set(state.capability_names) == expected
+    assert len(state.capability_names) == len(expected)
+
+    for provider_id, expected_catalog in (
+        (IT_GLUE_PROVIDER, IT_GLUE_CAPABILITIES),
+        (AUTOTASK_PROVIDER, AUTOTASK_CAPABILITIES),
+    ):
+        provider = providers.get(provider_id)
+        assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+        assert provider.health_status is ProviderHealth.HEALTHY
+        assert provider.approval_status is ProviderApproval.APPROVED
+        assert provider.capabilities == expected_catalog
+
+    for capability_name in expected:
+        capability = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+        assert capability.metadata["provider_neutral"] == "true"
+        assert capability.metadata["read_only"] == "true"
+        assert capability.risk_level.value == "low"
+        assert capability.permitted_execution_modes == frozenset({"deterministic"})
+        assert capability.approval.required is False
+
+
+def test_dynamic_profile_is_restart_persistable_environment_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        PROVIDER_READ_ACTIVATION_ENV,
+        PROVIDER_READ_DYNAMIC_PROFILE,
+    )
+    capabilities, providers = _registries()
+
+    state = apply_provider_read_activation_from_env(
+        capabilities=capabilities,
+        providers=providers,
+    )
+
+    assert state.enabled is True
+    assert state.profile == PROVIDER_READ_DYNAMIC_PROFILE
+    assert set(state.capability_names) == _all_provider_read_capabilities()
+
+
 def test_document_profile_is_restart_persistable_environment_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -222,7 +281,7 @@ def test_document_profile_is_restart_persistable_environment_contract(
     assert set(state.capability_names) == EXPECTED_DOCUMENT_CAPABILITIES
 
 
-def test_no_fourth_provider_read_is_activated() -> None:
+def test_legacy_initial_profile_still_activates_no_fourth_read() -> None:
     capabilities, providers = _registries()
 
     apply_provider_read_activation_profile(
@@ -261,7 +320,7 @@ def test_catalog_drift_fails_closed_before_provider_availability() -> None:
         apply_provider_read_activation_profile(
             capabilities=capabilities,
             providers=providers,
-            profile=PROVIDER_READ_PRODUCTION_PROFILE,
+            profile=PROVIDER_READ_DYNAMIC_PROFILE,
         )
 
     for provider_id in (IT_GLUE_PROVIDER, AUTOTASK_PROVIDER):
