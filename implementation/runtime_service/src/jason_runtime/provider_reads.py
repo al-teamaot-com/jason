@@ -5,13 +5,16 @@ from datetime import datetime
 from pathlib import Path
 
 from connectors.autotask.capability_manifest import build_autotask_manifest
-from connectors.autotask.connector import AutotaskConnector
+from connectors.autotask.impersonating_connector import AutotaskImpersonatingConnector
 from connectors.core.contracts import AuditSink, HttpTransport, SecretResolver
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from kernel.capabilities import CapabilityRegistryService
 from kernel.execution_providers import ExecutionProviderRegistryService
+from orchestrator.autotask_information_authorizer import (
+    AutotaskImpersonationInformationAuthorizer,
+)
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
@@ -47,6 +50,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
+from orchestrator.service import CapabilityInvoker
 from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
 
 from .provider_read_activation import apply_provider_read_activation_from_env
@@ -149,7 +153,7 @@ def runtime_principal_bindings_from_env() -> TrustedPrincipalBindingResolver | N
     """Open the canonical durable identity-binding store only when runtime config names it.
 
     Production compose already supplies JASON_TEAMS_IDENTITY_BINDINGS_DB. Provider
-    source-authorization therefore resolves the requester from the same durable
+    source authorization therefore resolves the requester from the same durable
     Microsoft->Jason binding used by conversational ingress instead of trusting a
     caller-supplied provider identity. Acceptance/library callers that do not set the
     runtime variable retain their explicit test seam.
@@ -169,7 +173,7 @@ def build_provider_read_invoker(
     it_glue_secrets: SecretResolver | None = None,
     autotask_secrets: SecretResolver | None = None,
     bindings: TrustedPrincipalBindingResolver | None = None,
-) -> ProviderReadInformationAuthorizingInvoker:
+) -> CapabilityInvoker:
     """Compose governed provider reads with source-aware release authorization.
 
     Explicit provider resolvers take precedence. The compatibility ``secrets``
@@ -177,11 +181,11 @@ def build_provider_read_invoker(
     runtime composition the known generic OpenBao bootstrap is deterministically
     split into provider-specific runtime AppRole identities.
 
-    Every provider read is wrapped by a source-aware information authorizer.
-    Production runtime also resolves the authenticated Jason principal through the
-    durable Microsoft identity-binding store when that store is configured. Providers
-    or resources without a positive requester authorization adapter remain service-only
-    and therefore cannot be released when the information-release gate is enforced.
+    IT Glue continues to require positive source ACL evidence before release.
+    Supported Autotask company/ticket reads are executed with provider-enforced
+    requester impersonation derived only from the durable Microsoft/Jason binding.
+    All other provider/resource combinations remain service-only until a positive
+    requester authorization adapter exists.
     """
 
     if secrets is not None and it_glue_secrets is None and autotask_secrets is None:
@@ -196,16 +200,18 @@ def build_provider_read_invoker(
             "IT Glue and Autotask secret resolvers are required for provider reads"
         )
 
+    effective_bindings = bindings if bindings is not None else runtime_principal_bindings_from_env()
     connectors = {
         IT_GLUE_PROVIDER: ItGlueConnector(
             secrets=it_glue_resolver,
             transport=transport,
             audit=audit,
         ),
-        AUTOTASK_PROVIDER: AutotaskConnector(
+        AUTOTASK_PROVIDER: AutotaskImpersonatingConnector(
             secrets=autotask_resolver,
             transport=transport,
             audit=audit,
+            bindings=effective_bindings,
         ),
     }
     delegate = GovernedConnectorCapabilityInvoker(
@@ -213,9 +219,12 @@ def build_provider_read_invoker(
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
     )
     canonical = GovernedProviderReadConnectorInvoker(delegate=delegate)
-    effective_bindings = bindings if bindings is not None else runtime_principal_bindings_from_env()
-    return ProviderReadInformationAuthorizingInvoker(
+    source_authorized = ProviderReadInformationAuthorizingInvoker(
         delegate=canonical,
+        bindings=effective_bindings,
+    )
+    return AutotaskImpersonationInformationAuthorizer(
+        delegate=source_authorized,
         bindings=effective_bindings,
     )
 
@@ -223,7 +232,7 @@ def build_provider_read_invoker(
 def register_provider_read_invokers(
     *,
     invokers: CapabilityInvokerRegistry,
-    invoker: ProviderReadInformationAuthorizingInvoker,
+    invoker: CapabilityInvoker,
 ) -> None:
     for capability in sorted(IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES):
         invokers.register(capability, invoker)
