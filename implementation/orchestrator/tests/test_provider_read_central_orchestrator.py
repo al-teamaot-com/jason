@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Mapping
 
+from connectors.autotask.impersonating_connector import (
+    AUTOTASK_AUTH_MODE_IMPERSONATED,
+    AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+)
 from kernel.capabilities import (
     CapabilityLifecycle,
     CapabilityRegistryService,
@@ -348,7 +352,13 @@ def test_it_glue_read_fetches_but_fails_closed_without_requester_source_authoriz
     )
 
 
-def test_autotask_read_runs_same_governed_path_with_bounded_impersonated_query() -> None:
+def test_autotask_read_runs_same_governed_path_with_bounded_impersonated_query(monkeypatch) -> None:
+    # This regression proves the legacy provider-native compatibility path.
+    # Production recovery uses the separately tested jason_managed mode.
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_IMPERSONATED,
+    )
     capabilities, providers = _foundation()
     _activate_in_memory(
         capabilities,
