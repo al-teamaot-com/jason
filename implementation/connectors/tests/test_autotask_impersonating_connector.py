@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -85,7 +86,7 @@ def _provider_native_mode(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def _request() -> ConnectorRequest:
+def _request(ticket_id: int | str = 12345) -> ConnectorRequest:
     return ConnectorRequest(
         context=ConnectorContext(
             correlation_id="corr-impersonation",
@@ -95,7 +96,7 @@ def _request() -> ConnectorRequest:
             capability="autotask.ticket.get",
             mode="observe",
         ),
-        arguments={"ticket_id": 12345},
+        arguments={"ticket_id": ticket_id},
     )
 
 
@@ -119,6 +120,11 @@ def test_supported_read_maps_trusted_email_and_applies_impersonation_header() ->
     assert lookup["url"].endswith("/V1.0/Resources/query")
     assert "ImpersonationResourceId" not in lookup["headers"]
     assert "al@example.com" in lookup["params"]["search"]
+    assert target["url"].endswith("/V1.0/Tickets/query")
+    assert json.loads(target["params"]["search"]) == {
+        "MaxRecords": 2,
+        "filter": [{"op": "eq", "field": "id", "value": 12345}],
+    }
     assert target["headers"]["ImpersonationResourceId"] == "77"
 
 
@@ -142,6 +148,12 @@ def test_jason_managed_mode_uses_service_account_without_impersonation_lookup(
     assert result.data["item"]["id"] == 12345
     assert len(transport.requests) == 2
     assert transport.requests[0]["url"].endswith("/v1.0/zoneInformation")
+    target = transport.requests[1]
+    assert target["url"].endswith("/V1.0/Tickets/query")
+    assert json.loads(target["params"]["search"]) == {
+        "MaxRecords": 2,
+        "filter": [{"op": "eq", "field": "id", "value": 12345}],
+    }
     assert not any(
         request["url"].endswith("/V1.0/Resources/query")
         for request in transport.requests
@@ -150,6 +162,38 @@ def test_jason_managed_mode_uses_service_account_without_impersonation_lookup(
         "ImpersonationResourceId" not in request["headers"]
         for request in transport.requests
     )
+
+
+def test_jason_managed_ticket_number_read_uses_exact_ticket_number_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+
+    connector.execute(_request("T20260911.0010"))
+
+    assert len(transport.requests) == 2
+    target = transport.requests[1]
+    assert target["url"].endswith("/V1.0/Tickets/query")
+    assert json.loads(target["params"]["search"]) == {
+        "MaxRecords": 2,
+        "filter": [
+            {
+                "op": "eq",
+                "field": "ticketNumber",
+                "value": "T20260911.0010",
+            }
+        ],
+    }
 
 
 def test_invalid_requester_authorization_mode_fails_before_provider_io(
