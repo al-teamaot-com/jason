@@ -126,3 +126,36 @@ The production host credential-staging metadata-only `--check-only` preflight wa
 The next production action for the already-approved initial provider-read subset remains gated on explicit production approval because it would stage protected runtime credential copies and recreate `jason-runtime`.
 
 Separately, document/policy capabilities must receive their own bounded provider-backed live acceptance before they may be considered for any future activation profile.
+
+## Provider-backed acceptance update - 2026-09-11
+
+The IT Glue static-document source foundation has completed bounded provider-backed acceptance.
+
+Live acceptance exposed an incorrect global document collection route. The provider returned `PROVIDER_HTTP_STATUS_404` for `GET /documents`. The source was corrected to use the organization-scoped document relationship collection route:
+
+`GET /organizations/:organization_id/relationships/documents`
+
+Exact document reads continue to use:
+
+`GET /documents/:document_id`
+
+Provider-backed acceptance then passed for both:
+
+- `documentation.document.search`
+- `documentation.document.read`
+
+The proof used bounded organization-scoped discovery, an exact durable-ID document read, no provider mutation, no credential or raw-payload exposure, and no hosted model.
+
+Corrected source commit:
+
+`70cf5db161118d5066fd0c4882bf965da54f460d`
+
+Accepted source patch SHA-256:
+
+`28036d5af3a88384da27b83facb70ea9e8130d0efaa0a2322a7e56d72b7db5cb`
+
+The capabilities remain **PILOT** and are not part of the current production activation profile. Provider-backed acceptance does not itself authorize production activation.
+
+See:
+
+`docs/sessions/IT-Glue-Document-Provider-Read-Acceptance-2026-09-11.md`
