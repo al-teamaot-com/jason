@@ -17,6 +17,11 @@ from .provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_CONFIGURATION_READ,
+    SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_CONTACT_READ,
+    SERVICE_CONTACT_SEARCH,
+    SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -27,12 +32,21 @@ class TrustedPrincipalBindingResolver(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
 
+# These canonical reads map only to Autotask entity classes documented as supporting
+# API-only resource impersonation/query security. A successful connector return means
+# the provider accepted the request under the authenticated requester's Resource ID.
+# Entity-description/schema metadata remains outside this requester-release upgrade.
 _IMPERSONATED_CANONICAL_READS = frozenset(
     {
         SERVICE_COMPANY_READ,
         SERVICE_COMPANY_SEARCH,
+        SERVICE_CONTACT_READ,
+        SERVICE_CONTACT_SEARCH,
+        SERVICE_CONFIGURATION_READ,
+        SERVICE_CONFIGURATION_SEARCH,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_SEARCH,
+        SERVICE_TICKET_NOTES_SEARCH,
     }
 )
 
@@ -91,14 +105,18 @@ def _active_trusted_binding(
 
 @dataclass(frozen=True, slots=True)
 class AutotaskImpersonationInformationAuthorizer:
-    """Upgrade only proven Autotask impersonated reads from service-only release.
+    """Upgrade proven Autotask requester-impersonated reads from service-only release.
 
     The delegate performs normal provider information authorization first. This
-    wrapper can replace that service-only envelope only for the small canonical set
-    whose connector operations are configured to apply Autotask requester
-    impersonation. Successful return from the connector means Autotask accepted the
-    impersonated request; missing/ambiguous trusted identity fails closed because no
-    upgrade occurs.
+    wrapper can replace that service-only envelope only for canonical reads whose
+    connector operations use Autotask's documented requester-impersonation boundary.
+    Successful return from the connector means Autotask accepted the impersonated
+    request. Missing/ambiguous trusted identity fails closed because no upgrade occurs.
+
+    This is resource-class based rather than question based: Company, Contact,
+    ConfigurationItem, Ticket, and TicketNote reads use the same authorization rule.
+    Adding a new provider entity class requires proof that the provider supports the
+    same enforcement semantics; it does not require enumerating human phrasings.
     """
 
     delegate: CapabilityInvoker
