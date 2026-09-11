@@ -14,6 +14,7 @@ from .information_authorization import (
     InformationHandlingClass,
     InformationRemediation,
 )
+from .information_sensitivity import assess_sensitive_evidence
 from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
@@ -36,6 +37,16 @@ _SENSITIVE_DOCUMENT_SEARCH_ATTRIBUTE_KEYS = frozenset(
         "rendered-content",
         "rendered_content",
         "sections",
+    }
+)
+_DOCUMENT_AUTHORIZATION_RELATIONSHIPS = frozenset(
+    {
+        "authorized_users",
+        "authorized-users",
+        "user_resource_accesses",
+        "user-resource-accesses",
+        "group_resource_accesses",
+        "group-resource-accesses",
     }
 )
 
@@ -219,16 +230,54 @@ def _it_glue_document_acl_envelope(
             reason_code="IT_GLUE_DOCUMENT_ACCESS_NOT_ESTABLISHED",
         )
 
+    sensitivity = assess_sensitive_evidence(attributes)
+    handling_class = (
+        InformationHandlingClass.DERIVED_OUTPUT_ONLY
+        if sensitivity.sensitive
+        else InformationHandlingClass.RELEASABLE
+    )
+    sensitivity_basis = tuple(
+        sorted({f"sensitivity:{finding.kind.value}" for finding in sensitivity.findings})
+    )
     return _authorized_envelope(
         provider_id=IT_GLUE_PROVIDER,
         resource_type="document",
-        handling_class=InformationHandlingClass.RELEASABLE,
+        handling_class=handling_class,
         basis=(
             SourceAuthorizationMode.ACL_MIRRORED.value,
             "it_glue_authorized_users",
             "authenticated_principal_email_match",
-        ),
+        ) + sensitivity_basis,
     )
+
+
+def _sanitize_it_glue_document_read_output(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove source ACL material after it has served the authorization decision."""
+
+    result = dict(output)
+    payload = result.get("data")
+    if not isinstance(payload, Mapping):
+        return result
+
+    sanitized_payload = dict(payload)
+    sanitized_payload.pop("included", None)
+    resource = payload.get("data")
+    if isinstance(resource, Mapping):
+        sanitized_resource = dict(resource)
+        relationships = resource.get("relationships")
+        if isinstance(relationships, Mapping):
+            sanitized_relationships = {
+                str(key): value
+                for key, value in relationships.items()
+                if str(key) not in _DOCUMENT_AUTHORIZATION_RELATIONSHIPS
+            }
+            if sanitized_relationships:
+                sanitized_resource["relationships"] = sanitized_relationships
+            else:
+                sanitized_resource.pop("relationships", None)
+        sanitized_payload["data"] = sanitized_resource
+    result["data"] = sanitized_payload
+    return result
 
 
 def _sanitize_it_glue_document_search_output(output: Mapping[str, Any]) -> dict[str, Any]:
@@ -296,7 +345,7 @@ class ProviderReadInformationAuthorizingInvoker:
                     reason_code="IT_GLUE_DOCUMENT_AUTHORIZATION_PAYLOAD_INVALID",
                 )
             )
-            output = dict(invocation.output)
+            output = _sanitize_it_glue_document_read_output(invocation.output)
         elif provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_SEARCH:
             authorization = _service_only_envelope(
                 provider_id=provider_id,
