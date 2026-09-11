@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -14,9 +15,21 @@ class TrustedPrincipalBindingResolver(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
 
-# Restrict requester impersonation to canonical provider operations whose Autotask
-# entities are documented as supporting impersonation/query security. Expanding this
-# set requires provider documentation plus focused tests.
+AUTOTASK_REQUESTER_AUTH_MODE_ENV = "JASON_AUTOTASK_REQUESTER_AUTH_MODE"
+AUTOTASK_AUTH_MODE_IMPERSONATED = "impersonated"
+AUTOTASK_AUTH_MODE_JASON_MANAGED = "jason_managed"
+_ALLOWED_AUTOTASK_REQUESTER_AUTH_MODES = frozenset(
+    {
+        AUTOTASK_AUTH_MODE_IMPERSONATED,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    }
+)
+
+# Restrict provider-native requester impersonation to canonical provider
+# operations whose Autotask entities are documented as supporting
+# impersonation/query security. The temporary Jason-managed mode below does not
+# add this header and relies on the already-proven Jason authority context plus
+# information-release authorization instead.
 _IMPERSONATED_READ_OPERATIONS = frozenset(
     {
         "autotask.company.get",
@@ -27,6 +40,24 @@ _IMPERSONATED_READ_OPERATIONS = frozenset(
 )
 
 
+def autotask_requester_authorization_mode() -> str:
+    """Return the explicit Autotask requester-authorization mode.
+
+    Jason-managed authorization is the temporary production default while the
+    provider-native impersonation path is blocked by an Autotask HTTP 500. The
+    legacy impersonated path remains available for bounded diagnostics and
+    rollback. Unknown values fail closed before a provider request is prepared.
+    """
+
+    mode = os.getenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    ).strip().casefold()
+    if mode not in _ALLOWED_AUTOTASK_REQUESTER_AUTH_MODES:
+        raise RuntimeError("AUTOTASK_REQUESTER_AUTH_MODE_INVALID")
+    return mode
+
+
 @dataclass(frozen=True, slots=True)
 class AutotaskImpersonationEvidence:
     applied: bool
@@ -34,18 +65,19 @@ class AutotaskImpersonationEvidence:
 
 
 class AutotaskImpersonatingConnector(AutotaskConnector):
-    """Execute selected Autotask reads as the authenticated Jason requester.
+    """Execute Autotask reads with an explicit requester-authorization mode.
 
-    Autotask REST authentication still uses the dedicated API-only integration
-    account. For supported read entities, the connector resolves the already-
-    authenticated Jason principal through the durable Microsoft binding, maps that
-    trusted email to exactly one Autotask Resource, and supplies Autotask's
-    `ImpersonationResourceId` header on the provider read.
+    Autotask REST authentication always uses the dedicated API-only integration
+    account. In ``impersonated`` mode, supported read entities resolve the
+    already-authenticated Jason principal through the durable Microsoft binding,
+    map that trusted email to exactly one Autotask Resource, and supply
+    Autotask's ``ImpersonationResourceId`` header.
 
-    The mapping lookup is internal evidence used only to establish the provider
-    enforcement identity. Missing or ambiguous trusted bindings, and zero or multiple
-    matching Autotask resources, fail closed before the requested provider read is
-    sent. Caller-provided arguments can never choose the impersonated resource.
+    In temporary ``jason_managed`` mode the provider request is intentionally
+    executed only as the API service account. Requester authorization and
+    release remain separate and are enforced by Jason's identity/authority,
+    Central Orchestrator, and information-release boundary. This mode does not
+    grant provider writes or bypass Jason authorization.
     """
 
     def __init__(self, *, bindings: TrustedPrincipalBindingResolver | None = None, **kwargs) -> None:
@@ -127,7 +159,11 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         request: ConnectorRequest,
         credentials: Mapping[str, str],
     ) -> PreparedRequest:
+        mode = autotask_requester_authorization_mode()
         prepared = super().prepare_request(request, credentials)
+
+        if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
+            return prepared
 
         if request.context.capability not in _IMPERSONATED_READ_OPERATIONS:
             return prepared
@@ -154,4 +190,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
 
 
 def autotask_operation_is_requester_impersonated(operation: str) -> bool:
-    return str(operation).strip() in _IMPERSONATED_READ_OPERATIONS
+    return (
+        autotask_requester_authorization_mode() == AUTOTASK_AUTH_MODE_IMPERSONATED
+        and str(operation).strip() in _IMPERSONATED_READ_OPERATIONS
+    )
