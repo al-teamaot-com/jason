@@ -43,7 +43,6 @@ _IT_GLUE_ENTITY = {
     DOCUMENTATION_LOCATION_READ: "Locations",
     DOCUMENTATION_CONFIGURATION_SEARCH: "Configurations",
     DOCUMENTATION_CONFIGURATION_READ: "Configurations",
-    DOCUMENTATION_DOCUMENT_SEARCH: "Documents",
     DOCUMENTATION_DOCUMENT_READ: "Documents",
 }
 
@@ -178,6 +177,58 @@ def adapt_it_glue_arguments(
         return {"organization_id": _resource_id(arguments)}
     if capability_name == DOCUMENTATION_DOCUMENT_READ:
         return {"document_id": _resource_id(arguments)}
+
+    if capability_name == DOCUMENTATION_DOCUMENT_SEARCH:
+        organization_id = arguments.get("organization_id")
+        if organization_id is None or (
+            isinstance(organization_id, str)
+            and not organization_id.strip()
+        ):
+            raise ValueError(
+                "organization_id is required for IT Glue document search"
+            )
+
+        if arguments.get("name") is not None:
+            raise ValueError(
+                "name is not a provider-supported IT Glue document "
+                "collection filter"
+            )
+
+        if arguments.get("resource_id") is not None:
+            raise ValueError(
+                "resource_id is not valid for document collection search; "
+                "use documentation.document.read"
+            )
+
+        filters = arguments.get("filters", {})
+        if filters is None:
+            filters = {}
+        if not isinstance(filters, Mapping):
+            raise ValueError(
+                "filters must be a mapping when supplied"
+            )
+
+        unsupported = sorted(
+            str(key)
+            for key in filters
+            if str(key) != "document_folder_id"
+        )
+        if unsupported:
+            raise ValueError(
+                "unsupported IT Glue document search filters: "
+                + ", ".join(unsupported)
+            )
+
+        result = {
+            "organization_id": organization_id,
+            "filters": dict(filters),
+            "page_size": _it_glue_page_size(arguments),
+        }
+
+        if arguments.get("page_number") is not None:
+            result["page_number"] = arguments["page_number"]
+
+        return result
 
     entity = _IT_GLUE_ENTITY.get(capability_name)
     if entity is None:

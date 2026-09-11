@@ -17,7 +17,6 @@ APPROVED_IT_GLUE_ENTITIES: Mapping[str, str] = {
     "Organizations": "organizations",
     "Configurations": "configurations",
     "FlexibleAssets": "flexible_assets",
-    "Documents": "documents",
     "Contacts": "contacts",
     "Locations": "locations",
 }
@@ -60,6 +59,11 @@ IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
         optional_parameters=frozenset(
             {"flexible_asset_type_id"}
         ),
+    ),
+    "it_glue.document.search": OperationDefinition(
+        method="GET",
+        path_template="/organizations/{organization_id}/relationships/documents",
+        path_arguments=("organization_id",),
     ),
     "it_glue.document.get": OperationDefinition(
         method="GET",
@@ -154,7 +158,10 @@ def resolve_operation(
 
         params[provider_name] = value
 
-    if capability == "it_glue.entity.query":
+    if capability in {
+        "it_glue.entity.query",
+        "it_glue.document.search",
+    }:
         filters = arguments.get("filters", {})
 
         if not isinstance(filters, Mapping):

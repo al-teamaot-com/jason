@@ -53,7 +53,7 @@ def test_it_glue_document_manifest_and_adapter_do_not_expose_password_resources(
         DOCUMENTATION_DOCUMENT_SEARCH,
         {
             "organization_id": "208",
-            "name": "Remote Access Policy",
+            "filters": {"document_folder_id": None},
             "page_size": 25,
         },
     )
@@ -63,11 +63,8 @@ def test_it_glue_document_manifest_and_adapter_do_not_expose_password_resources(
     )
 
     assert search == {
-        "entity": "Documents",
-        "filters": {
-            "organization_id": "208",
-            "name": "Remote Access Policy",
-        },
+        "organization_id": "208",
+        "filters": {"document_folder_id": None},
         "page_size": 25,
     }
     assert exact == {"document_id": "42"}

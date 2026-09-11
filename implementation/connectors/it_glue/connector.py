@@ -22,6 +22,7 @@ class ItGlueConnector(ConnectorBase):
             "it_glue.organization.get",
             "it_glue.configuration.search",
             "it_glue.flexible_asset.search",
+            "it_glue.document.search",
             "it_glue.document.get",
             "it_glue.relationships.list",
         }

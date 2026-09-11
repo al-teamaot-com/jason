@@ -198,11 +198,9 @@ def build_it_glue_manifest() -> IntegrationManifest:
                         DOCUMENTATION_DOCUMENT_SEARCH,
                         (
                             "organization_id",
-                            "name",
                             "filters",
                             "page_number",
                             "page_size",
-                            "resource_id",
                         ),
                     ),
                     _read_operation(

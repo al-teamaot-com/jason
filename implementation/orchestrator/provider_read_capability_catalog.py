@@ -293,7 +293,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             resource_types="documentation_document,document,policy,procedure,sop",
             operation="search",
             selector_keys=(
-                "organization_id,name,resource_id,filters,page_number,page_size"
+                "organization_id,filters,page_number,page_size"
             ),
             fact_hints=(
                 "document,documents,policy,policies,procedure,procedures,sop,standard,"
