@@ -5,16 +5,20 @@ on:
     paths:
       - 'implementation/orchestrator/information_authorization.py'
       - 'implementation/orchestrator/tests/test_information_authorization.py'
+      - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
+      - 'implementation/orchestrator/teams_request_factory.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - '.github/workflows/information-authorization.yml'
   push:
     paths:
       - 'implementation/orchestrator/information_authorization.py'
       - 'implementation/orchestrator/tests/test_information_authorization.py'
+      - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
+      - 'implementation/orchestrator/teams_request_factory.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - '.github/workflows/information-authorization.yml'
 
@@ -36,8 +40,13 @@ jobs:
         run: |
           python -m py_compile \
             implementation/orchestrator/information_authorization.py \
-            implementation/orchestrator/tests/test_information_authorization.py
+            implementation/orchestrator/service.py \
+            implementation/orchestrator/contracts.py \
+            implementation/orchestrator/teams_request_factory.py \
+            implementation/orchestrator/tests/test_information_authorization.py \
+            implementation/orchestrator/tests/test_information_release_boundary.py
       - name: Test fail-closed information authorization contract
         run: |
           python -m pytest -q \
-            implementation/orchestrator/tests/test_information_authorization.py
+            implementation/orchestrator/tests/test_information_authorization.py \
+            implementation/orchestrator/tests/test_information_release_boundary.py
