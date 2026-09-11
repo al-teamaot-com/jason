@@ -26,8 +26,11 @@ from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBi
 
 DEFAULT_OPENBAO_URL = "http://127.0.0.1:8200"
 DEFAULT_BINDINGS_DB = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
-DEFAULT_AUTOTASK_APPROLE = Path(
-    "/opt/jason/bootstrap/secrets/openbao/autotask-read-approle"
+DEFAULT_AUTOTASK_ROLE_ID_PATH = Path(
+    "/run/jason-runtime-credentials/openbao/autotask/role_id"
+)
+DEFAULT_AUTOTASK_SECRET_ID_PATH = Path(
+    "/run/jason-runtime-credentials/openbao/autotask/secret_id"
 )
 _IMPOSSIBLE_RESOURCE_ID = 9223372036854775807
 
@@ -98,7 +101,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--correlation-id", required=True)
     parser.add_argument("--evidence-output", type=Path, required=True)
     parser.add_argument("--bindings-db", type=Path, default=DEFAULT_BINDINGS_DB)
-    parser.add_argument("--approle-dir", type=Path, default=DEFAULT_AUTOTASK_APPROLE)
+    parser.add_argument(
+        "--role-id-path",
+        type=Path,
+        default=DEFAULT_AUTOTASK_ROLE_ID_PATH,
+    )
+    parser.add_argument(
+        "--secret-id-path",
+        type=Path,
+        default=DEFAULT_AUTOTASK_SECRET_ID_PATH,
+    )
     parser.add_argument("--openbao-url", default=DEFAULT_OPENBAO_URL)
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--live-read", action="store_true")
@@ -157,11 +169,10 @@ def _query(capability: str, *, principal_id: str, correlation_id: str) -> Connec
 
 
 def _resolver(args: argparse.Namespace) -> OpenBaoSecretResolver:
-    root = args.approle_dir.expanduser().resolve()
     return OpenBaoSecretResolver(
         base_url=str(args.openbao_url).strip(),
-        role_id_path=root / "role-id",
-        secret_id_path=root / "secret-id",
+        role_id_path=args.role_id_path.expanduser().resolve(),
+        secret_id_path=args.secret_id_path.expanduser().resolve(),
     )
 
 
