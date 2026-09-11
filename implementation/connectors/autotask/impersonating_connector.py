@@ -14,15 +14,22 @@ class TrustedPrincipalBindingResolver(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
 
-# Restrict requester impersonation to canonical provider operations whose Autotask
-# entities are documented as supporting impersonation/query security. Expanding this
-# set requires provider documentation plus focused tests.
+# Autotask documents Company, Contact, ConfigurationItem, Ticket, and TicketNote
+# as entity classes whose API-only security levels can independently permit querying
+# through resource impersonation. Keep schema/describe service-only: descriptive
+# provider metadata is a different release boundary and does not need requester
+# impersonation to support ordinary entity reads.
 _IMPERSONATED_READ_OPERATIONS = frozenset(
     {
         "autotask.company.get",
         "autotask.company.search",
+        "autotask.contact.get",
+        "autotask.contact.search",
+        "autotask.configuration.get",
+        "autotask.configuration.search",
         "autotask.ticket.get",
         "autotask.ticket.search",
+        "autotask.ticket.notes.list",
     }
 )
 
@@ -34,13 +41,19 @@ class AutotaskImpersonationEvidence:
 
 
 class AutotaskImpersonatingConnector(AutotaskConnector):
-    """Execute selected Autotask reads as the authenticated Jason requester.
+    """Execute supported Autotask entity reads as the authenticated Jason requester.
 
     Autotask REST authentication still uses the dedicated API-only integration
-    account. For supported read entities, the connector resolves the already-
-    authenticated Jason principal through the durable Microsoft binding, maps that
-    trusted email to exactly one Autotask Resource, and supplies Autotask's
+    account. For provider entity classes documented as supporting resource
+    impersonation/query security, the connector resolves the already-authenticated
+    Jason principal through the durable Microsoft binding, maps that trusted email to
+    exactly one active Autotask Resource, and supplies Autotask's
     `ImpersonationResourceId` header on the provider read.
+
+    This is intentionally resource-class driven rather than conversationally
+    hard-coded. Once an approved Autotask provider read maps to one of these documented
+    entity classes, the same requester-enforcement mechanism applies whether the human
+    asked for a ticket, contact, device/configuration item, company, or ticket note.
 
     The mapping lookup is internal evidence used only to establish the provider
     enforcement identity. Missing or ambiguous trusted bindings, and zero or multiple
