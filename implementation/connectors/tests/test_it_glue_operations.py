@@ -73,7 +73,9 @@ from connectors.it_glue.operations import (
             "it_glue.document.get",
             {"document_id": 73},
             "/documents/73",
-            None,
+            {
+                "include": "authorized_users,user_resource_accesses,group_resource_accesses",
+            },
         ),
         (
             "it_glue.relationships.list",
