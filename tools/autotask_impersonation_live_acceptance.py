@@ -27,10 +27,10 @@ from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBi
 DEFAULT_OPENBAO_URL = "http://127.0.0.1:8200"
 DEFAULT_BINDINGS_DB = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
 DEFAULT_AUTOTASK_ROLE_ID_PATH = Path(
-    "/run/jason-runtime-credentials/openbao/autotask/role_id"
+    "/run/jason-secrets/openbao/autotask/role_id"
 )
 DEFAULT_AUTOTASK_SECRET_ID_PATH = Path(
-    "/run/jason-runtime-credentials/openbao/autotask/secret_id"
+    "/run/jason-secrets/openbao/autotask/secret_id"
 )
 _IMPOSSIBLE_RESOURCE_ID = 9223372036854775807
 
@@ -146,6 +146,7 @@ def _query(capability: str, *, principal_id: str, correlation_id: str) -> Connec
         "autotask.ticket.search": "Tickets",
         "autotask.company.search": "Companies",
     }[capability]
+    del provider_capability
     search = json.dumps(
         {
             "MaxRecords": 1,
@@ -187,7 +188,11 @@ def _verify_binding(args: argparse.Namespace) -> SQLiteMicrosoftIdentityBindingS
     return store
 
 
-def _run_negative_control(args: argparse.Namespace, *, bindings) -> tuple[bool, int | None]:
+def _run_negative_control(
+    args: argparse.Namespace,
+    *,
+    bindings,
+) -> tuple[bool, int | None, int]:
     transport = ObservingTransport()
     connector = InvalidImpersonationConnector(
         secrets=_resolver(args),
@@ -204,8 +209,18 @@ def _run_negative_control(args: argparse.Namespace, *, bindings) -> tuple[bool, 
             )
         )
     except ConnectorTransportError as exc:
-        return True, exc.status_code
-    return False, None
+        target_calls = [call for call in transport.calls if bool(call["ticket_query"])]
+        provider_target_observed = (
+            len(target_calls) == 1
+            and bool(target_calls[0]["impersonation_header_present"])
+        )
+        provider_http_response_observed = exc.status_code is not None
+        return (
+            provider_target_observed and provider_http_response_observed,
+            exc.status_code,
+            len(target_calls),
+        )
+    return False, None, 0
 
 
 def _run_valid_probe(args: argparse.Namespace, *, bindings, capability: str) -> tuple[bool, int, int]:
@@ -267,10 +282,14 @@ def run(args: argparse.Namespace) -> Path | None:
 
     bindings = _verify_binding(args)
     try:
-        negative_rejected, negative_status = _run_negative_control(args, bindings=bindings)
+        (
+            negative_rejected,
+            negative_status,
+            negative_target_request_count,
+        ) = _run_negative_control(args, bindings=bindings)
         if not negative_rejected:
             raise PermissionError(
-                "AUTOTASK_IMPERSONATION_NEGATIVE_CONTROL_NOT_REJECTED"
+                "AUTOTASK_IMPERSONATION_NEGATIVE_CONTROL_NOT_PROVIDER_REJECTED"
             )
 
         ticket_applied, ticket_resource_lookups, ticket_audit_events = _run_valid_probe(
@@ -288,7 +307,7 @@ def run(args: argparse.Namespace) -> Path | None:
 
         observed_at = datetime.now(timezone.utc).isoformat()
         evidence = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "provider": "autotask",
             "observed_at": observed_at,
             "provider_backed": True,
@@ -301,6 +320,9 @@ def run(args: argparse.Namespace) -> Path | None:
             "autotask_resource_id_printed": False,
             "autotask_resource_id_persisted": False,
             "negative_impersonation_control_rejected": True,
+            "negative_control_provider_http_response_observed": True,
+            "negative_control_target_request_observed": negative_target_request_count == 1,
+            "negative_control_target_request_count": negative_target_request_count,
             "negative_control_http_status": negative_status,
             "ticket_search_impersonation_header_applied": ticket_applied,
             "company_search_impersonation_header_applied": company_applied,
