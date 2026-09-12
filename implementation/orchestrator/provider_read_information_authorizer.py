@@ -6,7 +6,7 @@ from typing import Any, Mapping, Protocol
 
 from kernel.resolution import CapabilityResolutionResult
 
-from .contracts import OrchestrationRequest
+from .contracts import OrchestrationMode, OrchestrationRequest
 from .information_authorization import (
     InformationAction,
     InformationAuthorizationDecision,
@@ -18,6 +18,7 @@ from .information_sensitivity import assess_sensitive_evidence
 from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
+    IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
 )
 from .service import CapabilityInvoker, InvocationResult
@@ -143,6 +144,70 @@ def _authorized_envelope(
         },
         source_provider=provider_id,
         source_resource_type=resource_type,
+    )
+
+
+def _active_trusted_binding(
+    *,
+    request: OrchestrationRequest,
+    bindings: TrustedPrincipalBindingResolver | None,
+):
+    if bindings is None:
+        return None
+    return bindings.find_active_by_jason_identity(
+        jason_identity_id=request.principal_id
+    )
+
+
+def _jason_managed_requester_authorization_proven(
+    *,
+    request: OrchestrationRequest,
+    bindings: TrustedPrincipalBindingResolver | None,
+) -> bool:
+    """Require positive identity/authority facts before requester release.
+
+    This is the temporary IT Glue compatibility path approved for governed reads.
+    Service-account fetch authority never becomes requester release authority by
+    implication: authenticated human identity, an active trusted Microsoft/Jason
+    binding, allowed JKD-001 authority, a validated authority context, observe-only
+    permission, and Central Orchestrator EXECUTE mode are all required.
+    """
+
+    return bool(
+        request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "human"
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+        and _active_trusted_binding(request=request, bindings=bindings) is not None
+    )
+
+
+def _jason_managed_it_glue_envelope(
+    *,
+    capability_name: str,
+    output: Mapping[str, Any],
+) -> InformationAuthorizationEnvelope:
+    sensitivity = assess_sensitive_evidence(output)
+    handling = (
+        InformationHandlingClass.DERIVED_OUTPUT_ONLY
+        if sensitivity.sensitive
+        else InformationHandlingClass.RELEASABLE
+    )
+    sensitivity_basis = tuple(
+        sorted({f"sensitivity:{finding.kind.value}" for finding in sensitivity.findings})
+    )
+    return _authorized_envelope(
+        provider_id=IT_GLUE_PROVIDER,
+        resource_type=capability_name,
+        handling_class=handling,
+        basis=(
+            SourceAuthorizationMode.JASON_MANAGED.value,
+            "jkd001_authority_context",
+            "trusted_microsoft_identity_binding",
+            "central_orchestrator_governed_read",
+        )
+        + sensitivity_basis,
     )
 
 
@@ -358,6 +423,12 @@ class ProviderReadInformationAuthorizingInvoker:
     lets Jason retrieve evidence for an authorized execution when needed while
     preventing the service identity's privilege from becoming requester disclosure
     authority.
+
+    IT Glue document reads retain the provider-native ACL-mirrored path when positive
+    source authorization is available. The approved temporary Jason-managed path is a
+    bounded fallback for registered IT Glue read capabilities and requires the same
+    positive identity, authority, observe-only, and Central Orchestrator facts used by
+    the temporary Autotask requester-authorization path.
     """
 
     delegate: CapabilityInvoker
@@ -388,13 +459,54 @@ class ProviderReadInformationAuthorizingInvoker:
                 )
             )
             output = _sanitize_it_glue_document_read_output(invocation.output)
+
+            # Prefer provider-native ACL evidence when it positively authorizes release.
+            # Otherwise the approved temporary Jason-managed path may authorize the same
+            # registered read only after all independent requester/governance checks pass.
+            if (
+                not authorization.require_allowed(InformationAction.RELEASE).allowed
+                and resolution.capability_name in IT_GLUE_CAPABILITIES
+                and _jason_managed_requester_authorization_proven(
+                    request=request,
+                    bindings=self.bindings,
+                )
+            ):
+                authorization = _jason_managed_it_glue_envelope(
+                    capability_name=resolution.capability_name,
+                    output=output,
+                )
         elif provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_SEARCH:
-            authorization = _service_only_envelope(
-                provider_id=provider_id,
-                resource_type="document-search",
-                reason_code="IT_GLUE_DOCUMENT_SEARCH_SOURCE_AUTHORIZATION_UNVERIFIED",
-            )
             output = _sanitize_it_glue_document_search_output(invocation.output)
+            if (
+                resolution.capability_name in IT_GLUE_CAPABILITIES
+                and _jason_managed_requester_authorization_proven(
+                    request=request,
+                    bindings=self.bindings,
+                )
+            ):
+                authorization = _jason_managed_it_glue_envelope(
+                    capability_name=resolution.capability_name,
+                    output=output,
+                )
+            else:
+                authorization = _service_only_envelope(
+                    provider_id=provider_id,
+                    resource_type="document-search",
+                    reason_code="IT_GLUE_DOCUMENT_SEARCH_SOURCE_AUTHORIZATION_UNVERIFIED",
+                )
+        elif (
+            provider_id == IT_GLUE_PROVIDER
+            and resolution.capability_name in IT_GLUE_CAPABILITIES
+            and _jason_managed_requester_authorization_proven(
+                request=request,
+                bindings=self.bindings,
+            )
+        ):
+            output = dict(invocation.output)
+            authorization = _jason_managed_it_glue_envelope(
+                capability_name=resolution.capability_name,
+                output=output,
+            )
         else:
             authorization = _service_only_envelope(
                 provider_id=provider_id or "unknown",
