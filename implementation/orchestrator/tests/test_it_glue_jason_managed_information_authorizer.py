@@ -10,6 +10,7 @@ from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.information_authorization import InformationAction, InformationHandlingClass
 from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_CONFIGURATION_READ,
+    DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_ORGANIZATION_SEARCH,
 )
@@ -212,3 +213,47 @@ def test_document_search_remains_sanitized_under_jason_managed_release() -> None
     release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
     assert release.allowed is True
     assert "jason_managed" in release.authorization_basis
+
+
+def test_document_read_explicit_acl_denial_is_not_overridden_by_jason_managed_release() -> None:
+    output = {
+        "provider": "it_glue",
+        "provider_capability": "it_glue.document.read",
+        "data": {
+            "data": {
+                "id": "73",
+                "type": "documents",
+                "attributes": {
+                    "name": "Restricted Network Notes",
+                    "restricted": True,
+                },
+                "relationships": {
+                    "authorized_users": {
+                        "data": [{"id": "user-other", "type": "users"}],
+                    }
+                },
+            },
+            "included": [
+                {
+                    "id": "user-other",
+                    "type": "users",
+                    "attributes": {"email": "other@example.com"},
+                }
+            ],
+        },
+    }
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(DOCUMENTATION_DOCUMENT_READ),
+        resolution=_resolution(DOCUMENTATION_DOCUMENT_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is False
+    assert release.reason_code == "IT_GLUE_DOCUMENT_ACCESS_NOT_ESTABLISHED"
+    assert "jason_managed" not in release.authorization_basis
+    assert "included" not in invocation.output["data"]
+    relationships = invocation.output["data"]["data"].get("relationships", {})
+    assert "authorized_users" not in relationships
