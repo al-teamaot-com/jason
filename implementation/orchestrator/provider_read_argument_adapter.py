@@ -115,6 +115,36 @@ def _resource_id(arguments: Mapping[str, Any]) -> Any:
     return value
 
 
+def _ticket_read_selector(arguments: Mapping[str, Any]) -> Any:
+    """Resolve one human or durable ticket selector without first-match guessing.
+
+    ChatGPT may naturally place an Autotask ticket number in ``ticket_id`` or
+    ``resource_id``. Canonical ticket read accepts those aliases plus the explicit
+    ``ticket_number`` selector. Multiple supplied selectors must identify the same
+    textual value or the read fails closed as ambiguous.
+    """
+
+    supplied: list[tuple[str, Any]] = []
+    for key in ("ticket_number", "ticket_id", "resource_id"):
+        value = arguments.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        supplied.append((key, value))
+
+    if not supplied:
+        raise ValueError(
+            "ticket_number, ticket_id, or resource_id is required for an exact ticket read"
+        )
+
+    normalized = {str(value).strip() for _, value in supplied}
+    if len(normalized) != 1:
+        raise ValueError("conflicting ticket selectors are not allowed")
+
+    return supplied[0][1]
+
+
 def _canonical_filters(
     arguments: Mapping[str, Any],
     *,
@@ -343,7 +373,7 @@ def adapt_autotask_arguments(
     if capability_name == SERVICE_CONTACT_READ:
         return {"contact_id": _resource_id(arguments)}
     if capability_name == SERVICE_TICKET_READ:
-        return {"ticket_id": _resource_id(arguments)}
+        return {"ticket_id": _ticket_read_selector(arguments)}
     if capability_name == SERVICE_CONFIGURATION_READ:
         return {"configuration_item_id": _resource_id(arguments)}
     if capability_name == SERVICE_TICKET_NOTES_SEARCH:

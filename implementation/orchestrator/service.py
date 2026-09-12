@@ -19,6 +19,12 @@ from .contracts import (
     OrchestrationResult,
     OrchestrationStatus,
 )
+from .information_authorization import (
+    FailClosedInformationReleaseAuthorizer,
+    InformationAuthorizationEnvelope,
+    InformationReleaseAuthorizer,
+    InformationRemediation,
+)
 
 
 class OrchestrationAuditSink(Protocol):
@@ -62,6 +68,7 @@ class InvocationResult:
     artifact_references: tuple[ArtifactReference, ...] = ()
     attempts: int = 1
     telemetry: InvocationTelemetry | None = None
+    information_authorization: InformationAuthorizationEnvelope | None = None
 
 
 class CapabilityInvoker(Protocol):
@@ -74,7 +81,13 @@ class CapabilityInvoker(Protocol):
 
 
 class CentralOrchestrator:
-    """Coordinate governed capability execution without provider logic."""
+    """Coordinate governed capability execution without provider logic.
+
+    Information release authorization is deliberately separate from capability and
+    provider execution authorization. Any invocation that carries an information
+    authorization envelope is automatically release-gated. Callers may also require
+    the gate for every invocation; in that mode a missing envelope fails closed.
+    """
 
     def __init__(
         self,
@@ -84,12 +97,20 @@ class CentralOrchestrator:
         audit: OrchestrationAuditSink,
         authority_context: AuthorityContextEnforcer | None = None,
         require_authority_context: bool = False,
+        information_release: InformationReleaseAuthorizer | None = None,
+        require_information_release_authorization: bool = False,
     ) -> None:
         self._resolution = resolution
         self._invoker = invoker
         self._audit = audit
         self._authority_context = authority_context
         self._require_authority_context = require_authority_context
+        self._information_release = (
+            information_release or FailClosedInformationReleaseAuthorizer()
+        )
+        self._require_information_release_authorization = (
+            require_information_release_authorization
+        )
         if require_authority_context and authority_context is None:
             raise ValueError("authority_context enforcer is required when enforcement is enabled")
 
@@ -222,6 +243,54 @@ class CentralOrchestrator:
             return result
 
         duration_ms = round((monotonic() - invocation_started) * 1000, 3)
+        release_output = dict(invocation.output)
+        release_gate_applies = (
+            self._require_information_release_authorization
+            or invocation.information_authorization is not None
+        )
+        if release_gate_applies:
+            release = self._information_release.authorize_release(
+                request=request,
+                resolution=resolution,
+                output=invocation.output,
+                authorization=invocation.information_authorization,
+            )
+            self._record(
+                "orchestration.information_release.decided",
+                request,
+                stage=(ExecutionStage.COMPLETED if release.allowed else ExecutionStage.DENIED),
+                details={
+                    "provider_id": resolution.selected_provider_id,
+                    "allowed": release.allowed,
+                    "reason_code": release.reason_code,
+                    "remediation": release.remediation.value,
+                    "handling_class": release.handling_class.value,
+                    "policy_ids": release.policy_ids,
+                    "authorization_basis": release.authorization_basis,
+                },
+            )
+            if not release.allowed:
+                status = (
+                    OrchestrationStatus.APPROVAL_REQUIRED
+                    if release.remediation is InformationRemediation.REQUEST_APPROVAL
+                    else OrchestrationStatus.DENIED
+                )
+                return OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=status,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=(release.reason_code, release.remediation.value.upper()),
+                    resolution=resolution,
+                    output={},
+                    artifact_references=request.artifact_references,
+                    attempts=invocation.attempts,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="INFORMATION_RELEASE_DENIED",
+                )
+            release_output = dict(release.output)
+
         result = OrchestrationResult(
             execution_id=request.execution_id,
             correlation_id=request.correlation_id,
@@ -230,7 +299,7 @@ class CentralOrchestrator:
             stage=ExecutionStage.COMPLETED,
             reason_codes=("capability_completed",),
             resolution=resolution,
-            output=dict(invocation.output),
+            output=release_output,
             artifact_references=request.artifact_references + invocation.artifact_references,
             attempts=invocation.attempts,
             provider_id=resolution.selected_provider_id,
@@ -242,6 +311,7 @@ class CentralOrchestrator:
             "provider_capability": invocation.output.get("provider_capability"),
             "duration_ms": duration_ms,
             "status": result.status.value,
+            "information_release_gate_applied": release_gate_applies,
         }
         telemetry = invocation.telemetry
         if telemetry is not None:

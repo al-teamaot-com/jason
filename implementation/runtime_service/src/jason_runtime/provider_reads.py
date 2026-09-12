@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
 from connectors.autotask.capability_manifest import build_autotask_manifest
-from connectors.autotask.connector import AutotaskConnector
+from connectors.autotask.impersonating_connector import AutotaskImpersonatingConnector
 from connectors.core.contracts import AuditSink, HttpTransport, SecretResolver
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from kernel.capabilities import CapabilityRegistryService
 from kernel.execution_providers import ExecutionProviderRegistryService
+from orchestrator.autotask_information_authorizer import (
+    AutotaskImpersonationInformationAuthorizer,
+)
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
+from orchestrator.provider_read_information_authorizer import (
+    ProviderReadInformationAuthorizingInvoker,
+    TrustedPrincipalBindingResolver,
+)
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
     AUTOTASK_PROVIDER,
@@ -41,6 +49,11 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
+)
+from orchestrator.service import CapabilityInvoker
+from orchestrator.teams_identity_binding_sqlite import (
+    DirectoryEnrichedMicrosoftIdentityBindingResolver,
+    SQLiteMicrosoftIdentityBindingStore,
 )
 
 from .provider_read_activation import apply_provider_read_activation_from_env
@@ -76,6 +89,10 @@ _RUNTIME_PROVIDER_CREDENTIALS = {
     IT_GLUE_PROVIDER: _RUNTIME_OPENBAO_ROOT / "it-glue",
     AUTOTASK_PROVIDER: _RUNTIME_OPENBAO_ROOT / "autotask",
 }
+_RUNTIME_BINDINGS_ENV = "JASON_TEAMS_IDENTITY_BINDINGS_DB"
+_RUNTIME_MICROSOFT_BOUNDARY_ENV = "JASON_MICROSOFT_BOUNDARY_DB"
+_RUNTIME_MICROSOFT_ROLE_ENV = "JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH"
+_RUNTIME_MICROSOFT_SECRET_ENV = "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH"
 
 
 def register_provider_read_runtime_foundation(
@@ -138,6 +155,73 @@ def scope_runtime_provider_secret_resolvers(
     )
 
 
+def runtime_principal_bindings_from_env() -> SQLiteMicrosoftIdentityBindingStore | None:
+    """Open the canonical durable identity-binding store only when runtime config names it.
+
+    This low-level helper exposes the stable Microsoft tenant/object -> Jason identity
+    binding. It deliberately does not manufacture a profile email when the durable row
+    omits one. Runtime source authorization wraps this store with the governed Microsoft
+    directory reader before using email to map the requester into provider-native ACLs.
+    """
+
+    configured = os.getenv(_RUNTIME_BINDINGS_ENV, "").strip()
+    if not configured:
+        return None
+    return SQLiteMicrosoftIdentityBindingStore(Path(configured))
+
+
+def runtime_source_authorization_bindings_from_env(
+    *,
+    transport: HttpTransport,
+) -> TrustedPrincipalBindingResolver | None:
+    """Resolve current requester profile data from the authenticated Microsoft binding.
+
+    The durable binding establishes identity using Microsoft tenant/object IDs and the
+    Jason principal. Email is mutable profile data used only to map that already-bound
+    identity into provider-native authorization systems such as Autotask Resources and
+    IT Glue authorized users. Resolve it live through the governed Microsoft Graph
+    directory path and fail closed on ambiguity, disabled identities, missing email, or
+    directory failure. Caller-supplied email is never used by this runtime path.
+    """
+
+    bindings = runtime_principal_bindings_from_env()
+    if bindings is None:
+        return None
+
+    from .microsoft_directory import build_microsoft_directory_runtime
+
+    boundary_db = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_BOUNDARY_ENV,
+            "/var/lib/jason/authority/client-boundaries.sqlite3",
+        )
+    )
+    openbao_url = os.getenv("JASON_OPENBAO_URL", "http://openbao:8200").strip()
+    microsoft_role = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_ROLE_ENV,
+            "/run/jason-secrets/openbao/microsoft-graph/role_id",
+        )
+    )
+    microsoft_secret = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_SECRET_ENV,
+            "/run/jason-secrets/openbao/microsoft-graph/secret_id",
+        )
+    )
+    directory_runtime = build_microsoft_directory_runtime(
+        boundary_db=boundary_db,
+        openbao_url=openbao_url,
+        role_id_path=microsoft_role,
+        secret_id_path=microsoft_secret,
+        transport=transport,
+    )
+    return DirectoryEnrichedMicrosoftIdentityBindingResolver(
+        bindings=bindings,
+        directory=directory_runtime.directory,
+    )
+
+
 def build_provider_read_invoker(
     *,
     transport: HttpTransport,
@@ -145,13 +229,21 @@ def build_provider_read_invoker(
     secrets: SecretResolver | None = None,
     it_glue_secrets: SecretResolver | None = None,
     autotask_secrets: SecretResolver | None = None,
-) -> GovernedProviderReadConnectorInvoker:
-    """Compose governed provider reads while preserving provider identities.
+    bindings: TrustedPrincipalBindingResolver | None = None,
+) -> CapabilityInvoker:
+    """Compose governed provider reads with source-aware release authorization.
 
     Explicit provider resolvers take precedence. The compatibility ``secrets``
     seam remains for bounded single-provider acceptance and tests. In normal
     runtime composition the known generic OpenBao bootstrap is deterministically
     split into provider-specific runtime AppRole identities.
+
+    IT Glue continues to require positive source ACL evidence before release.
+    Supported Autotask company/ticket reads are executed with provider-enforced
+    requester impersonation derived only from the durable Microsoft/Jason binding
+    plus current Microsoft Graph profile data. All other provider/resource
+    combinations remain service-only until a positive requester authorization adapter
+    exists.
     """
 
     if secrets is not None and it_glue_secrets is None and autotask_secrets is None:
@@ -166,29 +258,43 @@ def build_provider_read_invoker(
             "IT Glue and Autotask secret resolvers are required for provider reads"
         )
 
+    effective_bindings = (
+        bindings
+        if bindings is not None
+        else runtime_source_authorization_bindings_from_env(transport=transport)
+    )
     connectors = {
         IT_GLUE_PROVIDER: ItGlueConnector(
             secrets=it_glue_resolver,
             transport=transport,
             audit=audit,
         ),
-        AUTOTASK_PROVIDER: AutotaskConnector(
+        AUTOTASK_PROVIDER: AutotaskImpersonatingConnector(
             secrets=autotask_resolver,
             transport=transport,
             audit=audit,
+            bindings=effective_bindings,
         ),
     }
     delegate = GovernedConnectorCapabilityInvoker(
         connectors=connectors,
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
     )
-    return GovernedProviderReadConnectorInvoker(delegate=delegate)
+    canonical = GovernedProviderReadConnectorInvoker(delegate=delegate)
+    source_authorized = ProviderReadInformationAuthorizingInvoker(
+        delegate=canonical,
+        bindings=effective_bindings,
+    )
+    return AutotaskImpersonationInformationAuthorizer(
+        delegate=source_authorized,
+        bindings=effective_bindings,
+    )
 
 
 def register_provider_read_invokers(
     *,
     invokers: CapabilityInvokerRegistry,
-    invoker: GovernedProviderReadConnectorInvoker,
+    invoker: CapabilityInvoker,
 ) -> None:
     for capability in sorted(IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES):
         invokers.register(capability, invoker)

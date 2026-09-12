@@ -105,6 +105,17 @@ def test_resolves_registered_operation(
     assert params == expected_params
 
 
+def test_document_get_does_not_claim_unsupported_acl_include_contract() -> None:
+    method, path, params = resolve_operation(
+        "it_glue.document.get",
+        {"document_id": 73},
+    )
+
+    assert method == "GET"
+    assert path == "/documents/73"
+    assert params is None
+
+
 def test_registry_matches_connector_capabilities() -> None:
     assert set(IT_GLUE_OPERATIONS) == {
         "it_glue.entity.get",
