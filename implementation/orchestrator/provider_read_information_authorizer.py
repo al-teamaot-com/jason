@@ -54,6 +54,14 @@ _DOCUMENT_AUTHORIZATION_RELATIONSHIPS = frozenset(
         "group-resource-accesses",
     }
 )
+_DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES = frozenset(
+    {
+        "SOURCE_PRINCIPAL_EMAIL_REQUIRED",
+        "IT_GLUE_DOCUMENT_AUTHORIZATION_PAYLOAD_INVALID",
+        "IT_GLUE_DOCUMENT_RESTRICTION_STATE_UNKNOWN",
+        "IT_GLUE_AUTHORIZED_USERS_RELATIONSHIP_REQUIRED",
+    }
+)
 
 
 def _decision(
@@ -428,7 +436,8 @@ class ProviderReadInformationAuthorizingInvoker:
     source authorization is available. The approved temporary Jason-managed path is a
     bounded fallback for registered IT Glue read capabilities and requires the same
     positive identity, authority, observe-only, and Central Orchestrator facts used by
-    the temporary Autotask requester-authorization path.
+    the temporary Autotask requester-authorization path. An explicit provider-native
+    document ACL denial remains authoritative and is never overridden by the fallback.
     """
 
     delegate: CapabilityInvoker
@@ -460,11 +469,14 @@ class ProviderReadInformationAuthorizingInvoker:
             )
             output = _sanitize_it_glue_document_read_output(invocation.output)
 
-            # Prefer provider-native ACL evidence when it positively authorizes release.
-            # Otherwise the approved temporary Jason-managed path may authorize the same
-            # registered read only after all independent requester/governance checks pass.
+            # Provider-native ACL evidence is authoritative when it establishes a
+            # positive or negative requester decision. The temporary Jason-managed
+            # fallback is permitted only when provider ACL evidence is unavailable or
+            # unverifiable, never when IT Glue positively establishes no access.
+            release_decision = authorization.require_allowed(InformationAction.RELEASE)
             if (
-                not authorization.require_allowed(InformationAction.RELEASE).allowed
+                not release_decision.allowed
+                and release_decision.reason_code in _DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES
                 and resolution.capability_name in IT_GLUE_CAPABILITIES
                 and _jason_managed_requester_authorization_proven(
                     request=request,
