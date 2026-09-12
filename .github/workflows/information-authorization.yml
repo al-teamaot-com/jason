@@ -13,6 +13,7 @@ on:
       - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/tests/test_provider_read_information_authorizer.py'
       - 'implementation/orchestrator/tests/test_autotask_information_authorizer.py'
+      - 'implementation/orchestrator/tests/test_it_glue_jason_managed_information_authorizer.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
       - 'implementation/orchestrator/teams_request_factory.py'
@@ -37,6 +38,7 @@ on:
       - 'implementation/orchestrator/tests/test_information_release_boundary.py'
       - 'implementation/orchestrator/tests/test_provider_read_information_authorizer.py'
       - 'implementation/orchestrator/tests/test_autotask_information_authorizer.py'
+      - 'implementation/orchestrator/tests/test_it_glue_jason_managed_information_authorizer.py'
       - 'implementation/orchestrator/service.py'
       - 'implementation/orchestrator/contracts.py'
       - 'implementation/orchestrator/teams_request_factory.py'
@@ -83,6 +85,7 @@ jobs:
             implementation/orchestrator/tests/test_information_release_boundary.py \
             implementation/orchestrator/tests/test_provider_read_information_authorizer.py \
             implementation/orchestrator/tests/test_autotask_information_authorizer.py \
+            implementation/orchestrator/tests/test_it_glue_jason_managed_information_authorizer.py \
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
             implementation/connectors/tests/test_it_glue_operations.py \
             implementation/connectors/tests/test_autotask_impersonating_connector.py \
@@ -95,6 +98,7 @@ jobs:
             implementation/orchestrator/tests/test_information_release_boundary.py \
             implementation/orchestrator/tests/test_provider_read_information_authorizer.py \
             implementation/orchestrator/tests/test_autotask_information_authorizer.py \
+            implementation/orchestrator/tests/test_it_glue_jason_managed_information_authorizer.py \
             implementation/runtime_service/tests/test_provider_read_information_binding.py \
             implementation/connectors/tests/test_it_glue_operations.py \
             implementation/connectors/tests/test_autotask_impersonating_connector.py
