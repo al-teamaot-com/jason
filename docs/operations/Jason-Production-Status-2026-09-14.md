@@ -68,27 +68,45 @@ The pre-v4 authority database backup is `/var/lib/jason/authority/authority-pre-
 
 OpenBao's canonical non-secret recovery documentation remains `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`. Protected initialization material is not to be copied into documentation, logs, Prometheus labels, dashboard panels, or chat.
 
+## Monitoring and dashboard state
+
+The repository observability baseline has been refreshed to match the current v4 production state. The new source includes:
+
+- `infrastructure/showcase/production_health_exporter.py` — secret-safe runtime/MCP/OpenBao/host contract metrics on port 9467;
+- `infrastructure/showcase/grafana/dashboards/jason-production-health.json` — dedicated Jason Production Health dashboard;
+- `infrastructure/showcase/prometheus/alerts/jason-production.yml` — local Prometheus alert rules;
+- `infrastructure/showcase/prometheus/file_sd/jason-production-health.json` — scrape target;
+- `infrastructure/showcase/systemd/jason-production-health-exporter.service` — observational exporter service;
+- `infrastructure/showcase/deploy_production_health_dashboard.sh` — rollback-protected observability-only deployment;
+- `docs/operations/Jason-Production-Monitoring-Baseline.md` — monitoring contract, alert severity, and known gaps.
+
+The production-health dashboard/alerts monitor runtime and MCP health, OpenBao initialized/unsealed state, accepted MCP deployment contract, duplicate watched MCP environment entries, credential mount contract, current-boot kernel corruption/error signatures, failed systemd units, root filesystem state/capacity, preserved rollback availability, and firing Prometheus alerts.
+
+The monitoring system intentionally does not direct-call external providers or expose credentials/provider records. Continuous governed provider canaries remain future work and must traverse the same Jason identity/authority/Central-Orchestrator path as real reads.
+
+At the time this record was updated, the monitoring-as-code source is complete but the new 9467 exporter/Prometheus rules/Grafana Production Health dashboard have not yet been asserted as deployed on the live host. Live deployment must use the rollback-protected observability-only script and verify that `jason-runtime`, `jason-mcp-pilot`, OpenBao, Ollama, and node-exporter container IDs remain unchanged.
+
 ## Known production debt / gaps
 
 ### Duplicate MCP environment entries
 
-The v4 MCP was created from the old environment file plus explicit v4 overrides. `docker inspect` therefore shows duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. Runtime composition proved that the active process is using the v4 profile and the live Microsoft capabilities prove the v4 surface is active, so this is not currently a functional outage. It should nevertheless be removed during a controlled MCP recreation because duplicated configuration is ambiguous and should be monitored until corrected.
+The v4 MCP was created from the old environment file plus explicit v4 overrides. `docker inspect` therefore shows duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. Runtime composition proved that the active process is using the v4 profile and the live Microsoft capabilities prove the v4 surface is active, so this is not currently a functional outage. It should nevertheless be removed during a controlled MCP recreation because duplicated configuration is ambiguous. The new production-health monitor explicitly exposes the duplicate count until corrected.
 
 ### User-relevant output enrichment
 
 A real-world test asked who was assigned to an Autotask ticket and Jason returned an Autotask resource ID instead of the technician's name. This is a product-quality defect. Provider foreign keys must be resolved through authoritative governed reads before being presented when the user needs the business meaning rather than the implementation identifier.
 
-Immediate design need: add canonical service-resource/technician read/search capabilities backed by Autotask Resources and use them to resolve assigned resource, creator, owner, technician, queue/status and similar foreign-key references as needed.
+Immediate design need: add canonical service-resource/technician read/search capabilities backed by Autotask Resources and use them to resolve assigned resource, creator, owner, technician, queue/status and similar foreign-key references as needed. Tracked in GitHub issue #178.
 
 ### Microsoft tenant-wide coverage
 
 Current Microsoft Graph production capabilities are intentionally narrow: `identity.user.search` and `identity.user.read`. Jason does not yet have governed tenant-wide reads for tenant/organization facts, verified domains, subscriptions/license inventory, Conditional Access, or Exchange/mailbox configuration.
 
-Jason must say that those resource families are unavailable rather than saying Microsoft/Entra as a whole is unavailable. The Jason System Registry is Jason's own topology/operational registry and is not an authoritative fallback for Microsoft tenant facts.
+Jason must say that those resource families are unavailable rather than saying Microsoft/Entra as a whole is unavailable. The Jason System Registry is Jason's own topology/operational registry and is not an authoritative fallback for Microsoft tenant facts. Tracked in GitHub issue #179.
 
 ### Provider-native requester authorization
 
-Temporary Jason-managed requester authorization remains an approved transitional control for Autotask and IT Glue. Follow-up issues remain required to restore provider-native requester authorization or an equivalent stronger mapping where the provider supports it reliably.
+Temporary Jason-managed requester authorization remains an approved transitional control for Autotask and IT Glue. Existing follow-up issues track restoration of provider-native requester authorization or an equivalent stronger mapping where the provider supports it reliably.
 
 ### Provider health canaries
 
@@ -100,6 +118,8 @@ Live provider reads were proven during acceptance, but continuous external-provi
 2. **Capability-Aware Answer Principle** — Jason distinguishes what it can know, what it actually checked, and which capability/resource family is missing. It must not imply an entire provider is unavailable when only one capability family is unavailable, and it must not substitute a non-authoritative source.
 3. **Authoritative-source principle** — Missing capability is preferable to invented or weakly sourced information. Foreign-key enrichment and cross-provider correlation must use governed authoritative reads.
 
+The detailed architectural rule and acceptance criteria are in `docs/architecture/Jason-User-Relevant-Output-and-Capability-Awareness.md`.
+
 ## Current change-control state
 
-PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backup, OpenBao recovery assets, and the read-only/central-orchestrator security boundary.
+PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backup, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
