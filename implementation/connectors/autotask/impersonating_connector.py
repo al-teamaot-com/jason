@@ -36,6 +36,7 @@ _IMPERSONATED_READ_OPERATIONS = frozenset(
         "autotask.company.search",
         "autotask.ticket.get",
         "autotask.ticket.search",
+        "autotask.ticket.count",
     }
 )
 
@@ -86,6 +87,12 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
     remains ``autotask.ticket.get`` so the canonical governance contract does
     not change while the provider transport uses the proven read-only query
     path.
+
+    Autotask ticket status is a tenant picklist backed by an integer value. A
+    conversational selector such as ``New`` must therefore be resolved against
+    the live Tickets entityInformation metadata before it is sent in a query.
+    Numeric status values remain pass-through and do not require the metadata
+    lookup. Unknown or ambiguous labels fail closed before the ticket query.
     """
 
     def __init__(self, *, bindings: TrustedPrincipalBindingResolver | None = None, **kwargs) -> None:
@@ -165,6 +172,143 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         )
         return super().prepare_request(query_request, credentials)
 
+    @staticmethod
+    def _status_picklist_values(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        fields = payload.get("fields")
+        if not isinstance(fields, list):
+            item = payload.get("item")
+            if isinstance(item, Mapping):
+                fields = item.get("fields")
+        if not isinstance(fields, list):
+            raise ValueError("AUTOTASK_TICKET_STATUS_METADATA_INVALID")
+
+        status_fields = [
+            field
+            for field in fields
+            if isinstance(field, Mapping)
+            and str(field.get("name") or "").strip().casefold() == "status"
+        ]
+        if len(status_fields) != 1:
+            raise ValueError("AUTOTASK_TICKET_STATUS_METADATA_INVALID")
+
+        picklist_values = status_fields[0].get("picklistValues")
+        if not isinstance(picklist_values, list):
+            raise ValueError("AUTOTASK_TICKET_STATUS_METADATA_INVALID")
+
+        return [item for item in picklist_values if isinstance(item, Mapping)]
+
+    def _resolve_ticket_status_label(
+        self,
+        *,
+        prepared: PreparedRequest,
+        label: str,
+    ) -> int:
+        normalized = label.strip().casefold()
+        if not normalized:
+            raise ValueError("AUTOTASK_TICKET_STATUS_LABEL_REQUIRED")
+
+        payload = self._transport.request(
+            method="GET",
+            url=f"{self._api_root(prepared)}/V1.0/Tickets/entityInformation",
+            headers=prepared.headers,
+            params=None,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        if not isinstance(payload, Mapping):
+            raise ValueError("AUTOTASK_TICKET_STATUS_METADATA_INVALID")
+
+        matches: list[int] = []
+        for item in self._status_picklist_values(payload):
+            candidate = str(item.get("label") or "").strip().casefold()
+            if candidate != normalized:
+                continue
+            try:
+                value = int(item.get("value"))
+            except (TypeError, ValueError):
+                continue
+            matches.append(value)
+
+        unique = sorted(set(matches))
+        if len(unique) != 1:
+            raise ValueError("AUTOTASK_TICKET_STATUS_LABEL_NOT_UNIQUE")
+        return unique[0]
+
+    def _resolve_ticket_search_status(
+        self,
+        *,
+        prepared: PreparedRequest,
+    ) -> PreparedRequest:
+        if not isinstance(prepared.params, Mapping):
+            return prepared
+        raw_search = prepared.params.get("search")
+        if not isinstance(raw_search, str) or not raw_search.strip():
+            return prepared
+
+        try:
+            search = json.loads(raw_search)
+        except ValueError:
+            return prepared
+        if not isinstance(search, Mapping):
+            return prepared
+
+        raw_filters = search.get("filter")
+        if not isinstance(raw_filters, list):
+            return prepared
+
+        filters: list[Any] = []
+        changed = False
+        for raw_clause in raw_filters:
+            if not isinstance(raw_clause, Mapping):
+                filters.append(raw_clause)
+                continue
+
+            clause = dict(raw_clause)
+            if (
+                str(clause.get("field") or "").strip().casefold() == "status"
+                and str(clause.get("op") or "").strip().casefold() == "eq"
+            ):
+                value = clause.get("value")
+                if isinstance(value, bool):
+                    raise ValueError("AUTOTASK_TICKET_STATUS_VALUE_INVALID")
+                if isinstance(value, int):
+                    filters.append(clause)
+                    continue
+
+                text = str(value or "").strip()
+                if not text:
+                    raise ValueError("AUTOTASK_TICKET_STATUS_VALUE_INVALID")
+                try:
+                    clause["value"] = int(text)
+                except ValueError:
+                    clause["value"] = self._resolve_ticket_status_label(
+                        prepared=prepared,
+                        label=text,
+                    )
+                changed = True
+
+            filters.append(clause)
+
+        if not changed:
+            return prepared
+
+        normalized_search = dict(search)
+        normalized_search["filter"] = filters
+        params = dict(prepared.params)
+        params["search"] = json.dumps(
+            normalized_search,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return PreparedRequest(
+            method=prepared.method,
+            url=prepared.url,
+            headers=prepared.headers,
+            params=params,
+            json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+            audit_operation=prepared.audit_operation,
+        )
+
     def _resolve_impersonation_resource_id(
         self,
         *,
@@ -231,6 +375,12 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             )
         else:
             prepared = super().prepare_request(request, credentials)
+
+        if request.context.capability in {
+            "autotask.ticket.search",
+            "autotask.ticket.count",
+        }:
+            prepared = self._resolve_ticket_search_status(prepared=prepared)
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             return prepared
