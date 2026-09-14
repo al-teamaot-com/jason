@@ -10,6 +10,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/file_sd:/etc/prometheus/file_sd:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
