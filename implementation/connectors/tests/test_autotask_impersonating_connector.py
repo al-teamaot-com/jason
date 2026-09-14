@@ -85,7 +85,7 @@ class _Transport:
             }
         if url.endswith("/V1.0/Resources/query"):
             return {"items": list(self.resource_items)}
-        if url.endswith("/V1.0/Tickets/entityInformation"):
+        if url.endswith("/V1.0/Tickets/entityInformation/fields"):
             return {"fields": list(self.ticket_fields)}
         return {"item": {"id": 12345, "title": "Synthetic ticket"}}
 
@@ -235,7 +235,7 @@ def test_jason_managed_ticket_number_read_uses_exact_ticket_number_query(
     }
 
 
-def test_jason_managed_ticket_search_resolves_status_label_from_entity_metadata(
+def test_jason_managed_ticket_search_resolves_status_label_from_entity_metadata_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -253,7 +253,9 @@ def test_jason_managed_ticket_search_resolves_status_label_from_entity_metadata(
     connector.execute(_ticket_search_request("new"))
 
     assert len(transport.requests) == 3
-    assert transport.requests[1]["url"].endswith("/V1.0/Tickets/entityInformation")
+    assert transport.requests[1]["url"].endswith(
+        "/V1.0/Tickets/entityInformation/fields"
+    )
     target = transport.requests[2]
     assert target["url"].endswith("/V1.0/Tickets/query")
     assert json.loads(target["params"]["search"]) == {
@@ -281,7 +283,7 @@ def test_numeric_ticket_status_does_not_require_metadata_lookup(
 
     assert len(transport.requests) == 2
     assert not any(
-        request["url"].endswith("/V1.0/Tickets/entityInformation")
+        request["url"].endswith("/V1.0/Tickets/entityInformation/fields")
         for request in transport.requests
     )
 
@@ -305,7 +307,9 @@ def test_unknown_ticket_status_label_fails_closed_before_ticket_query(
         connector.execute(_ticket_search_request("does-not-exist"))
 
     assert len(transport.requests) == 2
-    assert transport.requests[1]["url"].endswith("/V1.0/Tickets/entityInformation")
+    assert transport.requests[1]["url"].endswith(
+        "/V1.0/Tickets/entityInformation/fields"
+    )
     assert not any(
         request["url"].endswith("/V1.0/Tickets/query")
         for request in transport.requests[1:]
