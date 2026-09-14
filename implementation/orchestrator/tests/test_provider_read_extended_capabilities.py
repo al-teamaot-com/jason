@@ -100,8 +100,8 @@ def test_microsoft_manifest_registers_provider_neutral_user_search_and_read():
 
     broker.register(build_microsoft_graph_manifest())
 
-    manifest = broker.get("microsoft_graph_directory")
-    assert manifest.integration.provider_id == MICROSOFT_GRAPH_PROVIDER
+    view = broker.get("microsoft_graph_directory")
+    assert view.provider_id == MICROSOFT_GRAPH_PROVIDER
     operations = {
         operation.capability_name
         for resource in build_microsoft_graph_manifest().resources
