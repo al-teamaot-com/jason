@@ -38,6 +38,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/aws-ses-sendmail-approle"
         ),
     },
+    "autotask_write": {
+        "logical_name": "autotask.write",
+        "secret_path": "secret/data/connectors/autotask/production/write",
+        "fields": ("username", "secret", "integration_code"),
+        "required_fields": ("username", "secret", "integration_code"),
+        "policy_name": "jason-autotask-write-secret-read",
+        "role_name": "jason-autotask-write-secret-read",
+        "connector_identity": "autotask-write",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/autotask-write-approle"
+        ),
+    },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
         "secret_path": "secret/data/connectors/datto-rmm/production/read-only",
