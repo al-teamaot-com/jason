@@ -51,6 +51,25 @@ After the first IT Glue + Datto RMM convergence slice:
 - first approved physical artifact/evidence store binding for INF-013;
 - broader cross-provider relationship and event normalization.
 
+### Governed Technician Access / RBAC — accepted design, queued
+
+Implement exactly four human access levels for Jason:
+
+- **Owner** — full authority. May read, write, execute, approve, administer, and modify Jason's Constitution, governance/security policies, authorization model, role definitions, approval rules, and provider/configuration boundaries.
+- **Admin** — full operational administration. May investigate and perform authorized operational remediation, but may not modify the Constitution, governance/security policies, role definitions, approval rules, Owner authority, or elevate their own authority.
+- **Tech** — may read anything within their authorized scope and may ask Jason to run approved Datto RMM components/scripts on positively identified devices. No governance, authorization, role, or unrestricted provider-administration changes. Higher-risk actions remain subject to policy and approval.
+- **RO (ReadOnly)** — limited allowlisted read-only access. No writes, execution, approval authority, or information release outside the user's permitted scope.
+
+Authorization design requirements:
+
+- Keep **role** separate from **scope**. Role controls what classes of action a person may perform; scope controls which clients, tenants, providers, resources, or devices they may access.
+- Compute effective authorization from **role + scope + action risk** through the Central Orchestrator; model discretion must never bypass the authorization decision.
+- Govern Tech component execution through an approved component/action catalog and risk classification. Routine diagnostic/remediation components may be Tech-executable; destructive actions, security-agent removal, broad/mass deployment, identity/security-control changes, and similar high-risk actions require elevated authority or approval.
+- Only **Owner** may change the authorization model itself, Owner membership/authority, constitutional controls, or the policy that defines the four access levels.
+- Prevent self-elevation and privilege escalation by Admin, Tech, or RO users.
+- Require positive target resolution before any device execution; ambiguous or incomplete endpoint resolution must fail closed.
+- Make effective permissions explainable and auditable so Jason can answer what a user is allowed to do and record both permitted and denied authorization decisions.
+
 ## Phase Principle
 
 **Model the business, not the software.**
