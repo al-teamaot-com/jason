@@ -20,7 +20,10 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
     DOCUMENTATION_ORGANIZATION_SEARCH,
+    IDENTITY_USER_READ,
+    IDENTITY_USER_SEARCH,
     IT_GLUE_PROVIDER,
+    MICROSOFT_GRAPH_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
@@ -113,6 +116,7 @@ _DEFAULT_IT_GLUE_PAGE_SIZE = 100
 _MAX_IT_GLUE_PAGE_SIZE = 1000
 _DEFAULT_AUTOTASK_MAX_RECORDS = 100
 _MAX_AUTOTASK_MAX_RECORDS = 500
+_MAX_MICROSOFT_USER_RECORDS = 25
 
 
 def _resource_id(arguments: Mapping[str, Any]) -> Any:
@@ -413,6 +417,63 @@ def adapt_autotask_arguments(
     raise ValueError(f"Unsupported Autotask canonical capability: {capability_name}")
 
 
+def adapt_microsoft_graph_arguments(
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    if capability_name == IDENTITY_USER_READ:
+        return {"resource_id": _resource_id(arguments)}
+    if capability_name != IDENTITY_USER_SEARCH:
+        raise ValueError(
+            f"Unsupported Microsoft Graph canonical capability: {capability_name}"
+        )
+
+    selectors = [
+        key
+        for key in ("email", "user_principal_name", "display_name")
+        if arguments.get(key) is not None and str(arguments.get(key)).strip()
+    ]
+    if len(selectors) != 1:
+        raise ValueError(
+            "Microsoft user search requires exactly one exact selector: "
+            "email, user_principal_name, or display_name"
+        )
+    allowed = {
+        "email",
+        "user_principal_name",
+        "display_name",
+        "page_size",
+        "requested_facts",
+        "result_intent",
+        "completeness_requirement",
+    }
+    unsupported = sorted(
+        str(key)
+        for key, value in arguments.items()
+        if value is not None and key not in allowed
+    )
+    if unsupported:
+        raise ValueError(
+            "unsupported Microsoft user search arguments: " + ", ".join(unsupported)
+        )
+
+    page_size = arguments.get("page_size", 10)
+    if isinstance(page_size, bool):
+        raise ValueError("page_size must be between 1 and 25")
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError) as error:
+        raise ValueError("page_size must be between 1 and 25") from error
+    if not 1 <= page_size <= _MAX_MICROSOFT_USER_RECORDS:
+        raise ValueError("page_size must be between 1 and 25")
+
+    selector = selectors[0]
+    return {
+        selector: str(arguments[selector]).strip(),
+        "page_size": page_size,
+    }
+
+
 def adapt_provider_read_arguments(
     *,
     provider_id: str,
@@ -423,6 +484,8 @@ def adapt_provider_read_arguments(
         return adapt_it_glue_arguments(capability_name, arguments)
     if provider_id == AUTOTASK_PROVIDER:
         return adapt_autotask_arguments(capability_name, arguments)
+    if provider_id == MICROSOFT_GRAPH_PROVIDER:
+        return adapt_microsoft_graph_arguments(capability_name, arguments)
     raise ValueError(f"No provider-read argument adapter for provider: {provider_id}")
 
 
