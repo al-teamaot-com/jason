@@ -133,16 +133,28 @@ def _openbao_health() -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _root_writable() -> int:
+def _root_writable_from_mounts(path: str) -> int | None:
     try:
-        lines = open("/proc/mounts", encoding="utf-8").read().splitlines()
+        lines = open(path, encoding="utf-8").read().splitlines()
     except OSError:
-        return -1
+        return None
     for line in lines:
         parts = line.split()
         if len(parts) >= 4 and parts[1] == "/":
             options = set(parts[3].split(","))
             return 1 if "rw" in options and "ro" not in options else 0
+    return None
+
+
+def _root_writable() -> int:
+    # The exporter service intentionally uses ProtectSystem=strict. Its own
+    # /proc/mounts therefore reports the service mount namespace as read-only
+    # even when the host root filesystem is healthy and read/write. PID 1 is
+    # in the host mount namespace, so prefer /proc/1/mounts for the host state.
+    for path in ("/proc/1/mounts", "/proc/mounts"):
+        value = _root_writable_from_mounts(path)
+        if value is not None:
+            return value
     return -1
 
 
@@ -281,7 +293,7 @@ def render_metrics() -> str:
         "# HELP jason_host_failed_systemd_units Failed systemd unit count; -1 means unavailable.",
         "# TYPE jason_host_failed_systemd_units gauge",
         f"jason_host_failed_systemd_units {failed_units}",
-        "# HELP jason_root_filesystem_writable Whether the root filesystem is mounted read/write; -1 means unavailable.",
+        "# HELP jason_root_filesystem_writable Whether the host root filesystem is mounted read/write; -1 means unavailable.",
         "# TYPE jason_root_filesystem_writable gauge",
         f"jason_root_filesystem_writable {root_writable}",
         "# HELP jason_mcp_rollback_available Whether a preserved pre-v4 MCP rollback container is present.",
@@ -300,7 +312,7 @@ def render_metrics() -> str:
         ),
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="1"} 1',
+        'jason_production_health_exporter_build_info{version="2"} 1',
     ])
 
     return "\n".join(lines) + "\n"
