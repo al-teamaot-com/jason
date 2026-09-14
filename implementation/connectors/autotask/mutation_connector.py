@@ -33,6 +33,12 @@ _OPERATION_PREFLIGHT = {
     "autotask.ticket.note.update": ("TicketNotes", "userAccessForUpdate"),
 }
 
+_ACCESS_LABELS = {
+    "none": 0,
+    "all": 1,
+    "restricted": 2,
+}
+
 
 class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     """Dormant, provider-enforced Autotask Ticket/TicketNote mutation path.
@@ -109,15 +115,25 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
         )
 
     @staticmethod
-    def _user_access_value(payload: Mapping[str, Any], field: str) -> int:
-        raw = payload.get(field)
-        if raw is None:
-            item = payload.get("item")
-            if isinstance(item, Mapping):
-                raw = item.get(field)
+    def _entity_information(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        info = payload.get("info")
+        if isinstance(info, Mapping):
+            return info
+        item = payload.get("item")
+        if isinstance(item, Mapping):
+            return item
+        return payload
 
-        if isinstance(raw, bool):
+    @classmethod
+    def _user_access_value(cls, payload: Mapping[str, Any], field: str) -> int:
+        raw = cls._entity_information(payload).get(field)
+        if isinstance(raw, bool) or raw is None:
             raise PermissionError("AUTOTASK_MUTATION_PREFLIGHT_INVALID")
+
+        if isinstance(raw, str):
+            normalized = raw.strip().casefold()
+            if normalized in _ACCESS_LABELS:
+                return _ACCESS_LABELS[normalized]
 
         try:
             value = int(raw)
