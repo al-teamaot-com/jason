@@ -1,0 +1,37 @@
+name: Validate Autotask Mutation Foundation
+
+on:
+  push:
+    paths:
+      - "implementation/connectors/autotask/**"
+      - "implementation/connectors/tests/test_autotask_operations.py"
+      - "implementation/connectors/tests/test_autotask_impersonating_connector.py"
+      - "implementation/connectors/tests/test_autotask_mutation_connector.py"
+      - ".github/workflows/autotask-mutation-foundation.yml"
+  pull_request:
+    paths:
+      - "implementation/connectors/autotask/**"
+      - "implementation/connectors/tests/test_autotask_operations.py"
+      - "implementation/connectors/tests/test_autotask_impersonating_connector.py"
+      - "implementation/connectors/tests/test_autotask_mutation_connector.py"
+      - ".github/workflows/autotask-mutation-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  autotask-mutation-foundation:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile Autotask connector foundation
+        run: python -m compileall -q implementation/connectors/autotask implementation/connectors/tests/test_autotask_operations.py implementation/connectors/tests/test_autotask_impersonating_connector.py implementation/connectors/tests/test_autotask_mutation_connector.py
+      - name: Test bounded Autotask mutation and impersonation foundation
+        run: python -m pytest implementation/connectors/tests/test_autotask_operations.py implementation/connectors/tests/test_autotask_impersonating_connector.py implementation/connectors/tests/test_autotask_mutation_connector.py -q
