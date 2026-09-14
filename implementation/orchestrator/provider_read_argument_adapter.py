@@ -28,6 +28,7 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
@@ -90,6 +91,12 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "email": "emailAddress",
     },
     SERVICE_TICKET_SEARCH: {
+        "resource_id": "id",
+        "ticket_number": "ticketNumber",
+        "company_id": "companyID",
+        "status": "status",
+    },
+    SERVICE_TICKET_COUNT: {
         "resource_id": "id",
         "ticket_number": "ticketNumber",
         "company_id": "companyID",
@@ -364,6 +371,20 @@ def _autotask_search(
     )
 
 
+def _autotask_count(
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> str:
+    if arguments.get("after_resource_id") is not None:
+        raise ValueError("after_resource_id is not valid for an Autotask count")
+
+    bounded_arguments = dict(arguments)
+    bounded_arguments["page_size"] = 1
+    payload = json.loads(_autotask_search(capability_name, bounded_arguments))
+    payload.pop("MaxRecords", None)
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
 def adapt_autotask_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
@@ -385,6 +406,8 @@ def adapt_autotask_arguments(
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")
         return {"entity": entity.strip()}
+    if capability_name == SERVICE_TICKET_COUNT:
+        return {"search": _autotask_count(capability_name, arguments)}
     if capability_name in _AUTOTASK_SEARCH_FIELDS:
         return {"search": _autotask_search(capability_name, arguments)}
     raise ValueError(f"Unsupported Autotask canonical capability: {capability_name}")
