@@ -47,8 +47,18 @@ class _Bindings:
 
 
 class _Transport:
-    def __init__(self, resource_items):
+    def __init__(self, resource_items, ticket_fields=None):
         self.resource_items = resource_items
+        self.ticket_fields = ticket_fields or [
+            {
+                "name": "status",
+                "isPickList": True,
+                "picklistValues": [
+                    {"value": "1", "label": "New"},
+                    {"value": "5", "label": "Complete"},
+                ],
+            }
+        ]
         self.requests: list[dict[str, Any]] = []
 
     def request(
@@ -75,6 +85,8 @@ class _Transport:
             }
         if url.endswith("/V1.0/Resources/query"):
             return {"items": list(self.resource_items)}
+        if url.endswith("/V1.0/Tickets/entityInformation"):
+            return {"fields": list(self.ticket_fields)}
         return {"item": {"id": 12345, "title": "Synthetic ticket"}}
 
 
@@ -97,6 +109,33 @@ def _request(ticket_id: int | str = 12345) -> ConnectorRequest:
             mode="observe",
         ),
         arguments={"ticket_id": ticket_id},
+    )
+
+
+def _ticket_search_request(status: int | str) -> ConnectorRequest:
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-ticket-status",
+            principal_id="person-al",
+            organization_id="aot",
+            client_id=None,
+            capability="autotask.ticket.search",
+            mode="observe",
+        ),
+        arguments={
+            "search": json.dumps(
+                {
+                    "MaxRecords": 1,
+                    "filter": [
+                        {
+                            "op": "eq",
+                            "field": "status",
+                            "value": status,
+                        }
+                    ],
+                }
+            )
+        },
     )
 
 
@@ -194,6 +233,83 @@ def test_jason_managed_ticket_number_read_uses_exact_ticket_number_query(
             }
         ],
     }
+
+
+def test_jason_managed_ticket_search_resolves_status_label_from_entity_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+
+    connector.execute(_ticket_search_request("new"))
+
+    assert len(transport.requests) == 3
+    assert transport.requests[1]["url"].endswith("/V1.0/Tickets/entityInformation")
+    target = transport.requests[2]
+    assert target["url"].endswith("/V1.0/Tickets/query")
+    assert json.loads(target["params"]["search"]) == {
+        "MaxRecords": 1,
+        "filter": [{"op": "eq", "field": "status", "value": 1}],
+    }
+
+
+def test_numeric_ticket_status_does_not_require_metadata_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+
+    connector.execute(_ticket_search_request(1))
+
+    assert len(transport.requests) == 2
+    assert not any(
+        request["url"].endswith("/V1.0/Tickets/entityInformation")
+        for request in transport.requests
+    )
+
+
+def test_unknown_ticket_status_label_fails_closed_before_ticket_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport([])
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+
+    with pytest.raises(ValueError, match="AUTOTASK_TICKET_STATUS_LABEL_NOT_UNIQUE"):
+        connector.execute(_ticket_search_request("does-not-exist"))
+
+    assert len(transport.requests) == 2
+    assert transport.requests[1]["url"].endswith("/V1.0/Tickets/entityInformation")
+    assert not any(
+        request["url"].endswith("/V1.0/Tickets/query")
+        for request in transport.requests[1:]
+    )
 
 
 def test_invalid_requester_authorization_mode_fails_before_provider_io(
