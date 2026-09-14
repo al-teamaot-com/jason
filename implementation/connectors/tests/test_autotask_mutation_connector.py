@@ -11,7 +11,11 @@ from connectors.autotask.impersonating_connector import (
     AUTOTASK_REQUESTER_AUTH_MODE_ENV,
 )
 from connectors.autotask.mutation_connector import AutotaskMutationConnector
-from connectors.core.contracts import ConnectorContext, ConnectorRequest
+from connectors.core.contracts import (
+    ConnectorAuthorizationError,
+    ConnectorContext,
+    ConnectorRequest,
+)
 
 
 class _Secrets:
@@ -270,7 +274,10 @@ def test_ticket_delete_is_not_a_supported_mutation_capability() -> None:
     transport = _Transport()
     connector = _connector(transport)
 
-    with pytest.raises(PermissionError, match="not authorized"):
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="not registered",
+    ):
         connector.execute(
             _request(
                 "autotask.ticket.delete",
