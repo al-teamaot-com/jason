@@ -50,7 +50,7 @@ Current accepted observations:
 - Prometheus production-health target: UP;
 - Grafana dashboard UID: `jason-production-health`.
 
-Exporter version 2 corrects the original root-filesystem namespace false positive while preserving systemd `ProtectSystem=strict` hardening.
+Exporter version 2 corrects the original root-filesystem namespace false positive while preserving systemd `ProtectSystem=strict` hardening. After Prometheus reevaluation, the stale `JasonRootFilesystemNotWritable` alert cleared. The only active Jason alert at checkpoint time was the expected `JasonMCPDuplicateEnvironment` warning.
 
 ## Known accepted exception
 
@@ -85,6 +85,22 @@ The user-relevant output and capability-aware answer principles are documented s
 
 The authority backup passed SQLite integrity validation when created.
 
+### Current accepted-level checkpoint
+
+A current-level checkpoint was successfully created without restarting services, calling providers, changing authority, or capturing secret contents.
+
+- checkpoint directory: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z`;
+- checkpoint archive: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z.tar.gz`;
+- archive SHA-256: `2193e1f7a28616f84ca55bf07d44b968e196077291c32e040c5319a23619b864`;
+- current authority SQLite backup: included and integrity-checked `ok`;
+- current Microsoft/Jason identity-binding SQLite backup: included and integrity-checked `ok`;
+- secret-safe container contract snapshot: included;
+- safe production-health metrics: included;
+- Prometheus alert-state snapshot: included;
+- SHA-256 manifest for checkpoint files: included.
+
+The checkpoint script verified both the pre-v4 MCP rollback container and pre-v4 authority backup were still present before accepting the snapshot.
+
 ### OpenBao recovery
 
 Canonical non-secret recovery documentation:
@@ -99,19 +115,28 @@ The production-health deployment created a rollback backup directory at:
 
 - `/tmp/jason-production-health-rollback-20260914T134502Z`.
 
-The exporter-v1 systemd unit was also backed up before the exporter-v2 correction. The v2 correction changed only the production-health exporter service; runtime, MCP, OpenBao, Prometheus, and Grafana container identities remained unchanged.
+The exporter-v1 systemd unit was also backed up before the exporter-v2 correction and copied into the current accepted-level checkpoint. The v2 correction changed only the production-health exporter service; runtime, MCP, OpenBao, Prometheus, and Grafana container identities remained unchanged.
 
-## Current-level checkpoint requirement
+## Checkpoint acceptance result
 
-Before the next nontrivial production change, create a current-level local checkpoint containing at minimum:
+The accepted-level checkpoint completed with:
 
-1. an online SQLite backup of the current authority database with integrity verification;
-2. a stable local tag/reference to the accepted MCP image ID;
-3. a secret-safe production contract snapshot covering image/source/profile/network/port/restart policy, mount destinations, OpenBao readiness, and current monitoring state;
-4. SHA-256 hashes for the checkpoint files;
-5. the GitHub documentation revision identifying this accepted state.
+- core health: PASS;
+- safe production contract snapshot: PASS;
+- authority backup/integrity: PASS;
+- identity-binding backup/integrity: PASS;
+- monitoring rollback material preserved: PASS;
+- live health evidence preserved: PASS;
+- pre-v4 rollback contract: PASS;
+- checkpoint manifest: PASS;
+- archive/hash creation: PASS;
+- services changed: NO;
+- provider requests: NO;
+- authority changed: NO;
+- rollback ready: YES;
+- current state backed up: YES.
 
-Do not copy OpenBao unseal shares, provider credentials, OAuth tokens, AppRole values, API keys, raw MCP environment contents, or raw provider records into the checkpoint.
+This is now the preferred recovery/reference level before any nontrivial production change.
 
 ## Change discipline from this checkpoint
 
