@@ -76,6 +76,11 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
                 "Autotask mutation requires explicit execute mode."
             )
 
+        # Do not even resolve the write-capable execution credential unless the
+        # provider-native requester authority path is explicitly selected.
+        if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
+            raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
+
         credentials = self._secrets.resolve(
             self.logical_secret,
             request.context,
@@ -182,9 +187,8 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
                 f"{operation}"
             )
 
-        # Mutations never use Jason-managed/service-account requester authority.
-        # Fail before zone discovery or any other provider I/O if impersonation
-        # is not explicitly active.
+        # Defense in depth for direct prepare_request callers. Mutations never
+        # use Jason-managed/service-account requester authority.
         if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
             raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
 
