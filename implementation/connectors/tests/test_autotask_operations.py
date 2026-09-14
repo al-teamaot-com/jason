@@ -5,6 +5,7 @@ import pytest
 from connectors.autotask.operations import (
     AUTOTASK_OPERATIONS,
     resolve_operation,
+    resolve_operation_request,
 )
 
 
@@ -78,14 +79,19 @@ def test_resolves_registered_operation(
     )
 
 
-def test_registry_matches_connector_capabilities() -> None:
+def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None:
     assert set(AUTOTASK_OPERATIONS) == {
         "autotask.entity.describe",
         "autotask.entity.get",
         "autotask.entity.query",
         "autotask.ticket.get",
         "autotask.ticket.search",
+        "autotask.ticket.count",
         "autotask.ticket.notes.list",
+        "autotask.ticket.create",
+        "autotask.ticket.update",
+        "autotask.ticket.note.create",
+        "autotask.ticket.note.update",
         "autotask.company.get",
         "autotask.company.search",
         "autotask.contact.get",
@@ -228,3 +234,52 @@ def test_generic_get_requires_numeric_entity_id() -> None:
                 "entity_id": "not-an-id",
             },
         )
+
+
+@pytest.mark.parametrize(
+    ("capability", "method", "path"),
+    [
+        ("autotask.ticket.create", "POST", "/V1.0/Tickets"),
+        ("autotask.ticket.update", "PATCH", "/V1.0/Tickets"),
+        ("autotask.ticket.note.create", "POST", "/V1.0/TicketNotes"),
+        ("autotask.ticket.note.update", "PATCH", "/V1.0/TicketNotes"),
+    ],
+)
+def test_compiles_only_registered_mutation_routes(capability, method, path) -> None:
+    payload = {"title": "Synthetic"}
+    if capability.endswith("update"):
+        payload["id"] = 12345
+
+    actual_method, actual_path, params, body = resolve_operation_request(
+        capability,
+        {"payload": payload},
+    )
+
+    assert actual_method == method
+    assert actual_path == path
+    assert params is None
+    assert body == payload
+
+
+def test_read_wrapper_refuses_to_discard_mutation_body() -> None:
+    with pytest.raises(
+        ValueError,
+        match="requires resolve_operation_request",
+    ):
+        resolve_operation(
+            "autotask.ticket.create",
+            {"payload": {"companyID": 999, "title": "Synthetic"}},
+        )
+
+
+def test_update_requires_positive_durable_id() -> None:
+    with pytest.raises(ValueError, match="positive numeric id"):
+        resolve_operation_request(
+            "autotask.ticket.update",
+            {"payload": {"status": 5}},
+        )
+
+
+def test_ticket_and_ticketnote_delete_remain_unregistered() -> None:
+    assert "autotask.ticket.delete" not in AUTOTASK_OPERATIONS
+    assert "autotask.ticket.note.delete" not in AUTOTASK_OPERATIONS
