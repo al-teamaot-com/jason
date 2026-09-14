@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
+import io
 from pathlib import Path
 
 
@@ -78,9 +80,44 @@ def test_render_metrics_is_secret_safe_and_flags_known_duplicate_environment(mon
     assert 'jason_mcp_env_duplicate_count{key="JASON_SOURCE_REVISION"} 1' in metrics
     assert "jason_mcp_required_secret_mount_contract 1" in metrics
     assert "jason_host_kernel_error_count 0" in metrics
+    assert "jason_root_filesystem_writable 1" in metrics
     assert "jason_mcp_rollback_available 1" in metrics
+    assert 'jason_production_health_exporter_build_info{version="2"} 1' in metrics
     for forbidden in ("password", "secret_id=", "role_id=", "access_token", "refresh_token"):
         assert forbidden not in metrics.casefold()
+
+
+def test_root_writable_prefers_pid1_host_mount_namespace(monkeypatch):
+    module = load_exporter()
+    seen = []
+
+    def fake_open(path, *args, **kwargs):
+        seen.append(path)
+        if path == "/proc/1/mounts":
+            return io.StringIO("/dev/nvme0n1p2 / ext4 rw,relatime 0 0\n")
+        if path == "/proc/mounts":
+            return io.StringIO("/dev/nvme0n1p2 / ext4 ro,relatime 0 0\n")
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+
+    assert module._root_writable() == 1
+    assert seen == ["/proc/1/mounts"]
+
+
+def test_root_writable_falls_back_when_pid1_mounts_unavailable(monkeypatch):
+    module = load_exporter()
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/1/mounts":
+            raise PermissionError(path)
+        if path == "/proc/mounts":
+            return io.StringIO("/dev/nvme0n1p2 / ext4 rw,relatime 0 0\n")
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+
+    assert module._root_writable() == 1
 
 
 def test_missing_components_fail_closed(monkeypatch):
@@ -98,4 +135,5 @@ def test_missing_components_fail_closed(monkeypatch):
     assert 'jason_production_component_health{component="jason_mcp"} 0' in metrics
     assert 'jason_production_component_health{component="openbao"} 0' in metrics
     assert "jason_mcp_required_secret_mount_contract 0" in metrics
+    assert "jason_root_filesystem_writable -1" in metrics
     assert "jason_mcp_rollback_available 0" in metrics
