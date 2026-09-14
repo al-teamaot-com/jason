@@ -213,6 +213,26 @@ def test_autotask_adapter_preserves_exact_reads_notes_and_schema_description() -
         {"resource_id": 101},
     ) == {"ticket_id": 101}
     assert adapt_autotask_arguments(
+        SERVICE_TICKET_READ,
+        {"ticket_id": 101},
+    ) == {"ticket_id": 101}
+    assert adapt_autotask_arguments(
+        SERVICE_TICKET_READ,
+        {"ticket_number": "T20260911.0010"},
+    ) == {"ticket_id": "T20260911.0010"}
+    assert adapt_autotask_arguments(
+        SERVICE_TICKET_READ,
+        {
+            "ticket_id": "T20260911.0010",
+            "resource_id": "T20260911.0010",
+        },
+    ) == {"ticket_id": "T20260911.0010"}
+    with pytest.raises(ValueError, match="conflicting ticket selectors"):
+        adapt_autotask_arguments(
+            SERVICE_TICKET_READ,
+            {"ticket_id": 101, "resource_id": "T20260911.0010"},
+        )
+    assert adapt_autotask_arguments(
         SERVICE_TICKET_NOTES_SEARCH,
         {"resource_id": 101},
     ) == {"ticket_id": 101}

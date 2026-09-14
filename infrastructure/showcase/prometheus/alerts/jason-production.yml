@@ -1,0 +1,173 @@
+groups:
+  - name: jason-production-health
+    interval: 30s
+    rules:
+      - alert: JasonProductionHealthExporterMissing
+        expr: absent(up{job="jason-production-health"})
+        for: 2m
+        labels:
+          severity: critical
+          service: jason-observability
+        annotations:
+          summary: Jason production health target is missing
+          description: Prometheus has no production-health scrape series. Monitoring is fail-closed until the target returns.
+
+      - alert: JasonProductionHealthExporterDown
+        expr: up{job="jason-production-health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: jason-observability
+        annotations:
+          summary: Jason production health exporter is down
+          description: Prometheus cannot scrape the secret-safe Jason production health exporter.
+
+      - alert: JasonRuntimeNotHealthy
+        expr: jason_production_component_health{component="jason_runtime"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: jason-runtime
+        annotations:
+          summary: Jason runtime is not healthy
+          description: The production runtime is not both running and Docker-healthy.
+
+      - alert: JasonMCPNotRunning
+        expr: jason_production_component_health{component="jason_mcp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: jason-mcp
+        annotations:
+          summary: Jason MCP is not running
+          description: The production Jason MCP container is not running.
+
+      - alert: JasonOpenBaoNotReady
+        expr: jason_production_component_health{component="openbao"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: openbao
+        annotations:
+          summary: OpenBao is not ready
+          description: OpenBao is not simultaneously running, initialized, and unsealed.
+
+      - alert: JasonMCPContractDrift
+        expr: min(jason_mcp_contract{check!="environment_unique"}) == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: jason-mcp
+        annotations:
+          summary: Jason MCP production contract drift detected
+          description: One or more expected image/source/profile/network/port/restart/requester-mode checks no longer match the accepted production contract.
+
+      - alert: JasonMCPDuplicateEnvironment
+        expr: sum(jason_mcp_env_duplicate_count) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: jason-mcp
+        annotations:
+          summary: Jason MCP has duplicate watched environment entries
+          description: Docker contains duplicate source/profile/requester-mode entries. Effective v4 operation may still be correct, but the configuration is ambiguous and should be cleaned during a controlled MCP recreation.
+
+      - alert: JasonMCPSecretMountContractDrift
+        expr: jason_mcp_required_secret_mount_contract == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: jason-mcp
+        annotations:
+          summary: Jason MCP credential mount contract drift detected
+          description: One or more required read-only OpenBao credential mount destinations are missing from the production MCP.
+
+      - alert: JasonKernelErrorsDetected
+        expr: jason_host_kernel_error_count > 0
+        for: 0m
+        labels:
+          severity: critical
+          service: jason-host
+        annotations:
+          summary: Kernel or storage corruption signature detected
+          description: Current-boot logs contain one or more EXT4/Oops/GPF/list-corruption/I-O/media-error signatures. Pause normal changes and investigate the host.
+
+      - alert: JasonKernelHealthUnavailable
+        expr: jason_host_kernel_error_count < 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-host
+        annotations:
+          summary: Kernel error monitoring is unavailable
+          description: The production health exporter cannot read the current-boot kernel journal, so a clean kernel state cannot be asserted.
+
+      - alert: JasonSystemdFailures
+        expr: jason_host_failed_systemd_units > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-host
+        annotations:
+          summary: Failed systemd units detected
+          description: One or more host systemd units are in failed state.
+
+      - alert: JasonSystemdHealthUnavailable
+        expr: jason_host_failed_systemd_units < 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-host
+        annotations:
+          summary: systemd failure monitoring is unavailable
+          description: The production health exporter cannot determine the host failed-unit count.
+
+      - alert: JasonRootFilesystemNotWritable
+        expr: jason_root_filesystem_writable == 0
+        for: 0m
+        labels:
+          severity: critical
+          service: jason-host
+        annotations:
+          summary: Root filesystem is not read-write
+          description: The root filesystem is not currently mounted read/write.
+
+      - alert: JasonRootFilesystemStateUnavailable
+        expr: jason_root_filesystem_writable < 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-host
+        annotations:
+          summary: Root filesystem mount state is unavailable
+          description: The production health exporter cannot determine whether the root filesystem is read/write.
+
+      - alert: JasonRollbackUnavailable
+        expr: jason_mcp_rollback_available == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-mcp
+        annotations:
+          summary: Preserved pre-v4 MCP rollback container is unavailable
+          description: No container matching the accepted pre-v4 rollback naming contract is present. Do not remove recovery assets automatically.
+
+      - alert: JasonRootDiskUsageHigh
+        expr: 100 * (1 - node_filesystem_avail_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"}) > 85
+        for: 10m
+        labels:
+          severity: warning
+          service: jason-host
+        annotations:
+          summary: Jason root disk usage is above 85 percent
+          description: Free space on the root filesystem is below the warning threshold.
+
+      - alert: JasonRootDiskUsageCritical
+        expr: 100 * (1 - node_filesystem_avail_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"}) > 95
+        for: 5m
+        labels:
+          severity: critical
+          service: jason-host
+        annotations:
+          summary: Jason root disk usage is above 95 percent
+          description: Root filesystem capacity is critically low.

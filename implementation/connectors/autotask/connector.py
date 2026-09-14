@@ -24,6 +24,7 @@ class AutotaskConnector(ConnectorBase):
             "autotask.entity.query",
             "autotask.ticket.get",
             "autotask.ticket.search",
+            "autotask.ticket.count",
             "autotask.ticket.notes.list",
             "autotask.company.get",
             "autotask.company.search",

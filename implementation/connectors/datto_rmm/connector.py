@@ -474,13 +474,8 @@ class DattoRmmConnector(ConnectorBase):
                     )
                 ).strip()
                 == "complete"
-                or (
-                    request.context.capability
-                    == "datto_rmm.site.search"
-                    and self._site_selector_present(
-                        request.arguments
-                    )
-                )
+                or request.context.capability
+                == "datto_rmm.site.search"
             ),
         )
 

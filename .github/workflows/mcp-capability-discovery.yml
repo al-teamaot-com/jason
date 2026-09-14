@@ -1,0 +1,49 @@
+name: Validate MCP Capability Discovery
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_capability_discovery.py'
+      - '.github/workflows/mcp-capability-discovery.yml'
+  push:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_capability_discovery.py'
+      - '.github/workflows/mcp-capability-discovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  mcp-capability-discovery:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install \
+            ./implementation \
+            ./implementation/connectors/openclaw \
+            ./implementation/runtime_service \
+            ./implementation/mcp_service
+
+      - name: Compile MCP discovery boundary
+        run: |
+          python -m py_compile \
+            implementation/mcp_service/src/jason_mcp/server.py \
+            implementation/mcp_service/tests/test_capability_discovery.py
+
+      - name: Test capability discovery alternatives
+        run: |
+          python -m pytest -q \
+            implementation/mcp_service/tests/test_capability_discovery.py

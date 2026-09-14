@@ -583,3 +583,95 @@ def test_fact_bearing_user_relationship_discovery_preserves_provider_identity(mo
         {"resource_id": "device-lindsey", "hostname": "AOT-50001", "site": "AOT"}
     ]
     assert result.data["provider_data"] == exact_payload
+
+
+def test_site_search_completes_provider_collection_by_default(monkeypatch) -> None:
+    """A provider-capped 10/45 site response must not become false complete evidence."""
+
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    total = 45
+    responses = []
+
+    for page in range(5):
+        first_index = page * 10
+        count = min(10, total - first_index)
+        final_page = first_index + count >= total
+
+        responses.append(
+            {
+                "pageDetails": {
+                    "count": count,
+                    "totalCount": total,
+                    "nextPageUrl": (
+                        None
+                        if final_page
+                        else (
+                            "https://provider.example/api/v2/account/sites"
+                            f"?max=10&page={page + 1}"
+                        )
+                    ),
+                    "prevPageUrl": (
+                        None
+                        if page == 0
+                        else (
+                            "https://provider.example/api/v2/account/sites"
+                            f"?max=10&page={page - 1}"
+                        )
+                    ),
+                },
+                "sites": [
+                    {
+                        "uid": f"site-{index}",
+                        "name": f"Site {index}",
+                    }
+                    for index in range(
+                        first_index + 1,
+                        first_index + count + 1,
+                    )
+                ],
+            }
+        )
+
+    audit = Audit()
+    transport = Transport(responses)
+
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=audit,
+    )
+
+    result = connector.execute(
+        connector_request(
+            arguments={},
+            capability="datto_rmm.site.search",
+        )
+    )
+
+    assert len(transport.calls) == 5
+
+    assert [
+        call["params"]["page"]
+        for call in transport.calls
+    ] == [0, 1, 2, 3, 4]
+
+    assert len(result.data["sites"]) == 45
+    assert result.data["pageDetails"]["count"] == 45
+    assert result.data["pageDetails"]["totalCount"] == 45
+    assert result.data["pageDetails"]["nextPageUrl"] is None
+    assert result.data["discovery_complete"] is True
+
+    adaptation_events = [
+        details
+        for event_type, details in audit.events
+        if event_type == "connector.adaptation_observed"
+    ]
+
+    assert len(adaptation_events) == 1
+    assert adaptation_events[0]["pages_aggregated"] == 5
+    assert adaptation_events[0]["final_count"] == 45
+    assert adaptation_events[0]["complete"] is True

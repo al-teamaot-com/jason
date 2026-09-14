@@ -20,7 +20,10 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
     DOCUMENTATION_ORGANIZATION_SEARCH,
+    IDENTITY_USER_READ,
+    IDENTITY_USER_SEARCH,
     IT_GLUE_PROVIDER,
+    MICROSOFT_GRAPH_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
@@ -28,6 +31,7 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
@@ -95,6 +99,12 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "company_id": "companyID",
         "status": "status",
     },
+    SERVICE_TICKET_COUNT: {
+        "resource_id": "id",
+        "ticket_number": "ticketNumber",
+        "company_id": "companyID",
+        "status": "status",
+    },
     SERVICE_CONFIGURATION_SEARCH: {
         "resource_id": "id",
         "company_id": "companyID",
@@ -106,6 +116,7 @@ _DEFAULT_IT_GLUE_PAGE_SIZE = 100
 _MAX_IT_GLUE_PAGE_SIZE = 1000
 _DEFAULT_AUTOTASK_MAX_RECORDS = 100
 _MAX_AUTOTASK_MAX_RECORDS = 500
+_MAX_MICROSOFT_USER_RECORDS = 25
 
 
 def _resource_id(arguments: Mapping[str, Any]) -> Any:
@@ -113,6 +124,36 @@ def _resource_id(arguments: Mapping[str, Any]) -> Any:
     if value is None or (isinstance(value, str) and not value.strip()):
         raise ValueError("resource_id is required for an exact provider read")
     return value
+
+
+def _ticket_read_selector(arguments: Mapping[str, Any]) -> Any:
+    """Resolve one human or durable ticket selector without first-match guessing.
+
+    ChatGPT may naturally place an Autotask ticket number in ``ticket_id`` or
+    ``resource_id``. Canonical ticket read accepts those aliases plus the explicit
+    ``ticket_number`` selector. Multiple supplied selectors must identify the same
+    textual value or the read fails closed as ambiguous.
+    """
+
+    supplied: list[tuple[str, Any]] = []
+    for key in ("ticket_number", "ticket_id", "resource_id"):
+        value = arguments.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        supplied.append((key, value))
+
+    if not supplied:
+        raise ValueError(
+            "ticket_number, ticket_id, or resource_id is required for an exact ticket read"
+        )
+
+    normalized = {str(value).strip() for _, value in supplied}
+    if len(normalized) != 1:
+        raise ValueError("conflicting ticket selectors are not allowed")
+
+    return supplied[0][1]
 
 
 def _canonical_filters(
@@ -334,6 +375,20 @@ def _autotask_search(
     )
 
 
+def _autotask_count(
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> str:
+    if arguments.get("after_resource_id") is not None:
+        raise ValueError("after_resource_id is not valid for an Autotask count")
+
+    bounded_arguments = dict(arguments)
+    bounded_arguments["page_size"] = 1
+    payload = json.loads(_autotask_search(capability_name, bounded_arguments))
+    payload.pop("MaxRecords", None)
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
 def adapt_autotask_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
@@ -343,7 +398,7 @@ def adapt_autotask_arguments(
     if capability_name == SERVICE_CONTACT_READ:
         return {"contact_id": _resource_id(arguments)}
     if capability_name == SERVICE_TICKET_READ:
-        return {"ticket_id": _resource_id(arguments)}
+        return {"ticket_id": _ticket_read_selector(arguments)}
     if capability_name == SERVICE_CONFIGURATION_READ:
         return {"configuration_item_id": _resource_id(arguments)}
     if capability_name == SERVICE_TICKET_NOTES_SEARCH:
@@ -355,9 +410,68 @@ def adapt_autotask_arguments(
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")
         return {"entity": entity.strip()}
+    if capability_name == SERVICE_TICKET_COUNT:
+        return {"search": _autotask_count(capability_name, arguments)}
     if capability_name in _AUTOTASK_SEARCH_FIELDS:
         return {"search": _autotask_search(capability_name, arguments)}
     raise ValueError(f"Unsupported Autotask canonical capability: {capability_name}")
+
+
+def adapt_microsoft_graph_arguments(
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    if capability_name == IDENTITY_USER_READ:
+        return {"resource_id": _resource_id(arguments)}
+    if capability_name != IDENTITY_USER_SEARCH:
+        raise ValueError(
+            f"Unsupported Microsoft Graph canonical capability: {capability_name}"
+        )
+
+    selectors = [
+        key
+        for key in ("email", "user_principal_name", "display_name")
+        if arguments.get(key) is not None and str(arguments.get(key)).strip()
+    ]
+    if len(selectors) != 1:
+        raise ValueError(
+            "Microsoft user search requires exactly one exact selector: "
+            "email, user_principal_name, or display_name"
+        )
+    allowed = {
+        "email",
+        "user_principal_name",
+        "display_name",
+        "page_size",
+        "requested_facts",
+        "result_intent",
+        "completeness_requirement",
+    }
+    unsupported = sorted(
+        str(key)
+        for key, value in arguments.items()
+        if value is not None and key not in allowed
+    )
+    if unsupported:
+        raise ValueError(
+            "unsupported Microsoft user search arguments: " + ", ".join(unsupported)
+        )
+
+    page_size = arguments.get("page_size", 10)
+    if isinstance(page_size, bool):
+        raise ValueError("page_size must be between 1 and 25")
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError) as error:
+        raise ValueError("page_size must be between 1 and 25") from error
+    if not 1 <= page_size <= _MAX_MICROSOFT_USER_RECORDS:
+        raise ValueError("page_size must be between 1 and 25")
+
+    selector = selectors[0]
+    return {
+        selector: str(arguments[selector]).strip(),
+        "page_size": page_size,
+    }
 
 
 def adapt_provider_read_arguments(
@@ -370,6 +484,8 @@ def adapt_provider_read_arguments(
         return adapt_it_glue_arguments(capability_name, arguments)
     if provider_id == AUTOTASK_PROVIDER:
         return adapt_autotask_arguments(capability_name, arguments)
+    if provider_id == MICROSOFT_GRAPH_PROVIDER:
+        return adapt_microsoft_graph_arguments(capability_name, arguments)
     raise ValueError(f"No provider-read argument adapter for provider: {provider_id}")
 
 

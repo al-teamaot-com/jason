@@ -68,6 +68,7 @@ class OrchestrationRequest:
     policy_ids: tuple[str, ...] = ()
     artifact_references: tuple[ArtifactReference, ...] = ()
     requester_kind: str = "human"
+    principal_attributes: Mapping[str, str] = field(default_factory=dict)
     permission_mode: str = "observe"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
@@ -105,6 +106,14 @@ class OrchestrationRequest:
             "administer",
         }:
             raise ValueError("permission_mode is not a recognized authority mode.")
+        normalized_attributes: dict[str, str] = {}
+        for raw_key, raw_value in self.principal_attributes.items():
+            key = str(raw_key).strip()
+            value = str(raw_value).strip()
+            if not key or not value:
+                raise ValueError("principal_attributes keys and values must be non-empty.")
+            normalized_attributes[key] = value
+        object.__setattr__(self, "principal_attributes", normalized_attributes)
         forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:

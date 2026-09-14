@@ -32,6 +32,8 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ACTIVATION_ENV,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
+    PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
+    PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
     PROVIDER_READ_PRODUCTION_CAPABILITIES,
     PROVIDER_READ_PRODUCTION_PROFILE,
     ProviderReadActivationError,
@@ -201,6 +203,61 @@ def test_document_profile_activates_exactly_five_proven_reads() -> None:
             else CapabilityLifecycle.PILOT
         )
         assert capability.lifecycle_status is expected_lifecycle
+
+
+def test_governed_catalog_profile_derives_all_reads_from_trusted_provider_catalogs() -> None:
+    capabilities, providers = _registries()
+
+    state = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
+    )
+
+    expected = _all_provider_read_capabilities()
+    assert PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES == expected
+    assert state.enabled is True
+    assert state.profile == PROVIDER_READ_GOVERNED_CATALOG_PROFILE
+    assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
+    assert set(state.capability_names) == expected
+
+    for provider_id in (IT_GLUE_PROVIDER, AUTOTASK_PROVIDER):
+        provider = providers.get(provider_id)
+        assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+        assert provider.health_status is ProviderHealth.HEALTHY
+        assert provider.approval_status is ProviderApproval.APPROVED
+        assert provider.execution_modes == frozenset({"deterministic"})
+        assert provider.pricing_profile_id == "zero-cost-foundation"
+
+    for capability_name in expected:
+        capability = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+        assert capability.metadata["provider_neutral"] == "true"
+        assert capability.metadata["read_only"] == "true"
+        assert capability.permitted_execution_modes == frozenset({"deterministic"})
+        assert capability.approval.required is False
+
+
+def test_governed_catalog_profile_is_restart_persistable_environment_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        PROVIDER_READ_ACTIVATION_ENV,
+        PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
+    )
+    capabilities, providers = _registries()
+
+    state = apply_provider_read_activation_from_env(
+        capabilities=capabilities,
+        providers=providers,
+    )
+
+    assert state.enabled is True
+    assert state.profile == PROVIDER_READ_GOVERNED_CATALOG_PROFILE
+    assert set(state.capability_names) == _all_provider_read_capabilities()
 
 
 def test_document_profile_is_restart_persistable_environment_contract(

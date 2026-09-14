@@ -35,15 +35,15 @@ jobs:
           python -m py_compile \
             implementation/runtime_service/src/jason_runtime/provider_read_activation.py \
             implementation/runtime_service/src/jason_runtime/provider_reads.py
-      - name: Test exact fail-closed activation contract
+      - name: Test fail-closed activation contract
         run: |
           python -m pytest -q \
             implementation/runtime_service/tests/test_provider_read_activation.py \
             implementation/runtime_service/tests/test_provider_reads.py
-      - name: Prove activation profile crosses the Compose boundary
+      - name: Prove governed catalog activation crosses the Compose boundary
         run: |
           grep -F 'JASON_PROVIDER_READ_ACTIVATION_PROFILE: ${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}' infrastructure/jason-runtime/compose.yaml
-          export JASON_PROVIDER_READ_ACTIVATION_PROFILE=itglue-autotask-initial-read-v1
+          export JASON_PROVIDER_READ_ACTIVATION_PROFILE=itglue-autotask-governed-catalog-v3
           export JASON_OLLAMA_MODEL=ci-local-model
           export JASON_OPENBAO_ROLE_ID_HOST_PATH=/tmp/base-role-id
           export JASON_OPENBAO_SECRET_ID_HOST_PATH=/tmp/base-secret-id
@@ -58,7 +58,7 @@ jobs:
           export JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH=/tmp/autotask-role-id
           export JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH=/tmp/autotask-secret-id
           docker compose -f infrastructure/jason-runtime/compose.yaml config > /tmp/jason-runtime-rendered.yaml
-          grep -F 'JASON_PROVIDER_READ_ACTIVATION_PROFILE: itglue-autotask-initial-read-v1' /tmp/jason-runtime-rendered.yaml
+          grep -F 'JASON_PROVIDER_READ_ACTIVATION_PROFILE: itglue-autotask-governed-catalog-v3' /tmp/jason-runtime-rendered.yaml
           echo 'PROVIDER_READ_ACTIVATION_COMPOSE_BOUNDARY=PASS'
       - name: Prove no provider-specific MCP tools were introduced
         run: |
@@ -79,7 +79,7 @@ jobs:
           print('MCP_PROVIDER_SPECIFIC_TOOLS=NO')
           print('MCP_CANONICAL_READ_SURFACE=PASS')
           PY
-      - name: Prove initial production profile is exact read-only and zero-cost
+      - name: Prove governed provider catalogs activate without per-resource allowlists
         run: |
           python - <<'PY'
           from datetime import datetime, timezone
@@ -96,16 +96,13 @@ jobs:
           from orchestrator.provider_read_capability_catalog import (
               AUTOTASK_CAPABILITIES,
               AUTOTASK_PROVIDER,
-              DOCUMENTATION_ORGANIZATION_SEARCH,
               IT_GLUE_CAPABILITIES,
               IT_GLUE_PROVIDER,
-              SERVICE_COMPANY_READ,
-              SERVICE_TICKET_SEARCH,
               register_provider_read_foundation,
           )
           from jason_runtime.provider_read_activation import (
-              PROVIDER_READ_PRODUCTION_CAPABILITIES,
-              PROVIDER_READ_PRODUCTION_PROFILE,
+              PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
+              PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
               apply_provider_read_activation_profile,
           )
 
@@ -119,40 +116,31 @@ jobs:
           state = apply_provider_read_activation_profile(
               capabilities=capabilities,
               providers=providers,
-              profile=PROVIDER_READ_PRODUCTION_PROFILE,
+              profile=PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
           )
 
-          expected = {
-              DOCUMENTATION_ORGANIZATION_SEARCH,
-              SERVICE_COMPANY_READ,
-              SERVICE_TICKET_SEARCH,
-          }
-          all_provider_reads = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
-
-          assert PROVIDER_READ_PRODUCTION_CAPABILITIES == frozenset(expected)
+          expected = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+          assert PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES == expected
           assert set(state.capability_names) == expected
-          assert len(state.capability_names) == 3
           assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
 
-          for name in all_provider_reads:
+          for name in expected:
               capability = capabilities.get(capability_name=name, version='1.0')
-              expected_lifecycle = (
-                  CapabilityLifecycle.ACTIVE
-                  if name in expected
-                  else CapabilityLifecycle.PILOT
-              )
-              assert capability.lifecycle_status is expected_lifecycle
+              assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+              assert capability.metadata.get('provider_neutral') == 'true'
               assert capability.metadata.get('read_only') == 'true'
               assert capability.permitted_execution_modes == frozenset({'deterministic'})
+              assert capability.approval.required is False
 
           for provider_id in state.provider_ids:
               provider = providers.get(provider_id)
               assert provider.pricing_profile_id == 'zero-cost-foundation'
               assert provider.execution_modes == frozenset({'deterministic'})
 
-          print('PROVIDER_READ_INITIAL_ACTIVATION_PROFILE=PASS')
-          print('ACTIVE_PROVIDER_READ_CAPABILITIES=3')
-          print('UNAPPROVED_PROVIDER_READS_REMAIN_PILOT=TRUE')
+          print('PROVIDER_READ_GOVERNED_CATALOG_PROFILE=PASS')
+          print(f'ACTIVE_PROVIDER_READ_CAPABILITIES={len(expected)}')
+          print('PER_RESOURCE_ACTIVATION_ALLOWLIST=NO')
+          print('PROVIDER_TRUST_BOUNDARY=EXPLICIT')
           print('READ_ONLY=TRUE')
           print('DETERMINISTIC_ONLY=TRUE')
           print('JASON_SIDE_MODEL_COST=0')
