@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from connectors.core.contracts import ConnectorContext, ConnectorRequest
+from connectors.core.contracts import (
+    ConnectorAuthorizationError,
+    ConnectorContext,
+    ConnectorRequest,
+)
 from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirectoryConnector
 from connectors.microsoft_graph.user_directory import MicrosoftGraphUserDirectoryReader
 
@@ -158,7 +162,10 @@ def test_search_rejects_missing_or_ambiguous_selector_before_graph_io():
 def test_missing_trusted_binding_fails_before_graph_io():
     subject, transport, _audit = connector(bindings=Bindings(None))
 
-    with pytest.raises(PermissionError, match="Microsoft identity binding"):
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="Microsoft identity binding",
+    ):
         subject.execute(
             ConnectorRequest(
                 context=context("microsoft_graph.user.search"),
