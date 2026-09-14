@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Mapping
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.identity_authority import (
+    ApprovalRecord,
     AuthorityOutcome,
     AuthorityRequest,
     PermissionMode,
@@ -31,6 +33,10 @@ from pydantic import AnyHttpUrl
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
+from jason_runtime.autotask_internal_note import (
+    SERVICE_TICKET_NOTE_CREATE,
+    autotask_internal_note_mcp_surface_enabled,
+)
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 
 
@@ -201,12 +207,21 @@ class EntraTokenVerifier(TokenVerifier):
         )
 
 
+_MCP_INTERNAL_NOTE_SURFACE_ENABLED = (
+    autotask_internal_note_mcp_surface_enabled()
+)
+
 mcp = MCPServer(
     "Jason",
     instructions=(
         "Project Jason governed operational interface. "
-        "This interface is read-only. "
-        "Microsoft Entra authenticates the caller. "
+        + (
+            "This interface provides governed reads plus one narrowly "
+            "scoped Autotask internal-note write capability. "
+            if _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+            else "This interface is read-only. "
+        )
+        + "Microsoft Entra authenticates the caller. "
         "Jason identity, authority, policy and Central Orchestrator "
         "remain authoritative."
     ),
@@ -316,6 +331,17 @@ def _authenticated_identity() -> tuple[
         "entra-oauth-bearer",
         binding.client_id,
     )
+
+
+def _authenticated_write_identity() -> tuple[
+    str,
+    str,
+    str,
+    str | None,
+]:
+    """Reuse authenticated Entra identity; Jason authority grants writes."""
+
+    return _authenticated_identity()
 
 
 def _safe(value: Any, *, depth: int = 0) -> Any:
@@ -633,6 +659,316 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _internal_note_arguments(
+    *,
+    ticket_id: int,
+    note: str,
+    title: str = "",
+) -> dict[str, Any]:
+    if isinstance(ticket_id, bool):
+        raise ValueError("ticket_id must be a positive integer")
+
+    try:
+        durable_ticket_id = int(ticket_id)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "ticket_id must be a positive integer"
+        ) from error
+
+    if durable_ticket_id < 1:
+        raise ValueError(
+            "ticket_id must be a positive integer"
+        )
+
+    description = str(note or "").strip()
+    if not description:
+        raise ValueError(
+            "internal note text is required"
+        )
+    if len(description) > 8000:
+        raise ValueError(
+            "internal note text exceeds the bounded MCP limit"
+        )
+
+    normalized_title = str(title or "").strip()
+    if len(normalized_title) > 255:
+        raise ValueError(
+            "internal note title exceeds the bounded MCP limit"
+        )
+
+    payload: dict[str, Any] = {
+        "ticketID": durable_ticket_id,
+        "description": description,
+        "noteType": 3,
+        "publish": 1,
+    }
+
+    if normalized_title:
+        payload["title"] = normalized_title
+
+    return {
+        "payload": payload,
+    }
+
+
+def _governed_internal_note_create(
+    *,
+    ticket_id: int,
+    note: str,
+    title: str = "",
+) -> dict[str, Any]:
+    """Create one internal Autotask note through the governed write path."""
+
+    if not autotask_internal_note_mcp_surface_enabled():
+        return {
+            "status": "rejected",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "error_code": "internal_note_write_surface_disabled",
+        }
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_write_identity()
+
+    # AOT Owner is intentionally organization-scoped in the first
+    # internal-note pilot. Exact principal authority plus Autotask
+    # requester impersonation remains mandatory. A later Tech scope
+    # model can add client restrictions without redefining Owner.
+    try:
+        capability = app.capabilities.get_current(
+            capability_name=SERVICE_TICKET_NOTE_CREATE
+        )
+    except LookupError:
+        return {
+            "status": "rejected",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "error_code": "internal_note_capability_not_active",
+        }
+
+    if (
+        str(
+            capability.metadata.get(
+                "mcp_action_enabled",
+                "",
+            )
+        ).casefold()
+        != "true"
+    ):
+        return {
+            "status": "rejected",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "error_code": "internal_note_mcp_not_approved",
+        }
+
+    arguments = _internal_note_arguments(
+        ticket_id=ticket_id,
+        note=note,
+        title=title,
+    )
+
+    execution_id = f"exec_mcp_write_{uuid4().hex}"
+    correlation_id = f"corr_mcp_write_{uuid4().hex}"
+
+    authority_request = AuthorityRequest(
+        request_id=execution_id,
+        correlation_id=correlation_id,
+        principal_id=principal,
+        organization_id=organization,
+        client_id=client_id,
+        capability=SERVICE_TICKET_NOTE_CREATE,
+        requested_mode=PermissionMode.EXECUTE,
+        authentication_assurance=assurance,
+    )
+
+    decision = app.identity_authority.evaluate(
+        authority_request
+    )
+
+    approval_present = False
+
+    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
+        imperative_approval = (
+            str(
+                capability.metadata.get(
+                    "conversation_authenticated_imperative_is_approval",
+                    "",
+                )
+            ).casefold()
+            == "true"
+        )
+
+        if not imperative_approval:
+            return {
+                "status": "approval_required",
+                "capability": SERVICE_TICKET_NOTE_CREATE,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+
+        approval_repository = getattr(
+            app.identity_authority,
+            "approvals",
+            None,
+        )
+        approval_writer = getattr(
+            approval_repository,
+            "put",
+            None,
+        )
+
+        if not callable(approval_writer):
+            return {
+                "status": "denied",
+                "capability": SERVICE_TICKET_NOTE_CREATE,
+                "reason_codes": [
+                    "APPROVAL_PERSISTENCE_UNAVAILABLE",
+                ],
+                "correlation_id": correlation_id,
+            }
+
+        now = datetime.now(timezone.utc)
+        approval_id = f"approval_mcp_{uuid4().hex}"
+
+        approval_writer(
+            ApprovalRecord(
+                approval_id=approval_id,
+                request_id=execution_id,
+                capability=SERVICE_TICKET_NOTE_CREATE,
+                organization_id=organization,
+                client_id=client_id,
+                requested_by=principal,
+                status="approved",
+                decided_by=principal,
+                decided_at=now,
+                expires_at=now + timedelta(minutes=5),
+            )
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=execution_id,
+                correlation_id=correlation_id,
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=SERVICE_TICKET_NOTE_CREATE,
+                requested_mode=PermissionMode.EXECUTE,
+                authentication_assurance=assurance,
+                approval_id=approval_id,
+            )
+        )
+
+        approval_present = True
+
+    if decision.outcome is not AuthorityOutcome.ALLOWED:
+        return {
+            "status": "denied",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "reason_codes": list(decision.reason_codes),
+            "correlation_id": correlation_id,
+        }
+
+    context = decision.execution_context
+
+    if context is None:
+        return {
+            "status": "denied",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "reason_codes": [
+                "AUTHORITY_CONTEXT_MISSING",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    # A write grant that does not require explicit approval is a
+    # configuration error for this MCP surface. Fail closed rather
+    # than treating execute authority alone as sufficient.
+    if not context.approval_required:
+        return {
+            "status": "denied",
+            "capability": SERVICE_TICKET_NOTE_CREATE,
+            "reason_codes": [
+                "WRITE_GRANT_MUST_REQUIRE_APPROVAL",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    request = OrchestrationRequest(
+        execution_id=execution_id,
+        correlation_id=correlation_id,
+        principal_id=principal,
+        organization_id=organization,
+        client_id=client_id,
+        capability_name=SERVICE_TICKET_NOTE_CREATE,
+        capability_version=None,
+        requested_mode="deterministic",
+        orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True,
+        approval_present=(
+            approval_present
+            or context.approval_required
+        ),
+        risk="high",
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+            retention_allowed=False,
+        ),
+        budget=ExecutionBudget(
+            maximum_estimated_cost=Decimal("1.00"),
+            maximum_attempts=1,
+        ),
+        arguments=arguments,
+        requester_kind="human",
+        permission_mode="execute",
+        policy_ids=(
+            "mcp-autotask-internal-note-v1",
+        ),
+        authority_context_id=context.context_id,
+        idempotency_key=f"idem_mcp_write_{uuid4().hex}",
+    )
+
+    result = app.governed_orchestrator.execute(
+        request
+    )
+
+    output = result.output
+    data = (
+        output.get("data")
+        if isinstance(output, Mapping)
+        else None
+    )
+
+    note_id = None
+    if isinstance(data, Mapping):
+        for key in (
+            "itemId",
+            "itemID",
+            "id",
+        ):
+            value = data.get(key)
+            if value is not None:
+                note_id = _safe(value)
+                break
+
+    return {
+        "status": result.status.value,
+        "stage": result.stage.value,
+        "capability": result.capability_name,
+        "provider": result.provider_id,
+        "reason_codes": list(result.reason_codes),
+        "error_code": result.error_code,
+        "correlation_id": result.correlation_id,
+        "note_id": note_id,
+        "provider_write_attempts": result.attempts,
+    }
+
+
 def _governed_read(
     *,
     capability_name: str,
@@ -749,17 +1085,66 @@ def _governed_read(
     }
 
 
+def create_autotask_internal_note(
+    ticket_id: int,
+    note: str,
+    title: str = "",
+) -> dict[str, Any]:
+    """Create one internal Autotask ticket note.
+
+    This tool is registered only when the explicit internal-note MCP
+    activation profile, mutation execution gate, and requester-native
+    impersonation gate are all enabled. Microsoft Entra authenticates
+    the caller; Jason's exact execute grant and per-execution approval
+    determine mutation authority. noteType and publish are fixed
+    server-side.
+    """
+
+    return _governed_internal_note_create(
+        ticket_id=ticket_id,
+        note=note,
+        title=title,
+    )
+
+
+if _MCP_INTERNAL_NOTE_SURFACE_ENABLED:
+    mcp.tool()(create_autotask_internal_note)
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP pilot state."""
+
+    write_enabled = (
+        _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+    )
+
     return {
         "status": "ok",
         "service": "jason-mcp",
-        "mode": "read-only",
-        "phase": "governed-read-pilot",
+        "mode": (
+            "governed-read-plus-internal-note"
+            if write_enabled
+            else "read-only"
+        ),
+        "phase": (
+            "governed-internal-note-pilot"
+            if write_enabled
+            else "governed-read-pilot"
+        ),
         "governed_execution": "central-orchestrator",
         "direct_provider_access": False,
-        "write_tools_enabled": False,
+        "write_tools_enabled": write_enabled,
+        "write_capabilities": (
+            [SERVICE_TICKET_NOTE_CREATE]
+            if write_enabled
+            else []
+        ),
+        "write_authority": (
+            "jason_exact_grant_plus_per_execution_approval"
+            if write_enabled
+            else None
+        ),
     }
 
 
@@ -1241,7 +1626,11 @@ async def healthz(_request):
         {
             "status": "ok",
             "service": "jason-mcp",
-            "mode": "read-only",
+            "mode": (
+                "governed-read-plus-internal-note"
+                if _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+                else "read-only"
+            ),
             "mcp_path": "/mcp",
         }
     )

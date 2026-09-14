@@ -116,10 +116,17 @@ from orchestrator.teams_conversation_flow import TeamsConversationFlow
 from orchestrator.teams_identity_binding import JasonTeamsIdentityBinder
 from orchestrator.teams_identity_binding_sqlite import (
     AuthorityIdentityRecordReader,
+    DirectoryEnrichedMicrosoftIdentityBindingResolver,
     SQLiteMicrosoftIdentityBindingStore,
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
+from .autotask_internal_note import (
+    SERVICE_TICKET_NOTE_CREATE,
+    build_autotask_internal_note_invoker,
+    register_autotask_internal_note_invoker,
+    register_autotask_internal_note_runtime_foundation,
+)
 from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
 from .conversation_experience_cutover import (
     ConversationExperienceCutoverSettings,
@@ -176,6 +183,12 @@ class RuntimeSettings:
     )
     microsoft_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/secret_id"
+    )
+    autotask_write_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/autotask-write/role_id"
+    )
+    autotask_write_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/autotask-write/secret_id"
     )
     ses_openbao_role_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/role_id")
     ses_openbao_secret_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/secret_id")
@@ -304,6 +317,18 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/microsoft-graph/secret_id",
+                )
+            ),
+            autotask_write_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_AUTOTASK_WRITE_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/autotask-write/role_id",
+                )
+            ),
+            autotask_write_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_AUTOTASK_WRITE_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/autotask-write/secret_id",
                 )
             ),
             ses_openbao_role_id_path=Path(
@@ -552,6 +577,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         identities=AuthorityIdentityRecordReader(authority_store),
         directory=microsoft_directory.directory,
     )
+    source_authorization_bindings = (
+        DirectoryEnrichedMicrosoftIdentityBindingResolver(
+            bindings=bindings,
+            directory=microsoft_directory.directory,
+        )
+    )
 
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
@@ -571,6 +602,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         capabilities=capabilities,
         providers=providers,
         integration_broker=integration_broker,
+        now=now,
+    )
+    register_autotask_internal_note_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
         now=now,
     )
 
@@ -736,6 +772,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    internal_note_invoker = build_autotask_internal_note_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
         registry=load_production_system_registry()
     )
@@ -769,6 +813,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_provider_read_invokers(
         invokers=invokers,
         invoker=provider_read_invoker,
+    )
+    register_autotask_internal_note_invoker(
+        invokers=invokers,
+        invoker=internal_note_invoker,
     )
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
