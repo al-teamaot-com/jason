@@ -12,10 +12,18 @@ UNIT="jason-production-health-exporter.service"
 UNIT_SRC="$SHOWCASE_DIR/systemd/$UNIT"
 BACKUP_DIR="${JASON_PRODUCTION_HEALTH_DEPLOY_BACKUP_DIR:-/tmp/jason-production-health-rollback-$(date -u +%Y%m%dT%H%M%SZ)}"
 MUTATED=0
+RECOVERED_ENV=""
 
 say() { printf '%s\n' "$*"; }
 container_id_or_empty() { docker inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
 container_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" == "true" ]]; }
+
+cleanup() {
+  if [[ -n "${RECOVERED_ENV:-}" ]]; then
+    rm -f "$RECOVERED_ENV"
+  fi
+}
+trap cleanup EXIT
 
 require_file() {
   [[ -f "$1" ]] || { say "PRECHECK=FAIL missing file: $1"; return 1; }
@@ -28,6 +36,34 @@ wait_http() {
     sleep "$delay"
   done
   return 1
+}
+
+recover_compose_env_from_running_grafana() {
+  local env_dump password_count
+  RECOVERED_ENV="$(mktemp)" || return 1
+  chmod 600 "$RECOVERED_ENV" || return 1
+  env_dump="$(docker inspect jason-grafana --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null)" || return 1
+
+  {
+    printf '%s\n' "$env_dump" | awk '
+      index($0,"GF_SECURITY_ADMIN_USER=")==1 {
+        print "GRAFANA_ADMIN_USER=" substr($0,length("GF_SECURITY_ADMIN_USER=")+1)
+      }
+      index($0,"GF_SECURITY_ADMIN_PASSWORD=")==1 {
+        print "GRAFANA_ADMIN_PASSWORD=" substr($0,length("GF_SECURITY_ADMIN_PASSWORD=")+1)
+      }
+    '
+  } > "$RECOVERED_ENV" || return 1
+
+  if ! grep -q '^GRAFANA_ADMIN_USER=' "$RECOVERED_ENV"; then
+    printf 'GRAFANA_ADMIN_USER=admin\n' >> "$RECOVERED_ENV"
+  fi
+  password_count="$(grep -c '^GRAFANA_ADMIN_PASSWORD=.' "$RECOVERED_ENV" || true)"
+  [[ "$password_count" -eq 1 ]] || return 1
+
+  OLD_ENV="$RECOVERED_ENV"
+  say "SHOWCASE_ENV_SOURCE=RECOVERED_FROM_RUNNING_GRAFANA"
+  say "SHOWCASE_ENV_VALUES_PRINTED=NO"
 }
 
 install_unit_from_source() {
@@ -130,8 +166,16 @@ precheck() {
   [[ -n "$OLD_PROJECT" && "$OLD_PROJECT" == "$PROM_PROJECT" ]] || { say "PRECHECK=FAIL Grafana/Prometheus compose project mismatch"; return 1; }
   [[ -n "$OLD_SHOWCASE" && -d "$OLD_SHOWCASE" ]] || { say "PRECHECK=FAIL existing showcase working directory unavailable"; return 1; }
   [[ "$OLD_COMPOSE" != *,* && -f "$OLD_COMPOSE" ]] || { say "PRECHECK=FAIL existing compose file unavailable or ambiguous"; return 1; }
+
   OLD_ENV="$OLD_SHOWCASE/.env"
-  [[ -f "$OLD_ENV" ]] || { say "PRECHECK=FAIL existing showcase .env unavailable"; return 1; }
+  if [[ -f "$OLD_ENV" ]]; then
+    say "SHOWCASE_ENV_SOURCE=EXISTING_MODE_600_FILE"
+  else
+    recover_compose_env_from_running_grafana || {
+      say "PRECHECK=FAIL existing showcase .env unavailable and safe recovery failed"
+      return 1
+    }
+  fi
 
   mkdir -p "$BACKUP_DIR" || return 1
   chmod 700 "$BACKUP_DIR" || return 1
@@ -230,7 +274,7 @@ for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
 user = values.get("GRAFANA_ADMIN_USER", "admin")
 password = values.get("GRAFANA_ADMIN_PASSWORD", "")
 if not password:
-    raise SystemExit("Grafana credential unavailable in existing .env")
+    raise SystemExit("Grafana credential unavailable in deployment environment")
 auth = base64.b64encode(f"{user}:{password}".encode()).decode()
 request = Request("http://127.0.0.1:3000/api/dashboards/uid/jason-production-health", headers={"Authorization": f"Basic {auth}"})
 with urlopen(request, timeout=5) as response:
