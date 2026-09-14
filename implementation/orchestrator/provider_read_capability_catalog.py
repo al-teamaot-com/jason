@@ -27,6 +27,7 @@ from kernel.execution_providers import (
 
 IT_GLUE_PROVIDER = "it_glue"
 AUTOTASK_PROVIDER = "autotask"
+MICROSOFT_GRAPH_PROVIDER = "microsoft_graph"
 
 DOCUMENTATION_ORGANIZATION_SEARCH = "documentation.organization.search"
 DOCUMENTATION_ORGANIZATION_READ = "documentation.organization.read"
@@ -50,6 +51,9 @@ SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
+
+IDENTITY_USER_SEARCH = "identity.user.search"
+IDENTITY_USER_READ = "identity.user.read"
 
 
 IT_GLUE_CAPABILITIES = frozenset(
@@ -80,6 +84,13 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_SEARCH,
         SERVICE_CONFIGURATION_READ,
         SERVICE_ENTITY_DESCRIBE,
+    }
+)
+
+MICROSOFT_GRAPH_CAPABILITIES = frozenset(
+    {
+        IDENTITY_USER_SEARCH,
+        IDENTITY_USER_READ,
     }
 )
 
@@ -165,8 +176,8 @@ def _read_capability(
         stewardship=CapabilityStewardship(
             steward="technology-steward",
             business_justification=(
-                "Expose existing client documentation and service-management records "
-                "through reusable governed resources rather than question-specific code."
+                "Expose existing authoritative operational records through reusable "
+                "governed resources rather than question-specific code."
             ),
             review_interval_days=90,
             retirement_criteria=(
@@ -182,6 +193,7 @@ def _read_capability(
 def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
     itg = ("IT Glue API documentation",)
     at = ("Autotask REST API documentation",)
+    ms = ("Microsoft Graph v1.0 documentation",)
     return (
         _read_capability(
             now=now,
@@ -475,6 +487,43 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="schema,fields,field names,entity metadata,entity information",
             authoritative_change_sources=at,
         ),
+        _read_capability(
+            now=now,
+            capability_name=IDENTITY_USER_SEARCH,
+            display_name="Search Microsoft Entra Users",
+            business_purpose=(
+                "Search the authenticated tenant's Microsoft Entra users by one exact "
+                "identity selector."
+            ),
+            resource_types="identity_user,user,entra_user",
+            operation="search",
+            selector_keys="email,user_principal_name,display_name,page_size",
+            fact_hints=(
+                "Microsoft Entra user,Entra user,user account,UPN,email,display name,"
+                "enabled account,directory user"
+            ),
+            authoritative_change_sources=ms,
+            collection_fact="users",
+            canonical_facts="id,display_name,email,user_principal_name,account_enabled",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=IDENTITY_USER_READ,
+            display_name="Read Microsoft Entra User",
+            business_purpose=(
+                "Read one Microsoft Entra user from the authenticated tenant by durable "
+                "Microsoft object identifier."
+            ),
+            resource_types="identity_user,user,entra_user",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints=(
+                "Microsoft Entra user,Entra user,user account,UPN,email,display name,"
+                "enabled account,directory user"
+            ),
+            authoritative_change_sources=ms,
+            canonical_facts="id,display_name,email,user_principal_name,account_enabled",
+        ),
     )
 
 
@@ -514,7 +563,7 @@ def _provider(
             review_interval_days=90,
             last_reviewed_at=now,
             retirement_criteria=(
-                f"{display_name} is no longer an approved authority for {authority}.",
+                f"{display_name} is no longer an approved authority for {authority}."
             ),
             vendor_change_sources=vendor_change_sources,
             operational_owner="AOT IT Operations",
@@ -535,7 +584,7 @@ def register_provider_read_foundation(
     providers: ExecutionProviderRegistryService,
     now: datetime,
 ) -> None:
-    """Register IT Glue and Autotask read foundations without activating MCP reads."""
+    """Register governed provider read foundations without activating MCP reads."""
 
     for definition in _capability_definitions(now):
         capabilities.register(definition)
@@ -558,5 +607,15 @@ def register_provider_read_foundation(
             capabilities=AUTOTASK_CAPABILITIES,
             authority="service_management",
             vendor_change_sources=("Autotask REST API documentation",),
+        )
+    )
+    providers.register(
+        _provider(
+            now=now,
+            provider_id=MICROSOFT_GRAPH_PROVIDER,
+            display_name="Microsoft Entra Directory",
+            capabilities=MICROSOFT_GRAPH_CAPABILITIES,
+            authority="identity_directory",
+            vendor_change_sources=("Microsoft Graph v1.0 documentation",),
         )
     )
