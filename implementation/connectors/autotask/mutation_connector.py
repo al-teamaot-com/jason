@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from connectors.core.connector_base import PreparedRequest
-from connectors.core.contracts import ConnectorRequest
+from connectors.core.contracts import (
+    ConnectorAuthorizationError,
+    ConnectorRequest,
+    ConnectorResult,
+)
 
 from .connector import AutotaskConnector
 from .impersonating_connector import (
@@ -33,9 +37,10 @@ _OPERATION_PREFLIGHT = {
 class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     """Dormant, provider-enforced Autotask Ticket/TicketNote mutation path.
 
-    The ordinary :class:`AutotaskConnector` remains read-only. This connector
-    adds only four explicitly approved mutation primitives and will refuse every
-    mutation unless provider-native requester impersonation is active.
+    The ordinary :class:`AutotaskConnector` and the global connector foundation
+    remain read-only. This connector adds only four explicitly approved mutation
+    primitives and will refuse every mutation unless provider-native requester
+    impersonation is active.
 
     The authenticated Jason principal is resolved through the trusted binding
     inherited from ``AutotaskImpersonatingConnector`` and must map to exactly one
@@ -46,6 +51,62 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     """
 
     capabilities = AutotaskConnector.capabilities | AUTOTASK_MUTATION_OPERATIONS
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        """Execute only an explicitly registered mutation in ``execute`` mode.
+
+        Read requests continue through the inherited read-only connector path.
+        This intentionally avoids weakening ``connectors.core.require_capability``
+        for every other provider connector in Jason.
+        """
+
+        if request.context.capability not in AUTOTASK_MUTATION_OPERATIONS:
+            return super().execute(request)
+
+        if request.context.mode != "execute":
+            raise ConnectorAuthorizationError(
+                "Autotask mutation requires explicit execute mode."
+            )
+
+        credentials = self._secrets.resolve(
+            self.logical_secret,
+            request.context,
+        )
+        prepared = self.prepare_request(request, credentials)
+        operation = prepared.audit_operation or prepared.url
+
+        self._audit.record(
+            "connector.mutation.requested",
+            request.context,
+            {
+                "provider": self.provider_name,
+                "operation": operation,
+            },
+        )
+
+        payload = self._transport.request(
+            method=prepared.method,
+            url=prepared.url,
+            headers=prepared.headers,
+            params=prepared.params,
+            json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+
+        self._audit.record(
+            "connector.mutation.completed",
+            request.context,
+            {
+                "provider": self.provider_name,
+                "operation": operation,
+            },
+        )
+
+        return ConnectorResult(
+            capability=request.context.capability,
+            provider=self.provider_name,
+            data=payload,
+        )
 
     @staticmethod
     def _user_access_value(payload: Mapping[str, Any], field: str) -> int:
