@@ -53,7 +53,8 @@ The host previously experienced an EXT4 metadata error and kernel list/pointer c
 Current operating observations:
 
 - kernel: `7.0.0-31-generic`;
-- root filesystem: ext4, independently verified mounted read/write after recovery;
+- root filesystem: ext4, independently verified mounted read/write;
+- current production-health root-writable metric: `1`;
 - current production-health kernel signature count: `0`;
 - current failed systemd unit count: `0`;
 - Secure Boot remains disabled from diagnostics and should only be re-enabled deliberately after stability is established;
@@ -69,13 +70,16 @@ The pre-v4 authority database backup is `/var/lib/jason/authority/authority-pre-
 
 OpenBao's canonical non-secret recovery documentation remains `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`. Protected initialization material is not to be copied into documentation, logs, Prometheus labels, dashboard panels, or chat.
 
+A separate current-level checkpoint is being recorded in `docs/operations/Jason-Checkpoint-2026-09-14-Provider-Read-v4.md`; that checkpoint is the preferred reference before any further nontrivial production change.
+
 ## Monitoring and dashboard state
 
 The `Jason Production Health` dashboard is deployed and accepted in production. Deployment source `34bbf4df087cd7c07ff844183c48744b31fbca48` passed source validation, Prometheus rule validation, exporter startup, Prometheus scrape acceptance, Grafana provisioning acceptance, metric-contract acceptance, and post-deployment core-isolation checks.
 
-Production observability state at acceptance:
+Production observability state after exporter version 2 acceptance:
 
 - `jason-production-health-exporter.service`: active;
+- production-health exporter version: `2`;
 - production-health exporter endpoint: `http://127.0.0.1:9467/metrics`;
 - Prometheus production-health target: UP;
 - Grafana dashboard UID: `jason-production-health`;
@@ -83,20 +87,22 @@ Production observability state at acceptance:
 - `jason-runtime`: running/healthy and container identity unchanged;
 - `jason-mcp-pilot`: running and container identity unchanged;
 - OpenBao: running, initialized, unsealed, and container identity unchanged;
+- Prometheus and Grafana were not restarted for the exporter-v2 correction;
 - MCP required secret-mount contract: pass;
 - pre-v4 MCP rollback available: yes;
+- root filesystem host-namespace writable metric: 1;
 - current-boot kernel error signature count: 0;
 - failed systemd unit count: 0.
 
-The production-health monitor correctly detected the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. Issue #180 tracks cleanup.
-
-Immediately after deployment, the firing-alert query returned zero alerts. That observation is not evidence that the duplicate-environment warning will never fire: the `JasonMCPDuplicateEnvironment` rule has a two-minute `for` period and the query was executed immediately after deployment.
+The production-health monitor correctly detects the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. `JasonMCPDuplicateEnvironment` is firing as expected after its two-minute hold period. Issue #180 tracks cleanup.
 
 ### Root-filesystem monitor correction
 
-The first accepted exporter returned `jason_root_filesystem_writable 0` even though the host root filesystem had already been independently verified read/write. Root cause: the exporter systemd unit deliberately uses `ProtectSystem=strict`, so its own `/proc/mounts` reflects the exporter's read-only service mount namespace rather than the host mount namespace.
+Exporter version 1 incorrectly reported `jason_root_filesystem_writable 0` because the service deliberately uses `ProtectSystem=strict`, causing its own `/proc/mounts` to reflect the exporter's read-only service namespace instead of the host mount namespace.
 
-Repository source has been corrected so exporter version 2 prefers `/proc/1/mounts`, which represents PID 1's host mount namespace, and falls back to `/proc/mounts` only if necessary. Regression tests cover host-namespace preference and fallback. This exporter-only correction must be deployed and accepted before the root-writable panel/alert is treated as authoritative. The security hardening remains in place; the correction does not weaken `ProtectSystem=strict`.
+Exporter version 2 is now deployed and accepted. It prefers `/proc/1/mounts` for host mount state while preserving `ProtectSystem=strict`. Standard-library validation proved both RW/RO parsing and the live host root state before installation. The live v2 metric now reports `jason_root_filesystem_writable 1`.
+
+Immediately after v2 acceptance, Prometheus still showed `JasonRootFilesystemNotWritable` as firing alongside `JasonMCPDuplicateEnvironment`. Because the corrected metric was already `1`, the root-filesystem alert is stale evaluation state and should clear on the next Prometheus rule evaluation/scrape cycle. It should not be treated as evidence of a current host filesystem problem unless the metric itself returns to `0`.
 
 The monitoring system intentionally does not direct-call external providers or expose credentials/provider records. Continuous governed provider canaries remain future work and must traverse the same Jason identity/authority/Central-Orchestrator path as real reads. Issue #181 tracks that work.
 
@@ -136,4 +142,6 @@ The detailed architectural rule and acceptance criteria are in `docs/architectur
 
 ## Current change-control state
 
-PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backup, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
+PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backups/checkpoints, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
+
+This state is now considered a **stabilization checkpoint**. Do not make opportunistic cleanup changes merely because they are available. Changes should be driven by a real-world test failure, a monitored operational risk, an explicitly prioritized capability, or a security/reliability requirement. The duplicate MCP environment cleanup is real debt, but because effective v4 operation is proven, it should be scheduled deliberately rather than performed simply to make the dashboard green.
