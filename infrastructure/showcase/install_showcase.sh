@@ -5,6 +5,8 @@ REPO_ROOT="${JASON_REPO_ROOT:-$HOME/projects/jason}"
 SHOWCASE_DIR="$REPO_ROOT/infrastructure/showcase"
 STATUS_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-status-exporter.service"
 STATUS_SERVICE_DST="/etc/systemd/system/jason-status-exporter.service"
+PRODUCTION_HEALTH_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-production-health-exporter.service"
+PRODUCTION_HEALTH_SERVICE_DST="/etc/systemd/system/jason-production-health-exporter.service"
 USAGE_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-usage-exporter.service"
 USAGE_SERVICE_DST="/etc/systemd/system/jason-usage-exporter.service"
 ATTRIBUTION_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-usage-attribution-exporter.service"
@@ -58,15 +60,18 @@ PY
 }
 
 install_service "$STATUS_SERVICE_SRC" "$STATUS_SERVICE_DST"
+install_service "$PRODUCTION_HEALTH_SERVICE_SRC" "$PRODUCTION_HEALTH_SERVICE_DST"
 install_service "$USAGE_SERVICE_SRC" "$USAGE_SERVICE_DST"
 install_service "$ATTRIBUTION_SERVICE_SRC" "$ATTRIBUTION_SERVICE_DST"
 sudo systemctl daemon-reload
 sudo systemctl enable --now jason-status-exporter.service
+sudo systemctl enable --now jason-production-health-exporter.service
 sudo systemctl enable --now jason-usage-exporter.service
 sudo systemctl enable --now jason-usage-attribution-exporter.service
 
 for endpoint in \
   "http://127.0.0.1:9464/metrics" \
+  "http://127.0.0.1:9467/metrics" \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics"; do
   for attempt in $(seq 1 20); do
@@ -134,11 +139,13 @@ fi
 
 sudo systemctl restart \
   jason-status-exporter.service \
+  jason-production-health-exporter.service \
   jason-usage-exporter.service \
   jason-usage-attribution-exporter.service
 
 for endpoint in \
   "http://127.0.0.1:9464/metrics" \
+  "http://127.0.0.1:9467/metrics" \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics"; do
   curl -fsS "$endpoint" >/dev/null
@@ -151,6 +158,7 @@ grep '^GRAFANA_ADMIN_USER=' .env | cut -d= -f2-
 echo "Grafana admin password remains stored only in the mode-600 showcase .env file and is not printed."
 echo
 echo "Status exporter: http://127.0.0.1:9464/metrics"
+echo "Production health exporter: http://127.0.0.1:9467/metrics"
 echo "Usage exporter: http://127.0.0.1:9465/metrics"
 echo "Usage attribution exporter: http://127.0.0.1:9466/metrics"
 echo "Prometheus: http://127.0.0.1:9090"
