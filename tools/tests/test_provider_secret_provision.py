@@ -30,6 +30,27 @@ def test_aws_ses_contract_uses_canonical_sendmail_path_and_fields() -> None:
     )
 
 
+def test_autotask_write_contract_is_separate_from_readonly_credentials() -> None:
+    spec = PROVIDERS["autotask_write"]
+    assert spec["logical_name"] == "autotask.write"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/autotask/production/write"
+    )
+    assert spec["fields"] == ("username", "secret", "integration_code")
+    assert spec["required_fields"] == (
+        "username",
+        "secret",
+        "integration_code",
+    )
+    assert spec["policy_name"] == "jason-autotask-write-secret-read"
+    assert spec["role_name"] == "jason-autotask-write-secret-read"
+    assert spec["connector_identity"] == "autotask-write"
+    assert Path(spec["credential_dir"]) == Path(
+        "/opt/jason/bootstrap/secrets/openbao/autotask-write-approle"
+    )
+    assert "read-only" not in str(spec["secret_path"])
+
+
 def test_datto_contract_uses_canonical_connector_path_and_fields() -> None:
     spec = PROVIDERS["datto_rmm"]
     assert spec["logical_name"] == "datto_rmm.readonly"
@@ -125,6 +146,8 @@ def test_operations_document_is_authoritative_and_rejects_old_pattern() -> None:
     assert "auth/token/revoke-self" in text
     assert "Deactivation is intentionally reversible" in text
     assert "Do not create `/etc/jason/openbao-provider.token`" in text
+    assert "autotask_write" in text
+    assert "autotask.write" in text
     assert "create the provider runtime orphan token" not in text
     assert "--admin-token-file" not in text
 
@@ -152,6 +175,7 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert "auth/approle/login" in source
     assert "auth/token/revoke-self" in source
     assert "finally:" in source
+    assert '"autotask.write"' in source
     assert '"datto_rmm.readonly"' in source
     assert '"it_glue.readonly"' in source
     assert '"aws_ses.sendmail"' in source
