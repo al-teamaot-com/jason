@@ -90,9 +90,10 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
 
     Autotask ticket status is a tenant picklist backed by an integer value. A
     conversational selector such as ``New`` must therefore be resolved against
-    the live Tickets entityInformation metadata before it is sent in a query.
-    Numeric status values remain pass-through and do not require the metadata
-    lookup. Unknown or ambiguous labels fail closed before the ticket query.
+    the live Tickets entityInformation/fields metadata before it is sent in a
+    query. Numeric status values remain pass-through and do not require the
+    metadata lookup. Unknown or ambiguous labels fail closed before the ticket
+    query.
     """
 
     def __init__(self, *, bindings: TrustedPrincipalBindingResolver | None = None, **kwargs) -> None:
@@ -209,7 +210,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
 
         payload = self._transport.request(
             method="GET",
-            url=f"{self._api_root(prepared)}/V1.0/Tickets/entityInformation",
+            url=f"{self._api_root(prepared)}/V1.0/Tickets/entityInformation/fields",
             headers=prepared.headers,
             params=None,
             timeout_seconds=prepared.timeout_seconds,
