@@ -51,6 +51,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "autotask.readonly": (
         "secret/data/connectors/autotask/production/read-only"
     ),
+    "autotask.write": (
+        "secret/data/connectors/autotask/production/write"
+    ),
     "it_glue.readonly": (
         "secret/data/connectors/it-glue/production/read-only"
     ),
@@ -68,6 +71,7 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "openai.semantic_intent": frozenset({"api_key"}),
     "autotask.readonly": frozenset({"username", "secret", "integration_code"}),
+    "autotask.write": frozenset({"username", "secret", "integration_code"}),
     "it_glue.readonly": frozenset({"api_key"}),
     "datto_rmm.readonly": frozenset({"api_url", "api_key", "api_secret"}),
     "aws_ses.sendmail": frozenset({"access_key_id", "secret_access_key"}),

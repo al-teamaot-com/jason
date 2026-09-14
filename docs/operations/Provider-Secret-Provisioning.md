@@ -20,10 +20,10 @@ The invariant is:
 
 1. provisioning/lifecycle administration uses the governed OpenBao `userpass` administrative identity only for the bounded ceremony;
 2. the temporary administrative token is revoked when the lifecycle operation completes;
-3. each provider has its own least-privilege runtime policy and AppRole;
-4. AppRole RoleID and SecretID artifacts are stored root-owned under `/opt/jason/bootstrap/secrets/openbao/<provider>-read-approle/`;
+3. each provider credential class has its own least-privilege runtime policy and AppRole;
+4. AppRole RoleID and SecretID artifacts are stored root-owned under `/opt/jason/bootstrap/secrets/openbao/<provider>-approle/`;
 5. runtime AppRole login issues a short-lived service token with a five-minute maximum lifetime and two-use limit;
-6. the runtime policy can read exactly the provider's own secret path and can `update` only `auth/token/revoke-self` so the ephemeral token can destroy itself;
+6. the runtime policy can read exactly the provider credential's own secret path and can `update` only `auth/token/revoke-self` so the ephemeral token can destroy itself;
 7. the resolver reads exactly one approved provider secret record and revokes the service token immediately afterward;
 8. provider credentials and temporary tokens never enter Git, chat, prompts, normal logs, evidence, or persistent runtime token files;
 9. KV v2 create/update operations use compare-and-set (CAS), never blind overwrite;
@@ -38,6 +38,7 @@ Credential-safe inspection:
 ```bash
 python3 tools/provider_secret.py status datto_rmm --check-only
 python3 tools/provider_secret.py create it_glue --check-only
+python3 tools/provider_secret.py create autotask_write --check-only
 ```
 
 Live operations run as root and prompt locally for the OpenBao administrative password when administrative authority is required:
@@ -45,6 +46,7 @@ Live operations run as root and prompt locally for the OpenBao administrative pa
 ```bash
 sudo python3 tools/provider_secret.py status datto_rmm
 sudo python3 tools/provider_secret.py create it_glue
+sudo python3 tools/provider_secret.py create autotask_write
 sudo python3 tools/provider_secret.py update datto_rmm
 sudo python3 tools/provider_secret.py verify datto_rmm
 sudo python3 tools/provider_secret.py rotate-identity datto_rmm
@@ -107,21 +109,21 @@ Status reports metadata only: logical name, KV current version/presence, AppRole
 
 Runtime resolution uses `implementation/connectors/core/openbao_secrets.py` and provider-specific AppRole files. The resolver authenticates to `auth/approle/login`, reads the allow-listed KV v2 record, returns only approved fields to the authorized connector execution context, and calls `auth/token/revoke-self` in a `finally` path.
 
-Runtime policies contain only:
+Runtime OpenBao policies contain only:
 
-- `read` on the provider's exact secret path; and
+- `read` on the credential's exact secret path; and
 - `update` on `auth/token/revoke-self`.
 
-They must not include provider-secret `create`, `update`, `delete`, `sudo`, broad prefixes, or another provider's secret path.
+They must not include provider-secret `create`, `update`, `delete`, `sudo`, broad prefixes, or another provider credential's secret path. A provider credential that can perform external mutations still receives only **read** access to its own encrypted OpenBao record; external provider authority and OpenBao secret-store authority are separate concerns.
 
 ## Standard provider onboarding
 
-A new provider is not considered integrated with JKD-003 until all of the following are defined and tested:
+A new provider credential class is not considered integrated with JKD-003 until all of the following are defined and tested:
 
 - stable logical secret name;
-- canonical OpenBao KV v2 path under `secret/data/connectors/<provider>/production/read-only`;
+- canonical OpenBao KV v2 path under an approved provider-specific production namespace;
 - exact allow-listed secret fields;
-- provider-specific read-only policy name;
+- provider-specific least-privilege OpenBao policy name;
 - provider-specific AppRole name;
 - protected AppRole credential directory;
 - short-lived service-token settings;
@@ -176,13 +178,41 @@ Runtime identity:
 
 IT Glue uses the same production AppRole lifecycle and no longer requires a provider-specific secret-management procedure.
 
+## Autotask governed write contract
+
+Lifecycle provider key: `autotask_write`
+
+Logical secret: `autotask.write`
+
+Approved provider path:
+
+`secret/data/connectors/autotask/production/write`
+
+Durable OpenBao fields:
+
+- `username`
+- `secret`
+- `integration_code`
+
+Runtime identity:
+
+- policy: `jason-autotask-write-secret-read`
+- AppRole: `jason-autotask-write-secret-read`
+- protected artifacts: `/opt/jason/bootstrap/secrets/openbao/autotask-write-approle/`
+
+The word `write` describes the external Autotask execution credential's potential provider authority; the OpenBao runtime identity still has only read access to this one encrypted secret record plus self-revocation.
+
+This credential is intentionally separate from `autotask.readonly`. It is reserved for the governed Ticket/TicketNote mutation path, must be backed by a dedicated minimum-permission Autotask API-only user/security profile, and must never become a general read credential. Provider-native requester impersonation remains mandatory for every mutation, so the external execution identity does not replace requester authority.
+
+Provisioning this secret does not activate Autotask writes. Connector source, Central Orchestrator authorization, runtime write enablement, requester impersonation acceptance, and explicit production activation remain separate gates.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
 - Never create a persistent shared provider runtime token.
 - Never use the historical contract-test token as a provider identity.
 - Never give a provider runtime policy write access to provider KV data.
-- Never expose another provider's secret path through the same AppRole policy.
+- Never expose another provider credential's secret path through the same AppRole policy.
 - Never silently fall back to environment variables or unmanaged files.
 - Never blind-overwrite KV v2 data; use CAS.
 - Never treat `deactivate` as provider-side API-key revocation or irreversible secret destruction.
@@ -201,4 +231,4 @@ The provider-secret workflow must fail when a change:
 - removes lifecycle check-only coverage;
 - changes the canonical lifecycle documentation without running the provider-secret tests.
 
-The goal is operationally simple: adding the next provider should require defining its logical contract and then using the same lifecycle command, not rediscovering OpenBao behavior.
+The goal is operationally simple: adding the next provider credential should require defining its logical contract and then using the same lifecycle command, not rediscovering OpenBao behavior.

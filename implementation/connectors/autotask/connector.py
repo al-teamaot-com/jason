@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from connectors.autotask.operations import resolve_operation
+from connectors.autotask.operations import resolve_operation_request
 from connectors.core.connector_base import (
     ConnectorBase,
     PreparedRequest,
@@ -17,6 +17,8 @@ class AutotaskConnector(ConnectorBase):
     provider_name = "autotask"
     logical_secret = "autotask.readonly"
 
+    # Keep the base connector deliberately read-only. Mutation capabilities are
+    # exposed only by the stricter requester-impersonating mutation connector.
     capabilities = frozenset(
         {
             "autotask.entity.describe",
@@ -63,7 +65,7 @@ class AutotaskConnector(ConnectorBase):
                 "Autotask zone discovery returned an invalid API URL."
             )
 
-        method, path, params = resolve_operation(
+        method, path, params, body = resolve_operation_request(
             request.context.capability,
             request.arguments,
         )
@@ -76,8 +78,10 @@ class AutotaskConnector(ConnectorBase):
                 "UserName": credentials["username"],
                 "Secret": credentials["secret"],
                 "Accept": "application/json",
+                "Content-Type": "application/json",
             },
             params=params,
+            json=body,
             timeout_seconds=30.0,
             audit_operation=path,
         )
