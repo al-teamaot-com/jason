@@ -43,31 +43,33 @@ _ACCESS_LABELS = {
 class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     """Dormant, provider-enforced Autotask Ticket/TicketNote mutation path.
 
-    The ordinary :class:`AutotaskConnector` and the global connector foundation
-    remain read-only. This connector adds only four explicitly approved mutation
-    primitives and will refuse every mutation unless provider-native requester
-    impersonation is active.
+    This connector is intentionally separate from the ordinary read-only
+    :class:`AutotaskConnector`. It resolves a dedicated write-capable execution
+    credential and exposes only the four approved mutation primitives. Read
+    operations must continue through the read-only connector and its separate
+    ``autotask.readonly`` credential boundary.
 
-    The authenticated Jason principal is resolved through the trusted binding
-    inherited from ``AutotaskImpersonatingConnector`` and must map to exactly one
-    active Autotask Resource. The provider's entityInformation user-access field
-    is then queried under that same ``ImpersonationResourceId``. Access ``None``
-    fails before mutation; ``All`` or ``Restricted`` permit the concrete provider
-    request to become the final record-level enforcement point.
+    Every mutation additionally requires provider-native requester
+    impersonation. The authenticated Jason principal is resolved through the
+    trusted binding inherited from ``AutotaskImpersonatingConnector`` and must
+    map to exactly one active Autotask Resource. The provider's
+    ``entityInformation`` user-access field is queried under that same
+    ``ImpersonationResourceId``. Access ``None`` fails before mutation;
+    ``All`` or ``Restricted`` permit the concrete provider request to become
+    the final record-level enforcement point.
     """
 
-    capabilities = AutotaskConnector.capabilities | AUTOTASK_MUTATION_OPERATIONS
+    logical_secret = "autotask.write"
+    capabilities = AUTOTASK_MUTATION_OPERATIONS
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        """Execute only an explicitly registered mutation in ``execute`` mode.
-
-        Read requests continue through the inherited read-only connector path.
-        This intentionally avoids weakening ``connectors.core.require_capability``
-        for every other provider connector in Jason.
-        """
+        """Execute only an explicitly registered mutation in ``execute`` mode."""
 
         if request.context.capability not in AUTOTASK_MUTATION_OPERATIONS:
-            return super().execute(request)
+            raise ConnectorAuthorizationError(
+                "Capability is not registered for the Autotask mutation connector: "
+                f"{request.context.capability}"
+            )
 
         if request.context.mode != "execute":
             raise ConnectorAuthorizationError(
@@ -175,11 +177,14 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     ) -> PreparedRequest:
         operation = request.context.capability
         if operation not in AUTOTASK_MUTATION_OPERATIONS:
-            return super().prepare_request(request, credentials)
+            raise ConnectorAuthorizationError(
+                "Capability is not registered for the Autotask mutation connector: "
+                f"{operation}"
+            )
 
-        # Mutations never use Jason-managed/service-account authority. Fail
-        # before zone discovery or any other provider I/O if impersonation is
-        # not explicitly active.
+        # Mutations never use Jason-managed/service-account requester authority.
+        # Fail before zone discovery or any other provider I/O if impersonation
+        # is not explicitly active.
         if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
             raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
 
