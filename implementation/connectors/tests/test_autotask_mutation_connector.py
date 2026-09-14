@@ -19,11 +19,16 @@ from connectors.core.contracts import (
 
 
 class _Secrets:
+    def __init__(self) -> None:
+        self.logical_names: list[str] = []
+
     def resolve(self, logical_name, context):
-        assert logical_name == "autotask.readonly"
+        del context
+        self.logical_names.append(str(logical_name))
+        assert logical_name == "autotask.write"
         return {
-            "username": "api-user@example.invalid",
-            "secret": "synthetic-secret",
+            "username": "write-api-user@example.invalid",
+            "secret": "synthetic-write-secret",
             "integration_code": "synthetic-integration-code",
         }
 
@@ -119,9 +124,13 @@ def _provider_native_mode(monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def _connector(transport: _Transport, bindings=_Bindings()):
+def _connector(
+    transport: _Transport,
+    bindings=_Bindings(),
+    secrets: _Secrets | None = None,
+):
     return AutotaskMutationConnector(
-        secrets=_Secrets(),
+        secrets=secrets or _Secrets(),
         transport=transport,
         audit=_Audit(),
         bindings=bindings,
@@ -130,7 +139,8 @@ def _connector(transport: _Transport, bindings=_Bindings()):
 
 def test_ticket_create_is_impersonated_and_preflighted() -> None:
     transport = _Transport()
-    connector = _connector(transport)
+    secrets = _Secrets()
+    connector = _connector(transport, secrets=secrets)
 
     result = connector.execute(
         _request(
@@ -139,6 +149,7 @@ def test_ticket_create_is_impersonated_and_preflighted() -> None:
         )
     )
 
+    assert secrets.logical_names == ["autotask.write"]
     assert result.data["itemId"] == 12345
     assert [request["method"] for request in transport.requests] == [
         "GET",
@@ -184,6 +195,29 @@ def test_ticket_note_create_uses_ticketnotes_security_preflight() -> None:
     assert transport.requests[3]["url"].endswith("/V1.0/TicketNotes")
 
 
+def test_mutation_connector_does_not_offer_or_resolve_credentials_for_reads() -> None:
+    transport = _Transport()
+    secrets = _Secrets()
+    connector = _connector(transport, secrets=secrets)
+
+    assert "autotask.ticket.search" not in connector.capabilities
+    assert "autotask.ticket.get" not in connector.capabilities
+
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="not registered",
+    ):
+        connector.execute(
+            _request(
+                "autotask.ticket.search",
+                {},
+            )
+        )
+
+    assert secrets.logical_names == []
+    assert transport.requests == []
+
+
 def test_update_requires_positive_durable_id_before_resource_lookup() -> None:
     transport = _Transport()
     connector = _connector(transport)
@@ -227,7 +261,7 @@ def test_none_profile_access_denies_before_mutation() -> None:
     )
 
 
-def test_jason_managed_mode_fails_before_any_provider_io(
+def test_jason_managed_mode_fails_before_secret_resolution_or_provider_io(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -235,7 +269,8 @@ def test_jason_managed_mode_fails_before_any_provider_io(
         AUTOTASK_AUTH_MODE_JASON_MANAGED,
     )
     transport = _Transport()
-    connector = _connector(transport)
+    secrets = _Secrets()
+    connector = _connector(transport, secrets=secrets)
 
     with pytest.raises(
         PermissionError,
@@ -248,6 +283,7 @@ def test_jason_managed_mode_fails_before_any_provider_io(
             )
         )
 
+    assert secrets.logical_names == []
     assert transport.requests == []
 
 
@@ -272,7 +308,8 @@ def test_missing_trusted_binding_fails_before_resource_lookup_or_mutation() -> N
 
 def test_ticket_delete_is_not_a_supported_mutation_capability() -> None:
     transport = _Transport()
-    connector = _connector(transport)
+    secrets = _Secrets()
+    connector = _connector(transport, secrets=secrets)
 
     with pytest.raises(
         ConnectorAuthorizationError,
@@ -285,4 +322,5 @@ def test_ticket_delete_is_not_a_supported_mutation_capability() -> None:
             )
         )
 
+    assert secrets.logical_names == []
     assert transport.requests == []
