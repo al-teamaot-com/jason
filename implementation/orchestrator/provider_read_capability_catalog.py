@@ -44,6 +44,7 @@ SERVICE_COMPANY_READ = "service.company.read"
 SERVICE_CONTACT_SEARCH = "service.contact.search"
 SERVICE_CONTACT_READ = "service.contact.read"
 SERVICE_TICKET_SEARCH = "service.ticket.search"
+SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
@@ -73,6 +74,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONTACT_SEARCH,
         SERVICE_CONTACT_READ,
         SERVICE_TICKET_SEARCH,
+        SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_NOTES_SEARCH,
         SERVICE_CONFIGURATION_SEARCH,
@@ -247,7 +249,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             now=now,
             capability_name=DOCUMENTATION_LOCATION_READ,
             display_name="Read Documented Location",
-            business_purpose="Read one authorized IT documentation location.",
+            business_purpose="Read one authorized IT documentation location record.",
             resource_types="documentation_location,location",
             operation="read",
             selector_keys="resource_id",
@@ -383,6 +385,24 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             ),
             authoritative_change_sources=at,
             collection_fact="tickets",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_COUNT,
+            display_name="Count Service Tickets",
+            business_purpose=(
+                "Count authorized service-management tickets matching bounded selectors "
+                "without retrieving ticket records."
+            ),
+            resource_types="service_ticket,ticket",
+            operation="count",
+            selector_keys="ticket_number,company_id,status,resource_id,filters",
+            fact_hints=(
+                "count,how many,number of tickets,ticket count,tickets,status,new tickets,"
+                "open tickets,company"
+            ),
+            authoritative_change_sources=at,
+            canonical_facts="count",
         ),
         _read_capability(
             now=now,
