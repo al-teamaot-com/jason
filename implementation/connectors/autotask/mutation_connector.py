@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Mapping
 
 from connectors.core.connector_base import PreparedRequest
@@ -17,6 +18,7 @@ from .impersonating_connector import (
 )
 
 
+AUTOTASK_MUTATION_ENABLED_ENV = "JASON_AUTOTASK_MUTATION_ENABLED"
 AUTOTASK_MUTATION_OPERATIONS = frozenset(
     {
         "autotask.ticket.create",
@@ -40,6 +42,25 @@ _ACCESS_LABELS = {
 }
 
 
+def autotask_mutation_execution_enabled() -> bool:
+    """Return the explicit local mutation execution gate.
+
+    Mutation execution is disabled when the variable is absent. Only the exact
+    values ``true`` and ``false`` are accepted so configuration mistakes fail
+    closed rather than silently enabling a write path.
+    """
+
+    raw = os.getenv(AUTOTASK_MUTATION_ENABLED_ENV)
+    if raw is None:
+        return False
+    normalized = raw.strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise RuntimeError("AUTOTASK_MUTATION_ENABLEMENT_INVALID")
+
+
 class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     """Dormant, provider-enforced Autotask Ticket/TicketNote mutation path.
 
@@ -57,13 +78,33 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     ``ImpersonationResourceId``. Access ``None`` fails before mutation;
     ``All`` or ``Restricted`` permit the concrete provider request to become
     the final record-level enforcement point.
+
+    Source presence does not activate execution. ``execute`` also requires the
+    explicit local ``JASON_AUTOTASK_MUTATION_ENABLED=true`` gate. Production
+    registration, Central Orchestrator authorization, and MCP exposure remain
+    separate controls outside this connector.
     """
 
     logical_secret = "autotask.write"
     capabilities = AUTOTASK_MUTATION_OPERATIONS
 
+    def _audit_mutation_event(
+        self,
+        event_type: str,
+        request: ConnectorRequest,
+        *,
+        error_type: str | None = None,
+    ) -> None:
+        details: dict[str, Any] = {
+            "provider": self.provider_name,
+            "capability": request.context.capability,
+        }
+        if error_type:
+            details["error_type"] = error_type
+        self._audit.record(event_type, request.context, details)
+
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        """Execute only an explicitly registered mutation in ``execute`` mode."""
+        """Execute one registered mutation through all local/provider gates."""
 
         if request.context.capability not in AUTOTASK_MUTATION_OPERATIONS:
             raise ConnectorAuthorizationError(
@@ -76,45 +117,47 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
                 "Autotask mutation requires explicit execute mode."
             )
 
-        # Do not even resolve the write-capable execution credential unless the
-        # provider-native requester authority path is explicitly selected.
-        if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
-            raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
+        # From this point forward the caller has requested a real registered
+        # mutation. Record the attempt before enablement, secret resolution, or
+        # provider preflight so denied/failed executions remain attributable.
+        self._audit_mutation_event("connector.mutation.requested", request)
 
-        credentials = self._secrets.resolve(
-            self.logical_secret,
-            request.context,
-        )
-        prepared = self.prepare_request(request, credentials)
-        operation = prepared.audit_operation or prepared.url
+        try:
+            if not autotask_mutation_execution_enabled():
+                raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
 
-        self._audit.record(
-            "connector.mutation.requested",
-            request.context,
-            {
-                "provider": self.provider_name,
-                "operation": operation,
-            },
-        )
+            # Do not even resolve the write-capable execution credential unless
+            # provider-native requester authority is explicitly selected.
+            if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
+                raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
 
-        payload = self._transport.request(
-            method=prepared.method,
-            url=prepared.url,
-            headers=prepared.headers,
-            params=prepared.params,
-            json=prepared.json,
-            timeout_seconds=prepared.timeout_seconds,
-        )
+            credentials = self._secrets.resolve(
+                self.logical_secret,
+                request.context,
+            )
+            prepared = self.prepare_request(request, credentials)
 
-        self._audit.record(
-            "connector.mutation.completed",
-            request.context,
-            {
-                "provider": self.provider_name,
-                "operation": operation,
-            },
-        )
+            payload = self._transport.request(
+                method=prepared.method,
+                url=prepared.url,
+                headers=prepared.headers,
+                params=prepared.params,
+                json=prepared.json,
+                timeout_seconds=prepared.timeout_seconds,
+            )
+        except Exception as error:
+            # Never persist exception text because provider/transport exceptions
+            # may contain implementation details. The exception class is enough
+            # for a bounded audit trail; detailed investigation uses sanitized
+            # connector/provider evidence separately.
+            self._audit_mutation_event(
+                "connector.mutation.failed",
+                request,
+                error_type=type(error).__name__,
+            )
+            raise
 
+        self._audit_mutation_event("connector.mutation.completed", request)
         return ConnectorResult(
             capability=request.context.capability,
             provider=self.provider_name,
@@ -188,7 +231,10 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
             )
 
         # Defense in depth for direct prepare_request callers. Mutations never
-        # use Jason-managed/service-account requester authority.
+        # use Jason-managed/service-account requester authority. This check is
+        # intentionally independent of the execute enablement gate so the
+        # dedicated read-only readiness tool can compile/preflight a future
+        # mutation without enabling or dispatching writes.
         if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
             raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
 
