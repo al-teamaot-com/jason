@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record captures the current production state after the governed provider-read v4 cutover and the host/OpenBao recovery work completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
+This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, and production-health monitoring deployment completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
 
 ## Current production state
 
@@ -15,7 +15,7 @@ The live interface reports:
 - direct provider access: disabled;
 - write tools: disabled.
 
-The separate `jason-runtime` container is running and healthy. It was not restarted during the MCP v4 cutover.
+The separate `jason-runtime` container is running and healthy. It was not restarted during the MCP v4 cutover or the production-health monitoring deployment.
 
 OpenBao is initialized, unsealed, and using raft storage. Runtime provider credentials are staged as read-only bind-mounted files under `/run/jason-runtime-credentials/openbao`; `/run` is ephemeral and the credential staging must be restored after a host reboot before dependent containers are started.
 
@@ -53,8 +53,9 @@ The host previously experienced an EXT4 metadata error and kernel list/pointer c
 Current operating observations:
 
 - kernel: `7.0.0-31-generic`;
-- root filesystem: ext4, mounted read/write;
-- recent production verification: no current-boot EXT4 error, kernel Oops, general-protection fault, list corruption, I/O error, or media error detected;
+- root filesystem: ext4, independently verified mounted read/write after recovery;
+- current production-health kernel signature count: `0`;
+- current failed systemd unit count: `0`;
 - Secure Boot remains disabled from diagnostics and should only be re-enabled deliberately after stability is established;
 - BIOS is materially old and should not be flashed casually as part of normal Jason changes.
 
@@ -70,27 +71,40 @@ OpenBao's canonical non-secret recovery documentation remains `docs/operations/J
 
 ## Monitoring and dashboard state
 
-The repository observability baseline has been refreshed to match the current v4 production state. The new source includes:
+The `Jason Production Health` dashboard is deployed and accepted in production. Deployment source `34bbf4df087cd7c07ff844183c48744b31fbca48` passed source validation, Prometheus rule validation, exporter startup, Prometheus scrape acceptance, Grafana provisioning acceptance, metric-contract acceptance, and post-deployment core-isolation checks.
 
-- `infrastructure/showcase/production_health_exporter.py` — secret-safe runtime/MCP/OpenBao/host contract metrics on port 9467;
-- `infrastructure/showcase/grafana/dashboards/jason-production-health.json` — dedicated Jason Production Health dashboard;
-- `infrastructure/showcase/prometheus/alerts/jason-production.yml` — local Prometheus alert rules;
-- `infrastructure/showcase/prometheus/file_sd/jason-production-health.json` — scrape target;
-- `infrastructure/showcase/systemd/jason-production-health-exporter.service` — observational exporter service;
-- `infrastructure/showcase/deploy_production_health_dashboard.sh` — rollback-protected observability-only deployment;
-- `docs/operations/Jason-Production-Monitoring-Baseline.md` — monitoring contract, alert severity, and known gaps.
+Production observability state at acceptance:
 
-The production-health dashboard/alerts monitor runtime and MCP health, OpenBao initialized/unsealed state, accepted MCP deployment contract, duplicate watched MCP environment entries, credential mount contract, current-boot kernel corruption/error signatures, failed systemd units, root filesystem state/capacity, preserved rollback availability, and firing Prometheus alerts.
+- `jason-production-health-exporter.service`: active;
+- production-health exporter endpoint: `http://127.0.0.1:9467/metrics`;
+- Prometheus production-health target: UP;
+- Grafana dashboard UID: `jason-production-health`;
+- Prometheus production alert rules: loaded;
+- `jason-runtime`: running/healthy and container identity unchanged;
+- `jason-mcp-pilot`: running and container identity unchanged;
+- OpenBao: running, initialized, unsealed, and container identity unchanged;
+- MCP required secret-mount contract: pass;
+- pre-v4 MCP rollback available: yes;
+- current-boot kernel error signature count: 0;
+- failed systemd unit count: 0.
 
-The monitoring system intentionally does not direct-call external providers or expose credentials/provider records. Continuous governed provider canaries remain future work and must traverse the same Jason identity/authority/Central-Orchestrator path as real reads.
+The production-health monitor correctly detected the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. Issue #180 tracks cleanup.
 
-At the time this record was updated, the monitoring-as-code source is complete but the new 9467 exporter/Prometheus rules/Grafana Production Health dashboard have not yet been asserted as deployed on the live host. Live deployment must use the rollback-protected observability-only script and verify that `jason-runtime`, `jason-mcp-pilot`, OpenBao, Ollama, and node-exporter container IDs remain unchanged.
+Immediately after deployment, the firing-alert query returned zero alerts. That observation is not evidence that the duplicate-environment warning will never fire: the `JasonMCPDuplicateEnvironment` rule has a two-minute `for` period and the query was executed immediately after deployment.
+
+### Root-filesystem monitor correction
+
+The first accepted exporter returned `jason_root_filesystem_writable 0` even though the host root filesystem had already been independently verified read/write. Root cause: the exporter systemd unit deliberately uses `ProtectSystem=strict`, so its own `/proc/mounts` reflects the exporter's read-only service mount namespace rather than the host mount namespace.
+
+Repository source has been corrected so exporter version 2 prefers `/proc/1/mounts`, which represents PID 1's host mount namespace, and falls back to `/proc/mounts` only if necessary. Regression tests cover host-namespace preference and fallback. This exporter-only correction must be deployed and accepted before the root-writable panel/alert is treated as authoritative. The security hardening remains in place; the correction does not weaken `ProtectSystem=strict`.
+
+The monitoring system intentionally does not direct-call external providers or expose credentials/provider records. Continuous governed provider canaries remain future work and must traverse the same Jason identity/authority/Central-Orchestrator path as real reads. Issue #181 tracks that work.
 
 ## Known production debt / gaps
 
 ### Duplicate MCP environment entries
 
-The v4 MCP was created from the old environment file plus explicit v4 overrides. `docker inspect` therefore shows duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. Runtime composition proved that the active process is using the v4 profile and the live Microsoft capabilities prove the v4 surface is active, so this is not currently a functional outage. It should nevertheless be removed during a controlled MCP recreation because duplicated configuration is ambiguous. The new production-health monitor explicitly exposes the duplicate count until corrected.
+The v4 MCP was created from the old environment file plus explicit v4 overrides. `docker inspect` therefore shows duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. Runtime composition proved that the active process is using the v4 profile and live Microsoft capabilities prove the v4 surface is active, so this is not currently a functional outage. It should nevertheless be removed during a controlled MCP recreation because duplicated configuration is ambiguous. The production-health monitor explicitly exposes the duplicate count until corrected. Tracked in GitHub issue #180.
 
 ### User-relevant output enrichment
 
@@ -110,7 +124,7 @@ Temporary Jason-managed requester authorization remains an approved transitional
 
 ### Provider health canaries
 
-Live provider reads were proven during acceptance, but continuous external-provider canaries have not yet been added to the monitoring stack. Any such canary must remain low cadence, bounded, governed, read-only, non-disclosing, and must not bypass Jason by calling provider APIs with raw credentials from the monitoring system.
+Live provider reads were proven during acceptance, but continuous external-provider canaries have not yet been added to the monitoring stack. Any such canary must remain low cadence, bounded, governed, read-only, non-disclosing, and must not bypass Jason by calling provider APIs with raw credentials from the monitoring system. Tracked in GitHub issue #181.
 
 ## User-facing operating principles confirmed by real-world testing
 
