@@ -7,6 +7,8 @@ on:
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_datto_rmm_auth.py'
       - 'implementation/connectors/tests/test_datto_rmm_connector.py'
+      - 'implementation/connectors/tests/test_datto_rmm_automation_reads.py'
+      - 'implementation/connectors/tests/test_datto_rmm_automation_manifest.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
@@ -16,6 +18,8 @@ on:
       - 'implementation/connectors/provider_resource_adapters.py'
       - 'implementation/connectors/tests/test_datto_rmm_auth.py'
       - 'implementation/connectors/tests/test_datto_rmm_connector.py'
+      - 'implementation/connectors/tests/test_datto_rmm_automation_reads.py'
+      - 'implementation/connectors/tests/test_datto_rmm_automation_manifest.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
@@ -33,6 +37,8 @@ jobs:
         run: |
           python -m py_compile implementation/connectors/datto_rmm/auth.py
           python -m py_compile implementation/connectors/datto_rmm/connector.py
+          python -m py_compile implementation/connectors/datto_rmm/automation_reads.py
+          python -m py_compile implementation/connectors/datto_rmm/automation_manifest.py
           python -m py_compile tools/datto_rmm_live_read.py
       - name: Run DRMM auth and resource translation tests
         env:
@@ -40,6 +46,8 @@ jobs:
         run: |
           python -m pytest implementation/connectors/tests/test_datto_rmm_auth.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_connector.py -q
+          python -m pytest implementation/connectors/tests/test_datto_rmm_automation_reads.py -q
+          python -m pytest implementation/connectors/tests/test_datto_rmm_automation_manifest.py -q
           python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
       - name: Verify credential-safe live-read preflight
         run: |
