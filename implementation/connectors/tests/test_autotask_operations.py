@@ -246,12 +246,16 @@ def test_generic_get_requires_numeric_entity_id() -> None:
             "POST",
             "/V1.0/Tickets/12345/Notes",
         ),
-        ("autotask.ticket.note.update", "PATCH", "/V1.0/TicketNotes"),
+        (
+            "autotask.ticket.note.update",
+            "PATCH",
+            "/V1.0/Tickets/12345/Notes",
+        ),
     ],
 )
 def test_compiles_only_registered_mutation_routes(capability, method, path) -> None:
     payload = {"title": "Synthetic"}
-    if capability == "autotask.ticket.note.create":
+    if capability.startswith("autotask.ticket.note."):
         payload["ticketID"] = 12345
     if capability.endswith("update"):
         payload["id"] = 12345

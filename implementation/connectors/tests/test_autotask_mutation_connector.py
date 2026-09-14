@@ -206,8 +206,8 @@ def test_ticket_note_create_uses_ticketnotes_security_preflight() -> None:
             {
                 "ticketID": 12345,
                 "description": "Synthetic note",
-                "noteType": 1,
-                "publish": 3,
+                "noteType": 3,
+                "publish": 1,
             },
         )
     )
@@ -219,6 +219,34 @@ def test_ticket_note_create_uses_ticketnotes_security_preflight() -> None:
     assert transport.requests[3]["url"].endswith(
         "/V1.0/Tickets/12345/Notes"
     )
+
+
+def test_ticket_note_update_uses_ticketnotes_security_preflight_and_child_route() -> None:
+    transport = _Transport(update_access=2)
+    connector = _connector(transport)
+
+    connector.execute(
+        _request(
+            "autotask.ticket.note.update",
+            {
+                "ticketID": 12345,
+                "id": 67890,
+                "description": "Updated synthetic note",
+                "noteType": 3,
+                "publish": 1,
+            },
+        )
+    )
+
+    assert transport.requests[2]["url"].endswith(
+        "/V1.0/TicketNotes/entityInformation"
+    )
+    assert transport.requests[3]["method"] == "PATCH"
+    assert transport.requests[3]["url"].endswith(
+        "/V1.0/Tickets/12345/Notes"
+    )
+    assert transport.requests[3]["json"]["id"] == 67890
+    assert transport.requests[3]["json"]["ticketID"] == 12345
 
 
 def test_mutation_connector_does_not_offer_or_resolve_credentials_for_reads() -> None:

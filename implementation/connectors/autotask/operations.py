@@ -86,7 +86,8 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     ),
     "autotask.ticket.note.update": OperationDefinition(
         method="PATCH",
-        path_template="/V1.0/TicketNotes",
+        path_template="/V1.0/Tickets/{ticketID}/Notes",
+        path_arguments=("ticketID",),
         json_argument="payload",
         require_positive_body_id=True,
     ),

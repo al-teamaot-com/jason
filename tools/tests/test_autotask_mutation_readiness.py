@@ -89,7 +89,10 @@ def test_synthetic_payloads_are_non_real_compilation_only_values() -> None:
         "ticketID": 1,
         "description": "JASON_READINESS_NOT_SENT",
     }
-    assert _synthetic_payload("autotask.ticket.note.update") == {"id": 1}
+    assert _synthetic_payload("autotask.ticket.note.update") == {
+        "ticketID": 1,
+        "id": 1,
+    }
     with pytest.raises(ValueError, match="OPERATION_NOT_APPROVED"):
         _synthetic_payload("autotask.ticket.delete")
 

@@ -204,7 +204,7 @@ def _synthetic_payload(operation: str) -> Mapping[str, Any]:
     if operation == "autotask.ticket.note.create":
         return {"ticketID": 1, "description": "JASON_READINESS_NOT_SENT"}
     if operation == "autotask.ticket.note.update":
-        return {"id": 1}
+        return {"ticketID": 1, "id": 1}
     raise ValueError("AUTOTASK_READINESS_OPERATION_NOT_APPROVED")
 
 
