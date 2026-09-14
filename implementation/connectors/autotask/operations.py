@@ -80,7 +80,8 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     ),
     "autotask.ticket.note.create": OperationDefinition(
         method="POST",
-        path_template="/V1.0/TicketNotes",
+        path_template="/V1.0/Tickets/{ticketID}/Notes",
+        path_arguments=("ticketID",),
         json_argument="payload",
     ),
     "autotask.ticket.note.update": OperationDefinition(
@@ -142,13 +143,22 @@ def _path_values(
     values: dict[str, str | int] = {}
 
     for argument_name in definition.path_arguments:
+        value_source = arguments
+
         if argument_name not in arguments:
-            raise ValueError(
-                f"Required argument is missing: {argument_name}"
-            )
+            payload = arguments.get("payload")
+            if (
+                isinstance(payload, Mapping)
+                and argument_name in payload
+            ):
+                value_source = payload
+            else:
+                raise ValueError(
+                    f"Required argument is missing: {argument_name}"
+                )
 
         if argument_name == "entity":
-            entity = arguments[argument_name]
+            entity = value_source[argument_name]
 
             if (
                 not isinstance(entity, str)
@@ -162,7 +172,7 @@ def _path_values(
             continue
 
         try:
-            value = int(arguments[argument_name])
+            value = int(value_source[argument_name])
         except (TypeError, ValueError) as error:
             raise ValueError(
                 f"Argument must be an integer: {argument_name}"

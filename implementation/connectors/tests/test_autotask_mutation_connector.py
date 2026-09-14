@@ -216,7 +216,9 @@ def test_ticket_note_create_uses_ticketnotes_security_preflight() -> None:
         "/V1.0/TicketNotes/entityInformation"
     )
     assert transport.requests[3]["method"] == "POST"
-    assert transport.requests[3]["url"].endswith("/V1.0/TicketNotes")
+    assert transport.requests[3]["url"].endswith(
+        "/V1.0/Tickets/12345/Notes"
+    )
 
 
 def test_mutation_connector_does_not_offer_or_resolve_credentials_for_reads() -> None:
