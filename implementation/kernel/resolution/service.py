@@ -154,6 +154,7 @@ class GovernedCapabilityResolutionEngine:
                 classification=request.data_handling.classification,
                 region=request.region,
                 allow_pilot=request.allow_pilot_provider,
+                required_provider_id=request.required_provider_id,
             )
         )
 

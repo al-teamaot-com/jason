@@ -137,6 +137,7 @@ class CentralOrchestrator:
                 allow_pilot_capability=request.allow_pilot_capability,
                 allow_pilot_provider=request.allow_pilot_provider,
                 idempotency_key=request.idempotency_key,
+                required_provider_id=request.required_provider_id,
             )
         )
 

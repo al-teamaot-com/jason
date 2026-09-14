@@ -48,17 +48,24 @@ class DiscoveredResourceSchema:
         tuple[str, str],
         ...
     ] = ()
+    provider_resource_handle: str | None = None
 
     @property
     def resource_handle(self) -> str:
-        raw = "|".join(
-            (
-                self.provider_id,
-                self.capability_name,
-                self.resource_type,
-                self.operation,
-            )
-        ).encode("utf-8")
+        # Existing capability-backed resources keep their historical opaque
+        # handle.  Dynamically discovered provider resources add the provider's
+        # opaque metadata handle so two resources with the same semantic type do
+        # not collide.  The provider handle is never exposed in model context.
+        parts = [
+            self.provider_id,
+            self.capability_name,
+            self.resource_type,
+            self.operation,
+        ]
+        if self.provider_resource_handle is not None:
+            parts.append(self.provider_resource_handle)
+
+        raw = "|".join(parts).encode("utf-8")
 
         return (
             "resource_"
@@ -87,6 +94,13 @@ class DiscoveredResourceSchema:
             raise ValueError(
                 "unsupported discovered operation"
             )
+        if (
+            self.provider_resource_handle is not None
+            and not self.provider_resource_handle.strip()
+        ):
+            raise ValueError(
+                "provider_resource_handle cannot be empty"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +109,13 @@ class OpenWorldResourceCatalog:
         DiscoveredResourceSchema,
         ...
     ]
+
+    def __post_init__(self) -> None:
+        handles = [item.resource_handle for item in self.resources]
+        if len(handles) != len(set(handles)):
+            raise OpenWorldSchemaError(
+                "open-world resource catalog contains duplicate opaque handles"
+            )
 
     def model_context(self) -> Mapping[str, Any]:
         return {

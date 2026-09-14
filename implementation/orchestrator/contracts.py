@@ -73,6 +73,7 @@ class OrchestrationRequest:
     allow_pilot_provider: bool = False
     authority_context_id: str | None = None
     idempotency_key: str | None = None
+    required_provider_id: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -95,6 +96,8 @@ class OrchestrationRequest:
             raise ValueError("authority_context_id must be non-empty when provided.")
         if self.idempotency_key is not None and not self.idempotency_key.strip():
             raise ValueError("idempotency_key must be non-empty when provided.")
+        if self.required_provider_id is not None and not self.required_provider_id.strip():
+            raise ValueError("required_provider_id must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
         if self.permission_mode not in {

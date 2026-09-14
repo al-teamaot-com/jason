@@ -137,7 +137,15 @@ class ProviderCandidateQuery:
     include_warning: bool = False
     include_deprecated: bool = False
     allow_pilot: bool = False
+    required_provider_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.capability.strip():
             raise ValueError("capability must be non-empty.")
+        if (
+            self.required_provider_id is not None
+            and not self.required_provider_id.strip()
+        ):
+            raise ValueError(
+                "required_provider_id must be non-empty when provided."
+            )
