@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, and production-health monitoring deployment completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
+This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, production-health monitoring deployment, and accepted-level rollback checkpoint completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
 
 ## Current production state
 
@@ -15,7 +15,7 @@ The live interface reports:
 - direct provider access: disabled;
 - write tools: disabled.
 
-The separate `jason-runtime` container is running and healthy. It was not restarted during the MCP v4 cutover or the production-health monitoring deployment.
+The separate `jason-runtime` container is running and healthy. It was not restarted during the MCP v4 cutover, production-health monitoring deployment, exporter-v2 correction, or accepted-level checkpoint.
 
 OpenBao is initialized, unsealed, and using raft storage. Runtime provider credentials are staged as read-only bind-mounted files under `/run/jason-runtime-credentials/openbao`; `/run` is ephemeral and the credential staging must be restored after a host reboot before dependent containers are started.
 
@@ -70,7 +70,13 @@ The pre-v4 authority database backup is `/var/lib/jason/authority/authority-pre-
 
 OpenBao's canonical non-secret recovery documentation remains `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`. Protected initialization material is not to be copied into documentation, logs, Prometheus labels, dashboard panels, or chat.
 
-A separate current-level checkpoint is being recorded in `docs/operations/Jason-Checkpoint-2026-09-14-Provider-Read-v4.md`; that checkpoint is the preferred reference before any further nontrivial production change.
+The accepted current-level checkpoint was successfully created at:
+
+- directory: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z`;
+- archive: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z.tar.gz`;
+- archive SHA-256: `2193e1f7a28616f84ca55bf07d44b968e196077291c32e040c5319a23619b864`.
+
+That checkpoint includes integrity-verified current authority and identity-binding SQLite backups, a secret-safe container contract snapshot, safe production-health metrics, alert state, rollback material, a manifest, and SHA-256 hashes. It changed no services, made no provider requests, and made no authority mutation. The detailed checkpoint record is `docs/operations/Jason-Checkpoint-2026-09-14-Provider-Read-v4.md`.
 
 ## Monitoring and dashboard state
 
@@ -94,15 +100,15 @@ Production observability state after exporter version 2 acceptance:
 - current-boot kernel error signature count: 0;
 - failed systemd unit count: 0.
 
-The production-health monitor correctly detects the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. `JasonMCPDuplicateEnvironment` is firing as expected after its two-minute hold period. Issue #180 tracks cleanup.
+The production-health monitor correctly detects the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. `JasonMCPDuplicateEnvironment` is firing as expected. Issue #180 tracks cleanup.
 
 ### Root-filesystem monitor correction
 
 Exporter version 1 incorrectly reported `jason_root_filesystem_writable 0` because the service deliberately uses `ProtectSystem=strict`, causing its own `/proc/mounts` to reflect the exporter's read-only service namespace instead of the host mount namespace.
 
-Exporter version 2 is now deployed and accepted. It prefers `/proc/1/mounts` for host mount state while preserving `ProtectSystem=strict`. Standard-library validation proved both RW/RO parsing and the live host root state before installation. The live v2 metric now reports `jason_root_filesystem_writable 1`.
+Exporter version 2 is deployed and accepted. It prefers `/proc/1/mounts` for host mount state while preserving `ProtectSystem=strict`. Standard-library validation proved both RW/RO parsing and the live host root state before installation. The live v2 metric reports `jason_root_filesystem_writable 1`.
 
-Immediately after v2 acceptance, Prometheus still showed `JasonRootFilesystemNotWritable` as firing alongside `JasonMCPDuplicateEnvironment`. Because the corrected metric was already `1`, the root-filesystem alert is stale evaluation state and should clear on the next Prometheus rule evaluation/scrape cycle. It should not be treated as evidence of a current host filesystem problem unless the metric itself returns to `0`.
+After Prometheus reevaluation, the stale `JasonRootFilesystemNotWritable` alert cleared. At accepted-level checkpoint time, the only active Jason alert was the expected `JasonMCPDuplicateEnvironment` warning.
 
 The monitoring system intentionally does not direct-call external providers or expose credentials/provider records. Continuous governed provider canaries remain future work and must traverse the same Jason identity/authority/Central-Orchestrator path as real reads. Issue #181 tracks that work.
 
@@ -144,4 +150,4 @@ The detailed architectural rule and acceptance criteria are in `docs/architectur
 
 PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backups/checkpoints, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
 
-This state is now considered a **stabilization checkpoint**. Do not make opportunistic cleanup changes merely because they are available. Changes should be driven by a real-world test failure, a monitored operational risk, an explicitly prioritized capability, or a security/reliability requirement. The duplicate MCP environment cleanup is real debt, but because effective v4 operation is proven, it should be scheduled deliberately rather than performed simply to make the dashboard green.
+This state is now an **accepted stabilization checkpoint**. Do not make opportunistic cleanup changes merely because they are available. Changes should be driven by a real-world test failure, a monitored operational risk, an explicitly prioritized capability, or a security/reliability requirement. The duplicate MCP environment cleanup is real debt, but because effective v4 operation is proven, it should be scheduled deliberately rather than performed simply to make the dashboard green.
