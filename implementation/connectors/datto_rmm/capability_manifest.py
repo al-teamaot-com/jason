@@ -15,6 +15,8 @@ from orchestrator.integration_broker import (
     SelectorDefinition,
 )
 
+from .automation_manifest import build_datto_rmm_automation_resources
+
 
 def build_datto_rmm_manifest() -> IntegrationManifest:
     endpoint = ResourceDefinition(
@@ -225,7 +227,12 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
         display_name="Datto RMM",
         manifest_version="1.0",
         provider_id="datto_rmm",
-        resources=(endpoint, site, management),
+        resources=(
+            endpoint,
+            site,
+            management,
+            *build_datto_rmm_automation_resources(),
+        ),
         metadata={
             "manifest_source": "integration",
             "authority": "descriptive_only",
