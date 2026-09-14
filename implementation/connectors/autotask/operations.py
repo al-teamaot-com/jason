@@ -55,6 +55,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Tickets/query",
         query_argument="search",
     ),
+    "autotask.ticket.count": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Tickets/query/count",
+        query_argument="search",
+    ),
     "autotask.ticket.notes.list": OperationDefinition(
         method="GET",
         path_template="/V1.0/Tickets/{ticket_id}/Notes",
