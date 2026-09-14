@@ -10,6 +10,8 @@ class OperationDefinition:
     path_template: str
     path_arguments: tuple[str, ...] = ()
     query_argument: str | None = None
+    json_argument: str | None = None
+    require_positive_body_id: bool = False
 
 
 APPROVED_AUTOTASK_ENTITIES = frozenset(
@@ -65,6 +67,28 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Tickets/{ticket_id}/Notes",
         path_arguments=("ticket_id",),
     ),
+    "autotask.ticket.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Tickets",
+        json_argument="payload",
+    ),
+    "autotask.ticket.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/Tickets",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.ticket.note.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/TicketNotes",
+        json_argument="payload",
+    ),
+    "autotask.ticket.note.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/TicketNotes",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
     "autotask.company.get": OperationDefinition(
         method="GET",
         path_template="/V1.0/Companies/{company_id}",
@@ -111,18 +135,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
 }
 
 
-def resolve_operation(
-    capability: str,
+def _path_values(
+    definition: OperationDefinition,
     arguments: Mapping[str, Any],
-) -> tuple[str, str, Mapping[str, Any] | None]:
-    definition = AUTOTASK_OPERATIONS.get(capability)
-
-    if definition is None:
-        raise ValueError(
-            f"Unsupported capability: {capability}"
-        )
-
-    path_values: dict[str, str | int] = {}
+) -> dict[str, str | int]:
+    values: dict[str, str | int] = {}
 
     for argument_name in definition.path_arguments:
         if argument_name not in arguments:
@@ -141,28 +158,55 @@ def resolve_operation(
                     f"Autotask entity is not approved: {entity!r}"
                 )
 
-            path_values[argument_name] = entity
+            values[argument_name] = entity
             continue
 
         try:
-            path_values[argument_name] = int(
-                arguments[argument_name]
-            )
+            value = int(arguments[argument_name])
         except (TypeError, ValueError) as error:
             raise ValueError(
                 f"Argument must be an integer: {argument_name}"
             ) from error
 
+        if value < 1:
+            raise ValueError(
+                f"Argument must be a positive integer: {argument_name}"
+            )
+        values[argument_name] = value
+
+    return values
+
+
+def resolve_operation_request(
+    capability: str,
+    arguments: Mapping[str, Any],
+) -> tuple[
+    str,
+    str,
+    Mapping[str, Any] | None,
+    Mapping[str, Any] | None,
+]:
+    """Compile one bounded Autotask provider request.
+
+    This compiler intentionally exposes only explicitly registered operations.
+    Write bodies are passed as structured mappings rather than arbitrary URLs or
+    raw request fragments. Update bodies must include a positive durable id.
+    """
+
+    definition = AUTOTASK_OPERATIONS.get(capability)
+
+    if definition is None:
+        raise ValueError(
+            f"Unsupported capability: {capability}"
+        )
+
     path = definition.path_template.format(
-        **path_values
+        **_path_values(definition, arguments)
     )
 
     params = None
-
     if definition.query_argument is not None:
-        query = arguments.get(
-            definition.query_argument
-        )
+        query = arguments.get(definition.query_argument)
 
         if not isinstance(query, str) or not query.strip():
             raise ValueError(
@@ -170,8 +214,54 @@ def resolve_operation(
                 "search expression is required."
             )
 
-        params = {
-            definition.query_argument: query,
-        }
+        params = {definition.query_argument: query}
 
-    return definition.method, path, params
+    body: Mapping[str, Any] | None = None
+    if definition.json_argument is not None:
+        raw_body = arguments.get(definition.json_argument)
+        if not isinstance(raw_body, Mapping) or not raw_body:
+            raise ValueError(
+                "A non-empty structured Autotask payload is required."
+            )
+        body = dict(raw_body)
+
+        if definition.require_positive_body_id:
+            raw_id = body.get("id")
+            if isinstance(raw_id, bool):
+                raise ValueError(
+                    "Autotask update payload requires a positive numeric id."
+                )
+            try:
+                durable_id = int(raw_id)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "Autotask update payload requires a positive numeric id."
+                ) from error
+            if durable_id < 1:
+                raise ValueError(
+                    "Autotask update payload requires a positive numeric id."
+                )
+            body["id"] = durable_id
+
+    return definition.method, path, params, body
+
+
+def resolve_operation(
+    capability: str,
+    arguments: Mapping[str, Any],
+) -> tuple[str, str, Mapping[str, Any] | None]:
+    """Backward-compatible read compiler used by existing callers/tests.
+
+    Mutation operations must use ``resolve_operation_request`` so the structured
+    JSON body cannot be silently discarded.
+    """
+
+    method, path, params, body = resolve_operation_request(
+        capability,
+        arguments,
+    )
+    if body is not None:
+        raise ValueError(
+            "Mutation operation requires resolve_operation_request."
+        )
+    return method, path, params
