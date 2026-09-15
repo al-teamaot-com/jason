@@ -4,7 +4,22 @@
 
 The governed Datto RMM component-execution workstream is active on isolated branch `feature/jason-datto-component-execution-20260914`, based on the accepted production documentation head `13941dfb97abd3f0ed2268ad1daed37fa61e00ec`.
 
-Production remains unchanged and read-only. No provider write credential has been created or staged, no Datto Security Level / Device Visibility / API Component Level has been changed, no execution capability has been activated in production, and no Datto component has been executed by this workstream.
+Production runtime remains read-only. No execution capability has been activated in production and no Datto component has been executed by this workstream.
+
+Phase 3 received explicit owner approval. The owner reports that the separate Datto execution API identity has been created with the intended provider-side containment. Jason has not yet independently authenticated that identity or verified its provider-side visibility/component restrictions.
+
+The first OpenBao staging attempt stopped safely because the `secret/` KV v2 engine requires check-and-set for writes and the initial provisioning request omitted the required CAS option. The attempt created the dedicated `jason-datto-rmm-execution` OpenBao policy and AppRole before the KV write failed. A subsequent read-only diagnostic proved:
+
+- `secret/` KV v2 `cas_required=true`;
+- the execution policy exists;
+- the execution AppRole exists;
+- the execution AppRole is bound only to the execution policy, has no default policy, 300-second token TTL/max TTL, and two token uses;
+- `secret/data/connectors/datto-rmm/production/execution` does not exist;
+- the existing Datto read-only secret remains at version 1;
+- no execution bootstrap credential directory exists;
+- no Datto provider call, runtime activation, write activation, MCP restart, runtime restart, or OpenBao restart occurred.
+
+A fail-closed recovery utility, `deploy/openbao/scripts/recover-datto-rmm-execution-staging.py`, was added specifically for this proven partial state. It verifies the existing policy and AppRole against approved source, requires the observed CAS configuration, writes the execution secret with `options.cas=0`, verifies version-1 isolation and AppRole access boundaries, confirms the read-only secret version remains unchanged, and creates bootstrap material through a temporary root-only directory followed by atomic rename. It still does not contact Datto or activate runtime execution.
 
 Draft PR #184 tracks this isolated workstream. Issue #183 tracks the capability objective.
 
@@ -53,24 +68,26 @@ The focused `Validate Datto RMM Automation Foundation` workflow passed at source
 
 ## Security boundary preserved
 
-Neither phase converts the existing Datto read identity into an execution identity. Future component execution remains designed to use a separate least-privilege logical credential such as `datto_rmm.execution` and exact `EXECUTE` authority.
+Neither phase converts the existing Datto read identity into an execution identity. Component execution is being built around a separate least-privilege logical credential, `datto_rmm.execution`, and exact `EXECUTE` authority.
 
-The existing `DattoRmmMutationConnector` is still proposal-only for live mutations. No quick-job provider mutation has been enabled in runtime composition, no write-capable credential is present in the new source path, and no arbitrary PowerShell/shell/batch/script-text execution interface has been introduced.
+The existing `DattoRmmMutationConnector` is still proposal-only for live mutations. No quick-job provider mutation has been enabled in runtime composition, and no arbitrary PowerShell/shell/batch/script-text execution interface has been introduced.
 
-## Next milestone — Phase 3 provider identity / containment
+## Phase 3 — provider identity / containment — active
 
-The next meaningful phase is no longer source-only. It would create or configure the provider-side identity and containment needed for a controlled execution pilot. The intended work is:
+The intended Phase 3 controls are:
 
-1. Create or designate a separate Datto RMM API identity for Jason execution rather than broadening `datto_rmm.readonly`.
-2. Apply the minimum Security Level required for the quick-job operation.
+1. Use a separate Datto RMM API identity for Jason execution rather than broadening `datto_rmm.readonly`.
+2. Apply only the minimum Security Level required for the quick-job operation.
 3. Restrict Device Visibility to the intended pilot scope.
 4. Assign an API Component Level containing only explicitly approved pilot component(s).
 5. Store the resulting execution credential separately as `datto_rmm.execution` under OpenBao rather than reusing the read credential.
 6. Prove authentication and harmless read-only access/containment before any quick-job execution.
 7. Keep the runtime write/execution surface disabled until a later explicit production-activation approval.
 
+The provider identity has been created by the owner. OpenBao staging is not yet complete because the first attempt stopped on the CAS-required KV write. Recovery is now source-controlled and must complete before any provider authentication proof begins.
+
 ## Approval boundary
 
-Phase 3 is consequential because it creates or changes provider security/access and stages a write-capable credential. It requires explicit owner approval before work begins.
+Phase 3 provider identity/containment work is explicitly owner-approved.
 
-Separate explicit approval will also be required later before deploying a runtime execution surface or running the first live component/quick job. The first live pilot remains intended to be one explicitly approved low-risk diagnostic/read-only component on one noncritical test endpoint with per-run approval and governed post-job verification.
+Separate explicit approval will still be required before deploying a runtime execution surface or running the first live component/quick job. The first live pilot remains intended to be one explicitly approved low-risk diagnostic/read-only component on one noncritical test endpoint with per-run approval and governed post-job verification.
