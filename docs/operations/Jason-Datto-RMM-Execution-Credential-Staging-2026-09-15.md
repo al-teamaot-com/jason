@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record captures the approved Phase 3 staging of the separate Datto RMM execution identity into OpenBao, including both fail-closed staging attempts, the read-only diagnostic evidence, the current verified state, and the next source correction required before staging can continue.
+This record captures the approved Phase 3 staging of the separate Datto RMM execution identity into OpenBao, including the fail-closed staging attempts, read-only diagnostic evidence, recovery-parser correction, current verified state, and next guarded recovery step.
 
 No provider credential value, OpenBao token, Linux password, Datto API key, Datto API secret, RoleID, SecretID, provider-native object ID, or host secret path value is recorded here.
 
@@ -52,11 +52,11 @@ A subsequent read-only diagnostic performed no mutation and proved the partial s
 
 This established the root cause of the first failure: the KV v2 mount requires check-and-set, while the initial provisioning write omitted a CAS option. A new-record write must use `options.cas=0` under the observed mount configuration.
 
-## First recovery implementation
+## First recovery implementation and fail-closed parser stop
 
-A fail-closed recovery utility was added at `deploy/openbao/scripts/recover-datto-rmm-execution-staging.py` and source-controlled on the isolated workstream branch. Its design requires the proven partial state, validates the existing policy and AppRole before proceeding, requires `cas_required=true`, uses `options.cas=0` for a new execution KV record, verifies read-only secret version stability, verifies AppRole secret isolation, and creates bootstrap material atomically. It does not contact Datto or activate runtime execution.
+A fail-closed recovery utility was added at `deploy/openbao/scripts/recover-datto-rmm-execution-staging.py`. Its design requires the proven partial state, validates the existing policy and AppRole before proceeding, requires `cas_required=true`, uses `options.cas=0` for a new execution KV record, verifies read-only secret version stability, verifies AppRole secret isolation, and creates bootstrap material atomically. It does not contact Datto or activate runtime execution.
 
-The recovery attempt was pinned to source `8d26e6a5b75f936b0c2f41341258954da1097d3b`. Source pinning, isolated-clone validation, recovery-script compilation, source-contract validation, live-service baseline, bootstrap absence, and the final source pin all passed.
+The first recovery attempt was pinned to source `8d26e6a5b75f936b0c2f41341258954da1097d3b`. Source pinning, isolated-clone validation, recovery-script compilation, source-contract validation, live-service baseline, bootstrap absence, and the final source pin all passed.
 
 The recovery then stopped immediately after OpenBao administrative authentication with:
 
@@ -66,33 +66,50 @@ The temporary administrative token was revoked. The recovery did not prompt for 
 
 ## Root cause of the recovery failure
 
-The recovery utility's policy-verification parser assumed that `GET /v1/sys/policies/acl/:name` returned the policy document under `data.rules`.
+The first recovery utility assumed that `GET /v1/sys/policies/acl/:name` returned the policy document under `data.rules`.
 
-OpenBao's ACL policy API returns the policy document in the top-level `policy` field for this endpoint. The recovery therefore failed closed before any credential write because the expected field was unavailable.
+The OpenBao ACL-policy read response used by this deployment returns the policy document in the top-level `policy` field. The recovery therefore failed closed before any credential write because the expected field was unavailable.
 
-This is a source parsing defect in the recovery utility, not evidence of policy loss or policy drift. The previously proven state remains authoritative until another read-only diagnostic or a corrected recovery run proves otherwise.
+This was a source parsing defect in the recovery utility, not evidence of policy loss or policy drift.
+
+## Recovery parser correction and CI proof
+
+The recovery parser was corrected in source so that:
+
+- the actual top-level OpenBao `policy` field is accepted;
+- the previously assumed nested `data.rules` form is retained only as a compatibility fallback;
+- if both representations are present they must normalize to the same policy text;
+- missing policy text fails closed;
+- conflicting policy representations fail closed;
+- the retrieved policy must still exactly match the approved source before recovery can proceed.
+
+Focused regression coverage was added at `deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py`, including actual top-level response shape, compatibility fallback, missing policy, conflicting policy representations, exact-policy acceptance, and policy-drift rejection.
+
+The `Validate Datto RMM Automation Foundation` workflow was extended to compile the recovery utility and run the focused recovery tests. GitHub Actions run `34958605522` completed successfully at source head `d97c6566dd837115f0d547b4d64a1a506af05d6a`.
+
+No production/OpenBao state changed as a result of the source correction or CI run.
 
 ## Current verified state
 
-As of the latest completed evidence:
+As of the latest completed production evidence:
 
 - production runtime remains read-only;
 - no Datto component has been executed;
 - no Datto provider authentication has yet been attempted with the execution identity;
-- the dedicated OpenBao execution policy exists;
-- the dedicated OpenBao execution AppRole exists with the previously proven bounded token settings;
-- the execution KV credential record remains unproven as created and must be treated as absent until revalidated;
-- the existing Datto read-only secret remains at its previously proven version 1 and must not be modified by this workstream;
-- no execution bootstrap credential directory had been created at the last successful diagnostic;
+- the dedicated OpenBao execution policy was proven present;
+- the dedicated OpenBao execution AppRole was proven present with the bounded token settings recorded above;
+- the execution KV credential record was last proven absent;
+- the existing Datto read-only secret was last proven at version 1 and must not be modified by this workstream;
+- the execution bootstrap credential directory was last proven absent;
 - no runtime execution surface has been activated;
 - no general provider-write capability has been enabled;
 - no service restart has been required by the staging attempts.
 
-Because the second recovery failed before the KV-write stage, it is consistent with the earlier diagnostic state. We do not infer mutation from consistency alone; the next corrected recovery must re-prove all relevant preconditions before writing anything.
+The corrected recovery must re-prove these preconditions before writing anything; prior evidence is not treated as permission to assume the state remains unchanged.
 
 ## Next step
 
-Correct the recovery utility to parse the actual OpenBao ACL-policy read response while preserving fail-closed exact-policy comparison. Add focused tests for both the actual response shape and malformed/ambiguous policy responses. Then re-run source CI and perform another guarded recovery only after verifying the authoritative branch pin and the still-expected partial state.
+Run the corrected guarded recovery from the current authoritative workstream branch. The recovery must first re-prove the expected partial state and exact source pin, then use `options.cas=0` only if the execution KV record is still absent. It must preserve the read-only credential, keep all services running without restart, and leave runtime/provider execution disabled.
 
 After OpenBao staging completes, the next Phase 3 milestone is harmless Datto authentication and provider-containment proof. That milestone still must not execute a component or activate a runtime mutation surface.
 
