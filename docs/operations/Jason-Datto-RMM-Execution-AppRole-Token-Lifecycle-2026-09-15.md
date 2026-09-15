@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record captures the first harmless provider-proof attempt after successful staging of the separate Datto RMM execution credential, the OpenBao self-revocation failure that stopped the proof before Datto contact, the initially incorrect token-use diagnosis, and the corrected least-privilege repair.
+This record captures the first harmless provider-proof attempt after successful staging of the separate Datto RMM execution credential, the OpenBao self-revocation failure that stopped the proof before Datto contact, the initially incorrect token-use diagnosis, the corrected least-privilege repair, and the successful live proof.
 
 No credential value, OpenBao token, Datto API key, Datto API secret, RoleID, SecretID, provider-native object ID, or raw provider response is recorded here.
 
@@ -60,7 +60,7 @@ The generic `OpenBaoSecretResolver` performs exactly this limited-token lifecycl
 
 Because the token carries no default policy, the self-revocation endpoint must be explicitly authorized by the dedicated execution policy. The missing self-revocation capability, not the original two-use budget, caused the HTTP 403.
 
-OpenBao documents that a limited token's use count is decremented on each authenticated request. Therefore the approved two-use budget is sufficient for the intended lifecycle: one KV read plus one self-revocation request. The self-revocation request itself destroys the token.
+The approved two-use budget is sufficient for the intended lifecycle: one execution-credential read plus one explicit self-revocation request. The self-revocation request destroys the token.
 
 ## Corrected least-privilege repair
 
@@ -75,7 +75,7 @@ The guarded repair utility at:
 
 `deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py`
 
-has been corrected to:
+was corrected to:
 
 - accept only the exact legacy policy or the exact corrected policy;
 - reject any extra policy authority;
@@ -86,7 +86,7 @@ has been corrected to:
 - prove successful explicit `revoke-self`;
 - prove the revoked token can no longer read the execution secret;
 - update only the protected bootstrap metadata describing the corrected lifecycle;
-- avoid all Datto provider contact;
+- avoid all Datto provider contact during the OpenBao repair;
 - avoid runtime execution activation, provider-write activation, component execution, and service restart.
 
 Focused tests at:
@@ -97,23 +97,56 @@ prove the exact two-use target, the bounded 3-to-2 recovery state, exact policy 
 
 `Validate Datto RMM Automation Foundation` passed the corrected repair at source head `4cdaee41a9ab26db7ebc988045954811ecf541a1` in Actions run `34961030873`.
 
-## Current security boundary
+## Successful live repair and provider proof
 
-Until the corrected guarded repair is run successfully:
+The guarded repair-and-proof run was pinned to authoritative source `344fba3386ed2dd68f58195d3e5a92d7d5085ea8` and the CI-validated repair head above.
+
+The live OpenBao repair succeeded and proved:
+
+- the execution ACL now explicitly permits only self-revocation in addition to the isolated execution-secret read;
+- the execution AppRole token-use budget is restored to 2;
+- one execution KV read succeeds;
+- explicit `revoke-self` succeeds;
+- post-revocation execution-secret access is denied;
+- the temporary administrative token is revoked;
+- no Datto provider request occurs during the repair.
+
+After that OpenBao proof passed, the staged execution identity was used for the first harmless Datto provider contact. The provider proof returned:
+
+- OAuth authentication: PASS;
+- `GET /api/v2/system/status`: HTTP 200;
+- account read requiring Global Settings View: HTTP 403;
+- account devices read requiring Global Settings View: HTTP 403;
+- account components read requiring Global Settings View: HTTP 403;
+- provider mutation requests: 0;
+- component execution attempted: NO;
+- runtime execution activated: NO;
+- access token persisted: NO;
+- provider response bodies printed or persisted: NO.
+
+The service-stability post-check passed. OpenBao, MCP, and runtime containers were not recreated or restarted.
+
+The successful provider-proof details are recorded separately in `docs/operations/Jason-Datto-RMM-Execution-Identity-Harmless-Provider-Proof-2026-09-15.md`.
+
+## Current security boundary
 
 - production runtime remains read-only;
 - the execution credential remains staged but not runtime-activated;
-- the execution AppRole may be in the transient three-use state from the failed adjustment;
-- the live execution ACL policy still lacks proven self-revocation capability until the repair succeeds;
-- no Datto OAuth authentication has yet been completed through the execution identity;
+- the execution ACL contains only execution-secret read plus token self-revocation;
+- the execution AppRole is back at the approved two-use token budget;
+- Datto OAuth authentication through the execution identity is proven;
+- the execution identity is proven not to carry Global Settings View authority;
 - no provider mutation has occurred;
 - no component or quick job has been executed;
 - no service restart is required.
 
-## Next step
+## Remaining Phase 3 containment evidence
 
-Run the CI-validated self-revocation policy repair against live OpenBao. It must restore the exact two-use AppRole budget and prove explicit token revocation before any Datto contact.
+Two provider-side controls remain to be independently evidenced:
 
-Only after that proof passes should the already bounded harmless Datto authentication/negative-permission probe run. The provider proof remains non-mutating and must not execute a component or activate a runtime mutation surface.
+1. Device Visibility — prove a known in-scope endpoint is visible and a known out-of-scope endpoint is denied, using GET-only provider requests.
+2. API Component Level — prove the execution identity is limited to the intended pilot component set using non-mutating authoritative evidence.
 
-If that proof succeeds, record authentication and the negative Global Settings privilege boundary as proven. Device Visibility and API Component Level still require separate positive/negative containment evidence and must not be inferred solely from authentication.
+Neither control is inferred solely from OAuth success or the negative Global Settings proof.
+
+Separate explicit approval is still required before runtime execution activation or the first live component / quick job.
