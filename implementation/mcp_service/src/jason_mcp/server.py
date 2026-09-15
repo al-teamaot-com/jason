@@ -1085,6 +1085,94 @@ def _governed_read(
     }
 
 
+def _project_action_result(
+    capability_name: str,
+    output: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose only capability-specific verified action evidence."""
+
+    data = output.get("data")
+
+    if not isinstance(data, Mapping):
+        data = {}
+
+    result: dict[str, Any] = {
+        "raw_provider_evidence_exposed": False,
+    }
+
+    if capability_name == "service.ticket.note.create":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        note_id = verification.get("ticketNoteId")
+
+        if note_id is not None:
+            result["ticket_note_id"] = _safe(note_id)
+
+        result["impersonator_recorded"] = bool(
+            verification.get("impersonatorRecorded")
+        )
+
+        return result
+
+    if capability_name == "service.ticket.update":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        ticket_id = verification.get("ticketId")
+
+        if ticket_id is not None:
+            result["ticket_id"] = _safe(ticket_id)
+
+        fields = verification.get("verifiedFields")
+
+        if isinstance(fields, (list, tuple)):
+            result["verified_fields"] = [
+                str(value)
+                for value in fields[:20]
+            ]
+            result["verified_fields_bounded"] = (
+                len(fields) > 20
+            )
+
+        return result
+
+    if capability_name == "automation.component.execute":
+        for source, target in (
+            ("status", "status"),
+            ("job_status", "job_status"),
+            ("readback_verified", "readback_verified"),
+            ("allowlist_name", "allowlist_name"),
+        ):
+            if source in data:
+                result[target] = _safe(data.get(source))
+
+        result["job_reference_present"] = bool(
+            str(data.get("job_uid") or "").strip()
+        )
+
+        return result
+
+    result["result_exposed"] = False
+    return result
+
+
 def _governed_execute(
     *,
     capability_name: str,
@@ -1294,9 +1382,10 @@ def _governed_execute(
     }
 
     if isinstance(result.output, Mapping):
-        data = result.output.get("data")
-        if isinstance(data, Mapping):
-            response["result"] = _safe(dict(data))
+        response["result"] = _project_action_result(
+            capability_name,
+            result.output,
+        )
 
     return response
 

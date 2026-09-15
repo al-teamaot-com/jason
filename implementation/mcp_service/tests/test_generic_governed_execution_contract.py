@@ -312,3 +312,111 @@ def test_discovery_marks_denied_requester_ineligible(
     assert action["permission_mode"] == "execute"
     assert action["potentially_eligible"] is False
     assert action["authority_outcome"] == "denied"
+
+
+def test_ticket_update_action_result_is_verification_only():
+    result = server._project_action_result(
+        "service.ticket.update",
+        {
+            "data": {
+                "id": 123,
+                "providerRawObject": {
+                    "sensitive": "must-not-escape",
+                },
+                "jasonVerification": {
+                    "readbackVerified": True,
+                    "ticketId": 123,
+                    "verifiedFields": [
+                        "status",
+                        "priority",
+                    ],
+                },
+            },
+        },
+    )
+
+    assert result == {
+        "raw_provider_evidence_exposed": False,
+        "verification_available": True,
+        "readback_verified": True,
+        "ticket_id": 123,
+        "verified_fields": [
+            "status",
+            "priority",
+        ],
+        "verified_fields_bounded": False,
+    }
+
+    assert "providerRawObject" not in result
+
+
+def test_internal_note_action_result_omits_resource_attribution():
+    result = server._project_action_result(
+        "service.ticket.note.create",
+        {
+            "data": {
+                "providerPayload": "must-not-escape",
+                "jasonVerification": {
+                    "readbackVerified": True,
+                    "ticketNoteId": 456,
+                    "creatorResourceId": 987654,
+                    "impersonatorRecorded": True,
+                },
+            },
+        },
+    )
+
+    assert result == {
+        "raw_provider_evidence_exposed": False,
+        "verification_available": True,
+        "readback_verified": True,
+        "ticket_note_id": 456,
+        "impersonator_recorded": True,
+    }
+
+    assert "creatorResourceId" not in result
+    assert "providerPayload" not in result
+
+
+def test_datto_action_result_omits_raw_job_uid():
+    result = server._project_action_result(
+        "automation.component.execute",
+        {
+            "data": {
+                "status": "verified",
+                "job_uid": "provider-job-secretish-id",
+                "job_status": "completed",
+                "readback_verified": True,
+                "allowlist_name": "diagnostic",
+                "unexpected": "must-not-escape",
+            },
+        },
+    )
+
+    assert result == {
+        "raw_provider_evidence_exposed": False,
+        "status": "verified",
+        "job_status": "completed",
+        "readback_verified": True,
+        "allowlist_name": "diagnostic",
+        "job_reference_present": True,
+    }
+
+    assert "job_uid" not in result
+    assert "unexpected" not in result
+
+
+def test_unknown_action_result_fails_closed():
+    result = server._project_action_result(
+        "future.unknown.action",
+        {
+            "data": {
+                "arbitrary": "must-not-escape",
+            },
+        },
+    )
+
+    assert result == {
+        "raw_provider_evidence_exposed": False,
+        "result_exposed": False,
+    }
