@@ -10,6 +10,7 @@ on:
       - 'implementation/connectors/tests/test_datto_rmm_automation_reads.py'
       - 'implementation/connectors/tests/test_datto_rmm_automation_manifest.py'
       - 'implementation/connectors/tests/test_datto_rmm_component_execution.py'
+      - 'implementation/connectors/tests/test_datto_rmm_execution_identity.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'implementation/orchestrator/capability_routing_invoker.py'
       - 'implementation/orchestrator/resource_capability_catalog.py'
@@ -28,6 +29,7 @@ on:
       - 'implementation/connectors/tests/test_datto_rmm_automation_reads.py'
       - 'implementation/connectors/tests/test_datto_rmm_automation_manifest.py'
       - 'implementation/connectors/tests/test_datto_rmm_component_execution.py'
+      - 'implementation/connectors/tests/test_datto_rmm_execution_identity.py'
       - 'implementation/connectors/tests/test_provider_resource_adapters.py'
       - 'implementation/orchestrator/capability_routing_invoker.py'
       - 'implementation/orchestrator/resource_capability_catalog.py'
@@ -55,6 +57,7 @@ jobs:
           python -m py_compile implementation/connectors/datto_rmm/automation_manifest.py
           python -m py_compile implementation/connectors/datto_rmm/capability_manifest.py
           python -m py_compile implementation/connectors/datto_rmm/component_execution.py
+          python -m py_compile implementation/connectors/datto_rmm/execution_identity.py
           python -m py_compile implementation/connectors/datto_rmm/mutations.py
           python -m py_compile implementation/orchestrator/capability_routing_invoker.py
           python -m py_compile implementation/orchestrator/resource_capability_catalog.py
@@ -69,6 +72,7 @@ jobs:
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_reads.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_manifest.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_component_execution.py -q
+          python -m pytest implementation/connectors/tests/test_datto_rmm_execution_identity.py -q
           python -m pytest implementation/connectors/tests/test_provider_resource_adapters.py -q
           python -m pytest implementation/orchestrator/tests/test_capability_routing_invoker.py -q
           python -m pytest implementation/orchestrator/tests/test_resource_capability_catalog.py -q
