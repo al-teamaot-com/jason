@@ -96,7 +96,13 @@ class SQLiteOrchestrationEventStore:
 
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = path
-        self._connection = sqlite3.connect(str(path))
+        # MCP synchronous tools may execute in worker threads while the runtime is
+        # process-cached. Preserve the append-only audit store across those threads
+        # rather than failing after authority succeeds and before/while execution.
+        self._connection = sqlite3.connect(
+            str(path),
+            check_same_thread=False,
+        )
         self._connection.row_factory = sqlite3.Row
         self._connection.executescript(_SCHEMA)
         self._connection.commit()

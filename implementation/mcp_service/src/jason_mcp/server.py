@@ -1085,6 +1085,311 @@ def _governed_read(
     }
 
 
+def _project_action_result(
+    capability_name: str,
+    output: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose only capability-specific verified action evidence."""
+
+    data = output.get("data")
+
+    if not isinstance(data, Mapping):
+        data = {}
+
+    result: dict[str, Any] = {
+        "raw_provider_evidence_exposed": False,
+    }
+
+    if capability_name == "service.ticket.note.create":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        note_id = verification.get("ticketNoteId")
+
+        if note_id is not None:
+            result["ticket_note_id"] = _safe(note_id)
+
+        result["impersonator_recorded"] = bool(
+            verification.get("impersonatorRecorded")
+        )
+
+        return result
+
+    if capability_name == "service.ticket.update":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        ticket_id = verification.get("ticketId")
+
+        if ticket_id is not None:
+            result["ticket_id"] = _safe(ticket_id)
+
+        fields = verification.get("verifiedFields")
+
+        if isinstance(fields, (list, tuple)):
+            result["verified_fields"] = [
+                str(value)
+                for value in fields[:20]
+            ]
+            result["verified_fields_bounded"] = (
+                len(fields) > 20
+            )
+
+        return result
+
+    if capability_name == "automation.component.execute":
+        for source, target in (
+            ("status", "status"),
+            ("job_status", "job_status"),
+            ("readback_verified", "readback_verified"),
+            ("allowlist_name", "allowlist_name"),
+        ):
+            if source in data:
+                result[target] = _safe(data.get(source))
+
+        result["job_reference_present"] = bool(
+            str(data.get("job_uid") or "").strip()
+        )
+
+        return result
+
+    result["result_exposed"] = False
+    return result
+
+
+def _governed_execute(
+    *,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Execute one explicitly MCP-enabled mutation through Jason governance."""
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_write_identity()
+
+    try:
+        capability = app.capabilities.get_current(
+            capability_name=capability_name
+        )
+    except LookupError:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_active",
+        }
+
+    metadata = dict(capability.metadata or {})
+
+    if (
+        str(metadata.get("mcp_action_enabled", "")).casefold()
+        != "true"
+    ):
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_mcp_action_enabled",
+        }
+
+    execution_id = f"exec_mcp_action_{uuid4().hex}"
+    correlation_id = f"corr_mcp_action_{uuid4().hex}"
+
+    decision = app.identity_authority.evaluate(
+        AuthorityRequest(
+            request_id=execution_id,
+            correlation_id=correlation_id,
+            principal_id=principal,
+            organization_id=organization,
+            client_id=client_id,
+            capability=capability_name,
+            requested_mode=PermissionMode.EXECUTE,
+            authentication_assurance=assurance,
+        )
+    )
+
+    approval_present = False
+
+    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
+        imperative_approval = (
+            str(
+                metadata.get(
+                    "conversation_authenticated_imperative_is_approval",
+                    "",
+                )
+            ).casefold()
+            == "true"
+        )
+
+        if not imperative_approval:
+            return {
+                "status": "approval_required",
+                "capability": capability_name,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+
+        approval_repository = getattr(
+            app.identity_authority,
+            "approvals",
+            None,
+        )
+        approval_writer = getattr(
+            approval_repository,
+            "put",
+            None,
+        )
+
+        if not callable(approval_writer):
+            return {
+                "status": "denied",
+                "capability": capability_name,
+                "reason_codes": [
+                    "APPROVAL_PERSISTENCE_UNAVAILABLE",
+                ],
+                "correlation_id": correlation_id,
+            }
+
+        now = datetime.now(timezone.utc)
+        approval_id = f"approval_mcp_{uuid4().hex}"
+
+        approval_writer(
+            ApprovalRecord(
+                approval_id=approval_id,
+                request_id=execution_id,
+                capability=capability_name,
+                organization_id=organization,
+                client_id=client_id,
+                requested_by=principal,
+                status="approved",
+                decided_by=principal,
+                decided_at=now,
+                expires_at=now + timedelta(minutes=5),
+            )
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=execution_id,
+                correlation_id=correlation_id,
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=capability_name,
+                requested_mode=PermissionMode.EXECUTE,
+                authentication_assurance=assurance,
+                approval_id=approval_id,
+            )
+        )
+
+        approval_present = True
+
+    if decision.outcome is not AuthorityOutcome.ALLOWED:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": list(decision.reason_codes),
+            "correlation_id": correlation_id,
+        }
+
+    context = decision.execution_context
+
+    if context is None:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": [
+                "AUTHORITY_CONTEXT_MISSING",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    if capability.approval.required and not context.approval_required:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": [
+                "ACTION_GRANT_APPROVAL_POLICY_MISMATCH",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    request = OrchestrationRequest(
+        execution_id=execution_id,
+        correlation_id=correlation_id,
+        principal_id=principal,
+        organization_id=organization,
+        client_id=client_id,
+        capability_name=capability_name,
+        capability_version=None,
+        requested_mode="deterministic",
+        orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True,
+        approval_present=(
+            approval_present
+            or not capability.approval.required
+            or context.approval_required
+        ),
+        risk=capability.risk_level.value,
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+            retention_allowed=False,
+        ),
+        budget=ExecutionBudget(
+            maximum_estimated_cost=Decimal("1.00"),
+            maximum_attempts=1,
+        ),
+        arguments=dict(arguments or {}),
+        requester_kind="human",
+        permission_mode="execute",
+        policy_ids=("mcp-governed-execution-v1",),
+        authority_context_id=context.context_id,
+        idempotency_key=f"idem_mcp_action_{uuid4().hex}",
+    )
+
+    result = app.governed_orchestrator.execute(request)
+
+    response = {
+        "status": result.status.value,
+        "stage": result.stage.value,
+        "capability": result.capability_name,
+        "provider": result.provider_id,
+        "reason_codes": list(result.reason_codes),
+        "error_code": result.error_code,
+        "correlation_id": result.correlation_id,
+        "provider_attempts": result.attempts,
+    }
+
+    if isinstance(result.output, Mapping):
+        response["result"] = _project_action_result(
+            capability_name,
+            result.output,
+        )
+
+    return response
+
+
 def create_autotask_internal_note(
     ticket_id: int,
     note: str,
@@ -1113,33 +1418,29 @@ if _MCP_INTERNAL_NOTE_SURFACE_ENABLED:
 
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
-    """Return Jason MCP pilot state."""
+    """Return Jason MCP governed capability state."""
 
-    write_enabled = (
-        _MCP_INTERNAL_NOTE_SURFACE_ENABLED
-    )
+    actions = _active_action_capabilities()
+    write_enabled = bool(actions)
 
     return {
         "status": "ok",
         "service": "jason-mcp",
         "mode": (
-            "governed-read-plus-internal-note"
+            "governed-read-plus-actions"
             if write_enabled
             else "read-only"
         ),
         "phase": (
-            "governed-internal-note-pilot"
+            "governed-action-pilot"
             if write_enabled
             else "governed-read-pilot"
         ),
         "governed_execution": "central-orchestrator",
+        "generic_execution_tool": True,
         "direct_provider_access": False,
         "write_tools_enabled": write_enabled,
-        "write_capabilities": (
-            [SERVICE_TICKET_NOTE_CREATE]
-            if write_enabled
-            else []
-        ),
+        "write_capabilities": actions,
         "write_authority": (
             "jason_exact_grant_plus_per_execution_approval"
             if write_enabled
@@ -1161,14 +1462,33 @@ def jason_mcp_status() -> dict[str, object]:
 def _capability_metadata(capability: Any) -> dict[str, Any]:
     metadata = dict(capability.metadata or {})
 
+    read_only = (
+        str(metadata.get("read_only", "")).strip().lower()
+        == "true"
+    )
+    write_capability = (
+        str(metadata.get("write_capability", "")).strip().lower()
+        == "true"
+    )
+    action_enabled = (
+        str(metadata.get("mcp_action_enabled", "")).strip().lower()
+        == "true"
+    )
+
     return {
         "capability": capability.capability_name,
         "display_name": capability.display_name,
         "lifecycle": capability.lifecycle_status.value,
         "risk": capability.risk_level.value,
-        "read_only": (
-            str(metadata.get("read_only", "")).strip().lower()
-            == "true"
+        "read_only": read_only,
+        "write_capability": write_capability,
+        "action_enabled": action_enabled,
+        "classification": (
+            "read"
+            if read_only
+            else "action"
+            if write_capability
+            else "operation"
         ),
         "resource_types": [
             value.strip()
@@ -1224,10 +1544,17 @@ def _discoverable_capabilities() -> list[dict[str, Any]]:
         if projected["lifecycle"] != "active":
             continue
 
-        if not projected["read_only"]:
+        if not projected["resource_types"]:
             continue
 
-        if not projected["resource_types"]:
+        # Reads are discoverable when active. Mutating capabilities require an
+        # explicit MCP action activation flag in addition to ACTIVE lifecycle.
+        # This prevents a provider/runtime activation from silently exposing a
+        # new conversational write surface.
+        if (
+            not projected["read_only"]
+            and not projected["action_enabled"]
+        ):
             continue
 
         result.append(projected)
@@ -1236,6 +1563,103 @@ def _discoverable_capabilities() -> list[dict[str, Any]]:
         result,
         key=lambda item: item["capability"],
     )
+
+
+def _active_action_capabilities() -> list[str]:
+    return sorted(
+        item["capability"]
+        for item in _discoverable_capabilities()
+        if (
+            item["read_only"] is False
+            and item["action_enabled"] is True
+        )
+    )
+
+
+def _annotate_requester_eligibility(
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Add bounded requester-specific authority eligibility to discovery."""
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_identity()
+
+    def annotate(
+        item: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        projected = dict(item)
+
+        requested_mode = (
+            PermissionMode.OBSERVE
+            if projected.get("read_only") is True
+            else PermissionMode.EXECUTE
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=(
+                    f"discover_{uuid4().hex}"
+                ),
+                correlation_id=(
+                    f"corr_discover_{uuid4().hex}"
+                ),
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=str(
+                    projected.get("capability")
+                    or ""
+                ),
+                requested_mode=requested_mode,
+                authentication_assurance=assurance,
+            )
+        )
+
+        projected["permission_mode"] = (
+            requested_mode.value
+        )
+
+        projected["authority_outcome"] = (
+            decision.outcome.value
+        )
+
+        projected["potentially_eligible"] = (
+            decision.outcome
+            in {
+                AuthorityOutcome.ALLOWED,
+                AuthorityOutcome.APPROVAL_REQUIRED,
+            }
+        )
+
+        return projected
+
+    output = dict(result)
+
+    capabilities = output.get("capabilities")
+
+    if isinstance(capabilities, list):
+        output["capabilities"] = [
+            annotate(item)
+            for item in capabilities
+            if isinstance(item, Mapping)
+        ]
+
+    alternatives = output.get("alternatives")
+
+    if isinstance(alternatives, list):
+        output["alternatives"] = [
+            annotate(item)
+            for item in alternatives
+            if isinstance(item, Mapping)
+        ]
+
+    return output
 
 
 def _dynamic_capability_allowed(
@@ -1247,6 +1671,30 @@ def _dynamic_capability_allowed(
         item["capability"] == target
         for item in _discoverable_capabilities()
     )
+
+
+def _dynamic_read_capability_allowed(
+    capability_name: str,
+) -> bool:
+    target = str(capability_name).strip()
+
+    return any(
+        item["capability"] == target
+        and item["read_only"] is True
+        for item in _discoverable_capabilities()
+    )
+
+
+def _discoverable_capability(
+    capability_name: str,
+) -> dict[str, Any] | None:
+    target = str(capability_name).strip()
+
+    for item in _discoverable_capabilities():
+        if item["capability"] == target:
+            return item
+
+    return None
 
 
 
@@ -1467,14 +1915,14 @@ def _filter_discoverable_capabilities(
     if alternatives:
         result["selection_guidance"] = (
             "No exact registry filter match was found, but active governed "
-            "read capabilities exist for this resource type. Evaluate the "
+            "capabilities exist for this resource type. Evaluate the "
             "listed alternatives before concluding that the resource cannot "
             "be read. A search operation can be the supported lookup path "
             "for an exact identifier or number."
         )
     else:
         result["selection_guidance"] = (
-            "No active governed read capability is registered for this "
+            "No active governed capability is registered for this "
             "resource type."
         )
 
@@ -1487,7 +1935,7 @@ def discover_capabilities(
     operation: str = "",
     facts: str = "",
 ) -> dict[str, Any]:
-    """Discover Jason's currently active governed read capabilities.
+    """Discover Jason's currently active governed capabilities.
 
     resource_type, operation, and facts are registry filters. In particular,
     operation is an exact registry operation and must not be inferred directly
@@ -1499,10 +1947,12 @@ def discover_capabilities(
     before concluding that Jason lacks a capability for the resource.
     """
 
-    return _filter_discoverable_capabilities(
-        resource_type=resource_type,
-        operation=operation,
-        facts=facts,
+    return _annotate_requester_eligibility(
+        _filter_discoverable_capabilities(
+            resource_type=resource_type,
+            operation=operation,
+            facts=facts,
+        )
     )
 
 
@@ -1526,7 +1976,7 @@ def execute_read_capability(
             "error_code": "capability_required",
         }
 
-    if not _dynamic_capability_allowed(
+    if not _dynamic_read_capability_allowed(
         capability_name
     ):
         return {
@@ -1621,16 +2071,72 @@ def execute_read_capability(
     return result
 
 
+@mcp.tool()
+def execute_governed_capability(
+    capability: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute one active governed Jason capability.
+
+    Reads continue through Jason's governed read path. Mutating actions must be
+    ACTIVE in the live capability registry and explicitly MCP-action-enabled.
+    Microsoft Entra authenticates the caller; Jason authority, approval policy,
+    Central Orchestrator routing, provider isolation, attempt limits and audit
+    remain authoritative.
+    """
+
+    capability_name = str(capability).strip()
+
+    if not capability_name:
+        return {
+            "status": "rejected",
+            "error_code": "capability_required",
+        }
+
+    projected = _discoverable_capability(
+        capability_name
+    )
+
+    if projected is None:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_active_or_exposed",
+        }
+
+    if projected["read_only"]:
+        return execute_read_capability(
+            capability=capability_name,
+            arguments=dict(arguments or {}),
+        )
+
+    if not projected["action_enabled"]:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_mcp_action_enabled",
+        }
+
+    return _governed_execute(
+        capability_name=capability_name,
+        arguments=dict(arguments or {}),
+    )
+
+
 async def healthz(_request):
+    actions = _active_action_capabilities()
+
     return JSONResponse(
         {
             "status": "ok",
             "service": "jason-mcp",
             "mode": (
-                "governed-read-plus-internal-note"
-                if _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+                "governed-read-plus-actions"
+                if actions
                 else "read-only"
             ),
+            "write_tools_enabled": bool(actions),
+            "write_capabilities": actions,
             "mcp_path": "/mcp",
         }
     )
