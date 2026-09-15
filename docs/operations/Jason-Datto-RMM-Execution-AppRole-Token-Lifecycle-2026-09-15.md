@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This record captures the first harmless provider-proof attempt after successful staging of the separate Datto RMM execution credential, the OpenBao token-lifecycle failure that stopped the proof before Datto contact, and the bounded correction selected for the execution AppRole.
+This record captures the first harmless provider-proof attempt after successful staging of the separate Datto RMM execution credential, the OpenBao self-revocation failure that stopped the proof before Datto contact, the initially incorrect token-use diagnosis, and the corrected least-privilege repair.
 
 No credential value, OpenBao token, Datto API key, Datto API secret, RoleID, SecretID, provider-native object ID, or raw provider response is recorded here.
 
@@ -19,7 +19,7 @@ Before this attempt, Phase 3 OpenBao execution-credential staging had completed 
 
 The execution AppRole had been configured with a five-minute service-token TTL, no default policy, only the dedicated execution policy, and `token_num_uses=2`.
 
-## Harmless provider-proof attempt
+## First harmless provider-proof attempt
 
 The guarded harmless proof was pinned to workstream source `84ee903f9d95454276af52531feee5be8f162f58` and CI-validated probe source `0567d42ab1bc167a8a7fd46ec191dadd45c6f724`.
 
@@ -36,65 +36,84 @@ The run reported:
 
 The failure occurred before the probe could perform the Datto OAuth exchange, so this attempt did **not** contact Datto.
 
-## Root cause
+## Initial diagnosis and failed correction
 
-The execution AppRole's two-use token budget is insufficient for the existing secret-resolver lifecycle.
+The first diagnosis attributed the HTTP 403 to the two-use token budget. A bounded source change temporarily targeted `token_num_uses=3` while preserving the generic resolver's explicit-revocation behavior. Focused CI passed at source head `130b64645d4b7164d7fa5caa2c171e0a9316f8d3` in Actions run `34960333100`.
 
-For this path, the limited-use OpenBao token must support:
+The guarded live adjustment then changed the dedicated execution AppRole to the three-use target and immediately performed its safety proof. After one successful execution-secret KV read, `auth/token/revoke-self` still returned HTTP 403.
 
-1. one authenticated KV read of the execution credential; and
-2. an explicit `revoke-self` request performed by the generic resolver.
+That second observation disproved the use-budget diagnosis. Datto was still not contacted, no component ran, runtime activation remained disabled, and provider writes remained disabled.
 
-With `token_num_uses=2`, the observed OpenBao behavior consumes the limited-use token before the explicit revoke-self operation can complete, causing the revoke request to return HTTP 403. Treating revoke failure as harmless inside the generic resolver would weaken an existing security invariant and was rejected as the correction.
+## Corrected root cause
 
-## Selected correction
+The execution AppRole is deliberately configured with `token_no_default_policy=true`. Its dedicated ACL policy originally granted only:
 
-The bounded correction is to change only the dedicated Datto execution AppRole token-use budget from 2 to 3 while preserving all other containment properties.
+- `read` on `secret/data/connectors/datto-rmm/production/execution`.
 
-The intended lifecycle becomes:
+It did **not** grant `update` on `auth/token/revoke-self`.
 
-1. execution KV read;
-2. explicit `revoke-self`;
-3. the token is proven unusable after explicit revocation, leaving the nominal third-use allowance unavailable in practice.
+The generic `OpenBaoSecretResolver` performs exactly this limited-token lifecycle for the execution credential:
 
-This keeps the generic resolver's explicit-revocation requirement intact. It does not broaden the ACL policy, provider permissions, provider identity, Device Visibility, API Component Level, runtime execution surface, or provider-write activation.
+1. AppRole login creates the short-lived service token;
+2. one authenticated KV read resolves the credential;
+3. the resolver explicitly calls `auth/token/revoke-self` in its `finally` path.
 
-A guarded adjustment utility was added at:
+Because the token carries no default policy, the self-revocation endpoint must be explicitly authorized by the dedicated execution policy. The missing self-revocation capability, not the original two-use budget, caused the HTTP 403.
+
+OpenBao documents that a limited token's use count is decremented on each authenticated request. Therefore the approved two-use budget is sufficient for the intended lifecycle: one KV read plus one self-revocation request. The self-revocation request itself destroys the token.
+
+## Corrected least-privilege repair
+
+The source-controlled execution ACL policy now grants exactly two capabilities:
+
+1. `read` on the isolated Datto execution credential; and
+2. `update` on `auth/token/revoke-self`.
+
+No general token-management path is granted. No read-only Datto credential path is added. No wildcard is added.
+
+The guarded repair utility at:
 
 `deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py`
 
-Its contract is fail-closed:
+has been corrected to:
 
-- it accepts only the exact previously approved AppRole shape with token use budget 2 or the exact target shape with budget 3;
-- it rejects policy, TTL, token-type, SecretID, or other authority drift;
-- it changes only the token-use budget when the predecessor state is present;
-- it proves one execution-secret read followed by successful explicit revoke-self;
-- it proves the revoked token can no longer read the execution secret;
-- it updates only the protected bootstrap metadata describing the use budget;
-- it does not contact Datto;
-- it does not activate runtime execution or provider writes;
-- it does not execute a component or quick job.
+- accept only the exact legacy policy or the exact corrected policy;
+- reject any extra policy authority;
+- accept only the exact approved AppRole shape with token-use budget 2 or the transient failed-adjustment state with budget 3;
+- install the corrected self-revocation policy when the legacy policy is present;
+- restore `token_num_uses=2` if the failed adjustment left it at 3;
+- prove one execution-secret read;
+- prove successful explicit `revoke-self`;
+- prove the revoked token can no longer read the execution secret;
+- update only the protected bootstrap metadata describing the corrected lifecycle;
+- avoid all Datto provider contact;
+- avoid runtime execution activation, provider-write activation, component execution, and service restart.
 
-Focused tests were added at:
+Focused tests at:
 
 `deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py`
 
-The `Validate Datto RMM Automation Foundation` workflow completed successfully at source head `130b64645d4b7164d7fa5caa2c171e0a9316f8d3` in Actions run `34960333100`.
+prove the exact two-use target, the bounded 3-to-2 recovery state, exact policy transition, denial of extra authority, live `data.policy` response compatibility, and drift rejection.
+
+`Validate Datto RMM Automation Foundation` passed the corrected repair at source head `4cdaee41a9ab26db7ebc988045954811ecf541a1` in Actions run `34961030873`.
 
 ## Current security boundary
 
-Until the guarded adjustment is run successfully:
+Until the corrected guarded repair is run successfully:
 
-- production remains read-only;
+- production runtime remains read-only;
 - the execution credential remains staged but not runtime-activated;
-- no Datto authentication has yet been proven through the execution identity;
-- no Datto provider request from the execution identity has completed;
+- the execution AppRole may be in the transient three-use state from the failed adjustment;
+- the live execution ACL policy still lacks proven self-revocation capability until the repair succeeds;
+- no Datto OAuth authentication has yet been completed through the execution identity;
 - no provider mutation has occurred;
 - no component or quick job has been executed;
 - no service restart is required.
 
 ## Next step
 
-Run the CI-validated AppRole token-use adjustment against live OpenBao, prove explicit revocation, and then rerun the already bounded harmless Datto authentication/negative-permission probe. The provider proof remains GET-only after OAuth and must not execute a component or activate a runtime mutation surface.
+Run the CI-validated self-revocation policy repair against live OpenBao. It must restore the exact two-use AppRole budget and prove explicit token revocation before any Datto contact.
+
+Only after that proof passes should the already bounded harmless Datto authentication/negative-permission probe run. The provider proof remains non-mutating and must not execute a component or activate a runtime mutation surface.
 
 If that proof succeeds, record authentication and the negative Global Settings privilege boundary as proven. Device Visibility and API Component Level still require separate positive/negative containment evidence and must not be inferred solely from authentication.
