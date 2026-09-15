@@ -163,6 +163,37 @@ def normalize_policy(value: str) -> str:
     return "\n".join(line.rstrip() for line in value.strip().splitlines())
 
 
+def extract_existing_policy_text(response: Mapping[str, Any]) -> str:
+    """Return the policy text from supported OpenBao ACL-policy response shapes.
+
+    OpenBao's ACL policy read endpoint returns the policy document in the top-level
+    ``policy`` field.  A nested ``data.rules`` form is accepted only as a
+    compatibility fallback.  If both forms are present they must agree exactly
+    after normalization, otherwise recovery fails closed.
+    """
+
+    candidates: list[str] = []
+
+    policy = response.get("policy")
+    if isinstance(policy, str) and policy:
+        candidates.append(policy)
+
+    data = response.get("data")
+    if isinstance(data, Mapping):
+        rules = data.get("rules")
+        if isinstance(rules, str) and rules:
+            candidates.append(rules)
+
+    if not candidates:
+        raise RecoveryError("Existing Datto execution policy rules were unavailable.")
+
+    normalized = {normalize_policy(value) for value in candidates}
+    if len(normalized) != 1:
+        raise RecoveryError("Existing Datto execution policy response was inconsistent.")
+
+    return candidates[0]
+
+
 def require_existing_policy_matches(
     *, base_url: str, token: str, policy_name: str, policy_text: str
 ) -> None:
@@ -172,13 +203,8 @@ def require_existing_policy_matches(
         method="GET",
         token=token,
     )
-    data = response.get("data")
-    if not isinstance(data, Mapping):
-        raise RecoveryError("Existing Datto execution policy response was invalid.")
-    rules = data.get("rules")
-    if not isinstance(rules, str):
-        raise RecoveryError("Existing Datto execution policy rules were unavailable.")
-    if normalize_policy(rules) != normalize_policy(policy_text):
+    existing_policy = extract_existing_policy_text(response)
+    if normalize_policy(existing_policy) != normalize_policy(policy_text):
         raise RecoveryError(
             "Existing Datto execution policy does not match the approved source; refusing recovery."
         )
