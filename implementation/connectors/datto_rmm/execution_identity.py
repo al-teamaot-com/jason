@@ -6,13 +6,26 @@ from dataclasses import dataclass
 DATTO_RMM_READONLY_LOGICAL_SECRET = "datto_rmm.readonly"
 DATTO_RMM_EXECUTION_LOGICAL_SECRET = "datto_rmm.execution"
 
+# Datto RMM API v2 documents these as the minimum API Security Level
+# permissions for PUT /v2/device/{deviceUid}/quickjob.  Device Visibility and
+# API Component Level are independent global restrictions and are validated
+# separately below.
+REQUIRED_QUICK_JOB_API_PERMISSIONS = frozenset(
+    {
+        "sites.sites.view",
+        "sites.devices.manage",
+        "jobs.active_jobs.manage",
+        "components.components.view",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DattoRmmExecutionIdentityContainment:
     """Source-of-truth containment contract for the future Datto execution identity.
 
     This object describes the provider-side boundary that must be proven before a
-    write-capable credential may be consumed by Jason.  It does not load secrets,
+    write-capable credential may be consumed by Jason. It does not load secrets,
     change Datto configuration, register an execution capability, or issue network
     requests.
     """
@@ -21,6 +34,7 @@ class DattoRmmExecutionIdentityContainment:
     security_level_name: str
     device_visibility_scope: tuple[str, ...]
     component_allowlist: tuple[str, ...]
+    api_security_permissions: frozenset[str] = REQUIRED_QUICK_JOB_API_PERMISSIONS
     logical_secret: str = DATTO_RMM_EXECUTION_LOGICAL_SECRET
     provider_identity_distinct_from_readonly: bool = True
     quick_job_execution_allowed: bool = True
@@ -43,6 +57,8 @@ class DattoRmmExecutionIdentityContainment:
             raise ValueError("security level name is required")
         if not self.quick_job_execution_allowed:
             raise ValueError("execution identity must be capable of the approved quick-job operation")
+        if self.api_security_permissions != REQUIRED_QUICK_JOB_API_PERMISSIONS:
+            raise ValueError("Datto execution API Security Level must match the minimum quick-job permissions exactly")
         if self.unrestricted_device_visibility:
             raise ValueError("execution identity may not have unrestricted device visibility")
 
