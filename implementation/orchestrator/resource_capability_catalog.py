@@ -33,6 +33,8 @@ ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
+AUTOMATION_COMPONENT_SEARCH = "automation.component.search"
+AUTOMATION_JOB_READ = "automation.job.read"
 DATTO_RMM_PROVIDER = "datto_rmm"
 
 
@@ -321,7 +323,6 @@ def endpoint_alert_search(now: datetime) -> CapabilityDefinition:
 
 
 
-
 def endpoint_alert_history_search(
     now: datetime,
 ) -> CapabilityDefinition:
@@ -356,6 +357,7 @@ def endpoint_alert_history_search(
         ),
         collection_fact="resolved alerts",
     )
+
 
 def endpoint_audit_read(now: datetime) -> CapabilityDefinition:
     return _read_resource_capability(
@@ -460,6 +462,64 @@ def management_site_search(now: datetime) -> CapabilityDefinition:
     )
 
 
+def automation_component_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=AUTOMATION_COMPONENT_SEARCH,
+        display_name="Search Automation Components",
+        business_purpose=(
+            "Read the governed automation component catalog so Jason can identify an "
+            "existing provider component before any separate execution decision."
+        ),
+        resource_types="automation_component",
+        operation="search",
+        selector_keys="name",
+        fact_hints=(
+            "component,components,automation component,automation components,"
+            "component name,component catalog,read only tool,read-only tool,"
+            "diagnostic component,diagnostic tool,component variable,component variables"
+        ),
+        canonical_facts="automation components",
+        planning_guidance=(
+            "Use only to discover/read existing automation components. This capability "
+            "does not authorize or imply component execution."
+        ),
+        collection_fact="automation components",
+        inquiry_hints=(
+            "component,components,automation component,automation components,"
+            "component catalog,read only tool,read-only tool,diagnostic component,"
+            "diagnostic tool"
+        ),
+    )
+
+
+def automation_job_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=AUTOMATION_JOB_READ,
+        display_name="Read Automation Job",
+        business_purpose=(
+            "Read the current status of one known automation job by durable job identity "
+            "for governed post-execution verification."
+        ),
+        resource_types="automation_job",
+        operation="read",
+        selector_keys="resource_id",
+        fact_hints=(
+            "automation job,job status,component job,quick job,job state,"
+            "job result,job verification"
+        ),
+        canonical_facts="automation job status",
+        planning_guidance=(
+            "Use only when a durable automation job resource_id is already known. "
+            "This read cannot create, modify, cancel, or rerun a job."
+        ),
+        inquiry_hints=(
+            "automation job,job status,component job,quick job,job state,job verification"
+        ),
+    )
+
+
 def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
         provider_id=DATTO_RMM_PROVIDER,
@@ -479,6 +539,8 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_SOFTWARE_SEARCH,
                 MANAGEMENT_ALERT_SEARCH,
                 MANAGEMENT_SITE_SEARCH,
+                AUTOMATION_COMPONENT_SEARCH,
+                AUTOMATION_JOB_READ,
             }
         ),
         supported_classifications=frozenset({"internal"}),
@@ -520,7 +582,7 @@ def register_endpoint_resource_foundation(
     providers: ExecutionProviderRegistryService,
     now: datetime,
 ) -> None:
-    """Register reusable endpoint resource primitives and the current approved provider."""
+    """Register reusable endpoint/automation read primitives and the approved provider."""
 
     capabilities.register(endpoint_device_search(now))
     capabilities.register(endpoint_device_read(now))
@@ -530,4 +592,6 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_software_search(now))
     capabilities.register(management_alert_search(now))
     capabilities.register(management_site_search(now))
+    capabilities.register(automation_component_search(now))
+    capabilities.register(automation_job_read(now))
     providers.register(datto_rmm_endpoint_provider(now))
