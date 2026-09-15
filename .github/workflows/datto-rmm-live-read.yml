@@ -28,7 +28,9 @@ on:
       - 'deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py'
       - 'tools/datto_rmm_live_read.py'
       - 'tools/datto_rmm_execution_identity_probe.py'
+      - 'tools/datto_rmm_execution_device_visibility_probe.py'
       - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
+      - 'tools/tests/test_datto_rmm_execution_device_visibility_probe.py'
       - '.github/workflows/datto-rmm-live-read.yml'
   push:
     paths:
@@ -57,7 +59,9 @@ on:
       - 'deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py'
       - 'tools/datto_rmm_live_read.py'
       - 'tools/datto_rmm_execution_identity_probe.py'
+      - 'tools/datto_rmm_execution_device_visibility_probe.py'
       - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
+      - 'tools/tests/test_datto_rmm_execution_device_visibility_probe.py'
       - '.github/workflows/datto-rmm-live-read.yml'
 
 jobs:
@@ -88,6 +92,7 @@ jobs:
           python -m py_compile deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py
           python -m py_compile tools/datto_rmm_live_read.py
           python -m py_compile tools/datto_rmm_execution_identity_probe.py
+          python -m py_compile tools/datto_rmm_execution_device_visibility_probe.py
       - name: Run DRMM read and proposal-boundary tests
         env:
           PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
@@ -106,10 +111,12 @@ jobs:
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py -q
           python -m pytest deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py -q
           python -m pytest tools/tests/test_datto_rmm_execution_identity_probe.py -q
+          python -m pytest tools/tests/test_datto_rmm_execution_device_visibility_probe.py -q
       - name: Verify credential-safe live-read preflights
         run: |
           python tools/datto_rmm_live_read.py > /tmp/drmm-live-preflight.json
           python tools/datto_rmm_execution_identity_probe.py > /tmp/drmm-execution-probe-preflight.json
+          python tools/datto_rmm_execution_device_visibility_probe.py --candidate device-one --candidate device-two > /tmp/drmm-device-visibility-preflight.json
           python - <<'PY'
           import json
           with open('/tmp/drmm-live-preflight.json', encoding='utf-8') as handle:
@@ -128,4 +135,15 @@ jobs:
           assert probe['provider_mutation_requests'] == 0
           assert probe['component_execution_attempted'] is False
           assert probe['runtime_execution_activated'] is False
+          with open('/tmp/drmm-device-visibility-preflight.json', encoding='utf-8') as handle:
+              visibility = json.load(handle)
+          assert visibility['status'] == 'credential_safe_preflight'
+          assert visibility['network_contacted'] is False
+          assert visibility['provider_credentials_used'] is False
+          assert visibility['provider_mutation_requests'] == 0
+          assert visibility['component_execution_attempted'] is False
+          assert visibility['runtime_execution_activated'] is False
+          assert visibility['provider_ids_printed'] is False
+          assert visibility['provider_response_bodies_printed'] is False
+          assert visibility['provider_response_bodies_persisted'] is False
           PY
