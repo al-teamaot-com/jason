@@ -18,6 +18,8 @@ on:
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
+      - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
+      - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
   push:
@@ -37,6 +39,8 @@ on:
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
+      - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
+      - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
 
@@ -62,6 +66,7 @@ jobs:
           python -m py_compile implementation/orchestrator/capability_routing_invoker.py
           python -m py_compile implementation/orchestrator/resource_capability_catalog.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/provider_reads.py
+          python -m py_compile deploy/openbao/scripts/provision-datto-rmm-execution.py
           python -m py_compile tools/datto_rmm_live_read.py
       - name: Run DRMM read and proposal-boundary tests
         env:
