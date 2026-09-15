@@ -85,6 +85,69 @@ class FakeTransport:
         }
 
 
+class PaginatedFakeTransport(FakeTransport):
+    def request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None = None,
+        json: Mapping[str, Any] | None = None,
+        timeout_seconds: float = 30.0,
+    ) -> Mapping[str, Any]:
+        if url.endswith("/v1.0/zoneInformation"):
+            return super().request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                json=json,
+                timeout_seconds=timeout_seconds,
+            )
+
+        self.requests.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": dict(headers),
+                "params": params,
+                "json": json,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+
+        if url.endswith("/V1.0/Tickets/query"):
+            return {
+                "items": [{"id": 101, "ticketNumber": "T-PAGE-1"}],
+                "pageDetails": {
+                    "nextPageUrl": (
+                        "https://webservices3.autotask.net/"
+                        "atservicesrest/V1.0/Tickets/query?page=2"
+                    ),
+                },
+            }
+
+        if url.endswith("/V1.0/Tickets/query?page=2"):
+            return {
+                "items": [{"id": 102, "ticketNumber": "T-PAGE-2"}],
+                "pageDetails": {
+                    "nextPageUrl": (
+                        "https://webservices3.autotask.net/"
+                        "atservicesrest/V1.0/Tickets/query?page=3"
+                    ),
+                },
+            }
+
+        if url.endswith("/V1.0/Tickets/query?page=3"):
+            return {
+                "items": [{"id": 103, "ticketNumber": "T-PAGE-3"}],
+                "pageDetails": {},
+            }
+
+        raise AssertionError(f"unexpected transport URL: {url}")
+
+
 def _request() -> ConnectorRequest:
     return ConnectorRequest(
         context=ConnectorContext(
@@ -96,6 +159,25 @@ def _request() -> ConnectorRequest:
             mode="observe",
         ),
         arguments={"ticket_id": 12345},
+    )
+
+
+def _search_request() -> ConnectorRequest:
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-pagination",
+            principal_id="user-1",
+            organization_id="team-aot",
+            client_id=None,
+            capability="autotask.ticket.search",
+            mode="observe",
+        ),
+        arguments={
+            "search": (
+                '{"MaxRecords":3,"filter":'
+                '[{"field":"id","op":"exist"}]}'
+            ),
+        },
     )
 
 
@@ -157,3 +239,36 @@ def test_invalid_zone_response_fails_before_ticket_request() -> None:
         connector.execute(_request())
 
     assert len(transport.requests) == 1
+
+
+def test_ticket_search_follows_third_page_within_requested_bound() -> None:
+    transport = PaginatedFakeTransport(
+        "https://webservices3.autotask.net/atservicesrest/"
+    )
+    audit = FakeAudit()
+
+    connector = AutotaskConnector(
+        secrets=FakeSecrets(),
+        transport=transport,
+        audit=audit,
+    )
+
+    result = connector.execute(_search_request())
+
+    assert [item["id"] for item in result.data["items"]] == [
+        101,
+        102,
+        103,
+    ]
+    assert result.data["items"][2]["ticketNumber"] == "T-PAGE-3"
+    assert result.data["jasonPagination"] == {
+        "pagesFetched": 3,
+        "itemCount": 3,
+        "requestedMaxRecords": 3,
+        "requestedLimitSatisfied": True,
+    }
+    assert len(transport.requests) == 4
+    assert transport.requests[2]["params"] is None
+    assert transport.requests[3]["params"] is None
+    assert audit.events[-1][0] == "connector.completed"
+    assert audit.events[-1][1]["provider_pages_examined"] == 3
