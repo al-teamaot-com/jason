@@ -24,10 +24,9 @@ The successful harmless provider proof established:
 
 The successful provider-proof record is maintained at `docs/operations/Jason-Datto-RMM-Execution-Identity-Harmless-Provider-Proof-2026-09-15.md`. The preceding staging/recovery history is retained in the related 2026-09-15 operational records.
 
-Two provider-side containment controls remain unproven and must be evidenced independently before the workstream can progress to a live execution pilot:
+A subsequent GET-only Device Visibility probe resolved two valid devices through the existing read identity, but both the site and device reads returned HTTP 403 through the execution identity. That result is intentionally recorded as inconclusive rather than treated as a visibility failure, because Datto requires separate Devices View permission for the device GET while the execution identity is designed around the minimum quick-job permission set. The same observability problem applies to API Component Level because account component enumeration additionally requires Global Settings View, which the execution identity intentionally lacks.
 
-1. Device Visibility — prove a known in-scope device is visible to the execution identity and a known out-of-scope device is not visible, using GET-only provider requests.
-2. API Component Level — prove the execution identity is limited to the intended pilot component set using non-mutating provider evidence.
+The evidence strategy has therefore been tightened: do not broaden the execution identity merely to make proof endpoints observable. Provider-side Device Visibility and API Component Level configuration is sufficient to continue source-only implementation work, while independent end-to-end enforcement remains deferred to the first separately approved live pilot quick job. This decision is recorded at `docs/operations/Jason-Datto-RMM-Phase3-Evidence-Strategy-2026-09-15.md`.
 
 Draft PR #184 tracks this isolated workstream. Issue #183 tracks the capability objective.
 
@@ -36,7 +35,7 @@ Draft PR #184 tracks this isolated workstream. Issue #183 tracks the capability 
 The first source-only milestone includes:
 
 - canonical read-only capability `automation.component.search`;
-- canonical read-only capability `automation.job.read`;
+- provider-neutral `automation.job.read`;
 - a Datto automation-read connector using the existing `datto_rmm.readonly` logical credential;
 - account component catalog reads through `GET /api/v2/account/components`;
 - bounded complete component pagination before canonical filtering;
@@ -80,7 +79,7 @@ Neither phase converts the existing Datto read identity into an execution identi
 
 The existing `DattoRmmMutationConnector` is still proposal-only for live mutations. No quick-job provider mutation has been enabled in runtime composition, and no arbitrary PowerShell/shell/batch/script-text execution interface has been introduced.
 
-## Phase 3 — provider identity / containment — active
+## Phase 3 — provider identity / containment — complete enough to continue source-only implementation
 
 Phase 3 controls are:
 
@@ -89,7 +88,7 @@ Phase 3 controls are:
 3. Restrict Device Visibility to the intended pilot scope.
 4. Assign an API Component Level containing only explicitly approved pilot component(s).
 5. Store the execution credential separately as `datto_rmm.execution` under OpenBao rather than reusing the read credential.
-6. Prove authentication and harmless read-only access/containment before any quick-job execution.
+6. Prove authentication and harmless access boundaries before any quick-job execution.
 7. Keep the runtime write/execution surface disabled until a later explicit production-activation approval.
 
 ### Phase 3 completed evidence
@@ -106,16 +105,20 @@ The following are complete and proven:
 - explicit self-revocation and post-revoke denial proven;
 - harmless Datto OAuth authentication proven;
 - absence of Global Settings View authority proven with GET-only 403 responses;
+- GET-only Device Visibility probe executed without mutation and correctly classified as inconclusive because the execution identity intentionally lacks the read permissions needed to isolate Device Visibility from permission denial;
 - no component execution, provider mutation, runtime activation, or service restart occurred.
 
-### Phase 3 remaining evidence
+### Deferred end-to-end provider enforcement proof
 
-The remaining provider-side containment proof is intentionally narrower than runtime execution:
+Do not add Devices View or Global Settings View merely to make Device Visibility or API Component Level observable through GET-only proof endpoints. Datto applies Device Visibility and API Component Level to the quick-job operation itself, so the first separately approved low-risk pilot quick job is the appropriate end-to-end enforcement proof.
 
-- Device Visibility positive/negative evidence;
-- API Component Level positive/negative or otherwise authoritative non-mutating evidence.
+Until that separately approved pilot occurs, the owner-configured provider restrictions are configuration evidence, while independent runtime enforcement remains explicitly unproven.
 
-These controls must not be inferred from authentication or from the Global Settings denial proof.
+## Next implementation step
+
+Continue source-only implementation of the governed live mutation transport, runtime composition boundary, approval enforcement, audit capture, and job follow-up path. Keep production activation disabled.
+
+When source/tests are ready, stop at the production activation / first-live-pilot approval boundary and present one bounded approval request rather than introducing additional exploratory proof loops.
 
 ## Approval boundary
 
