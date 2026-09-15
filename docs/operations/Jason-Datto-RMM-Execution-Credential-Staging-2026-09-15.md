@@ -85,7 +85,9 @@ The recovery parser was corrected in source so that:
 
 Focused regression coverage was added at `deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py`, including actual top-level response shape, compatibility fallback, missing policy, conflicting policy representations, exact-policy acceptance, and policy-drift rejection.
 
-The `Validate Datto RMM Automation Foundation` workflow was extended to compile the recovery utility and run the focused recovery tests. GitHub Actions run `34958605522` completed successfully at source head `d97c6566dd837115f0d547b4d64a1a506af05d6a`.
+The parser correction was committed at `fcfbf2f5f1b5cd6387940489335e48efc4d4d5cb`. Test coverage was added at `fa1e3a9f5acda8fe4564edba039a32ad7b0cc62b`, and the workflow was extended at `d97c6566dd837115f0d547b4d64a1a506af05d6a`.
+
+The `Validate Datto RMM Automation Foundation` workflow completed successfully in GitHub Actions run `34958605522` at source head `d97c6566dd837115f0d547b4d64a1a506af05d6a`.
 
 No production/OpenBao state changed as a result of the source correction or CI run.
 
