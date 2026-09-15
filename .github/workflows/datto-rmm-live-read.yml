@@ -22,8 +22,10 @@ on:
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py'
+      - 'deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
+      - 'deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py'
       - 'tools/datto_rmm_live_read.py'
       - 'tools/datto_rmm_execution_identity_probe.py'
       - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
@@ -49,8 +51,10 @@ on:
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py'
+      - 'deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
+      - 'deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py'
       - 'tools/datto_rmm_live_read.py'
       - 'tools/datto_rmm_execution_identity_probe.py'
       - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
@@ -81,6 +85,7 @@ jobs:
           python -m py_compile deploy/openbao/scripts/provision-datto-rmm-execution.py
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging.py
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py
+          python -m py_compile deploy/openbao/scripts/adjust-datto-rmm-execution-token-uses.py
           python -m py_compile tools/datto_rmm_live_read.py
           python -m py_compile tools/datto_rmm_execution_identity_probe.py
       - name: Run DRMM read and proposal-boundary tests
@@ -99,6 +104,7 @@ jobs:
           python -m pytest implementation/runtime_service/tests/test_datto_automation_runtime.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py -q
+          python -m pytest deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py -q
           python -m pytest tools/tests/test_datto_rmm_execution_identity_probe.py -q
       - name: Verify credential-safe live-read preflights
         run: |
