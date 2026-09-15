@@ -4,28 +4,30 @@
 
 The governed Datto RMM component-execution workstream is active on isolated branch `feature/jason-datto-component-execution-20260914`, based on the accepted production documentation head `13941dfb97abd3f0ed2268ad1daed37fa61e00ec`.
 
-Production runtime remains read-only. No execution capability has been activated in production and no Datto component has been executed by this workstream.
+Production runtime remains read-only. No execution capability has been activated in production and no Datto component or quick job has been executed by this workstream.
 
-Phase 3 received explicit owner approval. The owner reports that the separate Datto execution API identity has been created with the intended provider-side containment. Jason has not yet independently authenticated that identity or verified its provider-side visibility/component restrictions.
+Phase 3 received explicit owner approval. The owner created a separate Datto execution API identity with the intended provider-side containment. Jason has now successfully staged that identity in OpenBao, repaired and proven the execution AppRole token lifecycle, authenticated to Datto with the execution identity, and proven that the identity does not carry Global Settings View authority.
 
-The first OpenBao staging attempt stopped safely because the `secret/` KV v2 engine requires check-and-set for writes and the initial provisioning request omitted the required CAS option. The attempt created the dedicated `jason-datto-rmm-execution` OpenBao policy and AppRole before the KV write failed. A subsequent read-only diagnostic proved:
+The successful harmless provider proof established:
 
-- `secret/` KV v2 `cas_required=true`;
-- the execution policy exists;
-- the execution AppRole exists;
-- the execution AppRole is bound only to the execution policy, has no default policy, 300-second token TTL/max TTL, and two token uses;
-- `secret/data/connectors/datto-rmm/production/execution` does not exist;
-- the existing Datto read-only secret remains at version 1;
-- no execution bootstrap credential directory exists;
-- no Datto provider call, runtime activation, write activation, MCP restart, runtime restart, or OpenBao restart occurred.
+- `datto_rmm.execution` is usable as a separate provider credential;
+- its OpenBao AppRole has a five-minute service-token TTL, no default policy, execution-only ACL access, and the approved two-use token lifecycle;
+- the dedicated ACL permits only execution-secret read plus explicit token self-revocation;
+- one execution-secret read followed by `revoke-self` succeeds;
+- the revoked token is unusable afterward;
+- Datto OAuth authentication succeeds;
+- `GET /api/v2/system/status` succeeds with HTTP 200;
+- account, account-devices, and account-components reads that require Global Settings View are denied with HTTP 403;
+- no Datto mutation request occurred;
+- no provider response body or bearer token was persisted or printed;
+- OpenBao, MCP, and runtime containers remained unchanged and running.
 
-A fail-closed recovery utility, `deploy/openbao/scripts/recover-datto-rmm-execution-staging.py`, was added specifically for this proven partial state. It verifies the existing policy and AppRole against approved source, requires the observed CAS configuration, writes the execution secret with `options.cas=0`, verifies version-1 isolation and AppRole access boundaries, confirms the read-only secret version remains unchanged, and creates bootstrap material through a temporary root-only directory followed by atomic rename. It still does not contact Datto or activate runtime execution.
+The successful provider-proof record is maintained at `docs/operations/Jason-Datto-RMM-Execution-Identity-Harmless-Provider-Proof-2026-09-15.md`. The preceding staging/recovery history is retained in the related 2026-09-15 operational records.
 
-The first recovery run was pinned to source `8d26e6a5b75f936b0c2f41341258954da1097d3b`. Its source pin, isolated clone, compile/source-contract checks, live-service baseline, bootstrap-absence check, and final source pin all passed. It then stopped fail-closed immediately after OpenBao administrative authentication with `ERROR: Existing Datto execution policy rules were unavailable.` The temporary administrative token was revoked. The recovery did not reach the Datto execution API-key/API-secret prompts, did not contact Datto, did not activate runtime execution, did not activate provider writes, and did not restart MCP, runtime, or OpenBao.
+Two provider-side containment controls remain unproven and must be evidenced independently before the workstream can progress to a live execution pilot:
 
-The failure was traced to a response-shape defect in the recovery utility: it expected the policy document under `data.rules`, while the OpenBao ACL-policy read response used by this deployment returns it in the top-level `policy` field. The parser has now been corrected while preserving fail-closed exact-policy verification. The parser correction was committed at `fcfbf2f5f1b5cd6387940489335e48efc4d4d5cb`; focused regression coverage was added at `fa1e3a9f5acda8fe4564edba039a32ad7b0cc62b`; and the validation workflow was extended at `d97c6566dd837115f0d547b4d64a1a506af05d6a`. GitHub Actions run `34958605522` completed successfully at that validation head.
-
-The dedicated staging/recovery record is maintained at `docs/operations/Jason-Datto-RMM-Execution-Credential-Staging-2026-09-15.md`.
+1. Device Visibility — prove a known in-scope device is visible to the execution identity and a known out-of-scope device is not visible, using GET-only provider requests.
+2. API Component Level — prove the execution identity is limited to the intended pilot component set using non-mutating provider evidence.
 
 Draft PR #184 tracks this isolated workstream. Issue #183 tracks the capability objective.
 
@@ -70,30 +72,53 @@ Implemented controls include:
 
 Tests prove that a valid exact approval can reach only that disabled live-execution boundary, and that changing the reason or component variables after approval invalidates the approval digest.
 
-The focused `Validate Datto RMM Automation Foundation` workflow passed at source head `e4afc7afd1c465bee16891e356d59d902ecd3a84` in GitHub Actions run `34868375772`. That workflow compiles the Datto read/proposal boundary and runs the Datto authentication, existing endpoint/site read, automation read, automation manifest, component proposal, provider-adapter, capability-routing, resource-catalog, and runtime-composition tests plus the existing credential-safe/no-network Datto preflight.
+The focused `Validate Datto RMM Automation Foundation` workflow passed at source head `e4afc7afd1c465bee16891e356d59d902ecd3a84` in GitHub Actions run `34868375772`.
 
 ## Security boundary preserved
 
-Neither phase converts the existing Datto read identity into an execution identity. Component execution is being built around a separate least-privilege logical credential, `datto_rmm.execution`, and exact `EXECUTE` authority.
+Neither phase converts the existing Datto read identity into an execution identity. Component execution is built around a separate least-privilege logical credential, `datto_rmm.execution`, and exact `EXECUTE` authority.
 
 The existing `DattoRmmMutationConnector` is still proposal-only for live mutations. No quick-job provider mutation has been enabled in runtime composition, and no arbitrary PowerShell/shell/batch/script-text execution interface has been introduced.
 
 ## Phase 3 — provider identity / containment — active
 
-The intended Phase 3 controls are:
+Phase 3 controls are:
 
 1. Use a separate Datto RMM API identity for Jason execution rather than broadening `datto_rmm.readonly`.
 2. Apply only the minimum Security Level required for the quick-job operation.
 3. Restrict Device Visibility to the intended pilot scope.
 4. Assign an API Component Level containing only explicitly approved pilot component(s).
-5. Store the resulting execution credential separately as `datto_rmm.execution` under OpenBao rather than reusing the read credential.
+5. Store the execution credential separately as `datto_rmm.execution` under OpenBao rather than reusing the read credential.
 6. Prove authentication and harmless read-only access/containment before any quick-job execution.
 7. Keep the runtime write/execution surface disabled until a later explicit production-activation approval.
 
-The provider identity has been created by the owner. OpenBao staging is not yet complete: the original attempt stopped on the CAS-required KV write, and the first recovery stopped on the ACL-policy response parser mismatch before any credential write. The parser defect is corrected and CI-proven. The next guarded recovery must re-prove the expected partial state before continuing; the prior execution KV absence, read-only secret version, and bootstrap-directory absence are evidence, not assumptions.
+### Phase 3 completed evidence
+
+The following are complete and proven:
+
+- separate provider execution identity created;
+- isolated OpenBao execution credential staged as version 1;
+- execution AppRole separated from the read-only credential;
+- CAS-required KV behavior handled fail-closed;
+- live OpenBao ACL response shape (`data.policy`) handled and regression-tested;
+- execution ACL limited to execution-secret read plus token self-revocation;
+- execution AppRole restored to the approved two-use token lifecycle;
+- explicit self-revocation and post-revoke denial proven;
+- harmless Datto OAuth authentication proven;
+- absence of Global Settings View authority proven with GET-only 403 responses;
+- no component execution, provider mutation, runtime activation, or service restart occurred.
+
+### Phase 3 remaining evidence
+
+The remaining provider-side containment proof is intentionally narrower than runtime execution:
+
+- Device Visibility positive/negative evidence;
+- API Component Level positive/negative or otherwise authoritative non-mutating evidence.
+
+These controls must not be inferred from authentication or from the Global Settings denial proof.
 
 ## Approval boundary
 
 Phase 3 provider identity/containment work is explicitly owner-approved.
 
-Separate explicit approval will still be required before deploying a runtime execution surface or running the first live component/quick job. The first live pilot remains intended to be one explicitly approved low-risk diagnostic/read-only component on one noncritical test endpoint with per-run approval and governed post-job verification.
+Separate explicit approval is still required before deploying a runtime execution surface or running the first live component/quick job. The first live pilot remains intended to be one explicitly approved low-risk diagnostic/read-only component on one noncritical test endpoint with per-run approval and governed post-job verification.
