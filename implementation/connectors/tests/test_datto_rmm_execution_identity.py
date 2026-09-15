@@ -3,6 +3,7 @@ import pytest
 from connectors.datto_rmm.execution_identity import (
     DATTO_RMM_EXECUTION_LOGICAL_SECRET,
     DATTO_RMM_READONLY_LOGICAL_SECRET,
+    REQUIRED_QUICK_JOB_API_PERMISSIONS,
     DattoRmmExecutionIdentityContainment,
     validate_execution_identity_separation,
 )
@@ -27,6 +28,7 @@ def test_execution_identity_is_separate_and_bounded():
     )
     assert contract.logical_secret == DATTO_RMM_EXECUTION_LOGICAL_SECRET
     assert contract.logical_secret != DATTO_RMM_READONLY_LOGICAL_SECRET
+    assert contract.api_security_permissions == REQUIRED_QUICK_JOB_API_PERMISSIONS
     assert contract.quick_job_execution_allowed is True
     assert contract.unrestricted_device_visibility is False
 
@@ -59,6 +61,18 @@ def test_execution_identity_rejects_broadened_authority(field, value):
 def test_execution_identity_requires_explicit_pilot_and_component_scope(field, value):
     with pytest.raises(ValueError):
         contained_identity(**{field: value}).validate()
+
+
+def test_api_security_level_rejects_missing_quick_job_permission():
+    reduced = frozenset(REQUIRED_QUICK_JOB_API_PERMISSIONS - {"jobs.active_jobs.manage"})
+    with pytest.raises(ValueError, match="minimum quick-job permissions exactly"):
+        contained_identity(api_security_permissions=reduced).validate()
+
+
+def test_api_security_level_rejects_extra_provider_authority():
+    broadened = frozenset((*REQUIRED_QUICK_JOB_API_PERMISSIONS, "setup.global_settings.view"))
+    with pytest.raises(ValueError, match="minimum quick-job permissions exactly"):
+        contained_identity(api_security_permissions=broadened).validate()
 
 
 def test_readonly_identity_contract_may_not_be_repurposed():
