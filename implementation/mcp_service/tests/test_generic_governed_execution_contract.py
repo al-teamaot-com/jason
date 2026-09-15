@@ -169,3 +169,146 @@ def test_generic_execution_rejects_unexposed_capability(monkeypatch):
         "capability": "service.ticket.delete",
         "error_code": "capability_not_active_or_exposed",
     }
+
+
+def test_status_reports_all_active_actions(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_active_action_capabilities",
+        lambda: [
+            "automation.component.execute",
+            "service.ticket.note.create",
+            "service.ticket.update",
+        ],
+    )
+
+    result = server.jason_mcp_status()
+
+    assert result["mode"] == "governed-read-plus-actions"
+    assert result["phase"] == "governed-action-pilot"
+    assert result["write_tools_enabled"] is True
+    assert result["write_capabilities"] == [
+        "automation.component.execute",
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ]
+
+
+def test_discovery_reports_requester_potential_eligibility(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server,
+        "_filter_discoverable_capabilities",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "capability_count": 2,
+            "capabilities": [
+                {
+                    "capability": "endpoint.device.read",
+                    "read_only": True,
+                },
+                {
+                    "capability": "service.ticket.update",
+                    "read_only": False,
+                },
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        server,
+        "_authenticated_identity",
+        lambda: (
+            "person-al",
+            "aot",
+            "entra-oauth-bearer",
+            None,
+        ),
+    )
+
+    class Authority:
+        def evaluate(self, request):
+            if request.capability == "endpoint.device.read":
+                outcome = server.AuthorityOutcome.ALLOWED
+            else:
+                outcome = (
+                    server.AuthorityOutcome.APPROVAL_REQUIRED
+                )
+
+            return SimpleNamespace(
+                outcome=outcome,
+            )
+
+    monkeypatch.setattr(
+        server,
+        "_runtime",
+        lambda: SimpleNamespace(
+            identity_authority=Authority(),
+        ),
+    )
+
+    result = server.discover_capabilities()
+
+    read = result["capabilities"][0]
+    action = result["capabilities"][1]
+
+    assert read["permission_mode"] == "observe"
+    assert read["potentially_eligible"] is True
+    assert read["authority_outcome"] == "allowed"
+
+    assert action["permission_mode"] == "execute"
+    assert action["potentially_eligible"] is True
+    assert action["authority_outcome"] == "approval_required"
+
+
+def test_discovery_marks_denied_requester_ineligible(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        server,
+        "_filter_discoverable_capabilities",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "capability_count": 1,
+            "capabilities": [
+                {
+                    "capability": "service.ticket.update",
+                    "read_only": False,
+                },
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        server,
+        "_authenticated_identity",
+        lambda: (
+            "person-readonly",
+            "aot",
+            "entra-oauth-bearer",
+            None,
+        ),
+    )
+
+    class Authority:
+        def evaluate(self, request):
+            return SimpleNamespace(
+                outcome=server.AuthorityOutcome.DENIED,
+            )
+
+    monkeypatch.setattr(
+        server,
+        "_runtime",
+        lambda: SimpleNamespace(
+            identity_authority=Authority(),
+        ),
+    )
+
+    result = server.discover_capabilities()
+
+    action = result["capabilities"][0]
+
+    assert action["permission_mode"] == "execute"
+    assert action["potentially_eligible"] is False
+    assert action["authority_outcome"] == "denied"

@@ -1329,22 +1329,21 @@ if _MCP_INTERNAL_NOTE_SURFACE_ENABLED:
 
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
-    """Return Jason MCP pilot state."""
+    """Return Jason MCP governed capability state."""
 
-    write_enabled = (
-        _MCP_INTERNAL_NOTE_SURFACE_ENABLED
-    )
+    actions = _active_action_capabilities()
+    write_enabled = bool(actions)
 
     return {
         "status": "ok",
         "service": "jason-mcp",
         "mode": (
-            "governed-read-plus-internal-note"
+            "governed-read-plus-actions"
             if write_enabled
             else "read-only"
         ),
         "phase": (
-            "governed-internal-note-pilot"
+            "governed-action-pilot"
             if write_enabled
             else "governed-read-pilot"
         ),
@@ -1352,11 +1351,7 @@ def jason_mcp_status() -> dict[str, object]:
         "generic_execution_tool": True,
         "direct_provider_access": False,
         "write_tools_enabled": write_enabled,
-        "write_capabilities": (
-            [SERVICE_TICKET_NOTE_CREATE]
-            if write_enabled
-            else []
-        ),
+        "write_capabilities": actions,
         "write_authority": (
             "jason_exact_grant_plus_per_execution_approval"
             if write_enabled
@@ -1479,6 +1474,103 @@ def _discoverable_capabilities() -> list[dict[str, Any]]:
         result,
         key=lambda item: item["capability"],
     )
+
+
+def _active_action_capabilities() -> list[str]:
+    return sorted(
+        item["capability"]
+        for item in _discoverable_capabilities()
+        if (
+            item["read_only"] is False
+            and item["action_enabled"] is True
+        )
+    )
+
+
+def _annotate_requester_eligibility(
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Add bounded requester-specific authority eligibility to discovery."""
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_identity()
+
+    def annotate(
+        item: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        projected = dict(item)
+
+        requested_mode = (
+            PermissionMode.OBSERVE
+            if projected.get("read_only") is True
+            else PermissionMode.EXECUTE
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=(
+                    f"discover_{uuid4().hex}"
+                ),
+                correlation_id=(
+                    f"corr_discover_{uuid4().hex}"
+                ),
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=str(
+                    projected.get("capability")
+                    or ""
+                ),
+                requested_mode=requested_mode,
+                authentication_assurance=assurance,
+            )
+        )
+
+        projected["permission_mode"] = (
+            requested_mode.value
+        )
+
+        projected["authority_outcome"] = (
+            decision.outcome.value
+        )
+
+        projected["potentially_eligible"] = (
+            decision.outcome
+            in {
+                AuthorityOutcome.ALLOWED,
+                AuthorityOutcome.APPROVAL_REQUIRED,
+            }
+        )
+
+        return projected
+
+    output = dict(result)
+
+    capabilities = output.get("capabilities")
+
+    if isinstance(capabilities, list):
+        output["capabilities"] = [
+            annotate(item)
+            for item in capabilities
+            if isinstance(item, Mapping)
+        ]
+
+    alternatives = output.get("alternatives")
+
+    if isinstance(alternatives, list):
+        output["alternatives"] = [
+            annotate(item)
+            for item in alternatives
+            if isinstance(item, Mapping)
+        ]
+
+    return output
 
 
 def _dynamic_capability_allowed(
@@ -1766,10 +1858,12 @@ def discover_capabilities(
     before concluding that Jason lacks a capability for the resource.
     """
 
-    return _filter_discoverable_capabilities(
-        resource_type=resource_type,
-        operation=operation,
-        facts=facts,
+    return _annotate_requester_eligibility(
+        _filter_discoverable_capabilities(
+            resource_type=resource_type,
+            operation=operation,
+            facts=facts,
+        )
     )
 
 
@@ -1941,15 +2035,19 @@ def execute_governed_capability(
 
 
 async def healthz(_request):
+    actions = _active_action_capabilities()
+
     return JSONResponse(
         {
             "status": "ok",
             "service": "jason-mcp",
             "mode": (
-                "governed-read-plus-internal-note"
-                if _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+                "governed-read-plus-actions"
+                if actions
                 else "read-only"
             ),
+            "write_tools_enabled": bool(actions),
+            "write_capabilities": actions,
             "mcp_path": "/mcp",
         }
     )
