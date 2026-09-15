@@ -21,6 +21,10 @@ The first OpenBao staging attempt stopped safely because the `secret/` KV v2 eng
 
 A fail-closed recovery utility, `deploy/openbao/scripts/recover-datto-rmm-execution-staging.py`, was added specifically for this proven partial state. It verifies the existing policy and AppRole against approved source, requires the observed CAS configuration, writes the execution secret with `options.cas=0`, verifies version-1 isolation and AppRole access boundaries, confirms the read-only secret version remains unchanged, and creates bootstrap material through a temporary root-only directory followed by atomic rename. It still does not contact Datto or activate runtime execution.
 
+The first recovery run was pinned to source `8d26e6a5b75f936b0c2f41341258954da1097d3b`. Its source pin, isolated clone, compile/source-contract checks, live-service baseline, bootstrap-absence check, and final source pin all passed. It then stopped fail-closed immediately after OpenBao administrative authentication with `ERROR: Existing Datto execution policy rules were unavailable.` The temporary administrative token was revoked. The recovery did not reach the Datto execution API-key/API-secret prompts, did not contact Datto, did not activate runtime execution, did not activate provider writes, and did not restart MCP, runtime, or OpenBao.
+
+Review against the OpenBao ACL-policy API identified a response-shape defect in the recovery utility: it expected the policy document under `data.rules`, while `GET /v1/sys/policies/acl/:name` returns the policy document in the top-level `policy` field. The recovery therefore stopped before any credential write. This is a recovery-parser defect, not evidence that the existing execution policy is missing or different. A dedicated staging/recovery record is maintained at `docs/operations/Jason-Datto-RMM-Execution-Credential-Staging-2026-09-15.md`.
+
 Draft PR #184 tracks this isolated workstream. Issue #183 tracks the capability objective.
 
 ## Phase 1 — read-only automation foundation — complete in source/tests
@@ -84,7 +88,7 @@ The intended Phase 3 controls are:
 6. Prove authentication and harmless read-only access/containment before any quick-job execution.
 7. Keep the runtime write/execution surface disabled until a later explicit production-activation approval.
 
-The provider identity has been created by the owner. OpenBao staging is not yet complete because the first attempt stopped on the CAS-required KV write. Recovery is now source-controlled and must complete before any provider authentication proof begins.
+The provider identity has been created by the owner. OpenBao staging is not yet complete: the original attempt stopped on the CAS-required KV write, and the first recovery stopped on the ACL-policy response parser mismatch before any credential write. The last fully proven OpenBao state remains the dedicated execution policy and AppRole present, execution KV record absent, Datto read-only secret version 1, and execution bootstrap directory absent. A corrected recovery must re-prove those preconditions before continuing.
 
 ## Approval boundary
 
