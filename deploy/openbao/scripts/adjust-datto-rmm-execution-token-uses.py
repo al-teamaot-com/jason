@@ -15,9 +15,25 @@ from typing import Any, Mapping
 
 ROLE_NAME = "jason-datto-rmm-execution"
 POLICY_NAME = "jason-datto-rmm-execution"
-CURRENT_TOKEN_USES = 2
-TARGET_TOKEN_USES = 3
+APPROVED_TOKEN_USES = 2
+TRANSIENT_TOKEN_USES = 3
 EXECUTION_PATH = "secret/data/connectors/datto-rmm/production/execution"
+
+LEGACY_POLICY = '''
+path "secret/data/connectors/datto-rmm/production/execution" {
+  capabilities = ["read"]
+}
+'''
+
+APPROVED_POLICY = '''
+path "secret/data/connectors/datto-rmm/production/execution" {
+  capabilities = ["read"]
+}
+
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
+'''
 
 
 class AdjustmentError(RuntimeError):
@@ -102,7 +118,54 @@ def request_status(
         raise AdjustmentError(f"OpenBao request failed at {path}.") from error
 
 
-def desired_role_payload(*, token_num_uses: int = TARGET_TOKEN_USES) -> Mapping[str, Any]:
+def normalize_policy(value: str) -> str:
+    lines: list[str] = []
+    for raw_line in value.strip().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def extract_policy_text(response: Mapping[str, Any]) -> str:
+    candidates: list[str] = []
+
+    policy = response.get("policy")
+    if isinstance(policy, str) and policy:
+        candidates.append(policy)
+
+    data = response.get("data")
+    if isinstance(data, Mapping):
+        for key in ("policy", "rules"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                candidates.append(value)
+
+    if not candidates:
+        raise AdjustmentError("Execution AppRole policy text was unavailable.")
+
+    normalized = {normalize_policy(value) for value in candidates}
+    if len(normalized) != 1:
+        raise AdjustmentError("Execution AppRole policy response was inconsistent.")
+
+    return candidates[0]
+
+
+def validate_policy_transition(policy_text: str) -> str:
+    normalized = normalize_policy(policy_text)
+    legacy = normalize_policy(LEGACY_POLICY)
+    approved = normalize_policy(APPROVED_POLICY)
+    if normalized == legacy:
+        return "legacy_missing_self_revoke"
+    if normalized == approved:
+        return "approved"
+    raise AdjustmentError(
+        "Execution AppRole policy drifted outside the approved self-revocation repair boundary."
+    )
+
+
+def desired_role_payload(*, token_num_uses: int = APPROVED_TOKEN_USES) -> Mapping[str, Any]:
     return {
         "bind_secret_id": True,
         "secret_id_ttl": "2160h",
@@ -165,6 +228,16 @@ def read_role(*, base_url: str, admin_token: str) -> Mapping[str, Any]:
     return data
 
 
+def read_policy(*, base_url: str, admin_token: str) -> str:
+    response = request_json(
+        base_url=base_url,
+        path=f"sys/policies/acl/{POLICY_NAME}",
+        method="GET",
+        token=admin_token,
+    )
+    return extract_policy_text(response)
+
+
 def update_metadata(path: Path) -> None:
     try:
         metadata = json.loads(path.read_text(encoding="utf-8"))
@@ -174,12 +247,14 @@ def update_metadata(path: Path) -> None:
         raise AdjustmentError("Execution bootstrap metadata has an invalid shape.")
 
     current = metadata.get("service_token_num_uses")
-    if current not in (CURRENT_TOKEN_USES, TARGET_TOKEN_USES):
+    if current not in (APPROVED_TOKEN_USES, TRANSIENT_TOKEN_USES):
         raise AdjustmentError("Execution bootstrap metadata token use budget is unexpected.")
 
-    metadata["service_token_num_uses"] = TARGET_TOKEN_USES
-    metadata["token_use_budget_adjustment"] = (
-        "three uses permit one KV read plus explicit revoke-self before the limited-use token expires"
+    metadata["service_token_num_uses"] = APPROVED_TOKEN_USES
+    metadata.pop("token_use_budget_adjustment", None)
+    metadata["self_revoke_policy_repair"] = (
+        "execution policy explicitly grants update on auth/token/revoke-self; "
+        "two token uses cover one KV read and explicit self-revocation"
     )
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -202,9 +277,9 @@ def update_metadata(path: Path) -> None:
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Adjust the staged Datto execution AppRole from two token uses to three so "
-            "one secret read can be followed by explicit revoke-self. This does not "
-            "contact Datto or activate runtime execution."
+            "Repair the staged Datto execution AppRole so its no-default-policy token can "
+            "explicitly revoke itself after one execution-secret read, while restoring the "
+            "approved two-use token budget. This does not contact Datto or activate runtime execution."
         )
     )
     parser.add_argument("--base-url", default="http://127.0.0.1:8200")
@@ -213,6 +288,11 @@ def parse_arguments() -> argparse.Namespace:
         "--credential-dir",
         type=Path,
         default=Path("/opt/jason/bootstrap/secrets/openbao/datto-rmm-execution-approle"),
+    )
+    parser.add_argument(
+        "--policy-file",
+        type=Path,
+        default=Path("deploy/openbao/config/jason-datto-rmm-execution-policy.hcl"),
     )
     return parser.parse_args()
 
@@ -229,6 +309,13 @@ def main() -> int:
         if not path.is_file() or path.stat().st_size <= 0:
             raise AdjustmentError("Execution bootstrap material is incomplete.")
 
+    try:
+        approved_policy_text = args.policy_file.read_text(encoding="utf-8")
+    except OSError as error:
+        raise AdjustmentError("Approved execution policy source is unavailable.") from error
+    if normalize_policy(approved_policy_text) != normalize_policy(APPROVED_POLICY):
+        raise AdjustmentError("Approved execution policy source does not match the repair contract.")
+
     password = getpass.getpass(f"OpenBao password for {args.admin_username}: ")
     login = request_json(
         base_url=args.base_url,
@@ -243,13 +330,25 @@ def main() -> int:
     admin_token = require_string(auth, "client_token", "an administrative token")
 
     try:
-        before = read_role(base_url=args.base_url, admin_token=admin_token)
+        before_role = read_role(base_url=args.base_url, admin_token=admin_token)
         before_uses = validate_role_data(
-            before,
-            allowed_token_uses={CURRENT_TOKEN_USES, TARGET_TOKEN_USES},
+            before_role,
+            allowed_token_uses={APPROVED_TOKEN_USES, TRANSIENT_TOKEN_USES},
         )
+        before_policy = read_policy(base_url=args.base_url, admin_token=admin_token)
+        before_policy_state = validate_policy_transition(before_policy)
 
-        if before_uses == CURRENT_TOKEN_USES:
+        if before_policy_state == "legacy_missing_self_revoke":
+            request_json(
+                base_url=args.base_url,
+                path=f"sys/policies/acl/{POLICY_NAME}",
+                method="POST",
+                token=admin_token,
+                payload={"policy": approved_policy_text},
+                allow_empty=True,
+            )
+
+        if before_uses == TRANSIENT_TOKEN_USES:
             request_json(
                 base_url=args.base_url,
                 path=f"auth/approle/role/{ROLE_NAME}",
@@ -259,8 +358,12 @@ def main() -> int:
                 allow_empty=True,
             )
 
-        after = read_role(base_url=args.base_url, admin_token=admin_token)
-        validate_role_data(after, allowed_token_uses={TARGET_TOKEN_USES})
+        after_policy = read_policy(base_url=args.base_url, admin_token=admin_token)
+        if validate_policy_transition(after_policy) != "approved":
+            raise AdjustmentError("Execution AppRole self-revocation policy repair did not persist.")
+
+        after_role = read_role(base_url=args.base_url, admin_token=admin_token)
+        validate_role_data(after_role, allowed_token_uses={APPROVED_TOKEN_USES})
 
         role_id = role_id_path.read_text(encoding="utf-8").strip()
         secret_id = secret_id_path.read_text(encoding="utf-8").strip()
@@ -312,7 +415,8 @@ def main() -> int:
 
         update_metadata(metadata_path)
 
-        print("Execution AppRole token-use budget adjusted from 2 to 3 or already correct.")
+        print("Execution AppRole policy now explicitly permits only self-revocation in addition to the execution-secret read.")
+        print("Execution AppRole token-use budget is restored to the approved value of 2.")
         print("One execution KV read plus explicit revoke-self was proven.")
         print("Post-revoke execution secret access was denied.")
         print("Datto provider contacted: NO")
