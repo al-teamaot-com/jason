@@ -25,6 +25,8 @@ on:
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
       - 'tools/datto_rmm_live_read.py'
+      - 'tools/datto_rmm_execution_identity_probe.py'
+      - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
       - '.github/workflows/datto-rmm-live-read.yml'
   push:
     paths:
@@ -50,6 +52,8 @@ on:
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
       - 'tools/datto_rmm_live_read.py'
+      - 'tools/datto_rmm_execution_identity_probe.py'
+      - 'tools/tests/test_datto_rmm_execution_identity_probe.py'
       - '.github/workflows/datto-rmm-live-read.yml'
 
 jobs:
@@ -78,6 +82,7 @@ jobs:
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging.py
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py
           python -m py_compile tools/datto_rmm_live_read.py
+          python -m py_compile tools/datto_rmm_execution_identity_probe.py
       - name: Run DRMM read and proposal-boundary tests
         env:
           PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
@@ -94,9 +99,11 @@ jobs:
           python -m pytest implementation/runtime_service/tests/test_datto_automation_runtime.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py -q
-      - name: Verify credential-safe live-read preflight
+          python -m pytest tools/tests/test_datto_rmm_execution_identity_probe.py -q
+      - name: Verify credential-safe live-read preflights
         run: |
           python tools/datto_rmm_live_read.py > /tmp/drmm-live-preflight.json
+          python tools/datto_rmm_execution_identity_probe.py > /tmp/drmm-execution-probe-preflight.json
           python - <<'PY'
           import json
           with open('/tmp/drmm-live-preflight.json', encoding='utf-8') as handle:
@@ -107,4 +114,12 @@ jobs:
           assert result['maximum_records'] == 2
           assert result['ambiguity_detection_enabled'] is True
           assert result['capability'] == 'datto_rmm.device.search'
+          with open('/tmp/drmm-execution-probe-preflight.json', encoding='utf-8') as handle:
+              probe = json.load(handle)
+          assert probe['status'] == 'credential_safe_preflight'
+          assert probe['network_contacted'] is False
+          assert probe['provider_credentials_used'] is False
+          assert probe['provider_mutation_requests'] == 0
+          assert probe['component_execution_attempted'] is False
+          assert probe['runtime_execution_activated'] is False
           PY
