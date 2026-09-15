@@ -21,7 +21,9 @@ on:
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
+      - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
+      - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
   push:
@@ -44,7 +46,9 @@ on:
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
+      - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py'
       - 'deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py'
+      - 'deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py'
       - 'tools/datto_rmm_live_read.py'
       - '.github/workflows/datto-rmm-live-read.yml'
 
@@ -72,6 +76,7 @@ jobs:
           python -m py_compile implementation/runtime_service/src/jason_runtime/provider_reads.py
           python -m py_compile deploy/openbao/scripts/provision-datto-rmm-execution.py
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging.py
+          python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging-live-shape.py
           python -m py_compile tools/datto_rmm_live_read.py
       - name: Run DRMM read and proposal-boundary tests
         env:
@@ -88,6 +93,7 @@ jobs:
           python -m pytest implementation/orchestrator/tests/test_resource_capability_catalog.py -q
           python -m pytest implementation/runtime_service/tests/test_datto_automation_runtime.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py -q
+          python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py -q
       - name: Verify credential-safe live-read preflight
         run: |
           python tools/datto_rmm_live_read.py > /tmp/drmm-live-preflight.json
