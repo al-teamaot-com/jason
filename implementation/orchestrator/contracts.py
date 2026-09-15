@@ -143,3 +143,13 @@ class OrchestrationResult:
             raise ValueError("reason_codes must not be empty.")
         if self.attempts < 0:
             raise ValueError("attempts must not be negative.")
+
+        # Some failure boundaries historically represented absent provider
+        # evidence as None. Normalize that state to the contract's empty mapping
+        # so callers can return the structured failure without attempting to
+        # project non-existent evidence. Non-mapping non-null output remains a
+        # contract violation and fails closed.
+        if self.output is None:
+            object.__setattr__(self, "output", {})
+        elif not isinstance(self.output, Mapping):
+            raise ValueError("output must be a mapping when provided.")

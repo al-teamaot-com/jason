@@ -5,11 +5,15 @@ on:
     paths:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_capability_discovery.py'
+      - 'implementation/mcp_service/tests/test_governed_read_failure_contract.py'
+      - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
   push:
     paths:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_capability_discovery.py'
+      - 'implementation/mcp_service/tests/test_governed_read_failure_contract.py'
+      - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
 
 permissions:
@@ -41,9 +45,12 @@ jobs:
         run: |
           python -m py_compile \
             implementation/mcp_service/src/jason_mcp/server.py \
-            implementation/mcp_service/tests/test_capability_discovery.py
+            implementation/mcp_service/tests/test_capability_discovery.py \
+            implementation/mcp_service/tests/test_governed_read_failure_contract.py \
+            implementation/orchestrator/contracts.py
 
-      - name: Test capability discovery alternatives
+      - name: Test capability discovery and governed-read failure boundary
         run: |
           python -m pytest -q \
-            implementation/mcp_service/tests/test_capability_discovery.py
+            implementation/mcp_service/tests/test_capability_discovery.py \
+            implementation/mcp_service/tests/test_governed_read_failure_contract.py
