@@ -66,14 +66,37 @@ def build_datto_rmm_automation_resources() -> tuple[ResourceDefinition, ...]:
     job = ResourceDefinition(
         resource_type="automation_job",
         description=(
-            "Read-only automation job state used to verify a previously created "
-            "provider job."
+            "Read-only automation job state and bounded output used "
+            "to verify a previously created provider job."
         ),
         selectors=(
             SelectorDefinition(
                 name="resource_id",
-                description="Verified durable automation job identity.",
+                description=(
+                    "Verified durable automation job identity."
+                ),
                 verified_identity_required=True,
+            ),
+            SelectorDefinition(
+                name="device_uid",
+                description=(
+                    "Verified durable endpoint identity associated "
+                    "with the job."
+                ),
+                verified_identity_required=True,
+            ),
+            SelectorDefinition(
+                name="component_uid",
+                description=(
+                    "Verified durable automation component identity."
+                ),
+                verified_identity_required=True,
+            ),
+            SelectorDefinition(
+                name="stream",
+                description=(
+                    "Requested bounded output stream: stdout or stderr."
+                ),
             ),
         ),
         operations=(
@@ -82,23 +105,49 @@ def build_datto_rmm_automation_resources() -> tuple[ResourceDefinition, ...]:
                 kind=OperationKind.READ,
                 capability_name="automation.job.read",
                 description=(
-                    "Read current governed automation job status without changing "
-                    "the job or endpoint."
+                    "Read current governed automation job status "
+                    "without changing the job or endpoint."
                 ),
                 read_only=True,
                 selector_names=("resource_id",),
+            ),
+            IntegrationOperation(
+                operation_id="automation.job.output.read",
+                kind=OperationKind.READ,
+                capability_name="automation.job.output.read",
+                description=(
+                    "Read bounded StdOut or StdErr for one verified "
+                    "job, endpoint, and component."
+                ),
+                read_only=True,
+                selector_names=(
+                    "resource_id",
+                    "device_uid",
+                    "component_uid",
+                    "stream",
+                ),
             ),
         ),
         observations=(
             ResourceObservation(
                 name="status",
                 description=(
-                    "Provider-reported job state, name, and creation time when "
-                    "available."
+                    "Provider-reported job state, name, and creation "
+                    "time when available."
+                ),
+            ),
+            ResourceObservation(
+                name="output",
+                description=(
+                    "Bounded provider-reported StdOut or StdErr "
+                    "filtered to the requested component identity."
                 ),
             ),
         ),
-        relationships=("automation_job -> endpoint", "automation_job -> automation_component"),
+        relationships=(
+            "automation_job -> endpoint",
+            "automation_job -> automation_component",
+        ),
     )
 
     return (component, job)

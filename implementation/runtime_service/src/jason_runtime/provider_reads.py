@@ -65,6 +65,7 @@ from orchestrator.provider_read_capability_catalog import (
 from orchestrator.resource_capability_catalog import (
     AUTOMATION_COMPONENT_SEARCH,
     AUTOMATION_JOB_READ,
+    AUTOMATION_JOB_OUTPUT_READ,
     DATTO_RMM_PROVIDER,
 )
 from orchestrator.service import CapabilityInvoker
@@ -106,12 +107,14 @@ _DATTO_AUTOMATION_CAPABILITIES = frozenset(
     {
         AUTOMATION_COMPONENT_SEARCH,
         AUTOMATION_JOB_READ,
+        AUTOMATION_JOB_OUTPUT_READ,
     }
 )
 
 _DATTO_AUTOMATION_PROVIDER_CAPABILITY_MAP = {
     (DATTO_RMM_PROVIDER, AUTOMATION_COMPONENT_SEARCH): "datto_rmm.component.search",
     (DATTO_RMM_PROVIDER, AUTOMATION_JOB_READ): "datto_rmm.job.read",
+    (DATTO_RMM_PROVIDER, AUTOMATION_JOB_OUTPUT_READ): "datto_rmm.job.output.read",
 }
 
 _RUNTIME_OPENBAO_ROOT = Path("/run/jason-secrets/openbao")

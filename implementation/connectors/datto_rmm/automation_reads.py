@@ -18,6 +18,7 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
         {
             "datto_rmm.component.search",
             "datto_rmm.job.read",
+            "datto_rmm.job.output.read",
         }
     )
     adaptive_collection_keys = {
@@ -25,6 +26,8 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
     }
     default_component_page_size = 250
     maximum_component_page_size = 250
+    maximum_job_output_records = 20
+    maximum_job_output_chars = 65536
 
     def execute(self, request: ConnectorRequest):
         if request.context.capability == "datto_rmm.component.search":
@@ -59,6 +62,45 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                     ),
                 ),
             }
+
+        if capability == "datto_rmm.job.output.read":
+            job_uid = str(
+                arguments.get("job_uid")
+                or arguments.get("resource_id")
+                or ""
+            ).strip()
+            device_uid = str(
+                arguments.get("device_uid") or ""
+            ).strip()
+            component_uid = str(
+                arguments.get("component_uid") or ""
+            ).strip()
+            stream = str(
+                arguments.get("stream") or "stdout"
+            ).strip().casefold()
+
+            if not job_uid:
+                raise ValueError(
+                    "job_uid or resource_id is required"
+                )
+            if not device_uid:
+                raise ValueError(
+                    "device_uid is required for job output"
+                )
+            if not component_uid:
+                raise ValueError(
+                    "component_uid is required for job output"
+                )
+            if stream not in {"stdout", "stderr"}:
+                raise ValueError(
+                    "stream must be stdout or stderr"
+                )
+
+            return (
+                f"/api/v2/job/{job_uid}/results/"
+                f"{device_uid}/{stream}",
+                None,
+            )
 
         if capability == "datto_rmm.job.read":
             job_uid = str(
@@ -97,6 +139,15 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
             )
             return self._canonical_component_search_result(
                 payload=payload,
+                arguments=request.arguments,
+            )
+
+        if (
+            request.context.capability
+            == "datto_rmm.job.output.read"
+        ):
+            return self._canonical_job_output_result(
+                payload=initial_data,
                 arguments=request.arguments,
             )
 
@@ -216,6 +267,135 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                 "Datto component search returned a non-object component record"
             )
         return tuple(records)
+
+    @classmethod
+    def _canonical_job_output_result(
+        cls,
+        *,
+        payload: Any,
+        arguments: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        if not isinstance(payload, (list, tuple)):
+            raise ValueError(
+                "Datto job output response is not a collection"
+            )
+
+        requested_job_uid = str(
+            arguments.get("job_uid")
+            or arguments.get("resource_id")
+            or ""
+        ).strip()
+        requested_device_uid = str(
+            arguments.get("device_uid") or ""
+        ).strip()
+        requested_component_uid = str(
+            arguments.get("component_uid") or ""
+        ).strip()
+        stream = str(
+            arguments.get("stream") or "stdout"
+        ).strip().casefold()
+
+        if not requested_job_uid:
+            raise ValueError(
+                "job_uid or resource_id is required"
+            )
+        if not requested_device_uid:
+            raise ValueError(
+                "device_uid is required for job output"
+            )
+        if not requested_component_uid:
+            raise ValueError(
+                "component_uid is required for job output"
+            )
+        if stream not in {"stdout", "stderr"}:
+            raise ValueError(
+                "stream must be stdout or stderr"
+            )
+
+        outputs: list[Mapping[str, Any]] = []
+        matching_records = 0
+        remaining_chars = cls.maximum_job_output_chars
+        bounded = False
+
+        for record in payload:
+            if not isinstance(record, Mapping):
+                raise ValueError(
+                    "Datto job output returned a non-object record"
+                )
+
+            provider_component_uid = cls._first_scalar(
+                record,
+                "componentUid",
+            )
+
+            if not provider_component_uid:
+                raise ValueError(
+                    "Datto job output record lacks componentUid"
+                )
+
+            if provider_component_uid != requested_component_uid:
+                continue
+
+            matching_records += 1
+
+            if (
+                len(outputs)
+                >= cls.maximum_job_output_records
+            ):
+                bounded = True
+                continue
+
+            std_data = record.get("stdData")
+
+            if std_data is None:
+                text = ""
+            elif isinstance(std_data, str):
+                text = std_data
+            else:
+                raise ValueError(
+                    "Datto job output stdData is not text"
+                )
+
+            truncated = False
+
+            if remaining_chars <= 0:
+                bounded = True
+                continue
+
+            if len(text) > remaining_chars:
+                text = text[:remaining_chars]
+                truncated = True
+                bounded = True
+
+            remaining_chars -= len(text)
+
+            output: dict[str, Any] = {
+                "component_uid": provider_component_uid,
+                "stream": stream,
+                "text": text,
+                "truncated": truncated,
+            }
+
+            component_name = cls._first_scalar(
+                record,
+                "componentName",
+            )
+
+            if component_name:
+                output["component_name"] = component_name
+
+            outputs.append(output)
+
+        return {
+            "resource_id": requested_job_uid,
+            "device_uid": requested_device_uid,
+            "component_uid": requested_component_uid,
+            "stream": stream,
+            "outputs": outputs,
+            "match_count": matching_records,
+            "output_bounded": bounded,
+            "discovery_complete": True,
+        }
 
     @classmethod
     def _canonical_job_read_result(

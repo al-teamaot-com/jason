@@ -1179,6 +1179,149 @@ def _project_action_result(
     return result
 
 
+def _canonicalize_governed_action_arguments(
+    capability_name: str,
+    arguments: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Canonicalize server-controlled action arguments before approval/execution.
+
+    ChatGPT may express the same governed action with slightly different
+    argument shapes. Provider containment must not depend on the model
+    remembering internal allowlist/profile fields.
+
+    For the bounded Datto component pilot, Jason supplies its own
+    server-controlled allowlist and device class, while the caller must still
+    identify the exact target. Any caller-supplied target/component metadata
+    must agree with the configured bounded pilot.
+    """
+
+    raw = dict(arguments or {})
+
+    if capability_name != "automation.component.execute":
+        return raw
+
+    expected = {
+        "allowlist_name": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
+            "",
+        ).strip(),
+        "device_uid": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
+            "",
+        ).strip(),
+        "device_class": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
+            "",
+        ).strip(),
+        "component_uid": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID",
+            "",
+        ).strip(),
+        "component_name": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME",
+            "",
+        ).strip(),
+    }
+
+    if not all(expected.values()):
+        raise ValueError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
+        )
+
+    requested_device = str(
+        raw.get("device_uid")
+        or raw.get("resource_id")
+        or raw.get("target_device_uid")
+        or ""
+    ).strip()
+
+    if not requested_device:
+        raise ValueError(
+            "DATTO_COMPONENT_TARGET_REQUIRED"
+        )
+
+    if requested_device != expected["device_uid"]:
+        raise ValueError(
+            "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+        )
+
+    supplied_allowlist = str(
+        raw.get("allowlist_name") or ""
+    ).strip()
+
+    if (
+        supplied_allowlist
+        and supplied_allowlist != expected["allowlist_name"]
+    ):
+        raise ValueError(
+            "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
+        )
+
+    supplied_class = str(
+        raw.get("device_class") or ""
+    ).strip()
+
+    if (
+        supplied_class
+        and supplied_class.casefold()
+        != expected["device_class"].casefold()
+    ):
+        raise ValueError(
+            "DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"
+        )
+
+    supplied_component_uid = str(
+        raw.get("component_uid")
+        or raw.get("component_id")
+        or ""
+    ).strip()
+
+    supplied_component_name = str(
+        raw.get("component_name") or ""
+    ).strip()
+
+    if not supplied_component_uid and not supplied_component_name:
+        raise ValueError(
+            "DATTO_COMPONENT_IDENTITY_REQUIRED"
+        )
+
+    if (
+        supplied_component_uid
+        and supplied_component_uid != expected["component_uid"]
+    ):
+        raise ValueError(
+            "DATTO_COMPONENT_IDENTITY_MISMATCH"
+        )
+
+    if (
+        supplied_component_name
+        and supplied_component_name.casefold()
+        != expected["component_name"].casefold()
+    ):
+        raise ValueError(
+            "DATTO_COMPONENT_NAME_MISMATCH"
+        )
+
+    variables = raw.get("variables", {})
+    if variables is None:
+        variables = {}
+
+    if not isinstance(variables, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_VARIABLES_INVALID"
+        )
+
+    # Only provider-neutral values required by the runtime are forwarded.
+    # Internal scope values come from the MCP's approved configuration rather
+    # than from conversational model output.
+    return {
+        "allowlist_name": expected["allowlist_name"],
+        "device_uid": expected["device_uid"],
+        "device_class": expected["device_class"],
+        "variables": dict(variables),
+    }
+
+
 def _governed_execute(
     *,
     capability_name: str,
@@ -1216,6 +1359,21 @@ def _governed_execute(
             "status": "rejected",
             "capability": capability_name,
             "error_code": "capability_not_mcp_action_enabled",
+        }
+
+    try:
+        canonical_arguments = (
+            _canonicalize_governed_action_arguments(
+                capability_name,
+                arguments,
+            )
+        )
+    except ValueError as exc:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "invalid_action_arguments",
+            "reason_codes": [str(exc)],
         }
 
     execution_id = f"exec_mcp_action_{uuid4().hex}"
@@ -1366,7 +1524,7 @@ def _governed_execute(
             maximum_estimated_cost=Decimal("1.00"),
             maximum_attempts=1,
         ),
-        arguments=dict(arguments or {}),
+        arguments=canonical_arguments,
         requester_kind="human",
         permission_mode="execute",
         policy_ids=("mcp-governed-execution-v1",),

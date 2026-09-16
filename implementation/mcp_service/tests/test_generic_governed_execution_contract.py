@@ -422,3 +422,124 @@ def test_unknown_action_result_fails_closed():
         "raw_provider_evidence_exposed": False,
         "result_exposed": False,
     }
+
+
+def _set_datto_action_scope(monkeypatch):
+    values = {
+        "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME":
+            "AOT governed diagnostic pilot",
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID":
+            "device-123",
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS":
+            "Desktop",
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID":
+            "component-456",
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME":
+            "Get-DNS Settings AOT Ver 06042025-1",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_datto_action_canonicalizes_server_controlled_scope(
+    monkeypatch,
+):
+    _set_datto_action_scope(monkeypatch)
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_uid": "component-456",
+        },
+    )
+
+    assert result == {
+        "allowlist_name": "AOT governed diagnostic pilot",
+        "device_uid": "device-123",
+        "device_class": "Desktop",
+        "variables": {},
+    }
+
+
+def test_datto_action_accepts_resource_id_and_matching_component_hints(
+    monkeypatch,
+):
+    _set_datto_action_scope(monkeypatch)
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "resource_id": "device-123",
+            "component_uid": "component-456",
+            "component_name":
+                "Get-DNS Settings AOT Ver 06042025-1",
+            "variables": None,
+        },
+    )
+
+    assert result["device_uid"] == "device-123"
+    assert result["device_class"] == "Desktop"
+    assert result["variables"] == {}
+    assert "component_uid" not in result
+    assert "component_name" not in result
+
+
+def test_datto_action_rejects_different_target(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {"device_uid": "wrong-device"},
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+    else:
+        raise AssertionError("target mismatch must fail closed")
+
+
+def test_datto_action_rejects_different_component(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+                "component_uid": "wrong-component",
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+    else:
+        raise AssertionError("component mismatch must fail closed")
+
+
+
+def test_datto_action_requires_component_identity(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_IDENTITY_REQUIRED"
+    else:
+        raise AssertionError(
+            "missing component identity must fail closed"
+        )
+
+def test_non_datto_action_arguments_are_unchanged():
+    original = {"payload": {"ticketID": 123}}
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        original,
+    )
+
+    assert result == original

@@ -35,6 +35,7 @@ MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
 AUTOMATION_COMPONENT_SEARCH = "automation.component.search"
 AUTOMATION_JOB_READ = "automation.job.read"
+AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
 DATTO_RMM_PROVIDER = "datto_rmm"
 
 
@@ -520,6 +521,45 @@ def automation_job_read(now: datetime) -> CapabilityDefinition:
     )
 
 
+
+def automation_job_output_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=AUTOMATION_JOB_OUTPUT_READ,
+        display_name="Read Automation Job Output",
+        business_purpose=(
+            "Read bounded StdOut or StdErr evidence from one known "
+            "automation job, endpoint, and component without changing "
+            "the job or endpoint."
+        ),
+        resource_types=(
+            "automation_job_output,automation_job,"
+            "automation_component,endpoint"
+        ),
+        operation="read",
+        selector_keys=(
+            "resource_id,device_uid,component_uid,stream"
+        ),
+        fact_hints=(
+            "job output,component output,stdout,stderr,"
+            "standard output,standard error,script output,"
+            "automation result,component result"
+        ),
+        canonical_facts="automation job output",
+        planning_guidance=(
+            "Use only after a durable job resource_id, endpoint "
+            "device_uid, and component_uid are known. stream may be "
+            "stdout or stderr. This capability cannot create, change, "
+            "cancel, or rerun a job."
+        ),
+        inquiry_hints=(
+            "job output,component output,stdout,stderr,"
+            "standard output,standard error,script output,"
+            "automation result,component result"
+        ),
+    )
+
+
 def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
         provider_id=DATTO_RMM_PROVIDER,
@@ -541,6 +581,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 MANAGEMENT_SITE_SEARCH,
                 AUTOMATION_COMPONENT_SEARCH,
                 AUTOMATION_JOB_READ,
+                AUTOMATION_JOB_OUTPUT_READ,
             }
         ),
         supported_classifications=frozenset({"internal"}),
@@ -594,4 +635,5 @@ def register_endpoint_resource_foundation(
     capabilities.register(management_site_search(now))
     capabilities.register(automation_component_search(now))
     capabilities.register(automation_job_read(now))
+    capabilities.register(automation_job_output_read(now))
     providers.register(datto_rmm_endpoint_provider(now))
