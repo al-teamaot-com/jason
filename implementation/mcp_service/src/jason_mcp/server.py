@@ -1183,6 +1183,131 @@ def _project_action_result(
     return result
 
 
+
+def _canonical_datto_component_search_arguments(
+    arguments: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Use one stable provider page size while Jason completes the catalog."""
+
+    normalized = dict(arguments or {})
+
+    # Provider page navigation is internal to Jason. Every conversational
+    # component lookup begins at Datto page zero and Jason follows all pages
+    # before applying the requested name filter.
+    normalized["page"] = 0
+    normalized["max"] = 100
+
+    return normalized
+
+
+def _resolve_live_datto_component_name(
+    component_name: object,
+) -> tuple[str, str]:
+    """Resolve one exact component name through governed live catalog discovery."""
+
+    requested_name = str(
+        component_name or ""
+    ).strip()
+
+    if not requested_name:
+        raise ValueError(
+            "DATTO_COMPONENT_NAME_REQUIRED"
+        )
+
+    lookup = _governed_read(
+        capability_name="automation.component.search",
+        arguments=_canonical_datto_component_search_arguments(
+            {
+                "name": requested_name,
+            }
+        ),
+    )
+
+    if lookup.get("status") != "succeeded":
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    evidence = lookup.get("evidence")
+
+    if not isinstance(evidence, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    data = evidence.get("data")
+
+    if not isinstance(data, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    if data.get("discovery_complete") is not True:
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE"
+        )
+
+    matches = data.get("resource_matches")
+
+    if not isinstance(matches, (list, tuple)):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    exact: list[tuple[str, str]] = []
+
+    for item in matches:
+        if not isinstance(item, Mapping):
+            continue
+
+        live_name = str(
+            item.get("name") or ""
+        ).strip()
+
+        if (
+            live_name.casefold()
+            != requested_name.casefold()
+        ):
+            continue
+
+        live_uid = str(
+            item.get("resource_id") or ""
+        ).strip()
+
+        if not live_uid:
+            raise ValueError(
+                "DATTO_COMPONENT_IDENTITY_MISMATCH"
+            )
+
+        exact.append(
+            (
+                live_uid,
+                live_name,
+            )
+        )
+
+    if not exact:
+        raise ValueError(
+            "DATTO_COMPONENT_NAME_MISMATCH"
+        )
+
+    unique = {
+        (
+            uid,
+            name.casefold(),
+        )
+        for uid, name in exact
+    }
+
+    if len(unique) != 1:
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_AMBIGUOUS"
+        )
+
+    return exact[0]
+
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -1278,6 +1403,33 @@ def _canonicalize_governed_action_arguments(
     supplied_component_name = str(
         raw.get("component_name") or ""
     ).strip()
+
+    # Human callers identify components by their Datto display name.
+    # Jason resolves that name against the complete governed live catalog
+    # before selecting approval policy or creating a provider mutation.
+    if supplied_component_name:
+        (
+            live_component_uid,
+            live_component_name,
+        ) = _resolve_live_datto_component_name(
+            supplied_component_name
+        )
+
+        if (
+            supplied_component_uid
+            and supplied_component_uid
+            != live_component_uid
+        ):
+            raise ValueError(
+                "DATTO_COMPONENT_IDENTITY_MISMATCH"
+            )
+
+        supplied_component_uid = (
+            live_component_uid
+        )
+        supplied_component_name = (
+            live_component_name
+        )
 
     selected_component = resolve_datto_component(
         components,
@@ -2189,9 +2341,18 @@ def execute_read_capability(
             ),
         }
 
+    read_arguments = dict(arguments or {})
+
+    if capability_name == "automation.component.search":
+        read_arguments = (
+            _canonical_datto_component_search_arguments(
+                read_arguments
+            )
+        )
+
     result = _governed_read(
         capability_name=capability_name,
-        arguments=dict(arguments or {}),
+        arguments=read_arguments,
     )
 
     if result.get("status") != "succeeded":
