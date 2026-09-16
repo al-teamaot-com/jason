@@ -159,6 +159,37 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
             token_type=token_type,
         )
 
+    def _record_component_completion(
+        self,
+        *,
+        request: ConnectorRequest,
+        declared_total: int,
+        initial_count: int,
+        pages_read: int,
+        final_count: int,
+        page_size: int,
+    ) -> None:
+        self._audit.record(
+            "connector.adaptation_observed",
+            request.context,
+            {
+                "provider": self.provider_name,
+                "capability": request.context.capability,
+                "collection_key": "components",
+                "declared_total": declared_total,
+                "initial_count": initial_count,
+                "probes_attempted": max(pages_read - 1, 0),
+                "recovered": True,
+                "accepted_arguments": {
+                    "page": 1,
+                    "max": page_size,
+                },
+                "pages_aggregated": pages_read,
+                "final_count": final_count,
+                "complete": True,
+            },
+        )
+
     def _complete_component_collection(
         self,
         *,
@@ -186,6 +217,7 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                 "Datto component search response does not expose a components collection"
             )
 
+        initial_count = len(components)
         details = initial_data.get("pageDetails")
         if not isinstance(details, Mapping):
             # Without provider pagination metadata, a full first page is
@@ -317,6 +349,15 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
             raise ValueError(
                 "Datto component discovery did not satisfy declared total"
             )
+
+        self._record_component_completion(
+            request=request,
+            declared_total=declared_total,
+            initial_count=initial_count,
+            pages_read=pages_read,
+            final_count=len(items),
+            page_size=page_size,
+        )
 
         completed = dict(initial_data)
         completed["components"] = items
