@@ -1,7 +1,7 @@
 # Jason Datto RMM Cross-Chat Governed Execution / Output Proof — 2026-09-16
 
 **Classification:** Evidence / bounded production proof  
-**Status:** Execution and governed output proof complete; observability reconciliation tracked below  
+**Status:** Completed  
 **Owner:** Jason Architecture Authority / AOT Owner  
 **Scope:** ChatGPT Business ↔ Jason MCP ↔ Central Orchestrator ↔ Datto RMM governed component execution and output retrieval  
 **Authority note:** This record preserves evidence. It grants no new provider, identity, business, or execution authority.
@@ -148,9 +148,52 @@ The output read exercises the provider endpoint that returns a JSON array. The s
 - No reboot, shutdown, forced logoff, process termination, network/VPN interruption, or interruptive service restart occurred.
 - Provider credentials were not exposed to ChatGPT.
 
-## Section Goal result
+## Grafana / Prometheus reconciliation and acceptance
 
-The execution/output portion of the Section Goal is **complete**:
+The existing repository-provisioned `Jason Governed Actions` dashboard and `jason_datto_governed_execution_contract` remained the authoritative observability surface. Because the MCP had advanced from the earlier `8f1e864...` release to `e9c7a763...`, the production-health unit was updated to expect the exact current image/source without changing MCP runtime or provider authority:
+
+- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-e9c7a76318aa`
+- `JASON_EXPECTED_MCP_SOURCE_REVISION=e9c7a76318aa12b150194875726b1ba54bf6d61b`
+
+The clean deployment worktree was fast-forwarded to monitoring/documentation head `b2f8b0e740d8e61ee8d3d2e9f84ff13bdbef3752` and the existing rollback-protected monitoring-only deployment was run from that worktree.
+
+Deployment acceptance returned:
+
+- `PRECHECK=PASS`
+- `SOURCE_VALIDATION=PASS`
+- `PRODUCTION_HEALTH_EXPORTER=PASS`
+- `MONITORING_CONTAINERS=PASS`
+- `CORE_ISOLATION=PASS`
+- `PROMETHEUS_PRODUCTION_HEALTH=UP`
+- `PROMETHEUS_PRODUCTION_RULES=PASS`
+- `GRAFANA_PRODUCTION_HEALTH_DASHBOARD=PASS`
+- `METRIC_CONTRACT=PASS`
+- `RUNTIME_CHANGED=NO`
+- `MCP_CHANGED=NO`
+- `OPENBAO_CHANGED=NO`
+- `PROVIDER_ACCESS=NO`
+- `PROVIDER_WRITES=NO`
+
+Rollback evidence directory: `/tmp/jason-production-health-rollback-20260916T151911Z`.
+
+A final read-only live verification returned `1` for all current Datto/MCP contract checks:
+
+- `jason_mcp_contract{check="datto_execution_profile"} 1`
+- `jason_mcp_contract{check="datto_execution_scope"} 1`
+- `jason_mcp_contract{check="image"} 1`
+- `jason_mcp_contract{check="source_revision"} 1`
+- `jason_datto_governed_execution_contract 1`
+
+Grafana also returned:
+
+- dashboard UID: `jason-governed-actions`
+- dashboard title: `Jason Governed Actions`
+
+The monitoring deployment and final verification were observational only. No provider call, provider mutation, MCP recreation, OpenBao change, or authority expansion occurred.
+
+## Section Goal closure
+
+The Section Goal is **complete**:
 
 1. exact endpoint resolution — **proven**;
 2. exact component resolution — **proven**;
@@ -160,6 +203,9 @@ The execution/output portion of the Section Goal is **complete**:
 6. terminal completion through governed read-only polling — **proven (`completed`)**;
 7. actual StdOut through `automation.job.output.read` — **proven**;
 8. cross-chat continuity without reusing prior approval — **proven**;
-9. governance boundaries — **preserved**.
+9. bounded JSON-array provider transport — **live-proven**;
+10. governance boundaries — **preserved**;
+11. durable current-state/proof documentation — **reconciled**;
+12. Grafana/Prometheus current-release observability — **live and passing**.
 
-The existing Grafana/Prometheus governed-actions dashboard remains the correct observability surface. Because the live MCP advanced from the earlier `8f1e864...` release to `e9c7a763...`, its accepted image/source expectation must be reconciled to the current live release and re-verified through the existing rollback-protected monitoring-only deployment process before this record is marked fully closed for monitoring.
+This completed proof does not authorize arbitrary Datto execution or any disruptive action. Future execution still requires the active bounded capability, exact Jason grants, provider containment, and fresh per-execution approval. Disruptive operations continue to require explicit technician approval for that exact disruptive action.
