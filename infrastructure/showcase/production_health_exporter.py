@@ -14,11 +14,11 @@ PORT = int(os.environ.get("JASON_PRODUCTION_HEALTH_PORT", "9467"))
 
 EXPECTED_MCP_IMAGE = os.environ.get(
     "JASON_EXPECTED_MCP_IMAGE",
-    "jason-mcp:generic-governed-8f1e864947a2",
+    "jason-mcp:generic-governed-26704f0600bb",
 )
 EXPECTED_SOURCE_REVISION = os.environ.get(
     "JASON_EXPECTED_MCP_SOURCE_REVISION",
-    "8f1e864947a2e6e79bf47d3de14daacde7d73144",
+    "26704f0600bbc6c48c790c9b9ff501a3b5ec3aad",
 )
 EXPECTED_PROVIDER_PROFILE = os.environ.get(
     "JASON_EXPECTED_PROVIDER_PROFILE",
