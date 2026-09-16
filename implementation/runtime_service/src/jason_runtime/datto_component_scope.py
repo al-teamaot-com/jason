@@ -38,6 +38,17 @@ _FORBIDDEN_SCOPE_VALUES = frozenset(
     }
 )
 
+# Source-controlled canonical identity overrides are deliberately exact and
+# narrow. They repair stale server configuration only for a component whose
+# current Datto UID has already been independently verified through complete
+# governed catalog discovery. Caller-supplied names or UIDs never add entries
+# to this mapping and therefore cannot broaden execution authority.
+_CANONICAL_UID_OVERRIDES = {
+    "check service detail & diagnostic [win] aot ver 12122025-1": (
+        "2b49d490-bcae-4825-b31e-c4f1be881ae5"
+    ),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class DattoApprovedComponent:
@@ -71,6 +82,12 @@ def _normalize_component(
         raise DattoComponentScopeError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
+
+    canonical_override = _CANONICAL_UID_OVERRIDES.get(
+        normalized_name.casefold()
+    )
+    if canonical_override:
+        normalized_uid = canonical_override
 
     if (
         len(normalized_uid) > _MAX_UID_LENGTH
