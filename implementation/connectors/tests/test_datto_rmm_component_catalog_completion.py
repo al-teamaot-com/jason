@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
-from connectors.core.contracts import ConnectorRequest
 from connectors.datto_rmm.automation_reads import DattoRmmAutomationReadConnector
 
 
@@ -51,21 +48,12 @@ def test_component_search_pages_until_declared_total_before_name_filtering(monke
         lambda capability, payload: payload,
     )
 
-    request = ConnectorRequest(
-        context=replace(
-            ConnectorRequest.__dataclass_fields__["context"].default,
-        ) if False else None,
-        arguments={
+    class RequestLike:
+        arguments = {
             "name": "Datto EDR Force Reinstall",
             "page": 1,
             "max": 250,
-        },
-    )
-
-    # _complete_component_collection does not consume request.context; use a
-    # lightweight request-like object so this regression remains focused.
-    class RequestLike:
-        arguments = request.arguments
+        }
 
     completed = connector._complete_component_collection(
         request=RequestLike(),
