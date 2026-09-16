@@ -125,9 +125,15 @@ def test_generic_execution_dispatches_explicit_action(monkeypatch):
 
     captured = {}
 
-    def governed_execute(*, capability_name, arguments):
+    def governed_execute(
+        *,
+        capability_name,
+        arguments,
+        explicit_approval=False,
+    ):
         captured["capability"] = capability_name
         captured["arguments"] = arguments
+        captured["explicit_approval"] = explicit_approval
         return {"status": "succeeded"}
 
     monkeypatch.setattr(
@@ -150,6 +156,7 @@ def test_generic_execution_dispatches_explicit_action(monkeypatch):
 
     assert result["status"] == "succeeded"
     assert captured["capability"] == "service.ticket.note.create"
+    assert captured["explicit_approval"] is False
 
 
 def test_generic_execution_rejects_unexposed_capability(monkeypatch):
@@ -460,8 +467,9 @@ def _set_datto_multi_component_scope(monkeypatch):
     )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
-        '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1"},'
-        '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1"}]',
+        '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-reboot","name":"Scheduled Reboot AOT Ver 12112025-1","approval_mode":"per_run"}]',
     )
 
 

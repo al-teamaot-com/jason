@@ -105,8 +105,8 @@ def enable_multi_component_env(monkeypatch):
     )
     monkeypatch.setenv(
         DATTO_EXECUTION_COMPONENTS_JSON_ENV,
-        '[{"uid":"component-uid-1","name":"Pilot Diagnostic"},'
-        '{"uid":"component-uid-2","name":"Secondary Diagnostic"}]',
+        '[{"uid":"component-uid-1","name":"Pilot Diagnostic","approval_mode":"standing_safe"},'
+        '{"uid":"component-uid-2","name":"Secondary Diagnostic","approval_mode":"per_run"}]',
     )
     monkeypatch.setenv(
         DATTO_EXECUTION_DEVICE_UID_ENV,
@@ -225,6 +225,8 @@ def test_json_component_scope_is_authoritative(monkeypatch):
         "component-uid-1",
         "component-uid-2",
     ]
+    assert pilot.components[0].requires_explicit_approval is False
+    assert pilot.components[1].requires_explicit_approval is True
 
 
 class Secrets:

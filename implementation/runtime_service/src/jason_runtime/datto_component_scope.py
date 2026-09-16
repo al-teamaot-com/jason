@@ -16,6 +16,15 @@ DATTO_EXECUTION_COMPONENT_NAME_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"
 )
 
+DATTO_APPROVAL_MODE_STANDING_SAFE = "standing_safe"
+DATTO_APPROVAL_MODE_PER_RUN = "per_run"
+_VALID_APPROVAL_MODES = frozenset(
+    {
+        DATTO_APPROVAL_MODE_STANDING_SAFE,
+        DATTO_APPROVAL_MODE_PER_RUN,
+    }
+)
+
 _MAX_COMPONENTS = 16
 _MAX_UID_LENGTH = 128
 _MAX_NAME_LENGTH = 255
@@ -34,6 +43,11 @@ _FORBIDDEN_SCOPE_VALUES = frozenset(
 class DattoApprovedComponent:
     uid: str
     name: str
+    approval_mode: str = DATTO_APPROVAL_MODE_PER_RUN
+
+    @property
+    def requires_explicit_approval(self) -> bool:
+        return self.approval_mode == DATTO_APPROVAL_MODE_PER_RUN
 
 
 class DattoComponentScopeError(ValueError):
@@ -44,9 +58,14 @@ def _env(name: str) -> str:
     return os.getenv(name, "").strip()
 
 
-def _normalize_component(uid: object, name: object) -> DattoApprovedComponent:
+def _normalize_component(
+    uid: object,
+    name: object,
+    approval_mode: object = DATTO_APPROVAL_MODE_PER_RUN,
+) -> DattoApprovedComponent:
     normalized_uid = str(uid or "").strip()
     normalized_name = str(name or "").strip()
+    normalized_approval_mode = str(approval_mode or "").strip().casefold()
 
     if not normalized_uid or not normalized_name:
         raise DattoComponentScopeError(
@@ -69,9 +88,15 @@ def _normalize_component(uid: object, name: object) -> DattoApprovedComponent:
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
         )
 
+    if normalized_approval_mode not in _VALID_APPROVAL_MODES:
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID"
+        )
+
     return DattoApprovedComponent(
         uid=normalized_uid,
         name=normalized_name,
+        approval_mode=normalized_approval_mode,
     )
 
 
@@ -110,7 +135,7 @@ def configured_datto_components() -> tuple[DattoApprovedComponent, ...]:
                     "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
                 )
 
-            if set(item) != {"uid", "name"}:
+            if set(item) != {"uid", "name", "approval_mode"}:
                 raise DattoComponentScopeError(
                     "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
                 )
@@ -119,6 +144,7 @@ def configured_datto_components() -> tuple[DattoApprovedComponent, ...]:
                 _normalize_component(
                     item.get("uid"),
                     item.get("name"),
+                    item.get("approval_mode"),
                 )
             )
 

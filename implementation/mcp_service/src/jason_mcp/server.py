@@ -1310,6 +1310,7 @@ def _governed_execute(
     *,
     capability_name: str,
     arguments: Mapping[str, Any],
+    explicit_approval: bool = False,
 ) -> dict[str, Any]:
     """Execute one explicitly MCP-enabled mutation through Jason governance."""
 
@@ -1360,6 +1361,25 @@ def _governed_execute(
             "reason_codes": [str(exc)],
         }
 
+    datto_approval_mode: str | None = None
+
+    if capability_name == "automation.component.execute":
+        try:
+            selected_component = resolve_datto_component(
+                configured_datto_components(),
+                component_uid=canonical_arguments.get("component_uid"),
+                component_name=canonical_arguments.get("component_name"),
+            )
+        except ValueError as exc:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": "invalid_action_arguments",
+                "reason_codes": [str(exc)],
+            }
+
+        datto_approval_mode = selected_component.approval_mode
+
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
 
@@ -1379,15 +1399,44 @@ def _governed_execute(
     approval_present = False
 
     if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
-        imperative_approval = (
-            str(
-                metadata.get(
-                    "conversation_authenticated_imperative_is_approval",
-                    "",
-                )
-            ).casefold()
-            == "true"
-        )
+        approval_decided_by = principal
+
+        if capability_name == "automation.component.execute":
+            if datto_approval_mode == "standing_safe":
+                imperative_approval = True
+                approval_decided_by = "policy:datto-standing-safe"
+            elif datto_approval_mode == "per_run":
+                imperative_approval = explicit_approval is True
+
+                if not imperative_approval:
+                    return {
+                        "status": "approval_required",
+                        "capability": capability_name,
+                        "reason_codes": [
+                            "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED",
+                            *list(decision.reason_codes),
+                        ],
+                        "correlation_id": correlation_id,
+                    }
+            else:
+                return {
+                    "status": "denied",
+                    "capability": capability_name,
+                    "reason_codes": [
+                        "DATTO_COMPONENT_APPROVAL_MODE_INVALID",
+                    ],
+                    "correlation_id": correlation_id,
+                }
+        else:
+            imperative_approval = (
+                str(
+                    metadata.get(
+                        "conversation_authenticated_imperative_is_approval",
+                        "",
+                    )
+                ).casefold()
+                == "true"
+            )
 
         if not imperative_approval:
             return {
@@ -1430,7 +1479,7 @@ def _governed_execute(
                 client_id=client_id,
                 requested_by=principal,
                 status="approved",
-                decided_by=principal,
+                decided_by=approval_decided_by,
                 decided_at=now,
                 expires_at=now + timedelta(minutes=5),
             )
@@ -1590,8 +1639,13 @@ def jason_mcp_status() -> dict[str, object]:
         "write_tools_enabled": write_enabled,
         "write_capabilities": actions,
         "write_authority": (
-            "jason_exact_grant_plus_per_execution_approval"
+            "jason_exact_grant_plus_server_governed_approval_policy"
             if write_enabled
+            else None
+        ),
+        "datto_component_approval_policy": (
+            "server_classified_standing_safe_or_per_run"
+            if "automation.component.execute" in actions
             else None
         ),
     }
@@ -2223,6 +2277,7 @@ def execute_read_capability(
 def execute_governed_capability(
     capability: str,
     arguments: dict[str, Any],
+    explicit_approval: bool = False,
 ) -> dict[str, Any]:
     """Execute one active governed Jason capability.
 
@@ -2230,7 +2285,10 @@ def execute_governed_capability(
     ACTIVE in the live capability registry and explicitly MCP-action-enabled.
     Microsoft Entra authenticates the caller; Jason authority, approval policy,
     Central Orchestrator routing, provider isolation, attempt limits and audit
-    remain authoritative.
+    remain authoritative. For server-classified Datto per_run components,
+    explicit_approval must be true only after the authenticated technician has
+    explicitly approved that exact execution. standing_safe classification is
+    server-controlled and never accepted from action arguments.
     """
 
     capability_name = str(capability).strip()
@@ -2268,6 +2326,7 @@ def execute_governed_capability(
     return _governed_execute(
         capability_name=capability_name,
         arguments=dict(arguments or {}),
+        explicit_approval=(explicit_approval is True),
     )
 
 

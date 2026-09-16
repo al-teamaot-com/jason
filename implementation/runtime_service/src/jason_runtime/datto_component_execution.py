@@ -303,7 +303,10 @@ def _capability_definition(
             "mcp_action_enabled": "true",
             "mcp_tool_name": "execute_governed_capability",
             "conversation_authenticated_imperative_is_approval": (
-                "true"
+                "false"
+            ),
+            "component_approval_policy": (
+                "server_classified_standing_safe_or_per_run"
             ),
             "pilot_scope": "aot_owner_exact_component_exact_endpoint",
             "provider_native_execution_identity_required": "true",
@@ -682,7 +685,9 @@ class DattoRmmComponentExecutionConnector:
                     # The production pilot deliberately permits no
                     # conversation-supplied component variables.
                     variable_policies=(),
-                    requires_per_run_approval=True,
+                    requires_per_run_approval=(
+                        selected_component.requires_explicit_approval
+                    ),
                     status="active",
                 ),
             )

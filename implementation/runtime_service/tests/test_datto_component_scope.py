@@ -19,51 +19,43 @@ def clear_component_env(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
-def test_legacy_single_component_fallback(monkeypatch):
+def test_legacy_single_component_fallback_is_conservative_per_run(monkeypatch):
     clear_component_env(monkeypatch)
-    monkeypatch.setenv(
-        DATTO_EXECUTION_COMPONENT_UID_ENV,
-        "component-1",
-    )
-    monkeypatch.setenv(
-        DATTO_EXECUTION_COMPONENT_NAME_ENV,
-        "Diagnostic One",
-    )
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_UID_ENV, "component-1")
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_NAME_ENV, "Diagnostic One")
 
     components = configured_datto_components()
 
     assert len(components) == 1
     assert components[0].uid == "component-1"
     assert components[0].name == "Diagnostic One"
+    assert components[0].approval_mode == "per_run"
+    assert components[0].requires_explicit_approval is True
 
 
-def test_json_scope_is_authoritative_and_exact(monkeypatch):
+def test_json_scope_is_authoritative_and_server_classified(monkeypatch):
     clear_component_env(monkeypatch)
-    monkeypatch.setenv(
-        DATTO_EXECUTION_COMPONENT_UID_ENV,
-        "legacy-component",
-    )
-    monkeypatch.setenv(
-        DATTO_EXECUTION_COMPONENT_NAME_ENV,
-        "Legacy Diagnostic",
-    )
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_UID_ENV, "legacy-component")
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_NAME_ENV, "Legacy Diagnostic")
     monkeypatch.setenv(
         DATTO_EXECUTION_COMPONENTS_JSON_ENV,
-        '[{"uid":"component-1","name":"Diagnostic One"},'
-        '{"uid":"component-2","name":"Diagnostic Two"}]',
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+        '{"uid":"component-2","name":"Diagnostic Two","approval_mode":"per_run"}]',
     )
 
     components = configured_datto_components()
 
-    assert [item.uid for item in components] == [
-        "component-1",
-        "component-2",
-    ]
-    assert resolve_datto_component(
+    assert [item.uid for item in components] == ["component-1", "component-2"]
+    assert components[0].approval_mode == "standing_safe"
+    assert components[0].requires_explicit_approval is False
+
+    selected = resolve_datto_component(
         components,
         component_uid="component-2",
         component_name="Diagnostic Two",
-    ).uid == "component-2"
+    )
+    assert selected.approval_mode == "per_run"
+    assert selected.requires_explicit_approval is True
 
 
 @pytest.mark.parametrize(
@@ -72,31 +64,36 @@ def test_json_scope_is_authoritative_and_exact(monkeypatch):
         ("not-json", "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"),
         ("[]", "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"),
         (
-            '[{"uid":"*","name":"Diagnostic"}]',
+            '[{"uid":"component-1","name":"Diagnostic"}]',
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
         ),
         (
-            '[{"uid":"component-1","name":"Diagnostic","extra":true}]',
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"unknown"}]',
+            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID",
+        ),
+        (
+            '[{"uid":"*","name":"Diagnostic","approval_mode":"standing_safe"}]',
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
         ),
         (
-            '[{"uid":"component-1","name":"Diagnostic One"},'
-            '{"uid":"component-1","name":"Diagnostic Two"}]',
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe","extra":true}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
+        ),
+        (
+            '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+            '{"uid":"component-1","name":"Diagnostic Two","approval_mode":"per_run"}]',
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS",
         ),
         (
-            '[{"uid":"component-1","name":"Diagnostic"},'
-            '{"uid":"component-2","name":"diagnostic"}]',
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe"},'
+            '{"uid":"component-2","name":"diagnostic","approval_mode":"per_run"}]',
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS",
         ),
     ],
 )
 def test_invalid_scope_fails_closed(monkeypatch, payload, reason):
     clear_component_env(monkeypatch)
-    monkeypatch.setenv(
-        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
-        payload,
-    )
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENTS_JSON_ENV, payload)
 
     with pytest.raises(DattoComponentScopeError) as exc:
         configured_datto_components()
@@ -108,8 +105,8 @@ def test_crossed_uid_name_pair_fails_closed(monkeypatch):
     clear_component_env(monkeypatch)
     monkeypatch.setenv(
         DATTO_EXECUTION_COMPONENTS_JSON_ENV,
-        '[{"uid":"component-1","name":"Diagnostic One"},'
-        '{"uid":"component-2","name":"Diagnostic Two"}]',
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+        '{"uid":"component-2","name":"Diagnostic Two","approval_mode":"per_run"}]',
     )
 
     components = configured_datto_components()
