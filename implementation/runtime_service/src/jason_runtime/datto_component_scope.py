@@ -15,6 +15,9 @@ DATTO_EXECUTION_COMPONENT_UID_ENV = (
 DATTO_EXECUTION_COMPONENT_NAME_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"
 )
+DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV = (
+    "JASON_DATTO_COMPONENT_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN"
+)
 
 DATTO_APPROVAL_MODE_STANDING_SAFE = "standing_safe"
 DATTO_APPROVAL_MODE_PER_RUN = "per_run"
@@ -42,7 +45,7 @@ _FORBIDDEN_SCOPE_VALUES = frozenset(
 # narrow. They repair stale server configuration only for a component whose
 # current Datto UID has already been independently verified through complete
 # governed catalog discovery. Caller-supplied names or UIDs never add entries
-# to this mapping and therefore cannot broaden execution authority.
+# to this mapping and therefore cannot broaden standing-safe authority.
 _CANONICAL_UID_OVERRIDES = {
     "check service detail & diagnostic [win] aot ver 12122025-1": (
         "2b49d490-bcae-4825-b31e-c4f1be881ae5"
@@ -67,6 +70,12 @@ class DattoComponentScopeError(ValueError):
 
 def _env(name: str) -> str:
     return os.getenv(name, "").strip()
+
+
+def _unclassified_per_run_enabled() -> bool:
+    return _env(
+        DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV
+    ).casefold() in {"1", "true", "yes", "on"}
 
 
 def _normalize_component(
@@ -118,11 +127,16 @@ def _normalize_component(
 
 
 def configured_datto_components() -> tuple[DattoApprovedComponent, ...]:
-    """Return the exact server-controlled component identities.
+    """Return the exact server-controlled standing-safe/per-run identities.
 
     The JSON form is authoritative when present. Legacy scalar UID/name
     variables remain supported as a one-component fallback so existing
     deployments fail closed rather than requiring an in-place migration.
+
+    When the separate unclassified-per-run switch is enabled, components not
+    present in this tuple may be accepted only as per-run identities after the
+    caller supplies both durable Datto UID and display name. That fallback can
+    never create standing-safe authority or override a configured identity.
     """
 
     raw_json = _env(DATTO_EXECUTION_COMPONENTS_JSON_ENV)
@@ -192,7 +206,14 @@ def resolve_datto_component(
     component_uid: object = None,
     component_name: object = None,
 ) -> DattoApprovedComponent:
-    """Resolve exactly one approved UID/name pair and fail closed otherwise."""
+    """Resolve one component identity without allowing caller risk upgrades.
+
+    Configured identities retain their exact server-side approval mode. When
+    explicitly enabled, a UID/name pair that matches no configured identity may
+    fall back to ``per_run``. The fallback is intentionally impossible for a
+    partial collision with configured UID or name, preventing a caller from
+    altering or downgrading a standing-safe identity.
+    """
 
     uid = str(component_uid or "").strip()
     name = str(component_name or "").strip()
@@ -211,6 +232,30 @@ def resolve_datto_component(
 
     if len(matches) == 1:
         return matches[0]
+
+    uid_collision = bool(uid) and any(
+        item.uid == uid for item in components
+    )
+    name_collision = bool(name) and any(
+        item.name.casefold() == name.casefold()
+        for item in components
+    )
+
+    if uid_collision or name_collision:
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_IDENTITY_MISMATCH"
+        )
+
+    if (
+        uid
+        and name
+        and _unclassified_per_run_enabled()
+    ):
+        return _normalize_component(
+            uid,
+            name,
+            DATTO_APPROVAL_MODE_PER_RUN,
+        )
 
     if name and not uid:
         raise DattoComponentScopeError(
