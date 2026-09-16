@@ -1,367 +1,235 @@
-# Runbook — ChatGPT Business + Jason MCP Pilot
+# Runbook — ChatGPT Business + Jason MCP Governed Operations
 
-**Status:** Active operational runbook for ChatGPT/Jason governed reads and governed-action pilot  
+**Status:** Active operational runbook  
 **Updated:** 2026-09-16  
 **Owner:** Platform Owner  
 **Governing decision:** `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`  
-**Current checkpoint:** `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
+**Current state:** `docs/control/CURRENT.md`  
+**Final Datto proof:** `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
 
 ## Purpose
 
-Provide the controlled sequence for building, deploying, verifying, operating, and rolling back Jason as a ChatGPT Business MCP/custom app without disrupting the existing Teams/OpenClaw production baseline or bypassing Jason governance.
+Operate Jason through ChatGPT Business without bypassing Jason identity, authority, policy, approvals, Central Orchestrator execution, provider containment, evidence, or audit.
 
-This runbook supports both governed reads and separately authorized governed actions. It does not grant capability, provider, disclosure, business, or production-change authority by itself. Required Jason grants, provider authority, and per-execution approvals remain separate.
+This runbook does not itself grant provider or business authority.
 
-## Durable operating principle
+## Durable principle
 
 > **ChatGPT reasons. Jason governs and executes.**
 
-The ChatGPT app/MCP surface is an interface to Jason governance. It is not a direct provider client, secret broker, or alternate execution authority.
+The ChatGPT app/MCP surface is an interface to Jason governance. It is not a direct provider client, secret broker, or alternate source of authority.
 
-## Preconditions
+## Current production boundary
 
-Before pilot publication, production replacement, or action-surface expansion:
+The bounded live governed-action deployment proven on 2026-09-16 uses:
 
-- current Git branch and exact source commit identified from GitHub;
-- current System Registry and fresh host/runtime state reviewed when relevant;
-- existing Teams/Jason production baseline captured;
-- MCP service implementation passes deterministic tests and required CI for the changed surface;
-- MCP service has a defined System Registry entity/lifecycle record where required;
-- supported ChatGPT Business MCP/custom app connection method verified;
-- caller identity design approved and working;
-- active capability allowlist/grants approved;
-- provider credentials available only through existing Jason secret boundaries;
-- rollback/disable procedure and known-good image/container identified;
-- any action/write capability is separately authorized, bounded, and approval-gated;
-- direct provider access remains disabled.
+- MCP container: `jason-mcp-pilot`;
+- deployed code source: `8f1e864947a2e6e79bf47d3de14daacde7d73144`;
+- image: `jason-mcp:generic-governed-8f1e864947a2`;
+- image ID: `sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a`;
+- mode: `governed-read-plus-actions`;
+- execution coordinator: Central Orchestrator;
+- `direct_provider_access=false`;
+- active action capabilities: `automation.component.execute`, `service.ticket.note.create`, `service.ticket.update`;
+- action authority: `jason_exact_grant_plus_per_execution_approval`.
 
-## Current production deployment boundary
+Repository documentation commits may be newer than the deployed code source. Always distinguish current Git HEAD from the exact deployed image/code source.
 
-Current topology is volatile operational state and must be re-derived before a consequential production change.
+## Pre-change rules
 
-The authoritative bounded state for the current governed-action pilot is recorded in `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
+Before a consequential MCP or provider-facing change:
 
-At that checkpoint:
+1. identify the exact current live image/container and rollback asset;
+2. identify the exact intended Git source commit;
+3. use a clean isolated worktree;
+4. validate the changed source/test boundary;
+5. preserve provider credential isolation;
+6. preserve `direct_provider_access=false`;
+7. preserve Central Orchestrator as the execution coordinator;
+8. preserve exact grants and required per-execution approval for actions;
+9. do not change unrelated services merely because MCP changed;
+10. do not print or copy secret material into evidence/output.
 
-- live MCP service: `jason-mcp-pilot`;
-- last observed deployed MCP image: `jason-mcp:generic-governed-289bdfe957ed`;
-- deployed source: `289bdfe957ed6644f6ca25d70f0d558d54478cd3`;
-- live mode: `governed-read-plus-actions`;
-- Central Orchestrator execution: enabled;
-- direct provider access: disabled;
-- active write/action capabilities reported by MCP:
-  - `automation.component.execute`;
-  - `service.ticket.note.create`;
-  - `service.ticket.update`;
-- write authority: `jason_exact_grant_plus_per_execution_approval`.
+## MCP deployment sequence
 
-Current Git may be ahead of deployed runtime. A later source commit must not be described as deployed merely because it is the branch head.
+For an approved MCP-only source promotion:
 
-The runtime and MCP remain separate deployment units. A source change limited to `implementation/mcp_service` must not trigger a `jason-runtime` rebuild unless the change explicitly requires it.
+1. **Observe** current MCP image/container, public binding, action surface, governance status, and rollback asset.
+2. **Pin** the exact approved Git source commit.
+3. **Build** a candidate from the authoritative `infrastructure/jason-mcp/Dockerfile` using a positively established base image.
+4. **Validate** the changed contract/tests before touching the live container.
+5. **Preserve rollback** by retaining the current image and timestamped container.
+6. **Reconstruct launch** from current non-secret Docker metadata; do not guess mounts/network/port/user/restart policy.
+7. **Start candidate** without restarting unrelated runtime/OpenBao/provider services.
+8. **Verify health/auth/transport** and the delivered ChatGPT tool surface.
+9. **Verify governance**: Central Orchestrator, `direct_provider_access=false`, exact write/action profile.
+10. **Run a harmless governed read** as post-deployment smoke proof.
+11. **Do not run a provider mutation merely as a generic smoke test.** A mutation requires its own exact authority and approval.
+12. **Record** source SHA, image ID, rollback identity, health/governance proof, and any separately approved live action evidence.
 
-## Source and worktree rules
+## MCP rollback
 
-Production MCP builds must come from a clean isolated checkout/worktree pinned to the exact approved GitHub source commit.
+If candidate acceptance fails:
 
-Never deploy from a protected or dirty worktree merely because it is convenient. Do not reset, clean, stash, switch, or otherwise disturb unrelated work to make it deployable.
+1. remove/stop only the failed candidate as needed;
+2. restore the exact preserved MCP rollback container/image;
+3. verify public health/auth/transport;
+4. verify the expected authorized tool surface;
+5. verify Central Orchestrator and `direct_provider_access=false`;
+6. run one harmless governed read;
+7. record rollback evidence.
 
-Before building:
+Do not destroy provider credentials or roll back unrelated services unless separate evidence shows those components were changed.
 
-1. fetch the authoritative branch head from GitHub;
-2. verify the intended source commit exists on that branch;
-3. distinguish source-only/documentation-only commits from the exact approved deployment source;
-4. verify the exact code-change boundary;
-5. verify relevant CI/tests for the source commit;
-6. create/use a clean isolated checkout pinned to the approved commit;
-7. run deterministic validation appropriate to the change;
-8. record the source SHA used for the image build.
+## Capability discovery
 
-Documentation-only commits made after an approved source commit do not silently expand the approved production source scope.
+Discovery/registration is not execution authority.
 
-## MCP image build rule
+A read/action may proceed only when the capability is active and currently exposed, the authenticated requester has the required Jason authority, client/tenant scope matches, provider authority independently permits the operation, and any required approval is valid for the exact request.
 
-The authoritative Docker build definition is `infrastructure/jason-mcp/Dockerfile`.
+`discover_capabilities.operation` is exact registry metadata, not a natural-language synonym. An exact object lookup may legitimately be supported through a `search` capability.
 
-That Dockerfile requires a `BASE_IMAGE` build argument. Do not invent a base image. Derive the proven base-image input from accepted build/deployment evidence or fresh non-secret host evidence.
+## Governed action sequence
 
-Tag candidate images so the source commit is traceable. Preserve the exact resulting image ID in deployment evidence.
+For any bounded action:
 
-Do not bake provider credentials, OAuth client secrets, OpenBao tokens, RoleIDs/SecretIDs, or other secret values into the image or build arguments.
+1. perform the smallest governed pre-read needed to establish target/state;
+2. resolve exact target identifiers through Jason rather than accepting ambiguous model inference;
+3. confirm the action capability is active;
+4. confirm requester exact grant/role eligibility;
+5. obtain the required approval for the exact action/target/arguments;
+6. execute only through the governed action surface;
+7. respect provider attempt limits and do not retry through broader credentials;
+8. capture bounded action result and correlation ID;
+9. perform governed readback/job verification;
+10. record durable proof without secrets.
 
-## MCP production replacement sequence
+A ChatGPT confirmation prompt does not replace Jason authority. General approval for one action does not authorize a different target, component, argument, or disruptive side effect.
 
-This sequence governs an approved MCP-only source promotion:
+## User-disruptive actions
 
-1. **Observe:** verify current `jason-mcp-pilot` state, image ID/tag, public health behavior, delivered tool surface, MCP self-reported capability state, and governance status.
-2. **Pin:** verify the exact approved GitHub source commit and required CI result.
-3. **Isolate:** use a clean isolated checkout/worktree at that source SHA.
-4. **Build:** build a new MCP candidate from the authoritative Dockerfile using the positively established base image; do not mutate the running container.
-5. **Preserve rollback:** retain the exact current image and preserve/rename the current container as a timestamped rollback artifact before replacement.
-6. **Reconstruct launch safely:** reproduce required network, port publishing, mounts, identity/authentication inputs, and non-secret configuration from accepted deployment evidence/current Docker metadata. Never print full environment arrays or secret contents.
-7. **Start candidate:** create/start the candidate using the accepted MCP deployment boundary. Do not restart unrelated services merely because MCP changed.
-8. **Bounded health:** verify health/public route within a bounded timeout.
-9. **Transport/authentication:** verify anonymous access rejection, supported Host/Origin behavior, OAuth metadata, and Entra authentication.
-10. **Surface:** verify the model-facing tool surface matches the explicitly authorized profile. For the governed-action pilot, the backend may include the generic governed execution tool; do not infer client delivery solely from backend registration.
-11. **Governance:** verify `governed_execution=central-orchestrator`, `direct_provider_access=false`, and action/write state equals the approved profile.
-12. **Read smoke proof:** run the smallest harmless governed read needed to prove the changed behavior.
-13. **Action smoke proof:** do **not** use a provider mutation as a generic deployment smoke test. Run an action only when the specific action has separate authority/approval and the pilot requires it.
-14. **Parity:** verify running image ID equals candidate image ID and preserve source SHA → image ID → live container relationship.
-15. **Record:** update the applicable session/proof record, `CURRENT.md`, and System Registry lifecycle/verification records when required.
+Jason must not autonomously perform user-disruptive operations such as reboot/shutdown, forced logoff, terminating user applications/processes, disconnecting network/VPN, or restarting services that interrupt active work.
 
-## MCP rollback sequence
+Such operations require explicit technician approval for the exact disruptive action. When impact is uncertain, treat the action as disruptive and require approval.
 
-Rollback success is more than seeing a process start.
+## Autotask accepted state
 
-If a candidate fails acceptance:
+The bounded controlled proof used XYZ Test Company ticket `T20191013.0001` and changed priority `3` → `2` through `service.ticket.update`. A later governed read independently confirmed `priority=2`.
 
-1. stop/remove only the failed MCP candidate as needed;
-2. restore the preserved known-good MCP container/image using the exact pre-change image identity and deployment inputs;
-3. verify expected MCP container is running;
-4. verify public health/route behavior;
-5. verify OAuth/authentication and hostile Host/Origin protections;
-6. verify the expected authorized tool surface;
-7. verify Central Orchestrator-only governed execution and `direct_provider_access=false`;
-8. verify write/action state equals the intended rollback profile;
-9. run one harmless governed read;
-10. record rollback image/container identity and proof result.
+Do not repeat that mutation merely to prove the path again. This proof does not grant arbitrary Autotask CRUD.
 
-Do not destroy provider credentials, modify provider security levels, or roll back unrelated services merely to undo an MCP-only code deployment unless independent evidence shows those components were also changed.
+## Datto RMM accepted state
 
-## Capability discovery behavior
+Controlled endpoint:
 
-`discover_capabilities.operation` is an exact registry metadata filter, not a synonym for conversational verbs such as “read,” “get,” or “show.” A resource may legitimately support an exact lookup through a `search` operation rather than an active `read` operation.
+- `AOT-50282`;
+- device UID `69571572-83f7-1e33-9cdf-01717d4e74a4`.
 
-Discovery guidance does not activate a capability, bypass runtime capability gating, or grant execution/release authority.
+Controlled diagnostic component:
 
-For actions, the same principle applies: discovery/registration is not execution authority. The capability must be active, the requester must hold the exact Jason grant, any required approval must match the exact request digest/scope, and provider authority must independently permit the operation.
+- `Get-DNS Settings AOT Ver 06042025-1`;
+- component UID `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
+- allowlist `AOT governed diagnostic pilot`.
 
-## Phase A — Preserve existing baseline
+The historical first execution attempt was rejected with HTTP 403. The dedicated execution identity was later corrected without falling back to the read identity or broadening arbitrary execution authority.
 
-Capture before changing production exposure:
+The final explicitly approved production proof created exactly one Datto quick job on one provider attempt. Immediate readback returned:
 
-- `jason-runtime` service health/state;
-- `jason-teams-gateway` state and host port ownership;
-- OpenClaw state and currently justified functions;
-- current System Registry declared/observed/verified status;
-- current MCP source/image/container identifiers;
-- current rollback MCP image/container;
-- current MCP self-reported capability/action state;
-- current ChatGPT-delivered Jason tool catalog;
-- relevant Teams/MCP smoke proof.
+- result `status=accepted`;
+- `job_status=active`;
+- `readback_verified=true`;
+- `completion_verified=false`;
+- durable `job_uid=422d680b-a5ce-4473-b8e8-5d682ec85682`.
 
-Do not remove or reconfigure Teams/OpenClaw merely to update the MCP path.
+Read-only `automation.job.read` later returned terminal status `completed` for that exact job.
 
-## Phase B — Local MCP proof
+## Critical Datto asynchronous-job rule
 
-Verify locally before ChatGPT publication:
+Datto quick jobs are asynchronous. An approved execution returning:
 
-1. service starts cleanly;
-2. no secret values are emitted;
-3. health/readiness succeeds;
-4. only approved tools enumerate;
-5. tool names/descriptions are capability/resource oriented;
-6. each tool maps internally to a governed Jason capability;
-7. Central Orchestrator is the only provider execution coordinator;
-8. direct connector/provider invocation from MCP is impossible by contract/test;
-9. unsupported/unauthorized requests fail closed;
-10. evidence/provenance/audit are recorded;
-11. deterministic complete-data analysis works for large collections;
-12. service disable/restart/rollback is proven;
-13. action tools cannot execute without the required exact grant/approval chain;
-14. failed provider authorization does not fall back to a broader identity.
+- `status=accepted`;
+- `job_status=active`;
+- `readback_verified=true`;
+- `completion_verified=false`;
+- a durable `job_uid`
 
-## Phase C — Identity proof
+is **not a failed execution**. It means Datto accepted the job and Jason verified its durable identity/readback while the provider job was still running.
 
-Using the actual supported ChatGPT Business custom app/MCP identity mechanism:
+When this occurs:
 
-- prove caller identity is available and trustworthy enough for the chosen design;
-- map caller to Jason principal;
-- prove expected AOT user access;
-- prove unknown/unmapped user rejection;
-- prove organization/client scope;
-- prove action authority is not inferred from app access;
-- record bounded evidence of the identity mapping behavior.
+1. do **not** execute the component again;
+2. use the returned `job_uid` with read-only `automation.job.read`;
+3. poll only as needed until a terminal state is observed;
+4. treat terminal `completed`/success as completion proof;
+5. treat terminal failure/cancel/error as provider execution failure;
+6. preserve action and final-read correlation IDs.
 
-Stop if the current Business/MCP platform cannot provide an identity mechanism adequate for Jason governance.
+The component execution itself remains max one provider mutation/attempt unless a new execution is separately approved.
 
-## Phase D — Limited ChatGPT Business publication
+## Datto scope rule
 
-Publish only to the smallest practical AOT pilot scope supported by workspace/app controls.
+The current proof is bounded to the configured pilot scope. It does not authorize:
 
-The initial foundation was read-only. The current governed-action pilot may expose the generic governed execution action only when:
+- arbitrary Datto components;
+- arbitrary endpoint selection;
+- arbitrary shell/script text;
+- unapproved variables;
+- reboot or other disruptive action;
+- automatic expansion of Device Visibility/API Component Level;
+- credential fallback to a broader identity.
 
-- backend capability is explicitly active;
-- client/app permission mode permits delivery of the action while still prompting before changes as intended;
-- Jason exact-grant and per-execution approval remain mandatory;
-- provider-specific credential separation remains intact;
-- direct provider access remains disabled.
+Expand scope only through a separate capability/allowlist/authority decision.
 
-ChatGPT app permission is an additional client-side gate. It must never be treated as Jason authorization.
+## Production observability
 
-## Phase E — Governed-action acceptance
+Grafana/Prometheus monitoring is repository-provisioned under `infrastructure/showcase`.
 
-For a bounded action pilot:
+The focused `Jason Governed Actions` dashboard uses secret-safe local metrics for MCP health, deployment contract, credential mounts, bounded Datto execution configuration, rollback state, and alerts. Monitoring does not call Datto or other providers directly and does not grant action authority.
 
-1. choose a controlled resource and reversible/low-risk operation;
-2. obtain fresh governed pre-read evidence;
-3. record the exact current value/state that will be changed or the exact component/target pair;
-4. confirm the capability is active in Jason;
-5. confirm requester exact grant;
-6. obtain the required per-execution approval bound to the exact request;
-7. execute only through `execute_governed_capability` / the approved generic governed-action path;
-8. make exactly the approved provider attempt(s); do not broaden or retry through alternate credentials when authority fails;
-9. require provider result classification;
-10. require governed post-action readback/job verification;
-11. preserve correlation/audit evidence;
-12. update the bounded proof record and `CURRENT.md`.
+A monitoring-only refresh should use:
 
-A client confirmation prompt does not replace Jason per-execution approval. A user statement of general intent does not authorize a different target, capability, or argument digest.
+```bash
+JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_production_health_dashboard.sh
+```
 
-## Current provider-specific acceptance state
-
-### Autotask
-
-Controlled test company: **XYZ Test Company**.
-
-Controlled ticket: `T20191013.0001`.
-
-The bounded `service.ticket.update` pilot successfully changed priority `3` → `2`, and a later independent governed read confirmed `priority=2`.
-
-Do not repeat that mutation merely to prove the path again. Use the existing accepted evidence unless a new test is independently justified and approved.
-
-### Datto RMM
-
-Controlled endpoint: `AOT-50282`.
-
-Controlled diagnostic component: `Get-DNS Settings AOT Ver 06042025-1`.
-
-The first bounded `automation.component.execute` attempt reached Datto but received HTTP 403 and created no job. Treat this as provider authorization failure, not execution success.
-
-Correct the dedicated execution identity's minimum quick-job authority while preserving bounded Device Visibility and API Component Level. Do not broaden `datto_rmm.readonly` or add unrelated Global Settings/read permissions merely for observability.
-
-The retry requires separate approval and governed job/readback verification.
-
-## Pilot test matrix
-
-### Natural conversation
-
-- arbitrary wording for existing governed reads;
-- pronoun/follow-up questions in the same ChatGPT session;
-- question refinement without Jason-specific syntax;
-- comparisons and summaries across multiple reads;
-- explicit user confirmation behavior for a governed action.
-
-### Provider behavior
-
-- endpoint lookup;
-- endpoint audit/inventory;
-- alert lookup;
-- complete account/site collection question;
-- exact count using deterministic Jason analysis;
-- incomplete/provider-error case;
-- provider-authorized action success case;
-- provider authorization denial with no credential fallback;
-- post-action readback/job verification.
-
-### Cross-provider behavior
-
-- read from provider A;
-- use result/context to request provider B evidence;
-- synthesize answer in ChatGPT;
-- confirm Jason did not require a bespoke workflow for that wording.
-
-### Security/governance
-
-- unknown identity;
-- unauthorized capability;
-- missing exact action grant;
-- missing/expired/mismatched approval;
-- invalid client scope;
-- cross-client attempt;
-- retired/unavailable capability;
-- secret-like field request;
-- provider timeout/rate limit;
-- provider 403/authorization failure;
-- attempt to alter approved action arguments after approval;
-- attempt to bypass Jason through a direct provider path.
-
-### Cost
-
-For ordinary ChatGPT-originated tool use:
-
-- record Jason-side hosted-model calls;
-- target: zero additional conversational/reasoning calls for deterministic provider reads/actions;
-- identify any unavoidable Jason-side model dependency;
-- attribute its cost separately.
-
-## Acceptance criteria
-
-Pilot/promotion may advance only if:
-
-- ChatGPT technician experience is materially fluid enough for operational use;
-- Jason identity/authority boundaries remain intact;
-- no provider credential is exposed;
-- client isolation is proven;
-- Central Orchestrator remains sole execution coordinator;
-- exact collection questions work when source evidence is complete;
-- provenance/audit is available for each tool execution;
-- no question-specific handler is required;
-- duplicate Jason-side model use is absent by default;
-- latency is acceptable for technician use;
-- rollback/disable is proven;
-- action capabilities execute only under exact grant + required per-execution approval;
-- provider authorization failure fails closed without broader identity fallback;
-- post-action verification proves the resulting durable state/job result.
-
-## Stop conditions
-
-Stop promotion or expansion if any of the following occur:
-
-- caller identity cannot be established reliably;
-- cross-client/tenant scope can be manipulated by the model;
-- provider credentials or sensitive secrets reach ChatGPT;
-- MCP can bypass Central Orchestrator;
-- actions become reachable without exact Jason grant/approval design;
-- audit/provenance cannot correlate tool execution;
-- tool execution becomes dependent on question-specific workflow code;
-- ChatGPT Business workspace/app controls are insufficient for the approved risk posture;
-- current deployment inputs cannot be reconstructed without guessing;
-- the exact rollback image/container cannot be identified;
-- a proposed provider/security change exceeds explicitly approved least-privilege scope;
-- provider failure causes an automatic retry through a broader credential;
-- post-action state cannot be verified.
+The deployment script is rollback-protected and must verify core Jason container identity isolation.
 
 ## Evidence to preserve
 
-For each MCP deployment/pilot milestone preserve without secrets:
+For each governed deployment/action milestone preserve, without secrets:
 
 - repository source commit;
-- image tag and image ID;
-- prior/rollback image and container identity;
-- System Registry lifecycle/verification record when applicable;
-- service/public health verification result;
-- backend MCP capability/status snapshot;
-- client-delivered tool enumeration snapshot;
-- identity-binding proof;
-- representative governed read/provenance;
-- action request scope and approval evidence reference;
-- provider outcome and correlation/audit reference;
-- post-action readback/job verification;
-- failed-closed tests;
-- cost/usage summary where relevant;
-- ChatGPT pilot findings;
-- rollback proof where tested.
+- deployed image tag and image ID;
+- rollback image/container identity;
+- MCP status/governance snapshot;
+- client-delivered tool surface when relevant;
+- exact action target/scope;
+- approval evidence reference;
+- action correlation ID;
+- provider attempt count/classification;
+- durable job/resource reference when needed for readback;
+- final governed readback correlation/result;
+- relevant tests/acceptance output;
+- documentation/Grafana reconciliation state.
 
-## Production promotion
+## System Registry
 
-Do not call a new ChatGPT/Jason MCP source revision accepted in production until:
+Narrative proof must not be treated as System Registry lifecycle promotion. Update structured registry truth only through its authoritative governed registration/verification path. If no write path is exposed, leave registry state unchanged and document the gap rather than inventing state.
 
-- the exact source and image identity are recorded;
-- the service is represented in System Registry as required;
-- declared/observed/verified state agrees for the relevant boundary;
-- identity/authority/security proof passes;
-- the authorized read/action profile passes acceptance;
-- any live action pilot has independent approval and post-action verification;
-- current rollback is preserved and verified;
-- runbook/rollback information is current;
-- documentation distinguishes intended state, observed state, verified state, and historical proof.
+## Stop conditions
+
+Stop expansion or promotion if:
+
+- authenticated identity/scope cannot be established;
+- direct provider access becomes possible from ChatGPT;
+- provider credentials or secrets reach ChatGPT;
+- MCP bypasses Central Orchestrator;
+- action capability becomes reachable without exact grant/required approval;
+- provider failure retries through a broader identity;
+- post-action durable state/job result cannot be verified;
+- rollback identity cannot be established;
+- proposed provider permission change exceeds the approved least-privilege scope.
+
+## Current acceptance conclusion
+
+The bounded ChatGPT → Jason MCP → Central Orchestrator → Autotask/Datto governed-action path is operationally proven for the accepted pilots. Future provider/action expansion is a new governed change, not a continuation of the completed proof.
