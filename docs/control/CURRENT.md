@@ -49,7 +49,9 @@ Durable principle:
 
 A ChatGPT tool request is a request for governed execution, not authority.
 
-## Current production checkpoint
+## Production/runtime boundary
+
+### Current production checkpoint
 
 The authoritative bounded checkpoint is `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
 
