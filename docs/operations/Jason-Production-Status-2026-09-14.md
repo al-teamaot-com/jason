@@ -1,5 +1,7 @@
 # Jason Production Status — 2026-09-14
 
+> **Historical snapshot — superseded for current-state use on 2026-09-16.** This record accurately preserves the production state reached on 2026-09-14, but its statements that MCP is read-only and write tools are disabled are no longer current. The current governed-action checkpoint is `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`, and the canonical resume point is `docs/control/CURRENT.md`. Do not use this dated record to infer the live write/action surface without fresh runtime evidence.
+
 ## Purpose
 
 This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, production-health monitoring deployment, accepted-level rollback checkpoint, and the governed Datto site-pagination correction completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
