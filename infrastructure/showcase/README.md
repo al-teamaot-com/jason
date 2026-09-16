@@ -1,128 +1,102 @@
 # Jason Command Center Showcase
 
-SHOWCASE-001 makes Project Jason visibly observable without changing runtime authority. The observability stack now covers host health, production runtime/MCP/OpenBao contract health, roadmap state, OpenClaw authority operations, model/API usage, and authenticated-user attribution.
-
-## Components
-
-- Grafana provides the human-visible dashboards.
-- Prometheus stores showcase, host, production-health, usage, and attribution metrics and evaluates local alert rules.
-- Node Exporter reports Linux host CPU, memory, filesystem, and related metrics.
-- `status_exporter.py` exposes Jason-specific roadmap and legacy component-readiness metrics.
-- `production_health_exporter.py` exposes secret-safe production runtime/MCP/OpenBao/host contract metrics on TCP 9467.
-- `usage_exporter.py` exposes read-only model-cost, token, governed-request, and authenticated-user metrics from Jason's durable SQLite telemetry stores.
-- `usage_attribution_exporter.py` exposes authenticated-user/capability attribution metrics.
-- The machine-readable roadmap is stored in `07-Roadmap/Jason-Roadmap-Status.json`.
-- Ollama provides the loopback-only local model runtime used by governed local-AI capabilities.
+Project Jason's observability stack provides human-visible operational status without changing runtime authority. Grafana is provisioned from repository JSON under `infrastructure/showcase/grafana/dashboards`; Prometheus stores and evaluates secret-safe metrics; exporters read only local Jason/host state.
 
 ## Security boundary
 
-- OpenBao remains on its existing deployment and is not reconfigured by this stack.
-- Prometheus is bound to loopback only.
-- Grafana is bound to TCP 3000 so the internal administrator can view the dashboards from the LAN.
-- Grafana self-registration and analytics reporting are disabled.
-- The Grafana administrator password is generated locally into `.env`; it is not committed to Git.
-- Ollama is bound to loopback only.
-- The status exporter is observational only. It reads roadmap state, Docker container state, local TCP readiness, and local model readiness.
-- The production-health exporter is observational only. It reads Docker metadata, the unauthenticated OpenBao health endpoint, root mount state, failed-systemd state, and current-boot kernel error signatures. It never reads credential contents and never calls external providers.
-- The usage exporter opens durable Jason telemetry databases in SQLite read-only/query-only mode. Missing sources fail closed and are reported unavailable rather than being created.
-- Usage telemetry may export stable Jason identity IDs and Jason-owned display metadata needed for attribution; identity metadata is never used as an authority key.
-- Prompts, model responses, OAuth/JWT tokens, API keys, provider credentials, OpenBao shares/AppRole values, and raw provider evidence are not exported to Prometheus or Grafana.
-- Dashboard status never grants capability authority. Execution remains subject to normal Jason identity, authority, Central Orchestrator, provider authorization, information-release, policy, and audit boundaries.
-- Production provider canaries are deliberately not implemented as direct API calls from monitoring. Future canaries must execute through Jason's governed read path and export only safe pass/fail/latency metadata.
+- Grafana and Prometheus are observational only. Dashboard state never grants Jason or provider authority.
+- Monitoring does not call Autotask, Datto RMM, IT Glue, or other production providers directly.
+- Provider credentials, OAuth/JWT material, OpenBao AppRole values, prompts/responses, and raw provider evidence are not exported.
+- `direct_provider_access=false`, Jason identity/authority, Central Orchestrator routing, exact grants, provider authorization, approval policy, and audit remain authoritative independently of monitoring state.
 
-## Install
+## Production-health deployment
 
-From a clean repository worktree on the Jason host:
-
-```bash
-chmod +x infrastructure/showcase/install_showcase.sh
-JASON_REPO_ROOT="$PWD" infrastructure/showcase/install_showcase.sh
-```
-
-`JASON_REPO_ROOT` allows the showcase to be deployed from an isolated worktree without modifying another checked-out Jason worktree. The full install script installs and verifies all exporters, refreshes Prometheus/Grafana provisioning, and prints the Grafana URL and generated local administrator credential.
-
-For a production-health-only refresh that must not restart or recreate Jason runtime, Jason MCP, OpenBao, Ollama, or node-exporter, use the rollback-protected deployment:
+For a monitoring-only refresh from a clean repository worktree:
 
 ```bash
 chmod +x infrastructure/showcase/deploy_production_health_dashboard.sh
 JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_production_health_dashboard.sh
 ```
 
-That deployment validates source/configuration first, installs only `jason-production-health-exporter.service`, refreshes only Prometheus and Grafana, verifies the Prometheus target/rules and Grafana dashboard, checks core container IDs for isolation, and rolls monitoring changes back if acceptance fails.
+The deployment is rollback-protected. It validates source/configuration, installs only `jason-production-health-exporter.service`, refreshes only Prometheus and Grafana, verifies the Prometheus target/rules and Grafana provisioning, and confirms that Jason runtime, Jason MCP, OpenBao, Ollama, and node-exporter container identities did not change.
 
-## Dashboards
+The script can safely recover the existing Grafana compose credential from the already-running Grafana container when the original mode-600 `.env` file is unavailable; secret values are not printed.
 
-### Jason Command Center
+## Current production MCP monitoring contract
 
-The provisioned `Jason Command Center` dashboard shows:
+The 2026-09-16 accepted governed-action production boundary is monitored against:
 
-- Jason host availability;
-- CPU use;
-- memory use;
-- root filesystem use;
-- roadmap completion percentage and milestone table;
-- OpenBao, OpenClaw Gateway, and local-LLM readiness;
-- historical Autotask/CAP-003 readiness context;
-- near-live model/API cost for today and month-to-date;
-- rolling model attempts and token volume;
-- cost by provider/model;
-- unknown model-usage attempts and telemetry-source health;
-- governed request volume;
-- distinct active Jason identities; and
-- request/capability attribution by authenticated identity.
+- MCP image `jason-mcp:generic-governed-8f1e864947a2`;
+- deployed code source `8f1e864947a2e6e79bf47d3de14daacde7d73144`;
+- provider-read profile `itglue-autotask-entra-governed-catalog-v4`;
+- Autotask requester mode `jason_managed`;
+- network `jason-core`;
+- port binding `10.87.246.157:8765 -> 8000/tcp`;
+- restart policy `no`;
+- exact Datto governed-execution profile `owner-diagnostic-v1`;
+- exact controlled Datto allowlist/component/device/class scope used for the production proof;
+- required read-only OpenBao credential mounts, including bounded Autotask write and Datto execution identities.
+
+The source-revision contract accepts the exact runtime source environment value when current, and also accepts the commit-encoded current image tag. This prevents a preserved historical `JASON_SOURCE_REVISION` environment value from falsely overriding the stronger immutable deployed image identity.
+
+## Exporters
+
+### Production health exporter
+
+`production_health_exporter.py` exposes secret-safe metrics on TCP 9467, including:
+
+- runtime/MCP/OpenBao health;
+- current MCP image/source/profile/network/port/restart/requester-mode contract checks;
+- Datto bounded execution profile/scope checks;
+- required credential mount contract;
+- `jason_datto_governed_execution_contract`, a configuration-readiness gauge for the exact bounded Datto pilot;
+- environment duplicate counts;
+- kernel/systemd/root-filesystem health;
+- preserved MCP rollback availability.
+
+`jason_datto_governed_execution_contract=1` means the current MCP deployment matches the approved bounded configuration and required credential mounts. It is not a provider canary and does not mean a new execution is authorized.
+
+### Other exporters
+
+- `status_exporter.py` provides roadmap/legacy component-readiness and OpenClaw authority metrics.
+- `usage_exporter.py` provides read-only model usage/cost and governed-request metrics from durable telemetry.
+- `usage_attribution_exporter.py` provides authenticated-identity/capability attribution metrics.
+
+## Grafana dashboards
+
+### Jason Governed Actions
+
+`jason-governed-actions.json` is the focused operational view for the current governed-action boundary. It shows:
+
+- MCP availability;
+- full production MCP contract state;
+- credential mount contract;
+- bounded Datto governed-execution contract;
+- rollback availability;
+- firing alerts;
+- individual MCP contract checks; and
+- the dated 2026-09-16 bounded production proof context.
+
+The proof panel records that `Get-DNS Settings AOT Ver 06042025-1` on `AOT-50282` was accepted as one provider mutation/one attempt after explicit approval and was later verified `completed` through read-only `automation.job.read`. It intentionally does not treat that historical proof as authority for another execution.
 
 ### Jason Production Health
 
-The `Jason Production Health` dashboard is the current operational view for the production v4 service boundary. It shows:
+`jason-production-health.json` remains the broader host/runtime/MCP/OpenBao health dashboard. Its `MCP Contract` stat automatically includes the new Datto execution profile/scope checks because they are part of `jason_mcp_contract`.
 
-- `jason-runtime` running/healthy state;
-- `jason-mcp-pilot` running state;
-- OpenBao initialized/unsealed readiness;
-- current-boot kernel/storage corruption-signature count;
-- failed systemd unit count;
-- root filesystem read/write state and capacity;
-- accepted MCP image/source/profile/network/port/restart/requester-mode contract;
-- duplicate watched MCP environment-entry count;
-- required read-only credential mount contract;
-- preserved pre-v4 rollback availability;
-- currently firing Prometheus alerts; and
-- host CPU/memory trend.
+### Jason Command Center
 
-The accepted 2026-09-14 production MCP contract is image `jason-mcp:autotask-entra-67da8d80ca97-repaired`, source revision `67da8d80ca9703505d651e9e0935f5bd1aa7c651`, provider profile `itglue-autotask-entra-governed-catalog-v4`, network `jason-core`, port binding `10.87.246.157:8765 -> 8000/tcp`, restart policy `no`, and temporary Autotask requester mode `jason_managed`. These expected values are monitoring expectations only; they do not grant authority.
-
-The v4 cutover currently has a known warning: duplicate Docker environment entries for source revision/profile/requester-mode were inherited from the old env file and then explicitly overridden. Live runtime composition and live provider reads prove the effective profile is v4, but the duplicate count remains visible until a controlled MCP recreation removes the ambiguity.
+`jason-command-center.json` remains the broad host, roadmap, component, cost/usage, and attribution view.
 
 ## Alerts
 
-Prometheus evaluates `prometheus/alerts/jason-production.yml`. Current rules cover:
+Prometheus rules under `prometheus/alerts/jason-production.yml` remain fail-closed for runtime, MCP, OpenBao, deployment-contract, secret-mount, host-kernel/systemd/filesystem, rollback, and disk-capacity problems. Because the Datto profile/scope checks are part of `jason_mcp_contract`, drift is included in the existing `JasonMCPContractDrift` rule.
 
-- production-health exporter missing/down;
-- runtime unhealthy;
-- MCP down;
-- OpenBao not ready;
-- MCP deployment contract drift;
-- duplicate watched MCP environment values;
-- credential mount contract drift;
-- current-boot kernel/storage corruption signatures or unavailable kernel monitoring;
-- failed systemd units or unavailable systemd monitoring;
-- root filesystem not writable or state unavailable;
-- missing pre-v4 rollback container; and
-- root disk use above warning/critical thresholds.
+Prometheus/Grafana rule evaluation does not itself send Teams/email/pages. External notification routing is a separate operational decision.
 
-Prometheus/Grafana rule evaluation does not itself send Teams/email/pages. External notification routing is a separate operational change and should be added deliberately.
+## Current evidence
 
-## API usage and cost notes
+Current production state: `docs/control/CURRENT.md`.
 
-The cost panels use the effective cost already recorded in Jason's append-only Model Usage Ledger. A provider-reported cost is preferred when present; otherwise the ledger's calculated cost is used. OpenAI token counts are provider-reported, but calculated dollar cost depends on configured model pricing; provider billing reconciliation can later be added without changing the dashboard contract.
+Final bounded Datto proof: `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`.
 
-## Local LLM
-
-SHOWCASE-002 deployed CPU-only Ollama with `qwen3:1.7b` on the Jason host. Local inference remains a governed pilot rather than a high-throughput production service. CAP-003 projects only bounded business-relevant Autotask fields into the model context rather than sending entire raw provider objects.
-
-## Operational source of truth
-
-Current production state and open gaps are recorded in `docs/operations/Jason-Production-Status-2026-09-14.md`.
-
-The monitoring contract and severity guidance are recorded in `docs/operations/Jason-Production-Monitoring-Baseline.md`.
-
-Human-relevant output, foreign-key enrichment, and capability-aware answer behavior are recorded in `docs/architecture/Jason-User-Relevant-Output-and-Capability-Awareness.md`.
+Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
