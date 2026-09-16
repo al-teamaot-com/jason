@@ -52,5 +52,6 @@ def test_read_foundation_does_not_advertise_execution() -> None:
     assert capabilities == {
         "automation.component.search",
         "automation.job.read",
+        "automation.job.output.read",
     }
     assert "automation.component.execute" not in capabilities
