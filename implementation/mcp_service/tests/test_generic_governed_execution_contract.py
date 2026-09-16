@@ -425,6 +425,10 @@ def test_unknown_action_result_fails_closed():
 
 
 def _set_datto_action_scope(monkeypatch):
+    monkeypatch.delenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
+        raising=False,
+    )
     values = {
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME":
             "AOT governed diagnostic pilot",
@@ -439,6 +443,26 @@ def _set_datto_action_scope(monkeypatch):
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+
+
+def _set_datto_multi_component_scope(monkeypatch):
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
+        "AOT governed diagnostic pilot",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
+        "device-123",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
+        "Desktop",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
+        '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1"},'
+        '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1"}]',
+    )
 
 
 def test_datto_action_canonicalizes_server_controlled_scope(
@@ -458,6 +482,8 @@ def test_datto_action_canonicalizes_server_controlled_scope(
         "allowlist_name": "AOT governed diagnostic pilot",
         "device_uid": "device-123",
         "device_class": "Desktop",
+        "component_uid": "component-456",
+        "component_name": "Get-DNS Settings AOT Ver 06042025-1",
         "variables": {},
     }
 
@@ -480,9 +506,72 @@ def test_datto_action_accepts_resource_id_and_matching_component_hints(
 
     assert result["device_uid"] == "device-123"
     assert result["device_class"] == "Desktop"
+    assert result["component_uid"] == "component-456"
+    assert result["component_name"] == (
+        "Get-DNS Settings AOT Ver 06042025-1"
+    )
     assert result["variables"] == {}
-    assert "component_uid" not in result
-    assert "component_name" not in result
+
+
+def test_datto_action_accepts_second_exact_allowlisted_component(
+    monkeypatch,
+):
+    _set_datto_multi_component_scope(monkeypatch)
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "resource_id": "device-123",
+            "component_uid": "component-789",
+            "component_name":
+                "Check Datto EDR/AV Status AOT Ver 12122025-1",
+        },
+    )
+
+    assert result["component_uid"] == "component-789"
+    assert result["component_name"] == (
+        "Check Datto EDR/AV Status AOT Ver 12122025-1"
+    )
+
+
+def test_datto_action_rejects_crossed_component_identity_pair(
+    monkeypatch,
+):
+    _set_datto_multi_component_scope(monkeypatch)
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+                "component_uid": "component-789",
+                "component_name":
+                    "Get-DNS Settings AOT Ver 06042025-1",
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+    else:
+        raise AssertionError("crossed component identity must fail closed")
+
+
+def test_datto_action_rejects_unknown_component_in_multi_scope(
+    monkeypatch,
+):
+    _set_datto_multi_component_scope(monkeypatch)
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+                "component_uid": "component-unknown",
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+    else:
+        raise AssertionError("unknown component must fail closed")
 
 
 def test_datto_action_rejects_different_target(monkeypatch):
@@ -516,7 +605,6 @@ def test_datto_action_rejects_different_component(monkeypatch):
         raise AssertionError("component mismatch must fail closed")
 
 
-
 def test_datto_action_requires_component_identity(monkeypatch):
     _set_datto_action_scope(monkeypatch)
 
@@ -533,6 +621,7 @@ def test_datto_action_requires_component_identity(monkeypatch):
         raise AssertionError(
             "missing component identity must fail closed"
         )
+
 
 def test_non_datto_action_arguments_are_unchanged():
     original = {"payload": {"ticketID": 123}}
