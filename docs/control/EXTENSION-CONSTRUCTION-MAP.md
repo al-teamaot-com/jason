@@ -30,7 +30,7 @@ Working code alone is not completion.
 | Semantic capability gap / provider documentation discovery | `docs/engineering/capabilities/Resource-Inquiry-Evidence-Pattern.md` | Bounded semantic intent planning, capability-gap assessment, registered-provider discovery, governed documentation source registry, OpenAPI source adapter/interpreter, semantic-evidence and corroborating-evidence reviewers | Fail closed when registered capabilities cannot support requested facts; inspect only governed registered providers and approved authoritative documentation sources; documentation findings are candidate evidence only; textual similarity never establishes semantic proof; semantic mappings require separately governed proposal/approval before registry activation; no provider execution or credential access during documentation discovery |
 | Agent / reasoning component | `docs/architecture/J-100-Reference-Architecture.md` plus `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` | Existing bounded reasoning/resource-inquiry implementations and tests are exemplars, not authority | Agent may interpret/reason and return structured results or request named capabilities; no direct agent-to-agent, provider, secret-store, or business-authority path; bounded context; deterministic authority/provider/fact resolution remains outside model discretion; auditable failure behavior |
 | Governance / policy gate | `docs/architecture/J-102-Governed-Approval-Architecture.md` and `docs/components/kernel/JKD-004-Execution-Policy-Engine.md` | Existing authority/policy/approval gates and tests | Explicit trigger and inputs; allowed outcomes; fail-closed semantics; authority distinction; evidence/audit; escalation/approval behavior; no hidden policy inside connector/agent/workflow code; deterministic tests |
-| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md`, `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`, and transport-specific ADRs such as `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md` | Current ordinary Teams exemplar: `infrastructure/jason-teams-gateway/` plus signed Jason runtime ingress. Historical/outbound Teams exemplar: `infrastructure/openclaw-jason-bridge/`. Runtime enforcement: `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py` | Establish trusted machine/user identity; preserve correlation; guarantee one exclusive owner for a Jason-bound inbound turn before any independent model loop; construct governed orchestration request; no provider bypass; deterministic rejection/failure/clarification classification; governed return path; security audit; transport remains replaceable; bounded/non-authoritative processing feedback; exact authenticated transport-message idempotency at governed ingress; System Registry registration/verification; production rollback and exclusive-ingress proof |
+| Ingress / interface adapter | `docs/architecture/J-100-Reference-Architecture.md`, `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`, `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`, and transport-specific ADRs such as `docs/decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md` | ChatGPT/Jason MCP exemplar: `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md` plus `implementation/mcp_service/`. Current ordinary Teams exemplar: `infrastructure/jason-teams-gateway/` plus signed Jason runtime ingress. Historical/outbound Teams exemplar: `infrastructure/openclaw-jason-bridge/`. Runtime enforcement: `implementation/connectors/openclaw/src/jason_openclaw/conversation_ingress.py` | Establish trusted machine/user identity; preserve correlation; guarantee one exclusive owner for a Jason-bound inbound turn before any independent model loop; construct governed orchestration request; no provider bypass; distinguish backend capability/tool registration from actual client-delivered tool surface; consequential actions require exact Jason authority and approval; deterministic rejection/failure/clarification classification; governed return path; security audit; transport remains replaceable; bounded/non-authoritative processing feedback; exact authenticated transport-message idempotency where applicable; System Registry registration/verification; production rollback and exclusive-ingress proof |
 | Identity / authority component | `docs/components/kernel/JKD-001-Identity-and-Authority-Service.md` | JKD-001 runtime foundation, grant/delegation tooling and tests | Identity before authority; narrow capability/scope grants; explicit delegation semantics; auditable mutation; fail closed on ambiguity/missing authority; no authority inferred from technical access |
 | Secret / credential integration | `docs/components/kernel/JKD-003-Secrets-Broker.md` and `docs/operations/Provider-Secret-Provisioning.md` | OpenBao provider lifecycle tooling and secret-provider records | Secret references only; no secret values in docs/System Registry/audit; least privilege; runtime access verification; rotation/revocation/recovery; provider-specific credentials remain behind broker/provider boundary |
 | Internal service / runtime component | `docs/architecture/J-100-Reference-Architecture.md`, relevant JKD/INF record, and deployment architecture | `jason-runtime`, `jason-teams-gateway`, OpenBao, OpenClaw deployment/runbook patterns; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`; `docs/operations/Runbook-Teams-Integration.md` | Defined responsibility and dependency boundary; service identity; network/secret mounts by reference; health verification; hardened runtime controls; rollback; System Registry declared/observed/verified state; derive deployment topology/inputs from authoritative live state rather than assumption |
@@ -54,6 +54,8 @@ Before implementation approval, verify:
 - User-facing processing feedback is not treated as authorization, evidence, completion, or reasoning output.
 - No exact retry of an authenticated transport activity may initiate duplicate governed work when a stable authenticated message/activity identity exists; do not substitute text-similarity heuristics for transport identity.
 - A Jason-owned inbound turn must not enter an independent interface/model trajectory before Jason's governed ingress has exclusive ownership.
+- Backend action registration must not be confused with client delivery or requester authorization.
+- Provider authorization failure must not trigger retry through a broader credential.
 
 ## Universal extension Definition of Done
 
@@ -338,3 +340,27 @@ Historical proof:
 
 `docs/sessions/Governed-Semantic-Capability-Discovery-Proof-2026-08-13.md`
 <!-- END SEMANTIC CAPABILITY DISCOVERY FOUNDATION -->
+
+## 2026-09-16 ChatGPT/Jason governed-action construction refinement
+
+The generic governed-action workstream established several reusable interface rules that must not be rediscovered:
+
+1. **Backend registration is not client delivery.** A tool may exist in source, enumerate from MCP, and be present in the configured ChatGPT app while still being withheld from a session by client/app permission policy or stale catalog state. Acceptance must inspect the actual tool catalog delivered to the live session.
+2. **Client confirmation is not Jason approval.** ChatGPT app permission/confirmation is an additional user-facing gate only. Consequential actions still require Jason identity, exact capability grant, scope, policy, and any required exact per-execution approval.
+3. **Use one generic action entry point.** Prefer `execute_governed_capability` over proliferating provider-specific model-facing write tools. The selected capability still resolves through Central Orchestrator and provider-specific bounded connectors.
+4. **Provider failure must fail closed.** A provider `401/403` or equivalent authority denial must not retry through a broader read/service credential or trigger silent provider-permission expansion.
+5. **Verify side effects.** Action acceptance requires provider outcome plus governed durable-state/job readback when available.
+6. **Process-cached MCP state must be worker-thread safe.** Synchronous MCP tools may run on worker threads while runtime stores are process-cached. SQLite default thread affinity caused live governed-read failures; affected stores now allow cross-thread connection use. `check_same_thread=False` removes affinity only and is not a complete high-concurrency design.
+7. **Preserve source/runtime distinction.** Documentation/source branch head may advance beyond the deployed image. Current Git state must not be reported as current production without deployment evidence.
+
+Owning construction guide:
+
+`docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
+
+Operational runbook:
+
+`docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+
+Current bounded proof:
+
+`docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
