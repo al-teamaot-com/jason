@@ -15,12 +15,15 @@ from jason_runtime.datto_component_execution import (
     DATTO_EXECUTION_ALLOWLIST_NAME_ENV,
     DATTO_EXECUTION_COMPONENT_NAME_ENV,
     DATTO_EXECUTION_COMPONENT_UID_ENV,
+    DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_EXECUTION_DEVICE_CLASS_ENV,
     DATTO_EXECUTION_DEVICE_UID_ENV,
     DATTO_RMM_COMPONENT_EXECUTION_PROVIDER,
+    DattoApprovedComponent,
     DattoComponentExecutionPilot,
     DattoRmmComponentExecutionConnector,
     DattoRmmComponentExecutionVerificationError,
+    configured_pilot,
     register_datto_component_execution_runtime_foundation,
 )
 from kernel.capabilities import (
@@ -54,6 +57,7 @@ def clear_env(monkeypatch):
         DATTO_EXECUTION_ALLOWLIST_NAME_ENV,
         DATTO_EXECUTION_COMPONENT_UID_ENV,
         DATTO_EXECUTION_COMPONENT_NAME_ENV,
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
         DATTO_EXECUTION_DEVICE_UID_ENV,
         DATTO_EXECUTION_DEVICE_CLASS_ENV,
     ):
@@ -79,6 +83,30 @@ def enable_env(monkeypatch):
     monkeypatch.setenv(
         DATTO_EXECUTION_COMPONENT_NAME_ENV,
         "Pilot Diagnostic",
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_DEVICE_UID_ENV,
+        "device-uid-1",
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_DEVICE_CLASS_ENV,
+        "workstation",
+    )
+
+
+def enable_multi_component_env(monkeypatch):
+    monkeypatch.setenv(
+        DATTO_COMPONENT_EXECUTION_PROFILE_ENV,
+        DATTO_COMPONENT_EXECUTION_PROFILE,
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_ALLOWLIST_NAME_ENV,
+        "pilot-diagnostic",
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-uid-1","name":"Pilot Diagnostic"},'
+        '{"uid":"component-uid-2","name":"Secondary Diagnostic"}]',
     )
     monkeypatch.setenv(
         DATTO_EXECUTION_DEVICE_UID_ENV,
@@ -178,6 +206,27 @@ def test_exact_profile_activates_component_execution(
     )
 
 
+def test_json_component_scope_is_authoritative(monkeypatch):
+    clear_env(monkeypatch)
+    enable_multi_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENT_UID_ENV,
+        "legacy-component",
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENT_NAME_ENV,
+        "Legacy Component",
+    )
+
+    pilot = configured_pilot()
+
+    assert pilot is not None
+    assert [item.uid for item in pilot.components] == [
+        "component-uid-1",
+        "component-uid-2",
+    ]
+
+
 class Secrets:
     def resolve(
         self,
@@ -269,6 +318,8 @@ def execution_request(
         "allowlist_name": "pilot-diagnostic",
         "device_uid": "device-uid-1",
         "device_class": "workstation",
+        "component_uid": "component-uid-1",
+        "component_name": "Pilot Diagnostic",
         "variables": {},
     }
 
@@ -304,8 +355,16 @@ def connector(
         audit=audit,
         pilot=DattoComponentExecutionPilot(
             allowlist_name="pilot-diagnostic",
-            component_uid="component-uid-1",
-            component_name="Pilot Diagnostic",
+            components=(
+                DattoApprovedComponent(
+                    uid="component-uid-1",
+                    name="Pilot Diagnostic",
+                ),
+                DattoApprovedComponent(
+                    uid="component-uid-2",
+                    name="Secondary Diagnostic",
+                ),
+            ),
             device_uid="device-uid-1",
             device_class="workstation",
         ),
@@ -359,6 +418,34 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
         == "component-uid-1"
     )
 
+    assert any(
+        event[0]
+        == "connector.mutation.verified"
+        for event in audit.events
+    )
+
+
+def test_second_allowlisted_component_uses_exact_provider_uid(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector()
+
+    result = value.execute(
+        execution_request(
+            component_uid="component-uid-2",
+            component_name="Secondary Diagnostic",
+        )
+    )
+
+    assert result.data["readback_verified"] is True
+    assert (
+        transport.calls[0]["json"]["jobComponent"][
+            "componentUid"
+        ]
+        == "component-uid-2"
+    )
     assert any(
         event[0]
         == "connector.mutation.verified"
@@ -475,6 +562,13 @@ def test_quickjob_terminal_failure_fails_closed(
         },
         {
             "device_class": "server",
+        },
+        {
+            "component_uid": "unknown-component",
+        },
+        {
+            "component_uid": "component-uid-2",
+            "component_name": "Pilot Diagnostic",
         },
         {
             "variables": {
