@@ -38,6 +38,10 @@ from jason_runtime.autotask_internal_note import (
     autotask_internal_note_mcp_surface_enabled,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from jason_runtime.datto_component_scope import (
+    configured_datto_components,
+    resolve_datto_component,
+)
 
 
 JASON_ENTRA_TENANT_ID = os.environ.get(
@@ -1189,10 +1193,11 @@ def _canonicalize_governed_action_arguments(
     argument shapes. Provider containment must not depend on the model
     remembering internal allowlist/profile fields.
 
-    For the bounded Datto component pilot, Jason supplies its own
-    server-controlled allowlist and device class, while the caller must still
-    identify the exact target. Any caller-supplied target/component metadata
-    must agree with the configured bounded pilot.
+    For bounded Datto component execution, Jason supplies its own
+    server-controlled allowlist, endpoint and device class. The caller must
+    still identify the exact target and component. Component identity is
+    resolved against an exact server-controlled UID/name pair set before the
+    request can enter approval or provider execution.
     """
 
     raw = dict(arguments or {})
@@ -1213,17 +1218,11 @@ def _canonicalize_governed_action_arguments(
             "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
             "",
         ).strip(),
-        "component_uid": os.environ.get(
-            "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID",
-            "",
-        ).strip(),
-        "component_name": os.environ.get(
-            "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME",
-            "",
-        ).strip(),
     }
 
-    if not all(expected.values()):
+    components = configured_datto_components()
+
+    if not all(expected.values()) or not components:
         raise ValueError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
@@ -1280,27 +1279,11 @@ def _canonicalize_governed_action_arguments(
         raw.get("component_name") or ""
     ).strip()
 
-    if not supplied_component_uid and not supplied_component_name:
-        raise ValueError(
-            "DATTO_COMPONENT_IDENTITY_REQUIRED"
-        )
-
-    if (
-        supplied_component_uid
-        and supplied_component_uid != expected["component_uid"]
-    ):
-        raise ValueError(
-            "DATTO_COMPONENT_IDENTITY_MISMATCH"
-        )
-
-    if (
-        supplied_component_name
-        and supplied_component_name.casefold()
-        != expected["component_name"].casefold()
-    ):
-        raise ValueError(
-            "DATTO_COMPONENT_NAME_MISMATCH"
-        )
+    selected_component = resolve_datto_component(
+        components,
+        component_uid=supplied_component_uid,
+        component_name=supplied_component_name,
+    )
 
     variables = raw.get("variables", {})
     if variables is None:
@@ -1311,13 +1294,14 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_VARIABLES_INVALID"
         )
 
-    # Only provider-neutral values required by the runtime are forwarded.
-    # Internal scope values come from the MCP's approved configuration rather
-    # than from conversational model output.
+    # Only exact server-resolved component identity and provider-neutral values
+    # required by the runtime are forwarded. The model cannot widen the set.
     return {
         "allowlist_name": expected["allowlist_name"],
         "device_uid": expected["device_uid"],
         "device_class": expected["device_class"],
+        "component_uid": selected_component.uid,
+        "component_name": selected_component.name,
         "variables": dict(variables),
     }
 
