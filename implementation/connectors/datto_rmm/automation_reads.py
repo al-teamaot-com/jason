@@ -199,135 +199,125 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
         access_token: str,
         token_type: str,
     ) -> Mapping[str, Any]:
-        """Enumerate Datto's full component catalog before local filtering.
+        """Enumerate the complete Datto component catalog before filtering.
 
-        Datto component search has no reliable server-side display-name filter.
-        A first page is therefore not sufficient evidence for zero or unique
-        name resolution. Keep following provider pages until the declared total
-        is satisfied. If the provider omits nextPageUrl, advance the page number
-        using the already accepted page size while still enforcing bounded
-        collection limits.
+        Datto pagination metadata is retained as evidence but is not trusted as
+        proof that the account component catalog is complete. Jason advances
+        sequentially from page zero until the provider returns an empty page.
+
+        A non-empty page containing only previously observed UIDs is treated as
+        a pagination failure rather than as end-of-catalog evidence.
         """
         if not isinstance(initial_data, Mapping):
-            raise ValueError("Datto component search response is not an object")
-
-        components = initial_data.get("components")
-        if not isinstance(components, list):
             raise ValueError(
-                "Datto component search response does not expose a components collection"
+                "Datto component search response is not an object"
             )
-
-        initial_count = len(components)
-        details = initial_data.get("pageDetails")
-        if not isinstance(details, Mapping):
-            # Without provider pagination metadata, a full first page is
-            # ambiguous: there may be additional records we cannot prove absent.
-            if len(components) >= self.maximum_component_page_size:
-                raise ValueError(
-                    "Datto component discovery is incomplete: pagination metadata missing"
-                )
-            return dict(initial_data)
-
-        try:
-            declared_total = int(details.get("totalCount") or 0)
-        except (TypeError, ValueError):
-            declared_total = 0
-
-        if declared_total <= 0:
-            if len(components) >= self.maximum_component_page_size:
-                raise ValueError(
-                    "Datto component discovery is incomplete: totalCount unavailable"
-                )
-            return dict(initial_data)
-
-        if declared_total > 5000:
-            raise ValueError(
-                "Datto component catalog exceeds bounded discovery limit"
-            )
-
-        items = list(components)
-        if len(items) > declared_total:
-            raise ValueError(
-                "Datto component search returned more records than declared total"
-            )
-
-        try:
-            current_page = max(int(request.arguments.get("page", 0)), 0)
-        except (TypeError, ValueError):
-            current_page = 0
 
         requested_max = request.arguments.get(
             "max",
             self.default_component_page_size,
         )
+
         try:
             page_size = max(
                 1,
-                min(int(requested_max), self.maximum_component_page_size),
+                min(
+                    int(requested_max),
+                    self.maximum_component_page_size,
+                ),
             )
         except (TypeError, ValueError):
             page_size = self.default_component_page_size
 
+        try:
+            current_page = max(
+                int(request.arguments.get("page", 0)),
+                0,
+            )
+        except (TypeError, ValueError):
+            current_page = 0
+
+        max_pages = 50
+        max_components = 5000
+
+        items: list[Mapping[str, Any]] = []
         seen_uids: set[str] = set()
-        for record in items:
-            if isinstance(record, Mapping):
-                uid = self._first_scalar(record, "uid")
-                if uid:
-                    seen_uids.add(uid)
+        reported_totals: list[int] = []
 
-        max_pages = 20
-        pages_read = 1
-        next_page = current_page + 1
+        current_data: Any = initial_data
+        pages_read = 0
+        initial_count = 0
 
-        while len(items) < declared_total:
+        while True:
             if pages_read >= max_pages:
                 raise ValueError(
                     "Datto component discovery exceeded bounded page limit"
                 )
 
-            prepared = self._prepare_provider_request(
-                capability="datto_rmm.component.search",
-                arguments={"page": next_page, "max": page_size},
-                credentials=credentials,
-                access_token=access_token,
-                token_type=token_type,
-            )
-            payload = self._execute_prepared_request(
-                request=request,
-                prepared=prepared,
-            )
-            normalized = self._normalize_result(
-                "datto_rmm.component.search",
-                payload,
-            )
-            if not isinstance(normalized, Mapping):
+            if not isinstance(current_data, Mapping):
                 raise ValueError(
                     "Datto component pagination returned a non-object response"
                 )
 
-            page_items = normalized.get("components")
+            page_items = current_data.get("components")
+
             if not isinstance(page_items, list):
                 raise ValueError(
                     "Datto component pagination omitted components collection"
                 )
-            if not page_items:
+
+            if pages_read == 0:
+                initial_count = len(page_items)
+
+            details = current_data.get("pageDetails")
+
+            if details is not None and not isinstance(details, Mapping):
                 raise ValueError(
-                    "Datto component pagination ended before declared total"
+                    "Datto component pagination metadata is not an object"
                 )
 
+            if isinstance(details, Mapping):
+                try:
+                    reported_total = int(
+                        details.get("totalCount") or 0
+                    )
+                except (TypeError, ValueError):
+                    reported_total = 0
+
+                if reported_total > 0:
+                    reported_totals.append(
+                        reported_total
+                    )
+
+            pages_read += 1
+
+            # Empty provider page is the only positive terminal proof used by
+            # the canonical enumerator. totalCount and nextPageUrl are advisory
+            # evidence only.
+            if not page_items:
+                break
+
             added = 0
+
             for record in page_items:
                 if not isinstance(record, Mapping):
                     raise ValueError(
                         "Datto component pagination returned a non-object component record"
                     )
-                uid = self._first_scalar(record, "uid")
+
+                uid = self._first_scalar(
+                    record,
+                    "uid",
+                )
+
                 if not uid:
                     raise ValueError(
                         "Datto component record lacks durable uid"
                     )
+
                 if uid in seen_uids:
                     continue
+
                 seen_uids.add(uid)
                 items.append(record)
                 added += 1
@@ -337,36 +327,72 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                     "Datto component pagination repeated previously returned records"
                 )
 
-            pages_read += 1
-            next_page += 1
-
-            if len(items) > declared_total:
+            if len(items) > max_components:
                 raise ValueError(
-                    "Datto component pagination exceeded declared total"
+                    "Datto component catalog exceeds bounded discovery limit"
                 )
 
-        if len(items) != declared_total:
-            raise ValueError(
-                "Datto component discovery did not satisfy declared total"
+            next_page = current_page + 1
+
+            prepared = self._prepare_provider_request(
+                capability="datto_rmm.component.search",
+                arguments={
+                    "page": next_page,
+                    "max": page_size,
+                },
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
             )
+
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
+
+            current_data = self._normalize_result(
+                "datto_rmm.component.search",
+                payload,
+            )
+
+            current_page = next_page
+
+        provider_reported_total = max(
+            reported_totals,
+            default=0,
+        )
 
         self._record_component_completion(
             request=request,
-            declared_total=declared_total,
+            declared_total=provider_reported_total,
             initial_count=initial_count,
             pages_read=pages_read,
             final_count=len(items),
             page_size=page_size,
         )
 
+        initial_details = initial_data.get(
+            "pageDetails"
+        )
+
+        if not isinstance(
+            initial_details,
+            Mapping,
+        ):
+            initial_details = {}
+
         completed = dict(initial_data)
         completed["components"] = items
         completed["pageDetails"] = {
-            **dict(details),
+            **dict(initial_details),
             "count": len(items),
-            "totalCount": declared_total,
+            "totalCount": len(items),
+            "providerReportedTotalCount": (
+                provider_reported_total
+            ),
             "nextPageUrl": None,
         }
+
         return completed
 
     @classmethod
