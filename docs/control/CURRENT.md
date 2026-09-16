@@ -16,9 +16,8 @@ The production MCP service is `jason-mcp-pilot`.
 
 The currently established live MCP code/image boundary is:
 
-- source commit: `e9c7a76318aa12b150194875726b1ba54bf6d61b`;
-- source message: `Accept bounded JSON arrays from provider reads`;
-- image: `jason-mcp:generic-governed-e9c7a76318aa`;
+- source commit: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
+- image: `jason-mcp:generic-governed-26704f0600bb`;
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -27,7 +26,8 @@ The currently established live MCP code/image boundary is:
 - write tools enabled;
 - active write/action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
 - Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
-- write authority: `jason_exact_grant_plus_per_execution_approval`.
+- write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
+- Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
 Repository documentation/observability commits are newer than the deployed MCP code source. Do not equate branch HEAD with deployed MCP code without fresh runtime evidence.
 
@@ -103,8 +103,11 @@ Do not issue a second provider mutation because the first job is still active. U
 - Datto execution remains bounded to approved component/target policy rather than arbitrary script text;
 - failed authority/provider checks fail closed;
 - provider actions do not retry through a broader credential;
-- exact Jason grants and required per-execution approval remain mandatory;
-- a consumed execution approval must not be reused;
+- exact Jason grants remain mandatory;
+- Datto component approval classification is server-controlled and cannot be supplied or overridden by the caller;
+- `standing_safe` is reserved for explicitly classified non-disruptive diagnostics and does not require a separate per-run technician approval;
+- `per_run` requires explicit technician approval for the exact execution;
+- unknown, missing, or invalid component classification fails closed;
 - user-disruptive actions require explicit technician approval for the exact disruptive action.
 
 ## Grafana / production observability — current release accepted
@@ -113,10 +116,17 @@ The authoritative Grafana/Prometheus source remains repository-provisioned under
 
 The production-health unit now expects the exact live MCP boundary:
 
-- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-e9c7a76318aa`;
-- `JASON_EXPECTED_MCP_SOURCE_REVISION=e9c7a76318aa12b150194875726b1ba54bf6d61b`.
+- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-26704f0600bb`;
+- `JASON_EXPECTED_MCP_SOURCE_REVISION=26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`.
 
-The clean deployment worktree was fast-forwarded to documentation/monitoring head `b2f8b0e740d8e61ee8d3d2e9f84ff13bdbef3752`, then the existing rollback-protected monitoring-only deployment was run.
+The active Datto production scope contains exactly two server-classified `standing_safe` components:
+
+- `Get-DNS Settings AOT Ver 06042025-1` — `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
+- `Check Datto EDR/AV Status AOT Ver 12122025-1` — `8cb0f063-5875-452e-88ad-2e1748ed0fd0`.
+
+No reboot component is included in the production component scope.
+
+The latest rollback-protected monitoring-only deployment used repository head `cefa32e9b14db97fb8c6e703ad467a9eda33c32b` and reconciled production observability to the `26704f...` MCP release.
 
 Acceptance returned:
 
@@ -135,7 +145,11 @@ Acceptance returned:
 - `PROVIDER_ACCESS=NO`;
 - `PROVIDER_WRITES=NO`.
 
-Rollback directory: `/tmp/jason-production-health-rollback-20260916T151911Z`.
+Latest monitoring deployment source: `cefa32e9b14db97fb8c6e703ad467a9eda33c32b`.
+
+Latest monitoring rollback directory: `/tmp/jason-production-health-rollback-20260916T173323Z`.
+
+Production MCP rollback container: `jason-mcp-pilot-rollback-20260916T172806Z`.
 
 Final read-only live metrics returned `1` for:
 
@@ -168,7 +182,7 @@ The requested cross-chat Datto workflow is complete:
 7. terminal completion through governed read-only polling — **proven (`completed`)**;
 8. actual component StdOut through `automation.job.output.read` — **proven**;
 9. bounded JSON-array provider transport — **live-proven**;
-10. `direct_provider_access=false`, Central Orchestrator, exact grants, and per-execution approval — **preserved**;
+10. `direct_provider_access=false`, Central Orchestrator, exact grants, and the then-required fresh per-execution approval — **preserved in the historical proof**;
 11. durable proof/current-state reconciliation — **complete**;
 12. Grafana/Prometheus current-release observability — **live and passing**.
 
@@ -176,8 +190,8 @@ The requested cross-chat Datto workflow is complete:
 
 - Add first-class lifecycle/rotation tooling for the dedicated `datto_rmm.execution` secret identity so future rotation does not require rediscovery.
 - Reconcile System Registry structured truth when an authoritative governed write/verification route exists.
-- Normalize stale MCP source-revision environment metadata during a future controlled MCP recreation only if it remains stale; do not recreate MCP solely for cosmetic cleanup.
 - Expand Datto execution beyond the exact current pilot only through a separate capability/allowlist/authority decision.
+- Establish the exact UID and separately authorize any future disruptive component, such as scheduled reboot, before adding it to production scope.
 - Continue documentation-assurance work after Autotask/Datto/IT Glue governed update surfaces are available as planned.
 
 ## Read first in future sessions

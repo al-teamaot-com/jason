@@ -25,16 +25,16 @@ The ChatGPT app/MCP surface is an interface to Jason governance. It is not a dir
 The bounded live governed-action deployment proven on 2026-09-16 uses:
 
 - MCP container: `jason-mcp-pilot`;
-- deployed code source: `e9c7a76318aa12b150194875726b1ba54bf6d61b`;
-- source message: `Accept bounded JSON arrays from provider reads`;
-- image: `jason-mcp:generic-governed-e9c7a76318aa`;
+- deployed code source: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
+- image: `jason-mcp:generic-governed-26704f0600bb`;
 - mode: `governed-read-plus-actions`;
 - execution coordinator: Central Orchestrator;
 - `direct_provider_access=false`;
 - generic governed execution tool: enabled;
 - active action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
 - Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
-- action authority: `jason_exact_grant_plus_per_execution_approval`.
+- action authority: `jason_exact_grant_plus_server_governed_approval_policy`;
+- Datto approval policy: `server_classified_standing_safe_or_per_run`.
 
 Repository documentation/observability commits may be newer than the deployed MCP code source. Always distinguish Git branch HEAD from the exact deployed image/code source.
 
@@ -49,9 +49,10 @@ Before a consequential MCP or provider-facing change:
 5. preserve provider credential isolation;
 6. preserve `direct_provider_access=false`;
 7. preserve Central Orchestrator as the execution coordinator;
-8. preserve exact grants and required per-execution approval for actions;
-9. do not change unrelated services merely because MCP changed;
-10. do not print or copy secret material into evidence/output.
+8. preserve exact grants and the server-governed approval policy;
+9. preserve fail-closed Datto classification: `standing_safe` only for explicitly classified non-disruptive diagnostics, `per_run` for disruptive/state-changing execution, and explicit approval for `per_run`;
+10. do not change unrelated services merely because MCP changed;
+11. do not print or copy secret material into evidence/output.
 
 ## MCP deployment sequence
 
@@ -108,13 +109,30 @@ For any bounded action:
 10. retrieve bounded provider output only through an active governed read capability when required;
 11. record durable proof without secrets.
 
-A ChatGPT confirmation prompt does not replace Jason authority. General approval for one action does not authorize a different target, component, argument, retry, or disruptive side effect. A consumed per-execution approval must not be reused in a later chat or later execution.
+A ChatGPT confirmation prompt does not replace Jason authority. General approval for one action does not authorize a different target, component, argument, retry, or disruptive side effect. For `per_run` actions, a consumed per-execution approval must not be reused in a later chat or later execution. `standing_safe` Datto diagnostics rely on server classification and task authority rather than a consumable per-run approval.
 
 ## User-disruptive actions
 
 Jason must not autonomously perform user-disruptive operations such as reboot/shutdown, forced logoff, terminating user applications/processes, disconnecting network/VPN, or restarting services that interrupt active work.
 
 Such operations require explicit technician approval for the exact disruptive action. When impact is uncertain, treat the action as disruptive and require approval.
+
+## Datto component approval classification
+
+Datto component approval mode is server-controlled policy, not a caller argument.
+
+- `standing_safe`: an exact, pre-classified, non-disruptive diagnostic component. A technician request to investigate/check/troubleshoot provides task authority; Jason does not require an additional per-run approval prompt.
+- `per_run`: a disruptive or state-changing component. Explicit technician approval is required for that exact execution before orchestration/provider execution.
+- unknown, missing, invalid, or mismatched classification: fail closed.
+
+The caller cannot promote a `per_run` component to `standing_safe`. Exact Jason grant, target scope, component identity, variables, provider identity, Central Orchestrator routing, one-attempt limits, and audit remain authoritative regardless of approval mode.
+
+Current production `standing_safe` Datto components:
+
+- `Get-DNS Settings AOT Ver 06042025-1` — UID `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
+- `Check Datto EDR/AV Status AOT Ver 12122025-1` — UID `8cb0f063-5875-452e-88ad-2e1748ed0fd0`.
+
+No reboot component is currently in production scope.
 
 ## Autotask accepted state
 
@@ -261,4 +279,4 @@ Stop expansion or promotion if:
 
 ## Current acceptance conclusion
 
-The bounded ChatGPT → Jason MCP → Central Orchestrator → Datto workflow is operationally proven across chats for exact target/component resolution, fresh per-execution approval, one-attempt component execution, terminal readback, and actual component StdOut retrieval. Future provider/action expansion is a new governed change, not a continuation of the completed proof.
+The bounded ChatGPT → Jason MCP → Central Orchestrator → Datto workflow is operationally proven across chats for exact target/component resolution, historical fresh per-execution approval, one-attempt component execution, terminal readback, and actual component StdOut retrieval. The current production policy additionally supports server-classified `standing_safe` diagnostics without a separate per-run approval while preserving `per_run` approval for disruptive or state-changing execution. Future provider/action expansion is a new governed change, not a continuation of the completed proof.
