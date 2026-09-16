@@ -1158,14 +1158,20 @@ def _project_action_result(
             ("status", "status"),
             ("job_status", "job_status"),
             ("readback_verified", "readback_verified"),
+            ("completion_verified", "completion_verified"),
             ("allowlist_name", "allowlist_name"),
         ):
             if source in data:
                 result[target] = _safe(data.get(source))
 
-        result["job_reference_present"] = bool(
-            str(data.get("job_uid") or "").strip()
-        )
+        job_uid = str(
+            data.get("job_uid") or ""
+        ).strip()
+
+        if job_uid:
+            result["job_uid"] = _safe(job_uid)
+
+        result["job_reference_present"] = bool(job_uid)
 
         return result
 

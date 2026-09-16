@@ -378,15 +378,16 @@ def test_internal_note_action_result_omits_resource_attribution():
     assert "providerPayload" not in result
 
 
-def test_datto_action_result_omits_raw_job_uid():
+def test_datto_action_result_exposes_governed_job_uid_for_readback():
     result = server._project_action_result(
         "automation.component.execute",
         {
             "data": {
-                "status": "verified",
-                "job_uid": "provider-job-secretish-id",
-                "job_status": "completed",
+                "status": "accepted",
+                "job_uid": "provider-job-123",
+                "job_status": "active",
                 "readback_verified": True,
+                "completion_verified": False,
                 "allowlist_name": "diagnostic",
                 "unexpected": "must-not-escape",
             },
@@ -395,14 +396,15 @@ def test_datto_action_result_omits_raw_job_uid():
 
     assert result == {
         "raw_provider_evidence_exposed": False,
-        "status": "verified",
-        "job_status": "completed",
+        "status": "accepted",
+        "job_status": "active",
         "readback_verified": True,
+        "completion_verified": False,
         "allowlist_name": "diagnostic",
+        "job_uid": "provider-job-123",
         "job_reference_present": True,
     }
 
-    assert "job_uid" not in result
     assert "unexpected" not in result
 
 
