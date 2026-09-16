@@ -32,11 +32,11 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
     def execute(self, request: ConnectorRequest):
         if request.context.capability == "datto_rmm.component.search":
             # Canonical component discovery is complete-collection discovery,
-            # not arbitrary provider-page navigation. Starting after page one
-            # could produce a false zero/unique match, so fail closed.
-            requested_page = int(request.arguments.get("page", 1))
-            if requested_page != 1:
-                raise ValueError("component search must begin at provider page 1")
+            # not arbitrary provider-page navigation. Datto pagination is
+            # zero-based, so canonical discovery must begin at provider page 0.
+            requested_page = int(request.arguments.get("page", 0))
+            if requested_page != 0:
+                raise ValueError("component search must begin at provider page 0")
         return super().execute(request)
 
     @classmethod
@@ -53,7 +53,7 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                 )
             )
             return "/api/v2/account/components", {
-                "page": max(int(arguments.get("page", 1)), 1),
+                "page": max(int(arguments.get("page", 0)), 0),
                 "max": max(
                     1,
                     min(
@@ -181,7 +181,7 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
                 "probes_attempted": max(pages_read - 1, 0),
                 "recovered": True,
                 "accepted_arguments": {
-                    "page": 1,
+                    "page": 0,
                     "max": page_size,
                 },
                 "pages_aggregated": pages_read,
@@ -252,9 +252,9 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
             )
 
         try:
-            current_page = max(int(request.arguments.get("page", 1)), 1)
+            current_page = max(int(request.arguments.get("page", 0)), 0)
         except (TypeError, ValueError):
-            current_page = 1
+            current_page = 0
 
         requested_max = request.arguments.get(
             "max",

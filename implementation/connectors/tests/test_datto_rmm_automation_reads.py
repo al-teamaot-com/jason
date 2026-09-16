@@ -84,7 +84,7 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
                 "prevPageUrl": None,
                 "nextPageUrl": (
                     "https://provider.example/api/v2/account/components"
-                    "?max=2&page=2"
+                    "?max=2&page=1"
                 ),
             },
             "components": [
@@ -120,7 +120,7 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
                 "totalCount": 3,
                 "prevPageUrl": (
                     "https://provider.example/api/v2/account/components"
-                    "?max=2&page=1"
+                    "?max=2&page=0"
                 ),
                 "nextPageUrl": None,
             },
@@ -156,7 +156,7 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
         call["url"].endswith("/api/v2/account/components")
         for call in transport.calls
     )
-    assert [call["params"]["page"] for call in transport.calls] == [1, 2]
+    assert [call["params"]["page"] for call in transport.calls] == [0, 1]
     assert [call["params"]["max"] for call in transport.calls] == [2, 2]
     assert result.data["discovery_complete"] is True
     assert result.data["match_count"] == 2
@@ -192,11 +192,11 @@ def test_component_search_rejects_later_start_page() -> None:
         audit=Audit(),
     )
 
-    with pytest.raises(ValueError, match="must begin at provider page 1"):
+    with pytest.raises(ValueError, match="must begin at provider page 0"):
         connector.execute(
             request(
                 capability="datto_rmm.component.search",
-                arguments={"page": 2},
+                arguments={"page": 1},
             )
         )
 

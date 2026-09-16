@@ -51,7 +51,7 @@ def test_component_search_pages_until_declared_total_before_name_filtering(monke
     class RequestLike:
         arguments = {
             "name": "Datto EDR Force Reinstall",
-            "page": 1,
+            "page": 0,
             "max": 250,
         }
 
@@ -83,7 +83,7 @@ def test_component_search_fails_closed_when_full_page_has_no_pagination_metadata
     }
 
     class RequestLike:
-        arguments = {"page": 1, "max": 250}
+        arguments = {"page": 0, "max": 250}
 
     try:
         connector._complete_component_collection(
