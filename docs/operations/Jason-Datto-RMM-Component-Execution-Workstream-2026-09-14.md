@@ -1,5 +1,7 @@
 # Jason Datto RMM Component Execution Workstream — 2026-09-14
 
+> **Current-state note — 2026-09-16:** This document preserves the Datto execution design and staged-provider-identity work as it existed on 2026-09-14/15. It is no longer the current resume point. Datto governed reads are now working through Jason; `automation.component.execute` is active in the live MCP capability set; and the first bounded provider execution attempt against `AOT-50282` using `Get-DNS Settings AOT Ver 06042025-1` reached Datto but was denied with HTTP 403. Exactly one provider execution attempt was made and no Datto job was created. Current state, the ChatGPT action-surface blocker, and the next safe retry sequence are recorded in `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md` and `docs/control/CURRENT.md`. Nothing in this historical document independently authorizes another execution.
+
 ## Current status
 
 The governed Datto RMM component-execution workstream is active on isolated branch `feature/jason-datto-component-execution-20260914`, based on the accepted production documentation head `13941dfb97abd3f0ed2268ad1daed37fa61e00ec`.
