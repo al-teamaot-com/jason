@@ -208,7 +208,8 @@ deploy() {
   install_unit_from_source || return 1
   MUTATED=1
   sudo systemctl daemon-reload || return 1
-  sudo systemctl enable --now "$UNIT" || return 1
+  sudo systemctl enable "$UNIT" >/dev/null || return 1
+  sudo systemctl restart "$UNIT" || return 1
   wait_http "http://127.0.0.1:9467/metrics" 30 1 || return 1
   curl -fsS http://127.0.0.1:9467/metrics | grep -q '^jason_production_health_exporter_build_info' || return 1
   say "PRODUCTION_HEALTH_EXPORTER=PASS"

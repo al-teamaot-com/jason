@@ -26,7 +26,7 @@ EXPECTED_PROVIDER_PROFILE = os.environ.get(
 )
 EXPECTED_AUTOTASK_MODE = os.environ.get(
     "JASON_EXPECTED_AUTOTASK_REQUESTER_MODE",
-    "jason_managed",
+    "impersonated",
 )
 EXPECTED_DATTO_EXECUTION_PROFILE = os.environ.get(
     "JASON_EXPECTED_DATTO_EXECUTION_PROFILE",
