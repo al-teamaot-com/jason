@@ -16,8 +16,10 @@ on:
       - 'implementation/orchestrator/resource_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_capability_routing_invoker.py'
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
+      - 'implementation/runtime_service/tests/test_datto_component_execution_regression.py'
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
@@ -47,8 +49,10 @@ on:
       - 'implementation/orchestrator/resource_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_capability_routing_invoker.py'
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
+      - 'implementation/runtime_service/tests/test_datto_component_execution_regression.py'
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
       - 'deploy/openbao/scripts/provision-datto-rmm-execution.py'
       - 'deploy/openbao/scripts/recover-datto-rmm-execution-staging.py'
@@ -85,6 +89,7 @@ jobs:
           python -m py_compile implementation/connectors/datto_rmm/mutations.py
           python -m py_compile implementation/orchestrator/capability_routing_invoker.py
           python -m py_compile implementation/orchestrator/resource_capability_catalog.py
+          python -m py_compile implementation/runtime_service/src/jason_runtime/datto_component_scope.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/provider_reads.py
           python -m py_compile deploy/openbao/scripts/provision-datto-rmm-execution.py
           python -m py_compile deploy/openbao/scripts/recover-datto-rmm-execution-staging.py
@@ -107,6 +112,8 @@ jobs:
           python -m pytest implementation/orchestrator/tests/test_capability_routing_invoker.py -q
           python -m pytest implementation/orchestrator/tests/test_resource_capability_catalog.py -q
           python -m pytest implementation/runtime_service/tests/test_datto_automation_runtime.py -q
+          python -m pytest implementation/runtime_service/tests/test_datto_component_scope.py -q
+          python -m pytest implementation/runtime_service/tests/test_datto_component_execution_regression.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_staging.py -q
           python -m pytest deploy/openbao/tests/test_recover_datto_rmm_execution_live_shape.py -q
           python -m pytest deploy/openbao/tests/test_adjust_datto_rmm_execution_token_uses.py -q
