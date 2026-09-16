@@ -95,9 +95,28 @@ The bounded Datto RMM governed execution path is now **live-proven end-to-end** 
 
 This proof does **not** authorize arbitrary Datto RMM execution. Production authority remains bounded by Jason capability activation, exact grants, configured allowlists/targets, separate provider execution identity, and per-execution approval.
 
+## Documentation and observability reconciliation
+
+The final wrap-up reconciled the current operational documentation so the historical HTTP 403 and client-action exposure stages are no longer described as current blockers:
+
+- `docs/control/CURRENT.md` now records the completed governed-action state;
+- `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md` is marked resolved/superseded for current-state use;
+- `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md` now documents the accepted asynchronous Datto job workflow and current bounded action state.
+
+Repository inspection also identified the authoritative observability deployment under `infrastructure/showcase`. The final wrap-up therefore updates the production-health exporter and Grafana provisioning rather than inventing a separate dashboard write path.
+
+The observability update adds:
+
+- current MCP image/source expectations for the deployed governed-action release;
+- secret-safe contract checks for the exact bounded Datto execution profile, allowlist, component, endpoint, and endpoint class;
+- required read-only credential mount checks including the dedicated Datto execution identity;
+- `jason_datto_governed_execution_contract`, a local configuration-readiness metric that does not call Datto and does not grant authority;
+- a provisioned `Jason Governed Actions` Grafana dashboard showing the production contract and dated bounded proof context.
+
+Grafana/Prometheus remain observational only. They do not call production providers directly and cannot authorize a new provider action.
+
 ## Remaining operational follow-ups
 
-- Reconcile `docs/control/CURRENT.md` and the earlier 2026-09-16 checkpoint so they no longer describe Datto HTTP 403 / client action exposure as current blockers.
-- Reconcile structured System Registry state only through the registry's governed verification model; do not manually invent lifecycle promotions.
+- Reconcile structured System Registry state only through the registry's governed verification model; no registry lifecycle state was invented during this wrap-up.
 - Add first-class lifecycle tooling for the dedicated `datto_rmm.execution` secret identity so future credential rotation does not require rediscovery of its paths/policies.
-- Grafana update path was searched in the repository and System Registry during this session and no governed/authoritative write path was found. Do not invent or bypass a dashboard update mechanism; add/update Grafana only when an authoritative path is identified.
+- Expand the Datto execution allowlist/endpoint scope only through a separate governed capability/authority decision; this completed proof is not blanket execution approval.
