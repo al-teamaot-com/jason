@@ -55,6 +55,15 @@ from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
+from .datto_component_scope import (
+    DATTO_EXECUTION_COMPONENT_NAME_ENV,
+    DATTO_EXECUTION_COMPONENT_UID_ENV,
+    DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+    DattoApprovedComponent,
+    configured_datto_components,
+    resolve_datto_component,
+)
+
 
 AUTOMATION_COMPONENT_EXECUTE = "automation.component.execute"
 DATTO_RMM_COMPONENT_EXECUTION_PROVIDER = "datto_rmm_component_execution"
@@ -66,12 +75,6 @@ DATTO_COMPONENT_EXECUTION_PROFILE = "owner-diagnostic-v1"
 
 DATTO_EXECUTION_ALLOWLIST_NAME_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME"
-)
-DATTO_EXECUTION_COMPONENT_UID_ENV = (
-    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID"
-)
-DATTO_EXECUTION_COMPONENT_NAME_ENV = (
-    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"
 )
 DATTO_EXECUTION_DEVICE_UID_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID"
@@ -135,8 +138,7 @@ class DattoRmmComponentExecutionVerificationError(ConnectorError):
 @dataclass(frozen=True, slots=True)
 class DattoComponentExecutionPilot:
     allowlist_name: str
-    component_uid: str
-    component_name: str
+    components: tuple[DattoApprovedComponent, ...]
     device_uid: str
     device_class: str
 
@@ -154,23 +156,35 @@ def _env(name: str) -> str:
 
 
 def configured_pilot() -> DattoComponentExecutionPilot | None:
-    values = {
-        "allowlist_name": _env(DATTO_EXECUTION_ALLOWLIST_NAME_ENV),
-        "component_uid": _env(DATTO_EXECUTION_COMPONENT_UID_ENV),
-        "component_name": _env(DATTO_EXECUTION_COMPONENT_NAME_ENV),
-        "device_uid": _env(DATTO_EXECUTION_DEVICE_UID_ENV),
-        "device_class": _env(DATTO_EXECUTION_DEVICE_CLASS_ENV),
-    }
+    allowlist_name = _env(DATTO_EXECUTION_ALLOWLIST_NAME_ENV)
+    device_uid = _env(DATTO_EXECUTION_DEVICE_UID_ENV)
+    device_class = _env(DATTO_EXECUTION_DEVICE_CLASS_ENV)
+    components = configured_datto_components()
 
-    if not any(values.values()):
+    if (
+        not allowlist_name
+        and not device_uid
+        and not device_class
+        and not components
+    ):
         return None
 
-    if not all(values.values()):
+    if (
+        not allowlist_name
+        or not device_uid
+        or not device_class
+        or not components
+    ):
         raise DattoRmmComponentExecutionActivationError(
             "Datto execution pilot configuration is incomplete"
         )
 
-    return DattoComponentExecutionPilot(**values)
+    return DattoComponentExecutionPilot(
+        allowlist_name=allowlist_name,
+        components=components,
+        device_uid=device_uid,
+        device_class=device_class,
+    )
 
 
 def datto_component_execution_mcp_surface_enabled() -> bool:
@@ -640,6 +654,12 @@ class DattoRmmComponentExecutionConnector:
                 "DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"
             )
 
+        selected_component = resolve_datto_component(
+            pilot.components,
+            component_uid=request.arguments.get("component_uid"),
+            component_name=request.arguments.get("component_name"),
+        )
+
         variables = request.arguments.get(
             "variables",
             {},
@@ -650,16 +670,16 @@ class DattoRmmComponentExecutionConnector:
                 ComponentAllowlistEntry(
                     allowlist_name=pilot.allowlist_name,
                     canonical_component_id=(
-                        f"datto:{pilot.allowlist_name}"
+                        f"datto:{pilot.allowlist_name}:{selected_component.uid}"
                     ),
-                    display_name=pilot.component_name,
-                    provider_component_uid=pilot.component_uid,
+                    display_name=selected_component.name,
+                    provider_component_uid=selected_component.uid,
                     allowed_target_classes=frozenset(
                         {
                             pilot.device_class,
                         }
                     ),
-                    # First production pilot deliberately permits no
+                    # The production pilot deliberately permits no
                     # conversation-supplied component variables.
                     variable_policies=(),
                     requires_per_run_approval=True,
@@ -676,13 +696,13 @@ class DattoRmmComponentExecutionConnector:
             allowlist_name=pilot.allowlist_name,
             device_uid=pilot.device_uid,
             device_class=pilot.device_class,
-            component_uid=pilot.component_uid,
+            component_uid=selected_component.uid,
             variables=variables,
             job_name=str(
                 request.arguments.get("job_name")
-                or f"Jason - {pilot.component_name}"
+                or f"Jason - {selected_component.name}"
             ),
-            observed_component_name=pilot.component_name,
+            observed_component_name=selected_component.name,
         )
 
         credentials = self._secrets.resolve(
