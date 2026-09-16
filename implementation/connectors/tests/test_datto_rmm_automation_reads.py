@@ -326,6 +326,7 @@ def test_automation_read_connector_exposes_no_write_capability() -> None:
         {
             "datto_rmm.component.search",
             "datto_rmm.job.read",
+            "datto_rmm.job.output.read",
         }
     )
     assert all(
