@@ -226,7 +226,7 @@ def _capability_definition(
                 "exact approved endpoint identity",
                 "exact approved component identity",
                 "provider quick-job result",
-                "post-mutation job status verification",
+                "post-mutation job identity and status readback",
             ),
             verification_requirements=(
                 "execution uses the separate Datto execution identity",
@@ -234,7 +234,8 @@ def _capability_definition(
                 "component exactly matches the configured allowlist",
                 "no unapproved component variables are accepted",
                 "exactly one provider mutation request is issued",
-                "job status is read after creation",
+                "job identity and status are read after creation",
+                "terminal completion is verified through automation.job.read when the provider job remains asynchronous",
             ),
         ),
         dependencies=frozenset(
@@ -253,7 +254,7 @@ def _capability_definition(
         failure_behavior=(
             "Fail closed without retry, arbitrary shell execution, "
             "component substitution, target substitution, or "
-            "unverified success."
+            "unverified job identity."
         ),
         tenant_isolation_required=True,
         client_isolation_required=False,
@@ -501,8 +502,8 @@ class DattoRmmComponentExecutionConnector:
         audit: AuditSink,
         pilot: DattoComponentExecutionPilot | None,
         sleeper: Callable[[float], None] = time.sleep,
-        maximum_status_reads: int = 6,
-        status_interval_seconds: float = 2.0,
+        maximum_status_reads: int = 1,
+        status_interval_seconds: float = 0.0,
     ) -> None:
         self._secrets = secrets
         self._transport = transport
@@ -779,6 +780,13 @@ class DattoRmmComponentExecutionConnector:
                         "job read response was not an object"
                     )
 
+                readback_uid = self._job_uid(status_payload)
+
+                if readback_uid != job_uid:
+                    raise DattoRmmComponentExecutionVerificationError(
+                        "job readback uid did not match the created quick job"
+                    )
+
                 status = self._status(
                     status_payload
                 )
@@ -806,6 +814,7 @@ class DattoRmmComponentExecutionConnector:
                             "job_uid": job_uid,
                             "job_status": status,
                             "readback_verified": True,
+                            "completion_verified": True,
                             "allowlist_name": (
                                 pilot.allowlist_name
                             ),
@@ -830,10 +839,35 @@ class DattoRmmComponentExecutionConnector:
                         self._status_interval_seconds
                     )
 
-            raise DattoRmmComponentExecutionVerificationError(
-                "Datto quick job did not reach a terminal state "
-                f"within bounded verification reads; last status "
-                f"was {last_status!r}"
+            self._audit.record(
+                "connector.mutation.accepted",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "capability": request.context.capability,
+                    "job_uid_present": True,
+                    "job_status": str(last_status or "").casefold(),
+                    "completion_verified": False,
+                },
+            )
+
+            return ConnectorResult(
+                capability=request.context.capability,
+                provider=self.provider_name,
+                data={
+                    "status": "accepted",
+                    "job_uid": job_uid,
+                    "job_status": last_status,
+                    "readback_verified": True,
+                    "completion_verified": False,
+                    "allowlist_name": pilot.allowlist_name,
+                },
+                evidence_ids=(
+                    f"datto-rmm:job:{job_uid}",
+                ),
+                warnings=(
+                    "Datto quick job is still asynchronous; verify terminal completion with automation.job.read.",
+                ),
             )
 
         except Exception as error:
