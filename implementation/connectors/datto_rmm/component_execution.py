@@ -112,8 +112,38 @@ class DattoRmmComponentExecutionPolicy:
     future activation step behind EXECUTE authority and a dedicated credential.
     """
 
+    _SERVICE_DETAIL_DIAGNOSTIC_NAME = (
+        "Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1"
+    )
+
     def __init__(self, *, allowlist: ComponentAllowlistResolver) -> None:
         self._allowlist = allowlist
+
+    @classmethod
+    def _effective_variable_policies(
+        cls,
+        entry: ComponentAllowlistEntry,
+    ) -> tuple[ComponentVariablePolicy, ...]:
+        if entry.variable_policies:
+            return entry.variable_policies
+
+        # This is a source-controlled exception for one known diagnostic whose
+        # only input selects the service to inspect. It does not grant arbitrary
+        # PowerShell/CMD variables and unknown variable names still fail closed.
+        if (
+            entry.display_name.casefold()
+            == cls._SERVICE_DETAIL_DIAGNOSTIC_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="ServiceName",
+                    variable_type="string",
+                    required=False,
+                    maximum_length=256,
+                ),
+            )
+
+        return ()
 
     def prepare(
         self,
@@ -159,7 +189,7 @@ class DattoRmmComponentExecutionPolicy:
                 raise PermissionError("component metadata fingerprint differs from the approved allowlist")
 
         normalized_variables = self._validate_variables(
-            policies=entry.variable_policies,
+            policies=self._effective_variable_policies(entry),
             supplied=variables,
         )
 
