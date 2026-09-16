@@ -1,6 +1,7 @@
 import pytest
 
 from jason_runtime.datto_component_scope import (
+    DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV,
     DATTO_EXECUTION_COMPONENT_NAME_ENV,
     DATTO_EXECUTION_COMPONENT_UID_ENV,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
@@ -15,6 +16,7 @@ def clear_component_env(monkeypatch):
         DATTO_EXECUTION_COMPONENTS_JSON_ENV,
         DATTO_EXECUTION_COMPONENT_UID_ENV,
         DATTO_EXECUTION_COMPONENT_NAME_ENV,
+        DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -56,6 +58,59 @@ def test_json_scope_is_authoritative_and_server_classified(monkeypatch):
     )
     assert selected.approval_mode == "per_run"
     assert selected.requires_explicit_approval is True
+
+
+def test_unclassified_component_requires_both_identity_fields_and_is_always_per_run(monkeypatch):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"}]',
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV,
+        "true",
+    )
+
+    components = configured_datto_components()
+
+    selected = resolve_datto_component(
+        components,
+        component_uid="live-component-99",
+        component_name="Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024",
+    )
+
+    assert selected.uid == "live-component-99"
+    assert selected.approval_mode == "per_run"
+    assert selected.requires_explicit_approval is True
+
+    with pytest.raises(DattoComponentScopeError):
+        resolve_datto_component(
+            components,
+            component_name="Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024",
+        )
+
+
+def test_unclassified_fallback_cannot_override_configured_identity(monkeypatch):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"}]',
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV,
+        "true",
+    )
+
+    components = configured_datto_components()
+
+    with pytest.raises(DattoComponentScopeError) as exc:
+        resolve_datto_component(
+            components,
+            component_uid="different-uid",
+            component_name="Diagnostic One",
+        )
+
+    assert str(exc.value) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
 
 
 @pytest.mark.parametrize(
