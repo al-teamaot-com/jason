@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Apply and validate Jason's server-controlled Datto component approval policy.
+"""Apply and validate Jason's server-controlled Datto approval policy.
 
-This is a deterministic source migration. It performs no provider calls, does
-not modify credentials/grants, and does not deploy or restart services.
+This migration changes source/tests only. It performs no provider calls, does
+not change grants/credentials, and does not deploy or restart services.
 
-Policy introduced by this migration:
-- standing_safe: exact server-classified non-disruptive diagnostic component;
-  Jason may satisfy the existing approval-required authority grant with a
-  short-lived server policy approval record, so no separate per-run human
-  approval is required.
-- per_run: exact server-classified disruptive/state-changing component; a
-  current explicit_approval=True signal is required before Jason creates the
-  per-execution approval record and reaches the Central Orchestrator.
-- unknown component identity or unknown approval mode: fail closed.
+Approval modes are server-owned:
+- standing_safe: exact non-disruptive diagnostic component; no separate
+  per-run human approval is required.
+- per_run: exact disruptive/state-changing component; current explicit
+  technician approval is required before orchestration.
+- unknown component or approval mode: fail closed.
 
-The caller cannot supply or override approval_mode. It is read only from the
-server's exact component configuration.
+The action caller cannot supply or override approval_mode.
 """
 
 from __future__ import annotations
@@ -37,7 +33,9 @@ def read(path: str) -> str:
 
 
 def write(path: str, content: str) -> None:
-    (ROOT / path).write_text(content, encoding="utf-8")
+    target = ROOT / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
 
 
 def replace_once(path: str, old: str, new: str) -> None:
@@ -48,16 +46,6 @@ def replace_once(path: str, old: str, new: str) -> None:
             f"{path}: expected exactly one source match, found {count}"
         )
     write(path, content.replace(old, new, 1))
-
-
-def insert_before_once(path: str, marker: str, addition: str) -> None:
-    content = read(path)
-    count = content.count(marker)
-    if count != 1:
-        raise MigrationError(
-            f"{path}: expected exactly one insertion marker, found {count}"
-        )
-    write(path, content.replace(marker, addition + marker, 1))
 
 
 def run(command: list[str]) -> None:
@@ -86,26 +74,99 @@ def patch_scope() -> None:
 
     replace_once(
         path,
-        'DATTO_EXECUTION_COMPONENT_NAME_ENV = (\n    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"\n)\n\n_MAX_COMPONENTS = 16\n',
-        'DATTO_EXECUTION_COMPONENT_NAME_ENV = (\n    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"\n)\n\nDATTO_APPROVAL_MODE_STANDING_SAFE = "standing_safe"\nDATTO_APPROVAL_MODE_PER_RUN = "per_run"\n_VALID_APPROVAL_MODES = frozenset(\n    {\n        DATTO_APPROVAL_MODE_STANDING_SAFE,\n        DATTO_APPROVAL_MODE_PER_RUN,\n    }\n)\n\n_MAX_COMPONENTS = 16\n',
+        """DATTO_EXECUTION_COMPONENT_NAME_ENV = (
+    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"
+)
+
+_MAX_COMPONENTS = 16
+""",
+        """DATTO_EXECUTION_COMPONENT_NAME_ENV = (
+    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME"
+)
+
+DATTO_APPROVAL_MODE_STANDING_SAFE = "standing_safe"
+DATTO_APPROVAL_MODE_PER_RUN = "per_run"
+_VALID_APPROVAL_MODES = frozenset(
+    {
+        DATTO_APPROVAL_MODE_STANDING_SAFE,
+        DATTO_APPROVAL_MODE_PER_RUN,
+    }
+)
+
+_MAX_COMPONENTS = 16
+""",
     )
 
     replace_once(
         path,
-        '@dataclass(frozen=True, slots=True)\nclass DattoApprovedComponent:\n    uid: str\n    name: str\n',
-        '@dataclass(frozen=True, slots=True)\nclass DattoApprovedComponent:\n    uid: str\n    name: str\n    approval_mode: str = DATTO_APPROVAL_MODE_PER_RUN\n\n    @property\n    def requires_explicit_approval(self) -> bool:\n        return self.approval_mode == DATTO_APPROVAL_MODE_PER_RUN\n',
+        """@dataclass(frozen=True, slots=True)
+class DattoApprovedComponent:
+    uid: str
+    name: str
+""",
+        """@dataclass(frozen=True, slots=True)
+class DattoApprovedComponent:
+    uid: str
+    name: str
+    approval_mode: str = DATTO_APPROVAL_MODE_PER_RUN
+
+    @property
+    def requires_explicit_approval(self) -> bool:
+        return self.approval_mode == DATTO_APPROVAL_MODE_PER_RUN
+""",
     )
 
     replace_once(
         path,
-        'def _normalize_component(uid: object, name: object) -> DattoApprovedComponent:\n    normalized_uid = str(uid or "").strip()\n    normalized_name = str(name or "").strip()\n',
-        'def _normalize_component(\n    uid: object,\n    name: object,\n    approval_mode: object = DATTO_APPROVAL_MODE_PER_RUN,\n) -> DattoApprovedComponent:\n    normalized_uid = str(uid or "").strip()\n    normalized_name = str(name or "").strip()\n    normalized_approval_mode = str(approval_mode or "").strip().casefold()\n',
+        """def _normalize_component(uid: object, name: object) -> DattoApprovedComponent:
+    normalized_uid = str(uid or "").strip()
+    normalized_name = str(name or "").strip()
+""",
+        """def _normalize_component(
+    uid: object,
+    name: object,
+    approval_mode: object = DATTO_APPROVAL_MODE_PER_RUN,
+) -> DattoApprovedComponent:
+    normalized_uid = str(uid or "").strip()
+    normalized_name = str(name or "").strip()
+    normalized_approval_mode = str(approval_mode or "").strip().casefold()
+""",
     )
 
     replace_once(
         path,
-        '    if (\n        normalized_uid.casefold() in _FORBIDDEN_SCOPE_VALUES\n        or normalized_name.casefold() in _FORBIDDEN_SCOPE_VALUES\n    ):\n        raise DattoComponentScopeError(\n            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"\n        )\n\n    return DattoApprovedComponent(\n        uid=normalized_uid,\n        name=normalized_name,\n    )\n',
-        '    if (\n        normalized_uid.casefold() in _FORBIDDEN_SCOPE_VALUES\n        or normalized_name.casefold() in _FORBIDDEN_SCOPE_VALUES\n    ):\n        raise DattoComponentScopeError(\n            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"\n        )\n\n    if normalized_approval_mode not in _VALID_APPROVAL_MODES:\n        raise DattoComponentScopeError(\n            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID"\n        )\n\n    return DattoApprovedComponent(\n        uid=normalized_uid,\n        name=normalized_name,\n        approval_mode=normalized_approval_mode,\n    )\n',
+        """    if (
+        normalized_uid.casefold() in _FORBIDDEN_SCOPE_VALUES
+        or normalized_name.casefold() in _FORBIDDEN_SCOPE_VALUES
+    ):
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
+        )
+
+    return DattoApprovedComponent(
+        uid=normalized_uid,
+        name=normalized_name,
+    )
+""",
+        """    if (
+        normalized_uid.casefold() in _FORBIDDEN_SCOPE_VALUES
+        or normalized_name.casefold() in _FORBIDDEN_SCOPE_VALUES
+    ):
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
+        )
+
+    if normalized_approval_mode not in _VALID_APPROVAL_MODES:
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID"
+        )
+
+    return DattoApprovedComponent(
+        uid=normalized_uid,
+        name=normalized_name,
+        approval_mode=normalized_approval_mode,
+    )
+""",
     )
 
     replace_once(
@@ -116,8 +177,17 @@ def patch_scope() -> None:
 
     replace_once(
         path,
-        '                _normalize_component(\n                    item.get("uid"),\n                    item.get("name"),\n                )\n',
-        '                _normalize_component(\n                    item.get("uid"),\n                    item.get("name"),\n                    item.get("approval_mode"),\n                )\n',
+        """                _normalize_component(
+                    item.get("uid"),
+                    item.get("name"),
+                )
+""",
+        """                _normalize_component(
+                    item.get("uid"),
+                    item.get("name"),
+                    item.get("approval_mode"),
+                )
+""",
     )
 
 
@@ -126,14 +196,28 @@ def patch_runtime() -> None:
 
     replace_once(
         path,
-        '            "conversation_authenticated_imperative_is_approval": (\n                "true"\n            ),\n            "pilot_scope": "aot_owner_exact_component_exact_endpoint",\n',
-        '            "conversation_authenticated_imperative_is_approval": (\n                "false"\n            ),\n            "component_approval_policy": (\n                "server_classified_standing_safe_or_per_run"\n            ),\n            "pilot_scope": "aot_owner_exact_component_exact_endpoint",\n',
+        """            "conversation_authenticated_imperative_is_approval": (
+                "true"
+            ),
+            "pilot_scope": "aot_owner_exact_component_exact_endpoint",
+""",
+        """            "conversation_authenticated_imperative_is_approval": (
+                "false"
+            ),
+            "component_approval_policy": (
+                "server_classified_standing_safe_or_per_run"
+            ),
+            "pilot_scope": "aot_owner_exact_component_exact_endpoint",
+""",
     )
 
     replace_once(
         path,
-        '                    requires_per_run_approval=True,\n',
-        '                    requires_per_run_approval=(\n                        selected_component.requires_explicit_approval\n                    ),\n',
+        "                    requires_per_run_approval=True,\n",
+        """                    requires_per_run_approval=(
+                        selected_component.requires_explicit_approval
+                    ),
+""",
     )
 
 
@@ -142,134 +226,428 @@ def patch_mcp_server() -> None:
 
     replace_once(
         path,
-        'def _governed_execute(\n    *,\n    capability_name: str,\n    arguments: Mapping[str, Any],\n) -> dict[str, Any]:\n',
-        'def _governed_execute(\n    *,\n    capability_name: str,\n    arguments: Mapping[str, Any],\n    explicit_approval: bool = False,\n) -> dict[str, Any]:\n',
+        """def _governed_execute(
+    *,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+""",
+        """def _governed_execute(
+    *,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+    explicit_approval: bool = False,
+) -> dict[str, Any]:
+""",
     )
 
     replace_once(
         path,
-        '    execution_id = f"exec_mcp_action_{uuid4().hex}"\n    correlation_id = f"corr_mcp_action_{uuid4().hex}"\n',
-        '    datto_approval_mode: str | None = None\n\n    if capability_name == "automation.component.execute":\n        try:\n            selected_component = resolve_datto_component(\n                configured_datto_components(),\n                component_uid=canonical_arguments.get("component_uid"),\n                component_name=canonical_arguments.get("component_name"),\n            )\n        except ValueError as exc:\n            return {\n                "status": "rejected",\n                "capability": capability_name,\n                "error_code": "invalid_action_arguments",\n                "reason_codes": [str(exc)],\n            }\n\n        datto_approval_mode = selected_component.approval_mode\n\n    execution_id = f"exec_mcp_action_{uuid4().hex}"\n    correlation_id = f"corr_mcp_action_{uuid4().hex}"\n',
-    )
+        """    execution_id = f"exec_mcp_action_{uuid4().hex}"
+    correlation_id = f"corr_mcp_action_{uuid4().hex}"
+""",
+        """    datto_approval_mode: str | None = None
 
-    old_approval = '''    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:\n        imperative_approval = (\n            str(\n                metadata.get(\n                    "conversation_authenticated_imperative_is_approval",\n                    "",\n                )\n            ).casefold()\n            == "true"\n        )\n\n        if not imperative_approval:\n            return {\n                "status": "approval_required",\n                "capability": capability_name,\n                "reason_codes": list(decision.reason_codes),\n                "correlation_id": correlation_id,\n            }\n\n        approval_repository = getattr(\n'''
+    if capability_name == "automation.component.execute":
+        try:
+            selected_component = resolve_datto_component(
+                configured_datto_components(),
+                component_uid=canonical_arguments.get("component_uid"),
+                component_name=canonical_arguments.get("component_name"),
+            )
+        except ValueError as exc:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": "invalid_action_arguments",
+                "reason_codes": [str(exc)],
+            }
 
-    new_approval = '''    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:\n        approval_decided_by = principal\n\n        if capability_name == "automation.component.execute":\n            if datto_approval_mode == "standing_safe":\n                imperative_approval = True\n                approval_decided_by = "policy:datto-standing-safe"\n            elif datto_approval_mode == "per_run":\n                imperative_approval = explicit_approval is True\n\n                if not imperative_approval:\n                    return {\n                        "status": "approval_required",\n                        "capability": capability_name,\n                        "reason_codes": [\n                            "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED",\n                            *list(decision.reason_codes),\n                        ],\n                        "correlation_id": correlation_id,\n                    }\n            else:\n                return {\n                    "status": "denied",\n                    "capability": capability_name,\n                    "reason_codes": [\n                        "DATTO_COMPONENT_APPROVAL_MODE_INVALID",\n                    ],\n                    "correlation_id": correlation_id,\n                }\n        else:\n            imperative_approval = (\n                str(\n                    metadata.get(\n                        "conversation_authenticated_imperative_is_approval",\n                        "",\n                    )\n                ).casefold()\n                == "true"\n            )\n\n        if not imperative_approval:\n            return {\n                "status": "approval_required",\n                "capability": capability_name,\n                "reason_codes": list(decision.reason_codes),\n                "correlation_id": correlation_id,\n            }\n\n        approval_repository = getattr(\n'''
-    replace_once(path, old_approval, new_approval)
+        datto_approval_mode = selected_component.approval_mode
 
-    replace_once(
-        path,
-        '                decided_by=principal,\n',
-        '                decided_by=approval_decided_by,\n',
-    )
-
-    replace_once(
-        path,
-        '        "write_authority": (\n            "jason_exact_grant_plus_per_execution_approval"\n            if write_enabled\n            else None\n        ),\n',
-        '        "write_authority": (\n            "jason_exact_grant_plus_server_governed_approval_policy"\n            if write_enabled\n            else None\n        ),\n        "datto_component_approval_policy": (\n            "server_classified_standing_safe_or_per_run"\n            if "automation.component.execute" in actions\n            else None\n        ),\n',
-    )
-
-    replace_once(
-        path,
-        'def execute_governed_capability(\n    capability: str,\n    arguments: dict[str, Any],\n) -> dict[str, Any]:\n',
-        'def execute_governed_capability(\n    capability: str,\n    arguments: dict[str, Any],\n    explicit_approval: bool = False,\n) -> dict[str, Any]:\n',
-    )
-
-    replace_once(
-        path,
-        '    Microsoft Entra authenticates the caller; Jason authority, approval policy,\n    Central Orchestrator routing, provider isolation, attempt limits and audit\n    remain authoritative.\n',
-        '    Microsoft Entra authenticates the caller; Jason authority, approval policy,\n    Central Orchestrator routing, provider isolation, attempt limits and audit\n    remain authoritative. For server-classified Datto per_run components,\n    explicit_approval must be true only after the authenticated technician has\n    explicitly approved that exact execution. standing_safe classification is\n    server-controlled and never accepted from action arguments.\n',
+    execution_id = f"exec_mcp_action_{uuid4().hex}"
+    correlation_id = f"corr_mcp_action_{uuid4().hex}"
+""",
     )
 
     replace_once(
         path,
-        '    return _governed_execute(\n        capability_name=capability_name,\n        arguments=dict(arguments or {}),\n    )\n',
-        '    return _governed_execute(\n        capability_name=capability_name,\n        arguments=dict(arguments or {}),\n        explicit_approval=(explicit_approval is True),\n    )\n',
+        """    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
+        imperative_approval = (
+            str(
+                metadata.get(
+                    "conversation_authenticated_imperative_is_approval",
+                    "",
+                )
+            ).casefold()
+            == "true"
+        )
+
+        if not imperative_approval:
+            return {
+                "status": "approval_required",
+                "capability": capability_name,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+
+        approval_repository = getattr(
+""",
+        """    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
+        approval_decided_by = principal
+
+        if capability_name == "automation.component.execute":
+            if datto_approval_mode == "standing_safe":
+                imperative_approval = True
+                approval_decided_by = "policy:datto-standing-safe"
+            elif datto_approval_mode == "per_run":
+                imperative_approval = explicit_approval is True
+
+                if not imperative_approval:
+                    return {
+                        "status": "approval_required",
+                        "capability": capability_name,
+                        "reason_codes": [
+                            "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED",
+                            *list(decision.reason_codes),
+                        ],
+                        "correlation_id": correlation_id,
+                    }
+            else:
+                return {
+                    "status": "denied",
+                    "capability": capability_name,
+                    "reason_codes": [
+                        "DATTO_COMPONENT_APPROVAL_MODE_INVALID",
+                    ],
+                    "correlation_id": correlation_id,
+                }
+        else:
+            imperative_approval = (
+                str(
+                    metadata.get(
+                        "conversation_authenticated_imperative_is_approval",
+                        "",
+                    )
+                ).casefold()
+                == "true"
+            )
+
+        if not imperative_approval:
+            return {
+                "status": "approval_required",
+                "capability": capability_name,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+
+        approval_repository = getattr(
+""",
+    )
+
+    replace_once(
+        path,
+        "                decided_by=principal,\n",
+        "                decided_by=approval_decided_by,\n",
+    )
+
+    replace_once(
+        path,
+        """        "write_authority": (
+            "jason_exact_grant_plus_per_execution_approval"
+            if write_enabled
+            else None
+        ),
+""",
+        """        "write_authority": (
+            "jason_exact_grant_plus_server_governed_approval_policy"
+            if write_enabled
+            else None
+        ),
+        "datto_component_approval_policy": (
+            "server_classified_standing_safe_or_per_run"
+            if "automation.component.execute" in actions
+            else None
+        ),
+""",
+    )
+
+    replace_once(
+        path,
+        """def execute_governed_capability(
+    capability: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+""",
+        """def execute_governed_capability(
+    capability: str,
+    arguments: dict[str, Any],
+    explicit_approval: bool = False,
+) -> dict[str, Any]:
+""",
+    )
+
+    replace_once(
+        path,
+        """    Microsoft Entra authenticates the caller; Jason authority, approval policy,
+    Central Orchestrator routing, provider isolation, attempt limits and audit
+    remain authoritative.
+""",
+        """    Microsoft Entra authenticates the caller; Jason authority, approval policy,
+    Central Orchestrator routing, provider isolation, attempt limits and audit
+    remain authoritative. For server-classified Datto per_run components,
+    explicit_approval must be true only after the authenticated technician has
+    explicitly approved that exact execution. standing_safe classification is
+    server-controlled and never accepted from action arguments.
+""",
+    )
+
+    replace_once(
+        path,
+        """    return _governed_execute(
+        capability_name=capability_name,
+        arguments=dict(arguments or {}),
+    )
+""",
+        """    return _governed_execute(
+        capability_name=capability_name,
+        arguments=dict(arguments or {}),
+        explicit_approval=(explicit_approval is True),
+    )
+""",
     )
 
 
-def patch_scope_tests() -> None:
+def write_scope_tests() -> None:
     path = "implementation/runtime_service/tests/test_datto_component_scope.py"
-
-    replace_once(
+    write(
         path,
-        '    assert components[0].name == "Diagnostic One"\n',
-        '    assert components[0].name == "Diagnostic One"\n    assert components[0].approval_mode == "per_run"\n    assert components[0].requires_explicit_approval is True\n',
+        '''import pytest
+
+from jason_runtime.datto_component_scope import (
+    DATTO_EXECUTION_COMPONENT_NAME_ENV,
+    DATTO_EXECUTION_COMPONENT_UID_ENV,
+    DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+    DattoComponentScopeError,
+    configured_datto_components,
+    resolve_datto_component,
+)
+
+
+def clear_component_env(monkeypatch):
+    for name in (
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        DATTO_EXECUTION_COMPONENT_UID_ENV,
+        DATTO_EXECUTION_COMPONENT_NAME_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_legacy_single_component_fallback_is_conservative_per_run(monkeypatch):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_UID_ENV, "component-1")
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_NAME_ENV, "Diagnostic One")
+
+    components = configured_datto_components()
+
+    assert len(components) == 1
+    assert components[0].uid == "component-1"
+    assert components[0].name == "Diagnostic One"
+    assert components[0].approval_mode == "per_run"
+    assert components[0].requires_explicit_approval is True
+
+
+def test_json_scope_is_authoritative_and_server_classified(monkeypatch):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_UID_ENV, "legacy-component")
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENT_NAME_ENV, "Legacy Diagnostic")
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+        '{"uid":"component-2","name":"Diagnostic Two","approval_mode":"per_run"}]',
     )
 
-    replacements = {
-        '[{"uid":"component-1","name":"Diagnostic One"},': '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},',
-        '{"uid":"component-2","name":"Diagnostic Two"}]': '{"uid":"component-2","name":"Diagnostic Two","approval_mode":"per_run"}]',
-        '[{"uid":"*","name":"Diagnostic"}]': '[{"uid":"*","name":"Diagnostic","approval_mode":"standing_safe"}]',
-        '[{"uid":"component-1","name":"Diagnostic","extra":true}]': '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe","extra":true}]',
-        '[{"uid":"component-1","name":"Diagnostic One"},\'\n            \'{"uid":"component-1","name":"Diagnostic Two"}]': '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},\'\n            \'{"uid":"component-1","name":"Diagnostic Two","approval_mode":"per_run"}]',
-        '[{"uid":"component-1","name":"Diagnostic"},\'\n            \'{"uid":"component-2","name":"diagnostic"}]': '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe"},\'\n            \'{"uid":"component-2","name":"diagnostic","approval_mode":"per_run"}]',
-    }
+    components = configured_datto_components()
 
-    content = read(path)
-    for old, new in replacements.items():
-        content = content.replace(old, new)
-    write(path, content)
+    assert [item.uid for item in components] == ["component-1", "component-2"]
+    assert components[0].approval_mode == "standing_safe"
+    assert components[0].requires_explicit_approval is False
 
-    insert_before_once(
-        path,
-        '        (\n            \'[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},\'\n',
-        '        (\n            \'[{"uid":"component-1","name":"Diagnostic"}]\',\n            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",\n        ),\n        (\n            \'[{"uid":"component-1","name":"Diagnostic","approval_mode":"unknown"}]\',\n            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID",\n        ),\n',
+    selected = resolve_datto_component(
+        components,
+        component_uid="component-2",
+        component_name="Diagnostic Two",
+    )
+    assert selected.approval_mode == "per_run"
+    assert selected.requires_explicit_approval is True
+
+
+@pytest.mark.parametrize(
+    "payload,reason",
+    [
+        ("not-json", "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"),
+        ("[]", "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"),
+        (
+            '[{"uid":"component-1","name":"Diagnostic"}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
+        ),
+        (
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"unknown"}]',
+            "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID",
+        ),
+        (
+            '[{"uid":"*","name":"Diagnostic","approval_mode":"standing_safe"}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
+        ),
+        (
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe","extra":true}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID",
+        ),
+        (
+            '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+            '{"uid":"component-1","name":"Diagnostic Two","approval_mode":"per_run"}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS",
+        ),
+        (
+            '[{"uid":"component-1","name":"Diagnostic","approval_mode":"standing_safe"},'
+            '{"uid":"component-2","name":"diagnostic","approval_mode":"per_run"}]',
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS",
+        ),
+    ],
+)
+def test_invalid_scope_fails_closed(monkeypatch, payload, reason):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(DATTO_EXECUTION_COMPONENTS_JSON_ENV, payload)
+
+    with pytest.raises(DattoComponentScopeError) as exc:
+        configured_datto_components()
+
+    assert str(exc.value) == reason
+
+
+def test_crossed_uid_name_pair_fails_closed(monkeypatch):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"standing_safe"},'
+        '{"uid":"component-2","name":"Diagnostic Two","approval_mode":"per_run"}]',
     )
 
-    replace_once(
-        path,
-        '    assert resolve_datto_component(\n        components,\n        component_uid="component-2",\n        component_name="Diagnostic Two",\n    ).uid == "component-2"\n',
-        '    selected = resolve_datto_component(\n        components,\n        component_uid="component-2",\n        component_name="Diagnostic Two",\n    )\n    assert selected.uid == "component-2"\n    assert selected.approval_mode == "per_run"\n    assert selected.requires_explicit_approval is True\n    assert components[0].approval_mode == "standing_safe"\n    assert components[0].requires_explicit_approval is False\n',
+    components = configured_datto_components()
+
+    with pytest.raises(DattoComponentScopeError) as exc:
+        resolve_datto_component(
+            components,
+            component_uid="component-1",
+            component_name="Diagnostic Two",
+        )
+
+    assert str(exc.value) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+''',
     )
 
 
 def patch_runtime_tests() -> None:
     path = "implementation/runtime_service/tests/test_datto_component_execution_runtime.py"
-
     replace_once(
         path,
-        '        \'[{"uid":"component-uid-1","name":"Pilot Diagnostic"},\'\n        \'{"uid":"component-uid-2","name":"Secondary Diagnostic"}]\',\n',
-        '        \'[{"uid":"component-uid-1","name":"Pilot Diagnostic","approval_mode":"standing_safe"},\'\n        \'{"uid":"component-uid-2","name":"Secondary Diagnostic","approval_mode":"per_run"}]\',\n',
+        """        '[{"uid":"component-uid-1","name":"Pilot Diagnostic"},'
+        '{"uid":"component-uid-2","name":"Secondary Diagnostic"}]',
+""",
+        """        '[{"uid":"component-uid-1","name":"Pilot Diagnostic","approval_mode":"standing_safe"},'
+        '{"uid":"component-uid-2","name":"Secondary Diagnostic","approval_mode":"per_run"}]',
+""",
     )
-
     replace_once(
         path,
-        '    assert [item.uid for item in pilot.components] == [\n        "component-uid-1",\n        "component-uid-2",\n    ]\n',
-        '    assert [item.uid for item in pilot.components] == [\n        "component-uid-1",\n        "component-uid-2",\n    ]\n    assert pilot.components[0].requires_explicit_approval is False\n    assert pilot.components[1].requires_explicit_approval is True\n',
+        """    assert [item.uid for item in pilot.components] == [
+        "component-uid-1",
+        "component-uid-2",
+    ]
+""",
+        """    assert [item.uid for item in pilot.components] == [
+        "component-uid-1",
+        "component-uid-2",
+    ]
+    assert pilot.components[0].requires_explicit_approval is False
+    assert pilot.components[1].requires_explicit_approval is True
+""",
     )
 
-    replace_once(
-        path,
-        '                DattoApprovedComponent(\n                    uid="component-uid-1",\n                    name="Pilot Diagnostic",\n                ),\n                DattoApprovedComponent(\n                    uid="component-uid-2",\n                    name="Secondary Diagnostic",\n                ),\n',
-        '                DattoApprovedComponent(\n                    uid="component-uid-1",\n                    name="Pilot Diagnostic",\n                    approval_mode="standing_safe",\n                ),\n                DattoApprovedComponent(\n                    uid="component-uid-2",\n                    name="Secondary Diagnostic",\n                    approval_mode="per_run",\n                ),\n',
-    )
 
-
-def patch_mcp_tests() -> None:
+def patch_existing_mcp_tests() -> None:
     path = "implementation/mcp_service/tests/test_generic_governed_execution_contract.py"
 
     replace_once(
         path,
-        '    def governed_execute(*, capability_name, arguments):\n        captured["capability"] = capability_name\n        captured["arguments"] = arguments\n        return {"status": "succeeded"}\n',
-        '    def governed_execute(\n        *,\n        capability_name,\n        arguments,\n        explicit_approval=False,\n    ):\n        captured["capability"] = capability_name\n        captured["arguments"] = arguments\n        captured["explicit_approval"] = explicit_approval\n        return {"status": "succeeded"}\n',
+        """    def governed_execute(*, capability_name, arguments):
+        captured["capability"] = capability_name
+        captured["arguments"] = arguments
+        return {"status": "succeeded"}
+""",
+        """    def governed_execute(
+        *,
+        capability_name,
+        arguments,
+        explicit_approval=False,
+    ):
+        captured["capability"] = capability_name
+        captured["arguments"] = arguments
+        captured["explicit_approval"] = explicit_approval
+        return {"status": "succeeded"}
+""",
     )
 
     replace_once(
         path,
         '    assert captured["capability"] == "service.ticket.note.create"\n',
-        '    assert captured["capability"] == "service.ticket.note.create"\n    assert captured["explicit_approval"] is False\n',
+        '    assert captured["capability"] == "service.ticket.note.create"\n'
+        '    assert captured["explicit_approval"] is False\n',
     )
 
     replace_once(
         path,
-        '        \'[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1"},\'\n        \'{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1"}]\',\n',
-        '        \'[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1","approval_mode":"standing_safe"},\'\n        \'{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1","approval_mode":"standing_safe"},\'\n        \'{"uid":"component-reboot","name":"Scheduled Reboot AOT Ver 12112025-1","approval_mode":"per_run"}]\',\n',
+        """        '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1"},'
+        '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1"}]',
+""",
+        """        '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-reboot","name":"Scheduled Reboot AOT Ver 12112025-1","approval_mode":"per_run"}]',
+""",
     )
 
-    addition = r'''
 
-def _install_governed_datto_test_runtime(monkeypatch):
+def write_mcp_policy_tests() -> None:
+    path = "implementation/mcp_service/tests/test_datto_component_approval_policy.py"
+    write(
+        path,
+        '''from types import SimpleNamespace
+
+from jason_mcp import server
+
+
+def set_scope(monkeypatch):
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
+        "AOT governed diagnostic pilot",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
+        "device-123",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
+        "Desktop",
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
+        '[{"uid":"component-dns","name":"Get-DNS Settings AOT Ver 06042025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-edr","name":"Check Datto EDR/AV Status AOT Ver 12122025-1","approval_mode":"standing_safe"},'
+        '{"uid":"component-reboot","name":"Scheduled Reboot AOT Ver 12112025-1","approval_mode":"per_run"}]',
+    )
+
+
+def install_runtime(monkeypatch):
     approvals = []
     orchestrator_calls = []
 
@@ -338,46 +716,33 @@ def _install_governed_datto_test_runtime(monkeypatch):
     monkeypatch.setattr(
         server,
         "_authenticated_write_identity",
-        lambda: (
-            "person-al",
-            "aot",
-            "entra-oauth-bearer",
-            None,
-        ),
+        lambda: ("person-al", "aot", "entra-oauth-bearer", None),
     )
 
     return approvals, orchestrator_calls
 
 
-def test_datto_standing_safe_component_needs_no_explicit_per_run_approval(
-    monkeypatch,
-):
-    _set_datto_multi_component_scope(monkeypatch)
-    approvals, orchestrator_calls = _install_governed_datto_test_runtime(
-        monkeypatch
-    )
+def test_standing_safe_needs_no_explicit_per_run_approval(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
 
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
             "device_uid": "device-123",
-            "component_uid": "component-456",
+            "component_uid": "component-dns",
         },
     )
 
     assert result["status"] == "succeeded"
-    assert len(orchestrator_calls) == 1
+    assert len(calls) == 1
     assert len(approvals) == 1
     assert approvals[0].decided_by == "policy:datto-standing-safe"
 
 
-def test_datto_per_run_component_fails_before_orchestrator_without_explicit_approval(
-    monkeypatch,
-):
-    _set_datto_multi_component_scope(monkeypatch)
-    approvals, orchestrator_calls = _install_governed_datto_test_runtime(
-        monkeypatch
-    )
+def test_per_run_rejected_before_orchestrator_without_explicit_approval(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
 
     result = server._governed_execute(
         capability_name="automation.component.execute",
@@ -390,16 +755,12 @@ def test_datto_per_run_component_fails_before_orchestrator_without_explicit_appr
     assert result["status"] == "approval_required"
     assert "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED" in result["reason_codes"]
     assert approvals == []
-    assert orchestrator_calls == []
+    assert calls == []
 
 
-def test_datto_per_run_component_proceeds_only_with_explicit_approval(
-    monkeypatch,
-):
-    _set_datto_multi_component_scope(monkeypatch)
-    approvals, orchestrator_calls = _install_governed_datto_test_runtime(
-        monkeypatch
-    )
+def test_per_run_proceeds_with_current_explicit_approval(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
 
     result = server._governed_execute(
         capability_name="automation.component.execute",
@@ -411,13 +772,13 @@ def test_datto_per_run_component_proceeds_only_with_explicit_approval(
     )
 
     assert result["status"] == "succeeded"
-    assert len(orchestrator_calls) == 1
+    assert len(calls) == 1
     assert len(approvals) == 1
     assert approvals[0].decided_by == "person-al"
 
 
-def test_datto_caller_cannot_override_server_approval_mode(monkeypatch):
-    _set_datto_multi_component_scope(monkeypatch)
+def test_caller_cannot_override_server_approval_mode(monkeypatch):
+    set_scope(monkeypatch)
 
     result = server._canonicalize_governed_action_arguments(
         "automation.component.execute",
@@ -435,14 +796,8 @@ def test_datto_caller_cannot_override_server_approval_mode(monkeypatch):
         component_name=result["component_name"],
     )
     assert selected.approval_mode == "per_run"
-'''
-
-    content = read(path)
-    marker = "\ndef test_datto_action_rejects_different_target(monkeypatch):\n"
-    if marker not in content:
-        raise MigrationError(f"{path}: Datto test insertion marker missing")
-    content = content.replace(marker, addition + marker, 1)
-    write(path, content)
+''',
+    )
 
 
 def main() -> int:
@@ -452,9 +807,10 @@ def main() -> int:
         patch_scope()
         patch_runtime()
         patch_mcp_server()
-        patch_scope_tests()
+        write_scope_tests()
         patch_runtime_tests()
-        patch_mcp_tests()
+        patch_existing_mcp_tests()
+        write_mcp_policy_tests()
         print("DATTO_APPROVAL_POLICY_MIGRATION=APPLIED")
 
     run(
@@ -465,9 +821,9 @@ def main() -> int:
             "implementation/runtime_service/src/jason_runtime/datto_component_scope.py",
             "implementation/runtime_service/src/jason_runtime/datto_component_execution.py",
             "implementation/mcp_service/src/jason_mcp/server.py",
+            "implementation/mcp_service/tests/test_datto_component_approval_policy.py",
         ]
     )
-
     run(
         [
             sys.executable,
@@ -477,6 +833,7 @@ def main() -> int:
             "implementation/runtime_service/tests/test_datto_component_scope.py",
             "implementation/runtime_service/tests/test_datto_component_execution_runtime.py",
             "implementation/mcp_service/tests/test_generic_governed_execution_contract.py",
+            "implementation/mcp_service/tests/test_datto_component_approval_policy.py",
         ]
     )
 
