@@ -36,13 +36,16 @@ EXPECTED_DATTO_ALLOWLIST = os.environ.get(
     "JASON_EXPECTED_DATTO_EXECUTION_ALLOWLIST",
     "AOT governed diagnostic pilot",
 )
-EXPECTED_DATTO_COMPONENT_UID = os.environ.get(
-    "JASON_EXPECTED_DATTO_COMPONENT_UID",
-    "afb858ae-e0d5-4c7b-b0da-8617a22b60d4",
-)
-EXPECTED_DATTO_COMPONENT_NAME = os.environ.get(
-    "JASON_EXPECTED_DATTO_COMPONENT_NAME",
-    "Get-DNS Settings AOT Ver 06042025-1",
+EXPECTED_DATTO_COMPONENTS_JSON = os.environ.get(
+    "JASON_EXPECTED_DATTO_COMPONENTS_JSON",
+    (
+        '[{"uid":"afb858ae-e0d5-4c7b-b0da-8617a22b60d4",'
+        '"name":"Get-DNS Settings AOT Ver 06042025-1",'
+        '"approval_mode":"standing_safe"},'
+        '{"uid":"8cb0f063-5875-452e-88ad-2e1748ed0fd0",'
+        '"name":"Check Datto EDR/AV Status AOT Ver 12122025-1",'
+        '"approval_mode":"standing_safe"}]'
+    ),
 )
 EXPECTED_DATTO_DEVICE_UID = os.environ.get(
     "JASON_EXPECTED_DATTO_DEVICE_UID",
@@ -64,8 +67,7 @@ WATCHED_ENV_KEYS = (
     "JASON_AUTOTASK_REQUESTER_AUTH_MODE",
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE",
     "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
-    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID",
-    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME",
+    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
 )
@@ -272,8 +274,7 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         expected in env[key]
         for key, expected in (
             ("JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME", EXPECTED_DATTO_ALLOWLIST),
-            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID", EXPECTED_DATTO_COMPONENT_UID),
-            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME", EXPECTED_DATTO_COMPONENT_NAME),
+            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON", EXPECTED_DATTO_COMPONENTS_JSON),
             ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID", EXPECTED_DATTO_DEVICE_UID),
             ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS", EXPECTED_DATTO_DEVICE_CLASS),
         )
@@ -390,7 +391,7 @@ def render_metrics() -> str:
         ),
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="3"} 1',
+        'jason_production_health_exporter_build_info{version="4"} 1',
     ])
 
     return "\n".join(lines) + "\n"
