@@ -20,6 +20,7 @@ from jason_runtime.datto_component_execution import (
     DATTO_RMM_COMPONENT_EXECUTION_PROVIDER,
     DattoComponentExecutionPilot,
     DattoRmmComponentExecutionConnector,
+    DattoRmmComponentExecutionVerificationError,
     register_datto_component_execution_runtime_foundation,
 )
 from kernel.capabilities import (
@@ -215,8 +216,15 @@ class Audit:
 
 
 class Transport:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        get_status="completed",
+        get_uid="job-uid-1",
+    ):
         self.calls = []
+        self.get_status = get_status
+        self.get_uid = get_uid
 
     def request(
         self,
@@ -246,8 +254,8 @@ class Transport:
 
         if method == "GET":
             return {
-                "uid": "job-uid-1",
-                "status": "completed",
+                "uid": self.get_uid,
+                "status": self.get_status,
                 "name": "Jason - Pilot Diagnostic",
             }
 
@@ -279,8 +287,15 @@ def execution_request(
     )
 
 
-def connector():
-    transport = Transport()
+def connector(
+    *,
+    get_status="completed",
+    get_uid="job-uid-1",
+):
+    transport = Transport(
+        get_status=get_status,
+        get_uid=get_uid,
+    )
     audit = Audit()
 
     value = DattoRmmComponentExecutionConnector(
@@ -295,16 +310,14 @@ def connector():
             device_class="workstation",
         ),
         sleeper=lambda _: None,
-        maximum_status_reads=2,
+        maximum_status_reads=1,
         status_interval_seconds=0,
     )
 
     return value, transport, audit
 
 
-def test_live_connector_issues_one_quickjob_and_verifies_job(
-    monkeypatch,
-):
+def mock_access_token(monkeypatch):
     monkeypatch.setattr(
         module,
         "acquire_access_token",
@@ -314,6 +327,12 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
         ),
     )
 
+
+def test_live_connector_issues_one_quickjob_and_verifies_job(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
     value, transport, audit = connector()
 
     result = value.execute(
@@ -321,6 +340,7 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
     )
 
     assert result.data["readback_verified"] is True
+    assert result.data["completion_verified"] is True
     assert result.data["job_uid"] == "job-uid-1"
     assert result.data["job_status"] == "completed"
 
@@ -342,6 +362,104 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
     assert any(
         event[0]
         == "connector.mutation.verified"
+        for event in audit.events
+    )
+
+
+def test_async_quickjob_returns_durable_accepted_job_reference(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        get_status="running",
+    )
+
+    result = value.execute(
+        execution_request()
+    )
+
+    assert result.data["status"] == "accepted"
+    assert result.data["job_uid"] == "job-uid-1"
+    assert result.data["job_status"] == "running"
+    assert result.data["readback_verified"] is True
+    assert result.data["completion_verified"] is False
+    assert result.warnings
+
+    assert [
+        call["method"]
+        for call in transport.calls
+    ] == [
+        "PUT",
+        "GET",
+    ]
+
+    assert any(
+        event[0]
+        == "connector.mutation.accepted"
+        for event in audit.events
+    )
+
+
+def test_quickjob_readback_uid_mismatch_fails_closed(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        get_status="running",
+        get_uid="different-job-uid",
+    )
+
+    with pytest.raises(
+        DattoRmmComponentExecutionVerificationError
+    ):
+        value.execute(
+            execution_request()
+        )
+
+    assert [
+        call["method"]
+        for call in transport.calls
+    ] == [
+        "PUT",
+        "GET",
+    ]
+
+    assert any(
+        event[0]
+        == "connector.mutation.failed"
+        for event in audit.events
+    )
+
+
+def test_quickjob_terminal_failure_fails_closed(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        get_status="failed",
+    )
+
+    with pytest.raises(
+        DattoRmmComponentExecutionVerificationError
+    ):
+        value.execute(
+            execution_request()
+        )
+
+    assert [
+        call["method"]
+        for call in transport.calls
+    ] == [
+        "PUT",
+        "GET",
+    ]
+
+    assert any(
+        event[0]
+        == "connector.mutation.failed"
         for event in audit.events
     )
 
@@ -369,14 +487,7 @@ def test_execution_fails_closed_outside_exact_pilot(
     monkeypatch,
     override,
 ):
-    monkeypatch.setattr(
-        module,
-        "acquire_access_token",
-        lambda *, credentials: DattoRmmAccessToken(
-            access_token="synthetic-token",
-            token_type="Bearer",
-        ),
-    )
+    mock_access_token(monkeypatch)
 
     value, transport, audit = connector()
 
