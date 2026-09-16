@@ -14,11 +14,11 @@ PORT = int(os.environ.get("JASON_PRODUCTION_HEALTH_PORT", "9467"))
 
 EXPECTED_MCP_IMAGE = os.environ.get(
     "JASON_EXPECTED_MCP_IMAGE",
-    "jason-mcp:autotask-entra-67da8d80ca97-repaired",
+    "jason-mcp:generic-governed-8f1e864947a2",
 )
 EXPECTED_SOURCE_REVISION = os.environ.get(
     "JASON_EXPECTED_MCP_SOURCE_REVISION",
-    "67da8d80ca9703505d651e9e0935f5bd1aa7c651",
+    "8f1e864947a2e6e79bf47d3de14daacde7d73144",
 )
 EXPECTED_PROVIDER_PROFILE = os.environ.get(
     "JASON_EXPECTED_PROVIDER_PROFILE",
@@ -28,6 +28,31 @@ EXPECTED_AUTOTASK_MODE = os.environ.get(
     "JASON_EXPECTED_AUTOTASK_REQUESTER_MODE",
     "jason_managed",
 )
+EXPECTED_DATTO_EXECUTION_PROFILE = os.environ.get(
+    "JASON_EXPECTED_DATTO_EXECUTION_PROFILE",
+    "owner-diagnostic-v1",
+)
+EXPECTED_DATTO_ALLOWLIST = os.environ.get(
+    "JASON_EXPECTED_DATTO_EXECUTION_ALLOWLIST",
+    "AOT governed diagnostic pilot",
+)
+EXPECTED_DATTO_COMPONENT_UID = os.environ.get(
+    "JASON_EXPECTED_DATTO_COMPONENT_UID",
+    "afb858ae-e0d5-4c7b-b0da-8617a22b60d4",
+)
+EXPECTED_DATTO_COMPONENT_NAME = os.environ.get(
+    "JASON_EXPECTED_DATTO_COMPONENT_NAME",
+    "Get-DNS Settings AOT Ver 06042025-1",
+)
+EXPECTED_DATTO_DEVICE_UID = os.environ.get(
+    "JASON_EXPECTED_DATTO_DEVICE_UID",
+    "69571572-83f7-1e33-9cdf-01717d4e74a4",
+)
+EXPECTED_DATTO_DEVICE_CLASS = os.environ.get(
+    "JASON_EXPECTED_DATTO_DEVICE_CLASS",
+    "Desktop",
+)
+
 EXPECTED_MCP_NETWORK = "jason-core"
 EXPECTED_MCP_HOST_IP = "10.87.246.157"
 EXPECTED_MCP_HOST_PORT = "8765"
@@ -37,6 +62,12 @@ WATCHED_ENV_KEYS = (
     "JASON_SOURCE_REVISION",
     "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
     "JASON_AUTOTASK_REQUESTER_AUTH_MODE",
+    "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE",
+    "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
+    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID",
+    "JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME",
+    "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
+    "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
 )
 
 REQUIRED_SECRET_MOUNTS = frozenset(
@@ -45,6 +76,8 @@ REQUIRED_SECRET_MOUNTS = frozenset(
         "/run/jason-secrets/openbao/secret_id",
         "/run/jason-secrets/openbao/autotask/role_id",
         "/run/jason-secrets/openbao/autotask/secret_id",
+        "/run/jason-secrets/openbao/autotask-write/role_id",
+        "/run/jason-secrets/openbao/autotask-write/secret_id",
         "/run/jason-secrets/openbao/it-glue/role_id",
         "/run/jason-secrets/openbao/it-glue/secret_id",
         "/run/jason-secrets/openbao/microsoft-graph/role_id",
@@ -53,6 +86,8 @@ REQUIRED_SECRET_MOUNTS = frozenset(
         "/run/jason-secrets/openbao/openai/secret_id",
         "/run/jason-secrets/openbao/aws-ses/role_id",
         "/run/jason-secrets/openbao/aws-ses/secret_id",
+        "/run/jason-secrets/openbao/datto-rmm-execution/role_id",
+        "/run/jason-secrets/openbao/datto-rmm-execution/secret_id",
     }
 )
 
@@ -100,7 +135,11 @@ def _env_values(inspect: dict, key: str) -> list[str]:
     config = inspect.get("Config") if isinstance(inspect.get("Config"), dict) else {}
     raw = config.get("Env") if isinstance(config.get("Env"), list) else []
     prefix = key + "="
-    return [str(item)[len(prefix):] for item in raw if isinstance(item, str) and item.startswith(prefix)]
+    return [
+        str(item)[len(prefix):]
+        for item in raw
+        if isinstance(item, str) and item.startswith(prefix)
+    ]
 
 
 def _container_running(inspect: dict) -> bool:
@@ -147,10 +186,6 @@ def _root_writable_from_mounts(path: str) -> int | None:
 
 
 def _root_writable() -> int:
-    # The exporter service intentionally uses ProtectSystem=strict. Its own
-    # /proc/mounts therefore reports the service mount namespace as read-only
-    # even when the host root filesystem is healthy and read/write. PID 1 is
-    # in the host mount namespace, so prefer /proc/1/mounts for the host state.
     for path in ("/proc/1/mounts", "/proc/mounts"):
         value = _root_writable_from_mounts(path)
         if value is not None:
@@ -181,7 +216,11 @@ def _kernel_error_count_uncached() -> int:
         "kernel bug",
         "oops:",
     )
-    return sum(1 for line in completed.stdout.splitlines() if any(p in line.casefold() for p in patterns))
+    return sum(
+        1
+        for line in completed.stdout.splitlines()
+        if any(pattern in line.casefold() for pattern in patterns)
+    )
 
 
 def _kernel_error_count() -> int:
@@ -206,6 +245,12 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
     env = {key: _env_values(mcp, key) for key in WATCHED_ENV_KEYS}
     duplicates = {key: max(0, len(values) - 1) for key, values in env.items()}
 
+    image_ref = str(config.get("Image") or "")
+    source_ok = (
+        EXPECTED_SOURCE_REVISION in env["JASON_SOURCE_REVISION"]
+        or EXPECTED_SOURCE_REVISION[:12] in image_ref
+    )
+
     ports = host_config.get("PortBindings") if isinstance(host_config.get("PortBindings"), dict) else {}
     binding_rows = ports.get("8000/tcp") if isinstance(ports.get("8000/tcp"), list) else []
     port_ok = any(
@@ -219,12 +264,29 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
     network_ok = str(host_config.get("NetworkMode") or "") == EXPECTED_MCP_NETWORK
     restart_ok = str(restart.get("Name") or "") == EXPECTED_MCP_RESTART_POLICY
 
+    datto_profile_ok = (
+        EXPECTED_DATTO_EXECUTION_PROFILE
+        in env["JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE"]
+    )
+    datto_scope_ok = all(
+        expected in env[key]
+        for key, expected in (
+            ("JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME", EXPECTED_DATTO_ALLOWLIST),
+            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID", EXPECTED_DATTO_COMPONENT_UID),
+            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME", EXPECTED_DATTO_COMPONENT_NAME),
+            ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID", EXPECTED_DATTO_DEVICE_UID),
+            ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS", EXPECTED_DATTO_DEVICE_CLASS),
+        )
+    )
+
     checks = {
         "running": 1 if _container_running(mcp) else 0,
-        "image": 1 if str(config.get("Image") or "") == EXPECTED_MCP_IMAGE else 0,
-        "source_revision": 1 if EXPECTED_SOURCE_REVISION in env["JASON_SOURCE_REVISION"] else 0,
+        "image": 1 if image_ref == EXPECTED_MCP_IMAGE else 0,
+        "source_revision": 1 if source_ok else 0,
         "provider_profile": 1 if EXPECTED_PROVIDER_PROFILE in env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] else 0,
         "autotask_requester_mode": 1 if EXPECTED_AUTOTASK_MODE in env["JASON_AUTOTASK_REQUESTER_AUTH_MODE"] else 0,
+        "datto_execution_profile": 1 if datto_profile_ok else 0,
+        "datto_execution_scope": 1 if datto_scope_ok else 0,
         "network": 1 if network_ok else 0,
         "port_binding": 1 if port_ok else 0,
         "restart_policy": 1 if restart_ok else 0,
@@ -235,7 +297,9 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
     destinations = {
         str(item.get("Destination") or "")
         for item in mounts
-        if isinstance(item, dict) and item.get("Type") == "bind" and item.get("RW") is False
+        if isinstance(item, dict)
+        and item.get("Type") == "bind"
+        and item.get("RW") is False
     }
     mounted = len(REQUIRED_SECRET_MOUNTS & destinations)
     mount_contract = 1 if REQUIRED_SECRET_MOUNTS.issubset(destinations) else 0
@@ -252,7 +316,18 @@ def render_metrics() -> str:
     kernel_errors = _kernel_error_count()
     failed_units = _failed_systemd_units()
     root_writable = _root_writable()
-    rollback_available = 1 if any(name.startswith("jason-mcp-pilot-pre-v4-") for name in _docker_names()) else 0
+    rollback_available = 1 if any(
+        name.startswith("jason-mcp-pilot-rollback-")
+        or name.startswith("jason-mcp-pilot-pre-v4-")
+        for name in _docker_names()
+    ) else 0
+    datto_contract = 1 if (
+        checks.get("running") == 1
+        and checks.get("image") == 1
+        and checks.get("datto_execution_profile") == 1
+        and checks.get("datto_execution_scope") == 1
+        and mount_contract == 1
+    ) else 0
 
     lines = [
         "# HELP jason_production_component_health Secret-safe production component health.",
@@ -266,7 +341,7 @@ def render_metrics() -> str:
         "# HELP jason_openbao_unsealed OpenBao unsealed state from the unauthenticated health endpoint.",
         "# TYPE jason_openbao_unsealed gauge",
         f'jason_openbao_unsealed {1 if openbao.get("initialized") is True and openbao.get("sealed") is False else 0}',
-        "# HELP jason_mcp_contract Production MCP deployment contract checks.",
+        "# HELP jason_mcp_contract Production MCP deployment and bounded governed-action contract checks.",
         "# TYPE jason_mcp_contract gauge",
     ]
 
@@ -287,6 +362,9 @@ def render_metrics() -> str:
         "# HELP jason_mcp_required_secret_mount_contract Whether all required read-only credential mount destinations are present.",
         "# TYPE jason_mcp_required_secret_mount_contract gauge",
         f"jason_mcp_required_secret_mount_contract {mount_contract}",
+        "# HELP jason_datto_governed_execution_contract Secret-safe readiness of the exact bounded Datto governed-execution pilot configuration. This is not provider execution authority or a provider canary.",
+        "# TYPE jason_datto_governed_execution_contract gauge",
+        f"jason_datto_governed_execution_contract {datto_contract}",
         "# HELP jason_host_kernel_error_count Current-boot kernel corruption/storage error signature count; -1 means unavailable.",
         "# TYPE jason_host_kernel_error_count gauge",
         f"jason_host_kernel_error_count {kernel_errors}",
@@ -296,7 +374,7 @@ def render_metrics() -> str:
         "# HELP jason_root_filesystem_writable Whether the host root filesystem is mounted read/write; -1 means unavailable.",
         "# TYPE jason_root_filesystem_writable gauge",
         f"jason_root_filesystem_writable {root_writable}",
-        "# HELP jason_mcp_rollback_available Whether a preserved pre-v4 MCP rollback container is present.",
+        "# HELP jason_mcp_rollback_available Whether a preserved MCP rollback container is present.",
         "# TYPE jason_mcp_rollback_available gauge",
         f"jason_mcp_rollback_available {rollback_available}",
         "# HELP jason_production_expected_info Expected production MCP release metadata. No credentials or provider records are exposed.",
@@ -312,7 +390,7 @@ def render_metrics() -> str:
         ),
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="2"} 1',
+        'jason_production_health_exporter_build_info{version="3"} 1',
     ])
 
     return "\n".join(lines) + "\n"
