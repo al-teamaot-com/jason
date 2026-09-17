@@ -52,6 +52,21 @@ _CANONICAL_UID_OVERRIDES = {
     ),
 }
 
+# Arbitrary shell/code execution may never inherit standing-safe authority.
+# Either durable identity side is sufficient to force per-run approval so
+# a stale configured UID or later display-name change cannot weaken policy.
+_FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
+    {
+        "8a1c153c-feee-41c5-9c9b-58a48e0214fe",
+    }
+)
+
+_FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
+    {
+        "run ad hoc command (powershell 2-5) [win]",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DattoApprovedComponent:
@@ -97,6 +112,16 @@ def _normalize_component(
     )
     if canonical_override:
         normalized_uid = canonical_override
+
+    if (
+        normalized_uid
+        in _FORCED_PER_RUN_COMPONENT_UIDS
+        or normalized_name.casefold()
+        in _FORCED_PER_RUN_COMPONENT_NAMES
+    ):
+        normalized_approval_mode = (
+            DATTO_APPROVAL_MODE_PER_RUN
+        )
 
     if (
         len(normalized_uid) > _MAX_UID_LENGTH

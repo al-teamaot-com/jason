@@ -116,6 +116,16 @@ class DattoRmmComponentExecutionPolicy:
         "Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1"
     )
 
+    # Exact reviewed Datto identity for the arbitrary PowerShell runner.
+    # Variable permission is deliberately bound to both UID and display name.
+    # The runtime scope independently forces this component to per_run.
+    _AD_HOC_POWERSHELL_UID = (
+        "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
+    )
+    _AD_HOC_POWERSHELL_NAME = (
+        "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
+    )
+
     def __init__(self, *, allowlist: ComponentAllowlistResolver) -> None:
         self._allowlist = allowlist
 
@@ -127,9 +137,9 @@ class DattoRmmComponentExecutionPolicy:
         if entry.variable_policies:
             return entry.variable_policies
 
-        # This is a source-controlled exception for one known diagnostic whose
-        # only input selects the service to inspect. It does not grant arbitrary
-        # PowerShell/CMD variables and unknown variable names still fail closed.
+        # Source-controlled variable contracts remain exact and fail closed.
+        # Unknown variable names are never accepted merely because a live
+        # component exposes some variable.
         if (
             entry.display_name.casefold()
             == cls._SERVICE_DETAIL_DIAGNOSTIC_NAME.casefold()
@@ -140,6 +150,25 @@ class DattoRmmComponentExecutionPolicy:
                     variable_type="string",
                     required=False,
                     maximum_length=256,
+                ),
+            )
+
+        # Arbitrary PowerShell is intentionally a stronger boundary:
+        # only this exact reviewed Datto UID/name pair may accept usrInput.
+        # Its approval mode is independently forced to per_run by Jason's
+        # component-scope policy.
+        if (
+            entry.provider_component_uid
+            == cls._AD_HOC_POWERSHELL_UID
+            and entry.display_name.casefold()
+            == cls._AD_HOC_POWERSHELL_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="usrInput",
+                    variable_type="string",
+                    required=True,
+                    maximum_length=20_000,
                 ),
             )
 
