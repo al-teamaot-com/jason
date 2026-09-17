@@ -24,28 +24,64 @@ Status: source implementation in progress; no endpoint execution performed.
 
 These identities are evidence for exact matching. They do not themselves create standing authority.
 
-## Remaining runtime blocker
+## Proven Datto AV recovery behavior
 
-The playbook currently models Datto AV refresh as the predefined operation:
+The prior successful AOT-50282 repair established the missing AV-specific behavior without requiring a manual `EndpointProtectionService` start.
+
+Observed successful path:
+
+`EDR Maintenance / repair -> EDR Force Reinstall -> active HUNTAgent agent.exe datto-av --force-update -> reboot -> authoritative health check -> Status=Healthy`
+
+The exact AV command was:
 
 `agent.exe datto-av --force-update`
 
-Jason's live governed action surface does not expose arbitrary shell execution, and the Datto component catalog search did not identify an exact dedicated Datto AV force-update component. Therefore the runtime binding intentionally fails closed at this step rather than falling back to PowerShell or direct provider access.
+The RMM-managed HUNTAgent path before the successful force-update was:
 
-Before production activation, create or identify one narrowly scoped Datto RMM component that performs only the approved AV force-update behavior, discovers the active HUNTAgent executable path, validates the expected executable, refuses duplicate concurrent update work, and emits structured Result/Diagnostic output. Then verify its exact Datto UID through governed catalog discovery and add it to the runtime binding contract.
+`C:\ProgramData\CentraStage\AEMAgent\RMM.AdvancedThreatDetection\agent.exe`
+
+After the recovery/reboot sequence, HUNTAgent was observed at the alternate supported path:
+
+`C:\Program Files\Infocyte\agent\agent.exe`
+
+This confirms the playbook must discover the current service executable path rather than permanently assuming one location.
+
+The prior force-update job remained active unusually long and produced no StdOut. A second force-update was not launched. After reboot, the same authoritative EDR/AV health component changed from `Status=IssuesFound` / Datto AV not clearly detected to `Status=Healthy`.
+
+## Dedicated AV component prepared
+
+Source and operating contract are now present in:
+
+- `components/Datto_AV_Force_Update_WIN_AOT_Ver_09172026-1.ps1`
+- `components/Datto_AV_Force_Update_WIN_AOT_Ver_09172026-1.md`
+
+Proposed Datto component name:
+
+`Datto AV Force Update [WIN] AOT Ver 09172026-1`
+
+The component is intentionally narrow. It discovers the active HUNTAgent path, allows only the two known Datto agent locations, validates the binary signature, prevents duplicate force-update processes, runs only `datto-av --force-update`, and self-bounds its observation window. If the child process remains active, it returns `Status=PendingReboot` instead of hanging indefinitely or dispatching another update.
+
+Component completion never means AV health. The playbook must still run `Check Datto EDR/AV Status AOT Ver 12122025-1`, and only `Status=Healthy` closes the workflow successfully.
+
+## Remaining runtime blocker
+
+The dedicated AV component source is ready but the component does not yet have a Datto RMM UID. It must be created in Datto RMM, then its exact UID/name must be independently discovered through Jason's governed `automation.component.search` capability.
+
+Until that exact identity exists and is added to the runtime binding/server-controlled scope, the runtime contract intentionally fails closed at the AV force-update step rather than falling back to generic PowerShell or direct provider access.
 
 ## Production activation prerequisites
 
 1. Unit tests for `datto_edr_av_playbook.py` and `datto_edr_av_runtime_contract.py` pass in the Jason build environment.
-2. The dedicated governed Datto AV force-update component/capability exists and is exact-identity verified.
-3. The playbook runtime is wired to Central Orchestrator rather than calling provider connectors directly.
-4. Target resolution verifies exact Autotask company/ticket/device association and exact Datto device UID before action.
-5. The generic component-execution pilot's current single-endpoint configuration is either deliberately retained for the supervised pilot or replaced by a governed exact-target mechanism before wider use.
-6. Clean uninstall/recovery remains policy-gated for the first supervised pilot.
-7. Immediate reboot remains approval-required; only the named 02:30 scheduled reboot path receives playbook standing authorization.
-8. Autotask notes remain internal-only and milestone-driven.
-9. Job status/StdOut read failures retry reads on the same job and never redispatch remediation.
-10. `Status=Healthy` from the authoritative health component remains the only success terminal state.
+2. Create `Datto AV Force Update [WIN] AOT Ver 09172026-1` in Datto RMM from the reviewed source and verify its exact Datto UID through governed catalog discovery.
+3. Add that exact UID/name to the playbook runtime binding and server-controlled component scope; do not grant generic PowerShell standing authority.
+4. The playbook runtime is wired to Central Orchestrator rather than calling provider connectors directly.
+5. Target resolution verifies exact Autotask company/ticket/device association and exact Datto device UID before action.
+6. The generic component-execution pilot's current single-endpoint configuration is either deliberately retained for the supervised pilot or replaced by a governed exact-target mechanism before wider use.
+7. Clean uninstall/recovery remains policy-gated for the first supervised pilot.
+8. Immediate reboot remains approval-required; only the named 02:30 scheduled reboot path receives playbook standing authorization.
+9. Autotask notes remain internal-only and milestone-driven.
+10. Job status/StdOut read failures retry reads on the same job and never redispatch remediation.
+11. `Status=Healthy` from the authoritative health component remains the only success terminal state.
 
 ## No-device-work boundary
 
