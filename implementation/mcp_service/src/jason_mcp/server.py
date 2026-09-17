@@ -1381,18 +1381,11 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
         )
 
-    supplied_class = str(
-        raw.get("device_class") or ""
-    ).strip()
-
-    if (
-        supplied_class
-        and supplied_class.casefold()
-        != expected["device_class"].casefold()
-    ):
-        raise ValueError(
-            "DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"
-        )
+    # device_class is server-controlled metadata.
+    # Caller/model-provided class labels are deliberately ignored because
+    # provider terminology can differ (for example Desktop vs Workstation).
+    # Exact endpoint identity remains independently enforced above.
+    supplied_class = expected["device_class"]
 
     supplied_component_uid = str(
         raw.get("component_uid")
