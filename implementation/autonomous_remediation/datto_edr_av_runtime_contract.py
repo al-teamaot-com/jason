@@ -10,13 +10,38 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from datto_edr_av_playbook import ActionKind, PlannedAction, PLAYBOOK_NAME
+from datto_edr_av_playbook import (
+    AV_FORCE_UPDATE_COMMAND,
+    ActionKind,
+    PlannedAction,
+    PLAYBOOK_NAME,
+)
 
 
 AUTOMATION_COMPONENT_EXECUTE = "automation.component.execute"
 AUTOMATION_JOB_READ = "automation.job.read"
 AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
+
+RUN_AD_HOC_POWERSHELL_COMPONENT = "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
+RUN_AD_HOC_POWERSHELL_UID = "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
+
+# The playbook is permitted to use the generic Datto command component only for
+# this one fixed AV operation. No user-supplied command text is accepted here.
+# The command discovers the currently active HUNTAgent service executable,
+# permits only the two Datto paths observed in AOT's environment, then invokes
+# exactly: agent.exe datto-av --force-update.
+DATTO_AV_FORCE_UPDATE_POWERSHELL = (
+    "$s=Get-CimInstance Win32_Service -Filter \"Name='HUNTAgent'\" -ErrorAction Stop;"
+    "$raw=[string]$s.PathName;"
+    "if($raw -match '^\\s*\"([^\"]+\\.exe)\"'){$p=$matches[1]}"
+    "elseif($raw -match '^\\s*(.+?\\.exe)(?:\\s+--service)?\\s*$'){$p=$matches[1]}"
+    "else{throw 'Unable to resolve HUNTAgent executable path'};"
+    "$allowed=@('C:\\ProgramData\\CentraStage\\AEMAgent\\RMM.AdvancedThreatDetection\\agent.exe',"
+    "'C:\\Program Files\\Infocyte\\agent\\agent.exe');"
+    "if($allowed -notcontains $p){throw (\"Unapproved HUNTAgent path: {0}\" -f $p)};"
+    "& $p 'datto-av' '--force-update';exit $LASTEXITCODE"
+)
 
 
 class RuntimeBindingError(RuntimeError):
@@ -36,8 +61,10 @@ class CapabilityRequest:
 
 
 # Provider identities independently verified through Jason's governed Datto
-# component catalog on 2026-09-17. These identities are evidence, not global
-# standing-safe authority; policy still decides whether a step may execute.
+# component catalog on 2026-09-17, except the ad-hoc PowerShell identity which
+# is the exact component used in the previously successful AOT-50282 repair.
+# These identities are evidence, not global standing-safe authority; policy
+# still decides whether a step may execute.
 VERIFIED_COMPONENTS = {
     "Check Datto EDR/AV Status AOT Ver 12122025-1": ComponentIdentity(
         uid="8cb0f063-5875-452e-88ad-2e1748ed0fd0",
@@ -63,15 +90,19 @@ VERIFIED_COMPONENTS = {
         uid="a61ce810-84a6-435c-ba02-b589a6008f28",
         name="230 AM Scheduled Reboot AOT Ver 11282024",
     ),
+    RUN_AD_HOC_POWERSHELL_COMPONENT: ComponentIdentity(
+        uid=RUN_AD_HOC_POWERSHELL_UID,
+        name=RUN_AD_HOC_POWERSHELL_COMPONENT,
+    ),
 }
 
 
 def bind_execution(action: PlannedAction, *, device_uid: str) -> CapabilityRequest:
     """Bind one playbook action to Jason's existing governed execution surface.
 
-    Free-form commands deliberately do not fall back to PowerShell or shell.
-    They remain blocked until an exact vetted Datto component or dedicated
-    governed capability exists.
+    The generic PowerShell component is allowed only for the exact predefined
+    Datto AV force-update operation. The runtime generates the command itself;
+    callers cannot supply arbitrary PowerShell through this binding.
     """
 
     target = str(device_uid or "").strip()
@@ -98,9 +129,22 @@ def bind_execution(action: PlannedAction, *, device_uid: str) -> CapabilityReque
         )
 
     if action.kind == ActionKind.PREDEFINED_COMMAND:
-        raise RuntimeBindingError(
-            "Datto AV force-update is not yet represented by an exact governed "
-            "component/capability; arbitrary shell fallback is prohibited"
+        if action.operation != AV_FORCE_UPDATE_COMMAND:
+            raise RuntimeBindingError(
+                f"unapproved predefined command: {action.operation}"
+            )
+
+        component = VERIFIED_COMPONENTS[RUN_AD_HOC_POWERSHELL_COMPONENT]
+        return CapabilityRequest(
+            capability=AUTOMATION_COMPONENT_EXECUTE,
+            arguments={
+                "device_uid": target,
+                "component_uid": component.uid,
+                "component_name": component.name,
+                "variables": {"Command": DATTO_AV_FORCE_UPDATE_POWERSHELL},
+                "job_name": f"{PLAYBOOK_NAME} - {action.step.value}",
+                "idempotency_key": action.idempotency_key,
+            },
         )
 
     if action.kind == ActionKind.IMMEDIATE_REBOOT:
