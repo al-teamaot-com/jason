@@ -1564,6 +1564,11 @@ def _governed_execute(
                             *list(decision.reason_codes),
                         ],
                         "correlation_id": correlation_id,
+                        "approval_signal": {
+                            "argument": "explicit_approval",
+                            "required_value": True,
+                            "scope": "exact_execution",
+                        },
                     }
             else:
                 return {
@@ -2433,7 +2438,6 @@ def execute_read_capability(
 def execute_governed_capability(
     capability: str,
     arguments: dict[str, Any],
-    explicit_approval: bool = False,
 ) -> dict[str, Any]:
     """Execute one active governed Jason capability.
 
@@ -2442,7 +2446,7 @@ def execute_governed_capability(
     Microsoft Entra authenticates the caller; Jason authority, approval policy,
     Central Orchestrator routing, provider isolation, attempt limits and audit
     remain authoritative. For server-classified Datto per_run components,
-    explicit_approval must be true only after the authenticated technician has
+    arguments.explicit_approval must be true only after the authenticated technician has
     explicitly approved that exact execution. standing_safe classification is
     server-controlled and never accepted from action arguments.
     """
@@ -2454,6 +2458,24 @@ def execute_governed_capability(
             "status": "rejected",
             "error_code": "capability_required",
         }
+
+    execution_arguments = dict(arguments or {})
+
+    # The live MCP contract intentionally exposes only capability + arguments.
+    # Carry current conversational approval inside the governed argument
+    # envelope so approval does not depend on an out-of-band tool parameter.
+    #
+    # This reserved value is consumed here and is never forwarded to Datto.
+    datto_explicit_approval = False
+
+    if capability_name == "automation.component.execute":
+        datto_explicit_approval = (
+            execution_arguments.pop(
+                "explicit_approval",
+                False,
+            )
+            is True
+        )
 
     projected = _discoverable_capability(
         capability_name
@@ -2469,7 +2491,7 @@ def execute_governed_capability(
     if projected["read_only"]:
         return execute_read_capability(
             capability=capability_name,
-            arguments=dict(arguments or {}),
+            arguments=execution_arguments,
         )
 
     if not projected["action_enabled"]:
@@ -2481,8 +2503,8 @@ def execute_governed_capability(
 
     return _governed_execute(
         capability_name=capability_name,
-        arguments=dict(arguments or {}),
-        explicit_approval=(explicit_approval is True),
+        arguments=execution_arguments,
+        explicit_approval=datto_explicit_approval,
     )
 
 
