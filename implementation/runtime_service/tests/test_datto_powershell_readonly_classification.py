@@ -39,6 +39,9 @@ def component():
         "Get-NetIPConfiguration",
         "Get-NetTCPConnection | Select-Object LocalAddress,LocalPort,State",
         "Get-MpComputerStatus | Format-List",
+        "Get-ItemProperty HKLM:\\Software",
+        "Get-CimInstance -ClassName Win32_OperatingSystem",
+        "Get-WmiObject Win32_OperatingSystem",
     ],
 )
 def test_known_read_only_commands_use_standing_policy(
@@ -67,9 +70,8 @@ def test_known_read_only_commands_use_standing_policy(
         "Get-Service; Start-Service Spooler",
         "Get-Service | ForEach-Object { Stop-Service $_.Name }",
         "Get-Content C:\\Windows\\win.ini",
-        "Get-ItemProperty HKLM:\\Software",
-        "Get-CimInstance -ClassName Win32_OperatingSystem",
-        "Get-WmiObject Win32_OperatingSystem",
+        "Get-ItemProperty HKLM:\\SAM\\Domains\\Account",
+        "Get-ItemProperty HKLM:\\SECURITY\\Policy\\Secrets",
         "Invoke-Expression 'Get-Date'",
         "Get-Service -ComputerName OTHERPC",
         "Get-Service $(Start-Service Spooler)",
