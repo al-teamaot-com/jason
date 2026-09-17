@@ -1,0 +1,45 @@
+name: Datto Dynamic Diagnostics
+
+on:
+  push:
+    branches:
+      - feature/jason-datto-edr-av-diagnose-repair-20260917
+    paths:
+      - implementation/runtime_service/src/jason_runtime/datto_component_scope.py
+      - implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py
+      - implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
+      - .github/workflows/datto-dynamic-diagnostics.yml
+  pull_request:
+    paths:
+      - implementation/runtime_service/src/jason_runtime/datto_component_scope.py
+      - implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py
+      - implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
+      - .github/workflows/datto-dynamic-diagnostics.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pip install ./implementation ./implementation/runtime_service
+      - name: Compile diagnostic policy
+        run: python -m py_compile implementation/runtime_service/src/jason_runtime/datto_component_scope.py
+      - name: Test dynamic diagnostic classification
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py \
+            implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
