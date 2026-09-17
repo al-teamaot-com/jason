@@ -1171,9 +1171,47 @@ def _project_action_result(
         job_uid = str(
             data.get("job_uid") or ""
         ).strip()
+        device_uid = str(
+            data.get("device_uid") or ""
+        ).strip()
+        component_uid = str(
+            data.get("component_uid") or ""
+        ).strip()
+        component_name = str(
+            data.get("component_name") or ""
+        ).strip()
 
         if job_uid:
             result["job_uid"] = _safe(job_uid)
+            result["job_read_arguments"] = {
+                "resource_id": job_uid,
+            }
+
+        if device_uid:
+            result["device_uid"] = _safe(device_uid)
+
+        if component_uid:
+            result["component_uid"] = _safe(
+                component_uid
+            )
+
+        if component_name:
+            result["component_name"] = _safe(
+                component_name
+            )
+
+        if job_uid and device_uid and component_uid:
+            result["output_read_arguments"] = {
+                "resource_id": job_uid,
+                "device_uid": device_uid,
+                "component_uid": component_uid,
+                "stream": "stdout",
+            }
+            result["follow_up_contract"] = {
+                "poll_same_job": True,
+                "read_output_after_terminal": True,
+                "do_not_redispatch": True,
+            }
 
         result["job_reference_present"] = bool(job_uid)
 
@@ -2320,6 +2358,12 @@ def execute_read_capability(
     The capability must currently be active, read-only, and present in Jason's
     live capability registry. Jason performs identity/authority evaluation and
     Central Orchestrator execution. Provider credentials are never exposed.
+
+    For automation.job.output.read, use the exact output_read_arguments
+    returned by automation.component.execute. Missing job/device/component
+    selectors are a request-construction error, not evidence of a Datto or
+    provider failure. Correct the selectors and retry the read-only operation;
+    never redispatch a component because an output-read request was incomplete.
     """
 
     capability_name = str(capability).strip()
@@ -2342,6 +2386,140 @@ def execute_read_capability(
         }
 
     read_arguments = dict(arguments or {})
+
+    if capability_name == "automation.job.output.read":
+        selector_bundle = read_arguments.get(
+            "output_read_arguments"
+        )
+
+        if isinstance(selector_bundle, Mapping):
+            for key in (
+                "resource_id",
+                "device_uid",
+                "component_uid",
+                "stream",
+            ):
+                if (
+                    not read_arguments.get(key)
+                    and selector_bundle.get(key)
+                ):
+                    read_arguments[key] = (
+                        selector_bundle.get(key)
+                    )
+
+        resource_id = str(
+            read_arguments.get("resource_id")
+            or read_arguments.get("job_uid")
+            or ""
+        ).strip()
+
+        device_uid = str(
+            read_arguments.get("device_uid")
+            or read_arguments.get(
+                "target_device_uid"
+            )
+            or ""
+        ).strip()
+
+        component_uid = str(
+            read_arguments.get("component_uid")
+            or read_arguments.get("component_id")
+            or ""
+        ).strip()
+
+        stream = str(
+            read_arguments.get("stream")
+            or "stdout"
+        ).strip().casefold()
+
+        missing_arguments = []
+
+        if not resource_id:
+            missing_arguments.append(
+                "resource_id"
+            )
+
+        if not device_uid:
+            missing_arguments.append(
+                "device_uid"
+            )
+
+        if not component_uid:
+            missing_arguments.append(
+                "component_uid"
+            )
+
+        if missing_arguments:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": (
+                    "AUTOMATION_JOB_OUTPUT_SELECTORS_REQUIRED"
+                ),
+                "reason_codes": [
+                    "AUTOMATION_JOB_OUTPUT_SELECTORS_REQUIRED",
+                ],
+                "failure_domain": (
+                    "request_construction"
+                ),
+                "provider_called": False,
+                "retryable": True,
+                "missing_arguments": (
+                    missing_arguments
+                ),
+                "required_arguments": [
+                    "resource_id",
+                    "device_uid",
+                    "component_uid",
+                ],
+                "defaulted_arguments": {
+                    "stream": "stdout",
+                },
+                "do_not_redispatch": True,
+                "operator_message": (
+                    "The output-read request is incomplete. "
+                    "This is not evidence of a Datto/provider "
+                    "failure. Supply the exact job, device, and "
+                    "component selectors and retry this read-only "
+                    "operation. Do not rerun the component."
+                ),
+            }
+
+        if stream not in {
+            "stdout",
+            "stderr",
+            "all",
+        }:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": (
+                    "AUTOMATION_JOB_OUTPUT_STREAM_INVALID"
+                ),
+                "reason_codes": [
+                    "AUTOMATION_JOB_OUTPUT_STREAM_INVALID",
+                ],
+                "failure_domain": (
+                    "request_construction"
+                ),
+                "provider_called": False,
+                "retryable": True,
+                "allowed_streams": [
+                    "stdout",
+                    "stderr",
+                    "all",
+                ],
+                "do_not_redispatch": True,
+            }
+
+        # Only the exact provider-neutral selectors required by the governed
+        # Datto read path are forwarded.
+        read_arguments = {
+            "resource_id": resource_id,
+            "device_uid": device_uid,
+            "component_uid": component_uid,
+            "stream": stream,
+        }
 
     if capability_name == "automation.component.search":
         read_arguments = (
