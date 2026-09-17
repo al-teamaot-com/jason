@@ -40,6 +40,7 @@ from jason_runtime.autotask_internal_note import (
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.datto_component_scope import (
     configured_datto_components,
+    effective_datto_component_approval_mode,
     resolve_datto_component,
 )
 
@@ -1546,6 +1547,7 @@ def _governed_execute(
         }
 
     datto_approval_mode: str | None = None
+    datto_approval_reason_code: str | None = None
 
     if capability_name == "automation.component.execute":
         try:
@@ -1563,7 +1565,16 @@ def _governed_execute(
                 "reason_codes": [str(exc)],
             }
 
-        datto_approval_mode = selected_component.approval_mode
+        (
+            datto_approval_mode,
+            datto_approval_reason_code,
+        ) = effective_datto_component_approval_mode(
+            selected_component,
+            canonical_arguments.get(
+                "variables",
+                {},
+            ),
+        )
 
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
@@ -1589,7 +1600,18 @@ def _governed_execute(
         if capability_name == "automation.component.execute":
             if datto_approval_mode == "standing_safe":
                 imperative_approval = True
-                approval_decided_by = "policy:datto-standing-safe"
+
+                if (
+                    datto_approval_reason_code
+                    == "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+                ):
+                    approval_decided_by = (
+                        "policy:datto-powershell-readonly"
+                    )
+                else:
+                    approval_decided_by = (
+                        "policy:datto-standing-safe"
+                    )
             elif datto_approval_mode == "per_run":
                 imperative_approval = explicit_approval is True
 
@@ -1598,6 +1620,11 @@ def _governed_execute(
                         "status": "approval_required",
                         "capability": capability_name,
                         "reason_codes": [
+                            *(
+                                [datto_approval_reason_code]
+                                if datto_approval_reason_code
+                                else []
+                            ),
                             "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED",
                             *list(decision.reason_codes),
                         ],
@@ -2623,10 +2650,13 @@ def execute_governed_capability(
     ACTIVE in the live capability registry and explicitly MCP-action-enabled.
     Microsoft Entra authenticates the caller; Jason authority, approval policy,
     Central Orchestrator routing, provider isolation, attempt limits and audit
-    remain authoritative. For server-classified Datto per_run components,
-    arguments.explicit_approval must be true only after the authenticated technician has
-    explicitly approved that exact execution. standing_safe classification is
-    server-controlled and never accepted from action arguments.
+    remain authoritative. For Datto component execution, Jason derives
+    approval server-side. The exact reviewed ad-hoc PowerShell component may
+    execute a narrowly classified deterministic read-only command under standing
+    policy. Mutating, sensitive, ambiguous or unclassified commands remain
+    per_run and arguments.explicit_approval must be true only after the
+    authenticated technician explicitly approved that exact execution.
+    Classification is never accepted from action arguments.
     """
 
     capability_name = str(capability).strip()

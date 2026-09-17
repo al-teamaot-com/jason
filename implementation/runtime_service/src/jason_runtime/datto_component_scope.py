@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -55,16 +56,89 @@ _CANONICAL_UID_OVERRIDES = {
 # Arbitrary shell/code execution may never inherit standing-safe authority.
 # Either durable identity side is sufficient to force per-run approval so
 # a stale configured UID or later display-name change cannot weaken policy.
+DATTO_AD_HOC_POWERSHELL_UID = (
+    "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
+)
+DATTO_AD_HOC_POWERSHELL_NAME = (
+    "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
+)
+
 _FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
     {
-        "8a1c153c-feee-41c5-9c9b-58a48e0214fe",
+        DATTO_AD_HOC_POWERSHELL_UID,
     }
 )
 
 _FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
     {
-        "run ad hoc command (powershell 2-5) [win]",
+        DATTO_AD_HOC_POWERSHELL_NAME.casefold(),
     }
+)
+
+# Standing-safe PowerShell is intentionally narrow. These cmdlets are
+# operational reads whose normal behavior does not modify endpoint state.
+# Generic filesystem, registry, event-log, WMI/CIM, shell and executable
+# access remains per-run because "read-looking" input can expose sensitive
+# data, cross scope boundaries, or have provider-specific side effects.
+_READ_ONLY_POWERSHELL_PRIMARY = frozenset(
+    {
+        "get-acl",
+        "get-authenticodesignature",
+        "get-computerinfo",
+        "get-counter",
+        "get-date",
+        "get-disk",
+        "get-dnsclient",
+        "get-dnsclientserveraddress",
+        "get-filehash",
+        "get-hotfix",
+        "get-localgroup",
+        "get-localgroupmember",
+        "get-localuser",
+        "get-mpcomputerstatus",
+        "get-netadapter",
+        "get-netfirewallprofile",
+        "get-netfirewallrule",
+        "get-netipaddress",
+        "get-netipconfiguration",
+        "get-netroute",
+        "get-nettcpconnection",
+        "get-netudpendpoint",
+        "get-partition",
+        "get-physicaldisk",
+        "get-pnpdevice",
+        "get-process",
+        "get-scheduledtask",
+        "get-scheduledtaskinfo",
+        "get-service",
+        "get-smbconnection",
+        "get-timezone",
+        "get-volume",
+        "resolve-dnsname",
+        "test-netconnection",
+        "test-path",
+    }
+)
+
+_READ_ONLY_POWERSHELL_PIPELINE = frozenset(
+    {
+        "convertto-json",
+        "format-list",
+        "format-table",
+        "group-object",
+        "measure-object",
+        "out-string",
+        "select-object",
+        "sort-object",
+        "where-object",
+    }
+)
+
+_POWERSHELL_APPROVAL_REQUIRED_REASON = (
+    "DATTO_POWERSHELL_COMMAND_APPROVAL_REQUIRED"
+)
+_POWERSHELL_READ_ONLY_REASON = (
+    "DATTO_POWERSHELL_READ_ONLY_COMMAND"
 )
 
 
@@ -77,6 +151,175 @@ class DattoApprovedComponent:
     @property
     def requires_explicit_approval(self) -> bool:
         return self.approval_mode == DATTO_APPROVAL_MODE_PER_RUN
+
+
+def _powershell_command_token(segment: str) -> str:
+    text = segment.strip()
+
+    if not text:
+        return ""
+
+    token = text.split(None, 1)[0]
+
+    if re.fullmatch(
+        r"[A-Za-z][A-Za-z0-9-]*",
+        token,
+    ) is None:
+        return ""
+
+    return token.casefold()
+
+
+def _powershell_is_deterministically_read_only(
+    command: object,
+) -> bool:
+    if not isinstance(command, str):
+        return False
+
+    text = command.strip()
+
+    if not text or len(text) > 4000:
+        return False
+
+    # Standing-safe is limited to a simple one-line PowerShell pipeline.
+    # Any construct that can chain commands, invoke expressions, redirect
+    # data, expand variables, create script blocks, call methods, splat
+    # arguments, or escape normal parsing falls back to per-run approval.
+    for forbidden in (
+        "\n",
+        "\r",
+        ";",
+        "`",
+        "$",
+        "@",
+        "{",
+        "}",
+        "(",
+        ")",
+        ">",
+        "<",
+        "&",
+        "--%",
+    ):
+        if forbidden in text:
+            return False
+
+    segments = [
+        value.strip()
+        for value in text.split("|")
+    ]
+
+    if not segments or any(
+        not value for value in segments
+    ):
+        return False
+
+    risky_parameter = re.compile(
+        r"(?i)(?:^|\s)-("
+        r"credential|"
+        r"cimsession|"
+        r"session|"
+        r"connectionuri|"
+        r"scriptblock|"
+        r"argumentlist|"
+        r"encodedcommand|"
+        r"asjob"
+        r")\b"
+    )
+
+    remote_computer = re.compile(
+        r"(?i)(?:^|\s)-computername\b"
+    )
+
+    for index, segment in enumerate(segments):
+        command_name = _powershell_command_token(
+            segment
+        )
+
+        allowed = (
+            _READ_ONLY_POWERSHELL_PRIMARY
+            if index == 0
+            else _READ_ONLY_POWERSHELL_PIPELINE
+        )
+
+        if command_name not in allowed:
+            return False
+
+        if risky_parameter.search(segment):
+            return False
+
+        # Test-NetConnection is expressly a local diagnostic whose normal
+        # purpose is testing a named remote network destination. Other
+        # standing-safe cmdlets may not widen execution/query scope to a
+        # second managed computer through -ComputerName.
+        if (
+            command_name != "test-netconnection"
+            and remote_computer.search(segment)
+        ):
+            return False
+
+    return True
+
+
+def effective_datto_component_approval_mode(
+    component: DattoApprovedComponent,
+    variables: object,
+) -> tuple[str, str | None]:
+    """Return the server-derived approval mode for one exact execution.
+
+    Component configuration remains the baseline. The exact reviewed AOT
+    PowerShell runner is the only component whose approval can be narrowed
+    further by deterministic command analysis.
+
+    Unknown, ambiguous, sensitive or non-read-only PowerShell always remains
+    per-run. The caller cannot supply or override this classification.
+    """
+
+    if not (
+        component.uid == DATTO_AD_HOC_POWERSHELL_UID
+        and component.name.casefold()
+        == DATTO_AD_HOC_POWERSHELL_NAME.casefold()
+    ):
+        return component.approval_mode, None
+
+    if not isinstance(variables, Mapping):
+        return (
+            DATTO_APPROVAL_MODE_PER_RUN,
+            _POWERSHELL_APPROVAL_REQUIRED_REASON,
+        )
+
+    if len(variables) != 1:
+        return (
+            DATTO_APPROVAL_MODE_PER_RUN,
+            _POWERSHELL_APPROVAL_REQUIRED_REASON,
+        )
+
+    supplied_name, supplied_value = next(
+        iter(variables.items())
+    )
+
+    if (
+        not isinstance(supplied_name, str)
+        or supplied_name.strip().casefold()
+        != "usrinput"
+    ):
+        return (
+            DATTO_APPROVAL_MODE_PER_RUN,
+            _POWERSHELL_APPROVAL_REQUIRED_REASON,
+        )
+
+    if _powershell_is_deterministically_read_only(
+        supplied_value
+    ):
+        return (
+            DATTO_APPROVAL_MODE_STANDING_SAFE,
+            _POWERSHELL_READ_ONLY_REASON,
+        )
+
+    return (
+        DATTO_APPROVAL_MODE_PER_RUN,
+        _POWERSHELL_APPROVAL_REQUIRED_REASON,
+    )
 
 
 class DattoComponentScopeError(ValueError):
