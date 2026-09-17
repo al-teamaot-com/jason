@@ -56,7 +56,7 @@ def _capability(
             "without granting execution authority or bypassing current governance."
         ),
         owner_service="Jason Operational Resolution Memory",
-        architectural_capability_ids=frozenset({"CAP-006", "RESMEM-001"}),
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-012"}),
         risk_level=CapabilityRisk.LOW,
         data_classifications=frozenset({"internal"}),
         permitted_execution_modes=frozenset({"deterministic"}),

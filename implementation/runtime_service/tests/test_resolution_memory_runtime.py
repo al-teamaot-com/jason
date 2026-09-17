@@ -126,6 +126,12 @@ def test_foundation_registers_read_only_resolution_capabilities() -> None:
     search = capabilities.get_current(capability_name=RESOLUTION_MEMORY_SEARCH)
     read = capabilities.get_current(capability_name=RESOLUTION_MEMORY_READ)
 
+    assert search.architectural_capability_ids == frozenset(
+        {"JAC-005", "JAC-012"}
+    )
+    assert read.architectural_capability_ids == frozenset(
+        {"JAC-005", "JAC-012"}
+    )
     assert search.metadata["read_only"] == "true"
     assert search.metadata["provider_neutral"] == "true"
     assert search.metadata["authority_semantics"] == (

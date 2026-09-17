@@ -9,6 +9,9 @@ from typing import Any, Mapping
 
 from usage_ledger.ledger import SQLiteUsageLedger
 
+from decision_memory.resolution_service import ResolutionMemoryService
+from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
+
 from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
@@ -153,6 +156,12 @@ from .provider_reads import (
     register_provider_read_invokers,
     register_provider_read_runtime_foundation,
 )
+from .resolution_memory_runtime import (
+    RESOLUTION_MEMORY_READ,
+    RESOLUTION_MEMORY_SEARCH,
+    GovernedResolutionMemoryCapabilityInvoker,
+    register_resolution_memory_runtime_foundation,
+)
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
 
@@ -172,6 +181,9 @@ class RuntimeSettings:
     ollama_model: str
     allowed_machine_identities: frozenset[str]
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
+    resolution_memory_db: Path = Path(
+        "/var/lib/jason/openclaw/resolution-memory.sqlite3"
+    )
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -254,6 +266,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_MODEL_USAGE_DB",
                     "/var/lib/jason/openclaw/model-usage.sqlite3",
+                )
+            ),
+            resolution_memory_db=Path(
+                os.getenv(
+                    "JASON_RESOLUTION_MEMORY_DB",
+                    "/var/lib/jason/openclaw/resolution-memory.sqlite3",
                 )
             ),
             trusted_keys_registry=Path(
@@ -428,6 +446,8 @@ class RuntimeSettings:
             )
         if not str(self.dynamic_conversation_context_db).strip():
             raise ValueError("dynamic conversation context db path is required")
+        if not str(self.resolution_memory_db).strip():
+            raise ValueError("resolution memory db path is required")
         if not self.host:
             raise ValueError("runtime host is required")
         if not (0 < self.port < 65536):
@@ -599,6 +619,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     now = datetime.now(timezone.utc)
     register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
+    register_resolution_memory_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_email_send(capabilities=capabilities, providers=providers)
 
     integration_broker = IntegrationBroker(
@@ -819,6 +844,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         registry=load_production_system_registry()
     )
 
+    resolution_memory_store = SQLiteResolutionMemoryStore(
+        str(settings.resolution_memory_db)
+    )
+    resolution_memory_service = ResolutionMemoryService(
+        store=resolution_memory_store
+    )
+    resolution_memory_service.initialize()
+    resolution_memory_invoker = GovernedResolutionMemoryCapabilityInvoker(
+        service=resolution_memory_service
+    )
+
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
         role_id_path=settings.ses_openbao_role_id_path,
@@ -864,6 +900,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)
+    invokers.register(RESOLUTION_MEMORY_SEARCH, resolution_memory_invoker)
+    invokers.register(RESOLUTION_MEMORY_READ, resolution_memory_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
