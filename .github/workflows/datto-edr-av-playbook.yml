@@ -9,6 +9,7 @@ on:
       - implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
       - implementation/autonomous_remediation/test_datto_edr_av_playbook.py
       - implementation/autonomous_remediation/test_datto_edr_av_runtime_contract.py
+      - implementation/autonomous_remediation/components/**
       - .github/workflows/datto-edr-av-playbook.yml
   pull_request:
     paths:
@@ -16,6 +17,7 @@ on:
       - implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
       - implementation/autonomous_remediation/test_datto_edr_av_playbook.py
       - implementation/autonomous_remediation/test_datto_edr_av_runtime_contract.py
+      - implementation/autonomous_remediation/components/**
       - .github/workflows/datto-edr-av-playbook.yml
   workflow_dispatch:
 
@@ -41,3 +43,14 @@ jobs:
         run: python -m py_compile datto_edr_av_playbook.py datto_edr_av_runtime_contract.py
       - name: Run Datto EDR AV tests
         run: python -m pytest -q test_datto_edr_av_playbook.py test_datto_edr_av_runtime_contract.py
+      - name: Parse Datto AV component PowerShell
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          $path = Resolve-Path 'components/Datto_AV_Force_Update_WIN_AOT_Ver_09172026-1.ps1'
+          [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
