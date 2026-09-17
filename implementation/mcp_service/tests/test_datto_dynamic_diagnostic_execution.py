@@ -173,7 +173,7 @@ def test_dynamic_safe_diagnostics_receive_policy_standing_safe(
 
     approval = approvals[0]
     assert approval.requested_by == "person-al"
-    assert approval.decided_by == "policy:datto-dynamic-diagnostic"
+    assert approval.decided_by == "policy:datto-powershell-readonly"
     assert approval.decided_by != "person-al"
 
     governed_request = calls[0]
