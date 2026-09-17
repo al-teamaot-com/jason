@@ -30,7 +30,6 @@ rules:
       - Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1
       - Datto EDR Maintenance [WIN]
       - Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024
-      - agent.exe datto-av --force-update
       - 230 AM Scheduled Reboot AOT Ver 11282024
     conditions:
       exact_device_identity_required: true
@@ -51,6 +50,16 @@ rules:
       action: continue_bounded_playbook_or_escalate
       redispatch_on_read_failure: false
 
+  - id: jason-datto-edr-av-force-update-binding
+    description: Datto AV force-update must use an exact vetted component or dedicated governed capability before this step may execute autonomously.
+    playbook: Jason - Datto EDR/AV Diagnose & Repair
+    operation: agent.exe datto-av --force-update
+    outcome: block
+    autonomy_level: prohibited
+    until:
+      exact_governed_capability_registered: true
+      arbitrary_shell_fallback_prohibited: true
+
   - id: jason-datto-edr-av-clean-recovery-pilot
     description: Keep the clean EDR/AV uninstall and recovery branch approval-gated during supervised pilot validation.
     playbook: Jason - Datto EDR/AV Diagnose & Repair
@@ -60,7 +69,7 @@ rules:
       - recovery scheduled reboot
       - recovery Datto EDR Maintenance [WIN]
       - recovery Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024
-      - recovery agent.exe datto-av --force-update
+      - recovery Datto AV force-update governed capability
     maximum_targets: 1
     outcome: require_approval
     autonomy_level: approved_execute
