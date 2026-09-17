@@ -1,9 +1,9 @@
 # Jason Datto RMM Generalized Governed Component Execution — 2026-09-17
 
-**Classification:** Evidence / production capability proof in progress  
-**Status:** Execution accepted; terminal completion and StdOut pending  
+**Classification:** Evidence / production capability proof  
+**Status:** Completed  
 **Owner:** Jason Architecture Authority / AOT Owner  
-**Scope:** ChatGPT Business ↔ Jason MCP ↔ Central Orchestrator ↔ Datto RMM generalized governed component discovery, approval, execution, and asynchronous job monitoring  
+**Scope:** ChatGPT Business ↔ Jason MCP ↔ Central Orchestrator ↔ Datto RMM generalized governed component discovery, approval, execution, asynchronous job monitoring, and governed StdOut retrieval  
 **Authority note:** This record preserves evidence. It grants no new provider, identity, business, or execution authority.
 
 ## Section Goal
@@ -65,49 +65,86 @@ Datto job:
 - job UID: `77bbc834-097d-49a2-95ce-0066559f73d5`;
 - component: `Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024`;
 - endpoint: `AOT-50282`;
-- provider state after acceptance: `active`.
+- provider state after acceptance: `active`;
+- terminal state: `completed`.
 
-No duplicate component execution should be issued while this durable job is active. Follow-up work must use read-only job status checks against this exact job UID.
+No duplicate component execution was issued. Follow-up work used read-only job status checks against this exact durable job UID.
 
-## Asynchronous monitoring evidence
+## Asynchronous monitoring and terminal evidence
 
-Jason has already used `automation.job.read` against the exact job UID and received `status=active`. Repeated status reads are safe because they do not create another provider mutation.
+Jason repeatedly used `automation.job.read` against the exact job UID. Intermediate reads returned `status=active`; a later governed read returned terminal `status=completed`.
 
-Current known state at documentation time:
+Terminal governed job-read correlation:
 
-- execution accepted by Datto: **yes**;
-- job created: **yes**;
-- job UID durable and readable: **yes**;
-- current status: **active**;
-- second provider mutation: **not issued**;
-- terminal completion: **pending**;
-- final governed StdOut: **pending**.
+- `corr_mcp_52f7e97ff1824bbba9e3599258`.
 
-When terminal state is reached, use `automation.job.output.read` with the exact job UID, exact device UID, exact component UID, and `stream=stdout`. Record the terminal state and output in this document before closing the Section Goal.
+The terminal read confirmed:
+
+- job UID: `77bbc834-097d-49a2-95ce-0066559f73d5`;
+- job name: `Jason - Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024`;
+- terminal status: `completed`;
+- discovery complete: `true`.
+
+Repeated status reads were read-only and did not create another provider mutation.
+
+## Governed StdOut retrieval
+
+An earlier attempt to retrieve StdOut failed through the Jason/Datto read path immediately after completion. A later governed retry against the same immutable job identity succeeded without re-running the component.
+
+Successful output-read correlation:
+
+- `corr_mcp_d23517160780446cab8058391b5ec0c5`.
+
+The successful `automation.job.output.read` was bound to the exact:
+
+- job UID `77bbc834-097d-49a2-95ce-0066559f73d5`;
+- device UID `69571572-83f7-1e33-9cdf-01717d4e74a4`;
+- component UID `9c30dab8-b76c-417d-a264-b3ca91995179`;
+- stream `stdout`.
+
+Result:
+
+- output matches: `1`;
+- truncated: `false`;
+- discovery complete: `true`.
+
+Key returned component output:
+
+- current Datto EDR version reported as `3.17.1.6224`;
+- latest Datto EDR installer downloaded successfully;
+- installer digital-signature verification passed;
+- override/provisioning tenant detected as `https://teamao2154.infocyte.com/`;
+- Datto AV reported as already installed and installed properly;
+- existing Datto EDR installation detected and overwritten;
+- `HUNTAgent` was stopped, deleted, and the old EDR installation removed;
+- the replacement RTS/EDR agent was installed to `C:\ProgramData\CentraStage\AEMAgent\RMM.AdvancedThreatDetection\agent.exe`.
+
+The governed output proves that terminal completion and component-output retrieval both work through Jason for this modifying `per_run` component. The temporary output-read failure did not require or justify a second component execution.
 
 ## Governance invariants preserved
 
-- `direct_provider_access=false` remains mandatory.
-- Central Orchestrator remains authoritative for execution.
-- Provider credentials are not exposed to ChatGPT.
-- Exact endpoint identity remains required.
-- Component identity must come from governed live catalog resolution.
-- Safety/approval classification remains server-controlled.
+- `direct_provider_access=false` remained mandatory.
+- Central Orchestrator remained authoritative for execution.
+- Provider credentials were not exposed to ChatGPT.
+- Exact endpoint identity remained required.
+- Component identity came from governed live catalog resolution.
+- Safety/approval classification remained server-controlled.
 - `standing_safe` may execute under standing policy only when explicitly classified server-side.
 - Modifying, disruptive, destructive, unknown, or unclassified live components remain `per_run` unless separately classified by trusted policy.
 - Caller/model-supplied approval classification cannot widen authority.
-- Explicit approval applies to the exact execution only.
-- One dispatch is followed by monitoring of the same job ID; active status is not a reason to dispatch again.
+- Explicit approval applied to the exact execution only.
+- Exactly one dispatch was followed by monitoring of the same job ID.
+- Active or temporarily unreadable output was not treated as permission to dispatch again.
 
 ## Operational monitoring cadence
 
-ChatGPT's standard recurring automation scheduler is not a sub-hour polling engine. For a long-running Datto job, technicians may ask ChatGPT to check the status at any time and Jason can perform an immediate read-only `automation.job.read`.
+ChatGPT's standard recurring automation scheduler is not a sub-hour polling engine. During an active conversation, a technician can ask ChatGPT to check the job at any time and Jason can immediately perform another read-only `automation.job.read`.
 
-For unattended 5- or 10-minute polling, the durable implementation should be inside Jason or another approved operational scheduler, not by repeatedly redispatching the component and not by relying on ChatGPT recurring automations. A Jason-side watcher should store the exact job UID, perform read-only status checks on a bounded interval, stop automatically at terminal state or timeout, retrieve output once terminal, and notify the technician without creating a second provider mutation.
+For unattended 5- or 10-minute polling, the durable implementation should be inside Jason or another approved operational scheduler. A Jason-side watcher should retain the exact job UID, perform bounded read-only polling, stop automatically at terminal state or timeout, retrieve output once terminal, and notify the technician without creating a second provider mutation.
 
-## Section Goal status
+## Section Goal status — CLOSED
 
-Current acceptance:
+Final acceptance:
 
 1. complete live component catalog discovery — **proven**;
 2. exact endpoint resolution — **proven**;
@@ -117,9 +154,10 @@ Current acceptance:
 6. explicit conversational approval transported through the live MCP contract — **proven**;
 7. exactly one governed Datto job created — **proven**;
 8. durable job UID returned — **proven**;
-9. repeated read-only polling of the same job — **proven while active**;
-10. terminal completion — **pending**;
-11. final governed StdOut retrieval — **pending**;
-12. final documentation/Grafana reconciliation — **pending until terminal evidence is available**.
+9. repeated read-only polling of the same job — **proven**;
+10. terminal completion — **proven (`completed`)**;
+11. final governed StdOut retrieval — **proven**;
+12. temporary post-completion output-read failure recovered by read-only retry without duplicate execution — **proven**;
+13. documentation reconciliation — **complete for this proof**.
 
-The Section Goal remains open only for terminal job evidence, final StdOut interpretation, and final observability/documentation reconciliation. The generalized discovery, approval, and dispatch path itself is live-proven.
+Grafana/Prometheus release reconciliation is operational observability work separate from this evidence record and must use the actual deployed MCP image/source as its expected boundary. No observability state is claimed here without fresh monitoring evidence.
