@@ -135,8 +135,16 @@ The order below is provisional and should be changed when implementation evidenc
 | CAP-003 | Microsoft 365 Mail Investigation | Recommend | Test a different provider and evidence domain |
 | CAP-004 | Backup Failure Investigation | Recommend | Exercise time-sensitive operational evidence and escalation |
 | CAP-005 | Client Communication Drafting | Recommend | Apply audience-aware progressive disclosure |
-| CAP-006 | Knowledge Candidate Capture | Observe | Preserve reusable lessons from completed work |
+| CAP-006 | Knowledge Candidate Capture | Observe | Preserve reusable lessons, verified outcomes, failed attempts, and playbook candidates from completed work |
 | CAP-007 | Governed Email Send | Execute with approval | Provide one reusable governed outbound-email primitive with AWS SES as a replaceable pilot provider |
+
+## Operational learning roadmap cross-reference
+
+`REFLECT-001 — Governed reflection and continuous-improvement loop` and `RESMEM-001 / TODO-OPS-001 — Operational Resolution Memory and case-based troubleshooting reuse` are now planned reasoning-quality workstreams.
+
+They are not yet admitted as new canonical invokable capabilities merely because they appear on the roadmap. Before admission, the Capability Register's normal admission test must define the provider-neutral inputs/outputs, client-isolation model, evidence contract, authority ceiling, success metrics, failure behavior, steward, review interval, and retirement criteria.
+
+CAP-006 is the nearest existing planned vertical slice because it preserves reusable lessons from completed work. Resolution Memory may ultimately extend CAP-006 or justify a separate capability, but that decision should be made only after the `ReflectionRecord` and `ResolutionRecord` models are proven. In all cases, historical outcomes remain evidence rather than execution authority; current actions still pass through normal Jason authorization, approval, disruption, provider, and Central Orchestrator controls.
 
 ## Admission test
 
