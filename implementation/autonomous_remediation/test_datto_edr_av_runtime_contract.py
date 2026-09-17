@@ -1,6 +1,7 @@
 import pytest
 
 from datto_edr_av_playbook import (
+    AV_FORCE_UPDATE_COMMAND,
     ActionKind,
     ApprovalClass,
     PlannedAction,
@@ -10,6 +11,9 @@ from datto_edr_av_runtime_contract import (
     AUTOMATION_COMPONENT_EXECUTE,
     AUTOMATION_JOB_OUTPUT_READ,
     AUTOMATION_JOB_READ,
+    DATTO_AV_FORCE_UPDATE_POWERSHELL,
+    RUN_AD_HOC_POWERSHELL_COMPONENT,
+    RUN_AD_HOC_POWERSHELL_UID,
     RuntimeBindingError,
     VERIFIED_COMPONENTS,
     bind_execution,
@@ -39,7 +43,7 @@ def test_verified_health_component_binds_to_governed_execution():
 
 
 def test_all_provider_components_have_exact_uid_and_name():
-    assert len(VERIFIED_COMPONENTS) == 6
+    assert len(VERIFIED_COMPONENTS) == 7
     for identity in VERIFIED_COMPONENTS.values():
         assert identity.uid
         assert identity.name
@@ -52,13 +56,23 @@ def test_unknown_component_fails_closed():
         bind_execution(action("Some Other Component"), device_uid="device-1")
 
 
-def test_predefined_command_never_falls_back_to_shell():
-    with pytest.raises(RuntimeBindingError, match="arbitrary shell fallback is prohibited"):
+def test_datto_av_force_update_uses_exact_ad_hoc_powershell_component():
+    request = bind_execution(
+        action(AV_FORCE_UPDATE_COMMAND, kind=ActionKind.PREDEFINED_COMMAND),
+        device_uid="device-1",
+    )
+    assert request.capability == AUTOMATION_COMPONENT_EXECUTE
+    assert request.arguments["component_uid"] == RUN_AD_HOC_POWERSHELL_UID
+    assert request.arguments["component_name"] == RUN_AD_HOC_POWERSHELL_COMPONENT
+    assert request.arguments["variables"] == {"Command": DATTO_AV_FORCE_UPDATE_POWERSHELL}
+    assert "datto-av" in request.arguments["variables"]["Command"]
+    assert "--force-update" in request.arguments["variables"]["Command"]
+
+
+def test_arbitrary_predefined_command_still_fails_closed():
+    with pytest.raises(RuntimeBindingError, match="unapproved predefined command"):
         bind_execution(
-            action(
-                "agent.exe datto-av --force-update",
-                kind=ActionKind.PREDEFINED_COMMAND,
-            ),
+            action("Write-Output arbitrary", kind=ActionKind.PREDEFINED_COMMAND),
             device_uid="device-1",
         )
 
