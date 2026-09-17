@@ -29,6 +29,10 @@ _VALID_APPROVAL_MODES = frozenset(
     }
 )
 
+DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ = "passive_read"
+DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE = "active_diagnostic_probe"
+DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED = "approval_required"
+
 _MAX_COMPONENTS = 16
 _MAX_UID_LENGTH = 128
 _MAX_NAME_LENGTH = 255
@@ -75,26 +79,36 @@ _FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
     }
 )
 
-# Standing-safe PowerShell is intentionally narrow. These cmdlets are
-# operational reads whose normal behavior does not modify endpoint state.
-# Generic filesystem, registry, event-log, WMI/CIM, shell and executable
-# access remains per-run because "read-looking" input can expose sensitive
-# data, cross scope boundaries, or have provider-specific side effects.
-_READ_ONLY_POWERSHELL_PRIMARY = frozenset(
+# The ad-hoc runner remains per-run by default. Exact command content may be
+# promoted to standing-safe only when this deterministic classifier proves the
+# command is a bounded passive read or single non-disruptive diagnostic probe.
+# Jason does not have to pre-register every diagnostic string, but unknown or
+# ambiguous syntax never inherits read-only authority.
+_PASSIVE_POWERSHELL_PRIMARY = frozenset(
     {
         "get-acl",
         "get-authenticodesignature",
+        "get-childitem",
+        "get-cimclass",
+        "get-ciminstance",
+        "get-command",
         "get-computerinfo",
         "get-counter",
         "get-date",
         "get-disk",
         "get-dnsclient",
         "get-dnsclientserveraddress",
+        "get-eventlog",
         "get-filehash",
         "get-hotfix",
+        "get-item",
+        "get-itemproperty",
+        "get-itempropertyvalue",
         "get-localgroup",
         "get-localgroupmember",
         "get-localuser",
+        "get-member",
+        "get-module",
         "get-mpcomputerstatus",
         "get-netadapter",
         "get-netfirewallprofile",
@@ -108,20 +122,31 @@ _READ_ONLY_POWERSHELL_PRIMARY = frozenset(
         "get-physicaldisk",
         "get-pnpdevice",
         "get-process",
+        "get-psdrive",
         "get-scheduledtask",
         "get-scheduledtaskinfo",
         "get-service",
         "get-smbconnection",
+        "get-storagepool",
         "get-timezone",
         "get-volume",
-        "resolve-dnsname",
-        "test-netconnection",
+        "get-winevent",
+        "get-wmiobject",
         "test-path",
+    }
+)
+
+_ACTIVE_POWERSHELL_PRIMARY = frozenset(
+    {
+        "resolve-dnsname",
+        "test-connection",
+        "test-netconnection",
     }
 )
 
 _READ_ONLY_POWERSHELL_PIPELINE = frozenset(
     {
+        "convertto-csv",
         "convertto-json",
         "format-list",
         "format-table",
@@ -134,11 +159,83 @@ _READ_ONLY_POWERSHELL_PIPELINE = frozenset(
     }
 )
 
+_PASSIVE_NATIVE_COMMANDS = frozenset(
+    {
+        "arp",
+        "arp.exe",
+        "driverquery",
+        "driverquery.exe",
+        "gpresult",
+        "gpresult.exe",
+        "hostname",
+        "hostname.exe",
+        "ipconfig",
+        "ipconfig.exe",
+        "manage-bde",
+        "manage-bde.exe",
+        "netstat",
+        "netstat.exe",
+        "netsh",
+        "netsh.exe",
+        "pnputil",
+        "pnputil.exe",
+        "quser",
+        "quser.exe",
+        "qwinsta",
+        "qwinsta.exe",
+        "reg",
+        "reg.exe",
+        "route",
+        "route.exe",
+        "sc",
+        "sc.exe",
+        "systeminfo",
+        "systeminfo.exe",
+        "tasklist",
+        "tasklist.exe",
+        "wevtutil",
+        "wevtutil.exe",
+        "whoami",
+        "whoami.exe",
+    }
+)
+
+_ACTIVE_NATIVE_COMMANDS = frozenset(
+    {
+        "nslookup",
+        "nslookup.exe",
+        "ping",
+        "ping.exe",
+        "tracert",
+        "tracert.exe",
+    }
+)
+
 _POWERSHELL_APPROVAL_REQUIRED_REASON = (
     "DATTO_POWERSHELL_COMMAND_APPROVAL_REQUIRED"
 )
 _POWERSHELL_READ_ONLY_REASON = (
     "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+)
+
+_SENSITIVE_READ_PATTERN = re.compile(
+    r"(?i)("
+    r"hklm:\\(?:sam|security)(?:\\|$)|"
+    r"hkey_local_machine\\(?:sam|security)(?:\\|$)|"
+    r"\\windows\\system32\\config\\(?:sam|security)(?:\\|$)|"
+    r"\\microsoft\\credentials(?:\\|$)|"
+    r"\\microsoft\\vault(?:\\|$)|"
+    r"\\protect\\s-1-5-21-|"
+    r"\b(commandline|password|passwd|credential|privatekey|api[_-]?key|access[_-]?token|refresh[_-]?token)\b"
+    r")"
+)
+
+_MUTATION_WORD_PATTERN = re.compile(
+    r"(?i)(?:^|\s)("
+    r"add|create|delete|disable|enable|export|flushdns|import|install|"
+    r"kill|remove|rename|renew|release|reset|restart|save|set|start|stop|"
+    r"uninstall|update"
+    r")(?:\s|$)"
 )
 
 
@@ -162,7 +259,7 @@ def _powershell_command_token(segment: str) -> str:
     token = text.split(None, 1)[0]
 
     if re.fullmatch(
-        r"[A-Za-z][A-Za-z0-9-]*",
+        r"[A-Za-z][A-Za-z0-9.\-]*",
         token,
     ) is None:
         return ""
@@ -170,21 +267,167 @@ def _powershell_command_token(segment: str) -> str:
     return token.casefold()
 
 
-def _powershell_is_deterministically_read_only(
-    command: object,
+def _native_command_is_bounded_read(
+    command_name: str,
+    segment: str,
+) -> str:
+    lower = segment.casefold()
+    tokens = lower.split()
+
+    if command_name in {"hostname", "hostname.exe", "systeminfo", "systeminfo.exe"}:
+        return DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+
+    if command_name in {"whoami", "whoami.exe", "tasklist", "tasklist.exe", "driverquery", "driverquery.exe", "gpresult", "gpresult.exe", "quser", "quser.exe", "qwinsta", "qwinsta.exe"}:
+        return DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+
+    if command_name in {"ipconfig", "ipconfig.exe"}:
+        forbidden = {"/flushdns", "/release", "/release6", "/renew", "/renew6", "/registerdns", "/setclassid", "/setclassid6"}
+        return (
+            DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+            if any(value in forbidden for value in tokens[1:])
+            else DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+        )
+
+    if command_name in {"arp", "arp.exe"}:
+        allowed = {"-a", "-g", "-n"}
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if all(value in allowed or not value.startswith("-") for value in tokens[1:])
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"route", "route.exe"}:
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if len(tokens) >= 2 and tokens[1] == "print"
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"sc", "sc.exe"}:
+        allowed_verbs = {"query", "queryex", "qc", "qdescription", "enumdepend", "getdisplayname", "getkeyname"}
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if len(tokens) >= 2 and tokens[1] in allowed_verbs
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"reg", "reg.exe"}:
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if len(tokens) >= 2 and tokens[1] == "query"
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"wevtutil", "wevtutil.exe"}:
+        allowed_verbs = {"el", "enum-logs", "gl", "get-log", "gli", "get-log-info", "qe", "query-events"}
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if len(tokens) >= 2 and tokens[1] in allowed_verbs
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"manage-bde", "manage-bde.exe"}:
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if any(value in {"-status", "-protectors"} for value in tokens[1:])
+            and not _MUTATION_WORD_PATTERN.search(lower)
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"pnputil", "pnputil.exe"}:
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if any(value.startswith("/enum-") for value in tokens[1:])
+            and not _MUTATION_WORD_PATTERN.search(lower)
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    if command_name in {"netstat", "netstat.exe"}:
+        if any(value.isdigit() for value in tokens[1:]):
+            return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        return DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+
+    if command_name in {"netsh", "netsh.exe"}:
+        if "key=clear" in lower:
+            return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        if _MUTATION_WORD_PATTERN.search(lower):
+            return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        return (
+            DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            if "show" in tokens[1:]
+            else DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+        )
+
+    return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+
+
+def _native_command_is_bounded_probe(
+    command_name: str,
+    segment: str,
 ) -> bool:
+    lower = segment.casefold()
+    tokens = lower.split()
+
+    if command_name in {"nslookup", "nslookup.exe"}:
+        return len(tokens) >= 2
+
+    if command_name in {"ping", "ping.exe"}:
+        if "-t" in tokens or "/t" in tokens:
+            return False
+        for option in ("-n", "-w"):
+            if option in tokens:
+                index = tokens.index(option)
+                if index + 1 >= len(tokens):
+                    return False
+                try:
+                    value = int(tokens[index + 1])
+                except ValueError:
+                    return False
+                if option == "-n" and not 1 <= value <= 10:
+                    return False
+                if option == "-w" and not 1 <= value <= 5000:
+                    return False
+        return len(tokens) >= 2
+
+    if command_name in {"tracert", "tracert.exe"}:
+        for option in ("-h", "-w"):
+            if option in tokens:
+                index = tokens.index(option)
+                if index + 1 >= len(tokens):
+                    return False
+                try:
+                    value = int(tokens[index + 1])
+                except ValueError:
+                    return False
+                if option == "-h" and not 1 <= value <= 30:
+                    return False
+                if option == "-w" and not 1 <= value <= 5000:
+                    return False
+        return len(tokens) >= 2
+
+    return False
+
+
+def classify_datto_powershell_diagnostic_command(
+    command: object,
+) -> str:
+    """Classify one ad-hoc command without relying on a pre-enumerated string.
+
+    The classifier accepts only one simple command/pipeline. It permits a
+    growing vocabulary of passive reads and bounded network probes while
+    rejecting state mutation, secret-oriented reads, remote management scope,
+    command chaining, script blocks, method invocation, redirection, nested
+    shells and syntax it cannot prove safe.
+    """
+
     if not isinstance(command, str):
-        return False
+        return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
     text = command.strip()
 
     if not text or len(text) > 4000:
-        return False
+        return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
-    # Standing-safe is limited to a simple one-line PowerShell pipeline.
-    # Any construct that can chain commands, invoke expressions, redirect
-    # data, expand variables, create script blocks, call methods, splat
-    # arguments, or escape normal parsing falls back to per-run approval.
     for forbidden in (
         "\n",
         "\r",
@@ -196,23 +439,25 @@ def _powershell_is_deterministically_read_only(
         "}",
         "(",
         ")",
+        "[",
+        "]",
         ">",
         "<",
         "&",
         "--%",
+        "||",
+        "&&",
     ):
         if forbidden in text:
-            return False
+            return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
-    segments = [
-        value.strip()
-        for value in text.split("|")
-    ]
+    if _SENSITIVE_READ_PATTERN.search(text):
+        return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
-    if not segments or any(
-        not value for value in segments
-    ):
-        return False
+    segments = [value.strip() for value in text.split("|")]
+
+    if not segments or any(not value for value in segments):
+        return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
     risky_parameter = re.compile(
         r"(?i)(?:^|\s)-("
@@ -223,42 +468,63 @@ def _powershell_is_deterministically_read_only(
         r"scriptblock|"
         r"argumentlist|"
         r"encodedcommand|"
-        r"asjob"
+        r"asjob|"
+        r"outfile"
         r")\b"
     )
 
-    remote_computer = re.compile(
-        r"(?i)(?:^|\s)-computername\b"
-    )
+    remote_computer = re.compile(r"(?i)(?:^|\s)-computername\b")
+    classification = DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
 
     for index, segment in enumerate(segments):
-        command_name = _powershell_command_token(
-            segment
-        )
+        command_name = _powershell_command_token(segment)
 
-        allowed = (
-            _READ_ONLY_POWERSHELL_PRIMARY
-            if index == 0
-            else _READ_ONLY_POWERSHELL_PIPELINE
-        )
+        if not command_name or risky_parameter.search(segment):
+            return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
 
-        if command_name not in allowed:
-            return False
+        if index > 0:
+            if command_name not in _READ_ONLY_POWERSHELL_PIPELINE:
+                return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+            continue
 
-        if risky_parameter.search(segment):
-            return False
+        if command_name in _PASSIVE_POWERSHELL_PRIMARY:
+            if remote_computer.search(segment):
+                return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+            classification = DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ
+            continue
 
-        # Test-NetConnection is expressly a local diagnostic whose normal
-        # purpose is testing a named remote network destination. Other
-        # standing-safe cmdlets may not widen execution/query scope to a
-        # second managed computer through -ComputerName.
-        if (
-            command_name != "test-netconnection"
-            and remote_computer.search(segment)
-        ):
-            return False
+        if command_name in _ACTIVE_POWERSHELL_PRIMARY:
+            classification = DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE
+            continue
 
-    return True
+        if command_name in _PASSIVE_NATIVE_COMMANDS:
+            native_classification = _native_command_is_bounded_read(
+                command_name,
+                segment,
+            )
+            if native_classification == DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED:
+                return native_classification
+            classification = native_classification
+            continue
+
+        if command_name in _ACTIVE_NATIVE_COMMANDS:
+            if not _native_command_is_bounded_probe(command_name, segment):
+                return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+            classification = DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE
+            continue
+
+        return DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED
+
+    return classification
+
+
+def _powershell_is_deterministically_read_only(
+    command: object,
+) -> bool:
+    return classify_datto_powershell_diagnostic_command(command) in {
+        DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ,
+        DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE,
+    }
 
 
 def effective_datto_component_approval_mode(
@@ -271,7 +537,7 @@ def effective_datto_component_approval_mode(
     PowerShell runner is the only component whose approval can be narrowed
     further by deterministic command analysis.
 
-    Unknown, ambiguous, sensitive or non-read-only PowerShell always remains
+    Unknown, ambiguous, sensitive or mutating PowerShell always remains
     per-run. The caller cannot supply or override this classification.
     """
 
@@ -294,23 +560,18 @@ def effective_datto_component_approval_mode(
             _POWERSHELL_APPROVAL_REQUIRED_REASON,
         )
 
-    supplied_name, supplied_value = next(
-        iter(variables.items())
-    )
+    supplied_name, supplied_value = next(iter(variables.items()))
 
     if (
         not isinstance(supplied_name, str)
-        or supplied_name.strip().casefold()
-        != "usrinput"
+        or supplied_name.strip().casefold() != "usrinput"
     ):
         return (
             DATTO_APPROVAL_MODE_PER_RUN,
             _POWERSHELL_APPROVAL_REQUIRED_REASON,
         )
 
-    if _powershell_is_deterministically_read_only(
-        supplied_value
-    ):
+    if _powershell_is_deterministically_read_only(supplied_value):
         return (
             DATTO_APPROVAL_MODE_STANDING_SAFE,
             _POWERSHELL_READ_ONLY_REASON,
@@ -357,14 +618,10 @@ def _normalize_component(
         normalized_uid = canonical_override
 
     if (
-        normalized_uid
-        in _FORCED_PER_RUN_COMPONENT_UIDS
-        or normalized_name.casefold()
-        in _FORCED_PER_RUN_COMPONENT_NAMES
+        normalized_uid in _FORCED_PER_RUN_COMPONENT_UIDS
+        or normalized_name.casefold() in _FORCED_PER_RUN_COMPONENT_NAMES
     ):
-        normalized_approval_mode = (
-            DATTO_APPROVAL_MODE_PER_RUN
-        )
+        normalized_approval_mode = DATTO_APPROVAL_MODE_PER_RUN
 
     if (
         len(normalized_uid) > _MAX_UID_LENGTH
