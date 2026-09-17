@@ -173,7 +173,7 @@ def test_dynamic_safe_diagnostics_receive_policy_standing_safe(
 
     approval = approvals[0]
     assert approval.requested_by == "person-al"
-    assert approval.decided_by == "policy:datto-powershell-readonly"
+    assert approval.decided_by == "policy:datto-dynamic-diagnostic"
     assert approval.decided_by != "person-al"
 
     governed_request = calls[0]
@@ -186,7 +186,7 @@ def test_dynamic_safe_diagnostics_receive_policy_standing_safe(
         "variables": {"usrInput": command},
     }
     assert "approval_mode" not in governed_request.arguments
-    assert governed_request.maximum_attempts if hasattr(governed_request, "maximum_attempts") else True
+    assert governed_request.budget.maximum_attempts == 1
 
 
 @pytest.mark.parametrize(
