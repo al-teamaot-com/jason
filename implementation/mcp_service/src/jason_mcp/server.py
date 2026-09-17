@@ -1428,6 +1428,7 @@ def _canonicalize_governed_action_arguments(
         components,
         component_uid=supplied_component_uid,
         component_name=supplied_component_name,
+        catalog_verified=bool(supplied_component_name),
     )
 
     variables = raw.get("variables", {})
@@ -1514,6 +1515,7 @@ def _governed_execute(
                 configured_datto_components(),
                 component_uid=canonical_arguments.get("component_uid"),
                 component_name=canonical_arguments.get("component_name"),
+                catalog_verified=True,
             )
         except ValueError as exc:
             return {

@@ -661,6 +661,7 @@ class DattoRmmComponentExecutionConnector:
             pilot.components,
             component_uid=request.arguments.get("component_uid"),
             component_name=request.arguments.get("component_name"),
+            catalog_verified=True,
         )
 
         variables = request.arguments.get(

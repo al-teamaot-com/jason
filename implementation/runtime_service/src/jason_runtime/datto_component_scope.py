@@ -205,6 +205,7 @@ def resolve_datto_component(
     *,
     component_uid: object = None,
     component_name: object = None,
+    catalog_verified: bool = False,
 ) -> DattoApprovedComponent:
     """Resolve one component identity without allowing caller risk upgrades.
 
@@ -240,6 +241,47 @@ def resolve_datto_component(
         item.name.casefold() == name.casefold()
         for item in components
     )
+
+    if catalog_verified and uid and name:
+        # A live complete-catalog lookup is the authoritative provider
+        # identity. Static configured components classify risk; they do not
+        # override a newer Datto UID/name pair.
+        #
+        # Preserve standing-safe/per-run classification when either durable
+        # side of a configured identity still corresponds to the live record.
+        related = [
+            item
+            for item in components
+            if (
+                item.uid == uid
+                or item.name.casefold() == name.casefold()
+            )
+        ]
+
+        approval_modes = {
+            item.approval_mode
+            for item in related
+        }
+
+        if len(approval_modes) > 1:
+            raise DattoComponentScopeError(
+                "DATTO_COMPONENT_CLASSIFICATION_AMBIGUOUS"
+            )
+
+        approval_mode = (
+            next(iter(approval_modes))
+            if approval_modes
+            else DATTO_APPROVAL_MODE_PER_RUN
+        )
+
+        # A catalog-verified component not already classified standing-safe
+        # remains per-run. Live discovery can never manufacture standing-safe
+        # authority.
+        return _normalize_component(
+            uid,
+            name,
+            approval_mode,
+        )
 
     if uid_collision or name_collision:
         raise DattoComponentScopeError(
