@@ -18,6 +18,67 @@ pilot:
   client_confirmation_required_for_user_visible_symptoms: true
 
 rules:
+  - id: jason-datto-edr-av-standing-safe
+    description: Permit bounded standing-safe steps inside Jason - Datto EDR/AV Diagnose & Repair for one exact workstation target.
+    playbook: Jason - Datto EDR/AV Diagnose & Repair
+    playbook_version: 1.1.0
+    maximum_targets: 1
+    outcome: allow
+    autonomy_level: low_risk_autonomous
+    allowed_operations:
+      - Check Datto EDR/AV Status AOT Ver 12122025-1
+      - Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1
+      - Datto EDR Maintenance [WIN]
+      - Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024
+      - agent.exe datto-av --force-update
+      - 230 AM Scheduled Reboot AOT Ver 11282024
+    conditions:
+      exact_device_identity_required: true
+      exact_client_scope_required: true
+      device_role: workstation
+      playbook_state_machine_required: true
+      per_step_attempt_limit: 1
+      duplicate_dispatch_prohibited: true
+      direct_provider_access: false
+      scheduled_reboot_local_time: "02:30"
+      scheduled_verify_local_time: "03:30"
+      immediate_reboot_allowed: false
+      internal_ticket_notes_only: true
+    verification:
+      capability: Check Datto EDR/AV Status AOT Ver 12122025-1
+      success_expression: Status=Healthy
+    on_failure:
+      action: continue_bounded_playbook_or_escalate
+      redispatch_on_read_failure: false
+
+  - id: jason-datto-edr-av-clean-recovery-pilot
+    description: Keep the clean EDR/AV uninstall and recovery branch approval-gated during supervised pilot validation.
+    playbook: Jason - Datto EDR/AV Diagnose & Repair
+    playbook_version: 1.1.0
+    operations:
+      - Uninstall Datto EDR / AV AOT Ver 11052025-1
+      - recovery scheduled reboot
+      - recovery Datto EDR Maintenance [WIN]
+      - recovery Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024
+      - recovery agent.exe datto-av --force-update
+    maximum_targets: 1
+    outcome: require_approval
+    autonomy_level: approved_execute
+    required_approver_roles:
+      - technician
+    conditions:
+      ordinary_repair_ladder_exhausted: true
+      exact_device_identity_required: true
+      exact_client_scope_required: true
+      maintenance_window_required: true
+      direct_provider_access: false
+    verification:
+      capability: Check Datto EDR/AV Status AOT Ver 12122025-1
+      success_expression: Status=Healthy
+    on_failure:
+      action: escalate
+      internal_note_only: true
+
   - id: approved-quickbooks-update-workstation
     description: Permit a technician-approved QuickBooks update on a single workstation.
     capability: drmm.software.quickbooks.update
