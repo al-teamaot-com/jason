@@ -1,0 +1,43 @@
+name: Datto EDR AV Playbook
+
+on:
+  push:
+    branches:
+      - feature/jason-datto-edr-av-diagnose-repair-20260917
+    paths:
+      - implementation/autonomous_remediation/datto_edr_av_playbook.py
+      - implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
+      - implementation/autonomous_remediation/test_datto_edr_av_playbook.py
+      - implementation/autonomous_remediation/test_datto_edr_av_runtime_contract.py
+      - .github/workflows/datto-edr-av-playbook.yml
+  pull_request:
+    paths:
+      - implementation/autonomous_remediation/datto_edr_av_playbook.py
+      - implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
+      - implementation/autonomous_remediation/test_datto_edr_av_playbook.py
+      - implementation/autonomous_remediation/test_datto_edr_av_runtime_contract.py
+      - .github/workflows/datto-edr-av-playbook.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: implementation/autonomous_remediation
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Compile playbook modules
+        run: python -m py_compile datto_edr_av_playbook.py datto_edr_av_runtime_contract.py
+      - name: Run Datto EDR AV tests
+        run: python -m pytest -q test_datto_edr_av_playbook.py test_datto_edr_av_runtime_contract.py
