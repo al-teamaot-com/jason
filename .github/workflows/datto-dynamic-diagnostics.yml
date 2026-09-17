@@ -30,10 +30,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install runtime test dependencies
-        run: |
-          python -m pip install --disable-pip-version-check pytest
-          python -m pip install ./implementation ./implementation/runtime_service
+      - name: Install pytest
+        run: python -m pip install --disable-pip-version-check pytest
       - name: Compile diagnostic policy
         run: python -m py_compile implementation/runtime_service/src/jason_runtime/datto_component_scope.py
       - name: Test dynamic diagnostic classification
