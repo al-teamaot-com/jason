@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 
 DATTO_EXECUTION_COMPONENTS_JSON_ENV = (
@@ -22,34 +22,9 @@ DATTO_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN_ENV = (
 
 DATTO_APPROVAL_MODE_STANDING_SAFE = "standing_safe"
 DATTO_APPROVAL_MODE_PER_RUN = "per_run"
-_VALID_APPROVAL_MODES = frozenset(
-    {
-        DATTO_APPROVAL_MODE_STANDING_SAFE,
-        DATTO_APPROVAL_MODE_PER_RUN,
-    }
-)
-
-DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ = "passive_read"
-DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE = "active_diagnostic_probe"
-DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED = "approval_required"
-
-_MAX_COMPONENTS = 16
-_MAX_UID_LENGTH = 128
-_MAX_NAME_LENGTH = 255
-_FORBIDDEN_SCOPE_VALUES = frozenset(
-    {
-        "*",
-        "all",
-        "all components",
-        "global",
-        "unrestricted",
-    }
-)
-
-_CANONICAL_UID_OVERRIDES = {
-    "check service detail & diagnostic [win] aot ver 12122025-1": (
-        "2b49d490-bcae-4825-b31e-c4f1be881ae5"
-    ),
+_VALID_APPROVAL_MODES = {
+    DATTO_APPROVAL_MODE_STANDING_SAFE,
+    DATTO_APPROVAL_MODE_PER_RUN,
 }
 
 DATTO_AD_HOC_POWERSHELL_UID = (
@@ -59,26 +34,34 @@ DATTO_AD_HOC_POWERSHELL_NAME = (
     "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
 )
 
-_FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
-    {
-        DATTO_AD_HOC_POWERSHELL_UID,
-    }
-)
+DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ = "passive_read"
+DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE = "active_diagnostic_probe"
+DATTO_DIAGNOSTIC_CLASS_APPROVAL_REQUIRED = "approval_required"
 
-_FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
-    {
-        DATTO_AD_HOC_POWERSHELL_NAME.casefold(),
-    }
-)
+_MAX_COMPONENTS = 64
+_MAX_UID_LENGTH = 256
+_MAX_NAME_LENGTH = 512
+_FORBIDDEN_SCOPE_VALUES = {"*", "all", "any", "default"}
+_FORCED_PER_RUN_COMPONENT_UIDS = {
+    DATTO_AD_HOC_POWERSHELL_UID,
+}
+_FORCED_PER_RUN_COMPONENT_NAMES = {
+    DATTO_AD_HOC_POWERSHELL_NAME.casefold(),
+}
+_CANONICAL_UID_OVERRIDES = {
+    DATTO_AD_HOC_POWERSHELL_NAME.casefold(): DATTO_AD_HOC_POWERSHELL_UID,
+}
 
 _PASSIVE_POWERSHELL_PRIMARY = frozenset(
     {
+        "compare-object",
+        "convertfrom-json",
+        "convertto-json",
+        "format-list",
+        "format-table",
         "get-acl",
-        "get-authenticodesignature",
         "get-childitem",
-        "get-cimclass",
         "get-ciminstance",
-        "get-command",
         "get-computerinfo",
         "get-counter",
         "get-date",
@@ -90,36 +73,26 @@ _PASSIVE_POWERSHELL_PRIMARY = frozenset(
         "get-hotfix",
         "get-item",
         "get-itemproperty",
-        "get-itempropertyvalue",
         "get-localgroup",
         "get-localgroupmember",
         "get-localuser",
-        "get-member",
-        "get-module",
-        "get-mpcomputerstatus",
         "get-netadapter",
-        "get-netfirewallprofile",
-        "get-netfirewallrule",
+        "get-netconnectionprofile",
         "get-netipaddress",
         "get-netipconfiguration",
         "get-netroute",
         "get-nettcpconnection",
         "get-netudpendpoint",
-        "get-partition",
-        "get-physicaldisk",
-        "get-pnpdevice",
         "get-process",
-        "get-psdrive",
-        "get-scheduledtask",
-        "get-scheduledtaskinfo",
         "get-service",
-        "get-smbconnection",
-        "get-storagepool",
-        "get-timezone",
         "get-volume",
         "get-winevent",
         "get-wmiobject",
-        "test-path",
+        "get-mpcomputerstatus",
+        "measure-object",
+        "select-object",
+        "sort-object",
+        "where-object",
     }
 )
 
@@ -133,7 +106,8 @@ _ACTIVE_POWERSHELL_PRIMARY = frozenset(
 
 _READ_ONLY_POWERSHELL_PIPELINE = frozenset(
     {
-        "convertto-csv",
+        "compare-object",
+        "convertfrom-json",
         "convertto-json",
         "format-list",
         "format-table",
@@ -201,8 +175,8 @@ _ACTIVE_NATIVE_COMMANDS = frozenset(
 _POWERSHELL_APPROVAL_REQUIRED_REASON = (
     "DATTO_POWERSHELL_COMMAND_APPROVAL_REQUIRED"
 )
-_POWERSHELL_READ_ONLY_REASON = (
-    "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+_DYNAMIC_DIAGNOSTIC_STANDING_SAFE_REASON = (
+    "DATTO_DYNAMIC_DIAGNOSTIC_STANDING_SAFE"
 )
 
 _SENSITIVE_READ_PATTERN = re.compile(
@@ -405,7 +379,7 @@ def classify_datto_powershell_diagnostic_command(command: object) -> str:
     return classification
 
 
-def _powershell_is_deterministically_read_only(command: object) -> bool:
+def _powershell_is_deterministically_safe_diagnostic(command: object) -> bool:
     return classify_datto_powershell_diagnostic_command(command) in {
         DATTO_DIAGNOSTIC_CLASS_PASSIVE_READ,
         DATTO_DIAGNOSTIC_CLASS_ACTIVE_PROBE,
@@ -426,8 +400,8 @@ def effective_datto_component_approval_mode(component: DattoApprovedComponent, v
     if not isinstance(supplied_name, str) or supplied_name.strip().casefold() != "usrinput":
         return DATTO_APPROVAL_MODE_PER_RUN, _POWERSHELL_APPROVAL_REQUIRED_REASON
 
-    if _powershell_is_deterministically_read_only(supplied_value):
-        return DATTO_APPROVAL_MODE_STANDING_SAFE, _POWERSHELL_READ_ONLY_REASON
+    if _powershell_is_deterministically_safe_diagnostic(supplied_value):
+        return DATTO_APPROVAL_MODE_STANDING_SAFE, _DYNAMIC_DIAGNOSTIC_STANDING_SAFE_REASON
 
     return DATTO_APPROVAL_MODE_PER_RUN, _POWERSHELL_APPROVAL_REQUIRED_REASON
 
@@ -519,22 +493,13 @@ def resolve_datto_component(
 
     uid_collision = bool(uid) and any(item.uid == uid for item in components)
     name_collision = bool(name) and any(item.name.casefold() == name.casefold() for item in components)
-
-    if catalog_verified and uid and name:
-        related = [item for item in components if item.uid == uid or item.name.casefold() == name.casefold()]
-        approval_modes = {item.approval_mode for item in related}
-        if len(approval_modes) > 1:
-            raise DattoComponentScopeError("DATTO_COMPONENT_CLASSIFICATION_AMBIGUOUS")
-        approval_mode = next(iter(approval_modes)) if approval_modes else DATTO_APPROVAL_MODE_PER_RUN
-        return _normalize_component(uid, name, approval_mode)
-
     if uid_collision or name_collision:
         raise DattoComponentScopeError("DATTO_COMPONENT_IDENTITY_MISMATCH")
 
-    if uid and name and _unclassified_per_run_enabled():
-        return _normalize_component(uid, name, DATTO_APPROVAL_MODE_PER_RUN)
+    if not _unclassified_per_run_enabled():
+        raise DattoComponentScopeError("DATTO_COMPONENT_NOT_APPROVED")
 
-    if name and not uid:
-        raise DattoComponentScopeError("DATTO_COMPONENT_NAME_MISMATCH")
+    if not uid or not name or catalog_verified is False:
+        raise DattoComponentScopeError("DATTO_COMPONENT_IDENTITY_REQUIRED")
 
-    raise DattoComponentScopeError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+    return _normalize_component(uid, name, DATTO_APPROVAL_MODE_PER_RUN)
