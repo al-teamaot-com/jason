@@ -98,6 +98,51 @@ Items in this document are not approved capabilities and must not be enabled mer
 
 ---
 
+## Operational learning and resolution reuse
+
+### TODO-OPS-001 — Operational Resolution Memory and case-based troubleshooting reuse
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Build a governed Resolution Memory that captures structured outcomes from alerts, tickets, diagnostics, governed executions, technician corrections, and verified resolutions so Jason can find comparable historical cases and use what worked — and what failed — to choose better first diagnostic and remediation steps.
+- **Why it matters:** Many MSP incidents recur with substantially the same symptoms, products, error codes, service states, versions, or environmental conditions. Reusing verified prior outcomes can reduce mean time to resolution, avoid repeating known dead ends, improve first-action quality, and turn AOT's accumulated operating experience into durable institutional knowledge.
+- **Why not now:** The capability depends on trustworthy outcome labeling, reliable ticket/alert/device correlation, durable job/output evidence, client isolation, recency/staleness handling, and enough real production history to distinguish a repeatable pattern from a one-off success.
+- **Prerequisites:**
+  - REFLECT-001 governed reflection and continuous-improvement foundation;
+  - normalized issue/incident signature model;
+  - structured `ResolutionRecord` schema;
+  - correlation between Autotask tickets, Datto RMM alerts/jobs/output, IT Glue documentation, and later approved email-derived evidence;
+  - technician-confirmed outcome/root-cause capture;
+  - tenant/client isolation and privacy/retention controls;
+  - confidence, recency, contradiction, and deprecation handling;
+  - search/ranking of similar historical cases;
+  - governed playbook-promotion workflow and regression coverage.
+- **Resolution record should preserve:** issue/alert signature; affected client/device/product/version; symptoms and error codes; relevant evidence; diagnostics attempted; PowerShell/components/actions attempted; success/failure result of each step; disruption/approval requirements; confirmed root cause; final resolution; correlation/source references; recency; and technician confirmation where available.
+- **Expected lifecycle:** `observed -> repeated -> verified pattern -> playbook candidate -> promoted/deprecated`.
+- **Expected behavior:**
+  1. Normalize a new alert or ticket into an issue signature.
+  2. Search Resolution Memory for materially similar prior cases.
+  3. Rank prior cases by similarity, recency, evidence quality, and verified outcomes.
+  4. Prefer high-confidence read-only diagnostics that historically differentiated or resolved the issue.
+  5. Avoid repeatedly trying steps that consistently failed in comparable cases unless current evidence materially differs.
+  6. Treat successful historical remediation as evidence, not execution authority; normal approval, disruption, client-scope, and data-access rules still apply.
+  7. Record the new outcome so future ranking improves.
+  8. Promote only repeated, verified patterns into durable playbooks after governed review.
+- **Important safeguards:**
+  - one successful case must not become organization-wide truth;
+  - client-specific exceptions must not silently generalize to other clients;
+  - failures and contradictory outcomes must reduce confidence rather than disappear;
+  - current endpoint/ticket evidence must be checked before applying a historical pattern;
+  - no historical record may broaden provider access, execution authority, approval scope, or disruption authority;
+  - mutating/disruptive actions continue to require their normal approval even when historically successful.
+- **Relationship to existing roadmap:** This extends `REFLECT-001` and GitHub issue #172. Reflection identifies reusable lessons; Resolution Memory makes verified troubleshooting outcomes searchable and reusable during future incident handling. It must not become a parallel self-modifying or execution-authority system.
+- **Initial motivating example:** A recurring Datto EDR alert showing a stale EDR version plus stopped `EndpointProtectionService` can be correlated with prior diagnostics and outcomes. If previous comparable cases show that service-only intervention failed while an approved EDR reinstall succeeded, Jason can prioritize the proven read-only diagnostic path and present the historically successful remediation when appropriate, while still requiring any normal approval for the modifying action.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Begin design once governed ticket/alert reads, Datto job/output correlation, and reliable resolution outcomes are stable; implement before incident volume makes repeated rediscovery materially costly.
+
+---
+
 ## Communication and audience controls
 
 ### TODO-COMM-001 — Connect audience policy engine to all outbound channels
