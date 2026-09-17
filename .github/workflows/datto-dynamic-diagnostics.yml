@@ -8,12 +8,20 @@ on:
       - implementation/runtime_service/src/jason_runtime/datto_component_scope.py
       - implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py
       - implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_dynamic_diagnostic_execution.py
+      - implementation/mcp_service/tests/test_datto_powershell_command_approval.py
+      - implementation/mcp_service/tests/test_datto_component_approval_policy.py
       - .github/workflows/datto-dynamic-diagnostics.yml
   pull_request:
     paths:
       - implementation/runtime_service/src/jason_runtime/datto_component_scope.py
       - implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py
       - implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_dynamic_diagnostic_execution.py
+      - implementation/mcp_service/tests/test_datto_powershell_command_approval.py
+      - implementation/mcp_service/tests/test_datto_component_approval_policy.py
       - .github/workflows/datto-dynamic-diagnostics.yml
   workflow_dispatch:
 
@@ -30,14 +38,26 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install pytest
-        run: python -m pip install --disable-pip-version-check pytest
-      - name: Compile diagnostic policy
-        run: python -m py_compile implementation/runtime_service/src/jason_runtime/datto_component_scope.py
-      - name: Test dynamic diagnostic classification
+      - name: Install focused runtime and MCP test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pip install \
+            ./implementation \
+            ./implementation/connectors/openclaw \
+            ./implementation/runtime_service \
+            ./implementation/mcp_service
+      - name: Compile diagnostic policy and governed MCP boundary
+        run: |
+          python -m py_compile \
+            implementation/runtime_service/src/jason_runtime/datto_component_scope.py \
+            implementation/mcp_service/src/jason_mcp/server.py
+      - name: Test dynamic diagnostic classification and governed execution
         env:
-          PYTHONPATH: implementation:implementation/runtime_service/src
+          PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
         run: |
           python -m pytest -q \
             implementation/runtime_service/tests/test_datto_ad_hoc_powershell_policy.py \
-            implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py
+            implementation/runtime_service/tests/test_datto_powershell_readonly_classification.py \
+            implementation/mcp_service/tests/test_datto_dynamic_diagnostic_execution.py \
+            implementation/mcp_service/tests/test_datto_powershell_command_approval.py \
+            implementation/mcp_service/tests/test_datto_component_approval_policy.py
