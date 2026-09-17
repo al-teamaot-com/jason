@@ -141,6 +141,455 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Begin design once governed ticket/alert reads, Datto job/output correlation, and reliable resolution outcomes are stable; implement before incident volume makes repeated rediscovery materially costly.
 
+### TODO-OPS-002 — Governed BackupIQ ticket-processing playbook
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Build and productionize an end-to-end governed Jason playbook for Autotask tickets titled `BackupIQ: Backup for asset is not available for AOT Office`, including asset resolution, availability gating, periodic rechecks, Endpoint Backup diagnostics, bounded remediation, dependency-ticket creation, full command/result documentation, and verified successful-backup closure.
+- **Why it matters:** BackupIQ tickets are repetitive, evidence-driven MSP work that Jason can materially process when the correct read, execution, ticket-write, scheduling, and verification capabilities are available. A deterministic playbook can reduce technician effort while preserving auditability, client isolation, and AOT approval rules.
+- **Why not now:** A live test exposed specific missing capabilities and workflow gaps that prevent safe end-to-end completion today, including governed Autotask ticket creation, reliable DRMM component discovery/metadata reads, durable workflow state, and scheduled periodic rechecks.
+- **Prerequisites:** governed Autotask ticket search/read and internal notes; narrowly scoped Autotask ticket creation; DRMM endpoint/software/service reads; DRMM component search/metadata read; governed component execution; job/result/StdOut reads; site-variable presence validation without secret disclosure; persisted playbook state; periodic recheck scheduling; duplicate suppression; and successful-backup verification.
+- **Decision owner:** Jason Governance Authority / Jason Architecture Authority
+- **Review trigger:** Implement as the next operational playbook after the required bounded capabilities are available and validate against the controlled AOT-50740 BackupIQ ticket workflow.
+
+#### Architect prompt
+
+```text
+Build and productionize a governed Jason playbook for Autotask tickets with the title:
+
+BackupIQ: Backup for asset is not available for AOT Office
+
+SECTION GOAL
+
+Jason must be able to take one of these BackupIQ tickets from initial triage through verified resolution or escalation, while fully documenting every step in the original Autotask ticket.
+
+The playbook must follow Jason’s existing governance model, Central Orchestrator authority, exact grants, provider isolation, and direct_provider_access=false.
+
+Do not weaken or bypass existing governance.
+
+TEST FINDINGS THAT MUST BE ADDRESSED
+
+We tested the proposed workflow against AOT endpoints and identified capability/workflow gaps that prevent the full playbook from completing today.
+
+1. Jason can locate and read DRMM endpoints and determine:
+   - hostname
+   - site
+   - online/offline state
+   - last seen
+   - last logged-in user
+   - other endpoint facts
+
+2. Jason can search/read Autotask tickets and can create internal ticket notes through the governed internal-note path.
+
+3. Jason currently did not have a governed Autotask ticket-create capability available during the test.
+   - This blocks the branch where a missing DRMM site variable requires Jason to create a configuration/dependency ticket.
+   - Add a narrowly scoped governed ticket-create capability suitable for this playbook.
+
+4. A governed endpoint/component discovery/read path was not available during part of the test (endpoint.component.search was not active).
+   - Jason needs a reliable governed way to locate the exact DRMM component by name and validate its metadata/requirements before execution.
+   - Do not require direct provider access.
+
+5. The test also proved that Jason must not write BackupIQ troubleshooting notes into an unrelated ticket simply because it is for the same device.
+   - Jason must identify the actual BackupIQ ticket first.
+
+6. AOT-50282 demonstrated the importance of the two-hour gate: a recent reboot meant the endpoint had not yet completed a full backup cycle.
+7. AOT-50740 demonstrated the offline branch: the device was offline, so remediation should not begin.
+
+CORE PLAYBOOK
+
+1. IDENTIFY THE BACKUPIQ TICKET AND ASSET
+
+Read the BackupIQ ticket and extract:
+
+- ticket ID/number
+- organization
+- asset/device name
+- alert time
+- BackupIQ/external identifier if present
+- alert details
+
+Resolve the asset to the exact DRMM endpoint.
+
+Do not continue if the asset cannot be identified confidently.
+
+Do not use an unrelated Autotask ticket for documentation.
+
+2. MANDATORY INTERNAL DOCUMENTATION
+
+Every meaningful playbook step must create an internal Autotask ticket note.
+
+This includes:
+
+- reads/checks
+- commands
+- DRMM components
+- decisions
+- failures
+- blockers
+- retries
+- remediation
+- verification
+
+Every command/component execution must document:
+
+- purpose
+- exact command or component name
+- target device
+- job/correlation ID when available
+- terminal status
+- return/exit status when available
+- relevant StdOut/StdErr
+- Jason’s interpretation
+- resulting next decision
+
+Secrets, passwords, API keys, tokens, and site-variable values must never be written into Autotask notes.
+
+Document only whether a required secret/variable was present and usable.
+
+Use standardized note titles such as:
+
+- Jason - BackupIQ - Asset Validation
+- Jason - BackupIQ - Device Availability
+- Jason - BackupIQ - Device Availability Recheck
+- Jason - BackupIQ - Backup Agent Check
+- Jason - BackupIQ - Site Variable Check
+- Jason - BackupIQ - Remediation
+- Jason - BackupIQ - Verification
+- Jason - BackupIQ - Escalation
+- Jason - BackupIQ - Resolution
+
+3. DEVICE AVAILABILITY GATE
+
+Check the current DRMM status first.
+
+IF OFFLINE
+
+Document:
+
+- device is offline
+- check timestamp
+- last-seen timestamp
+- duration offline
+- exact governed read used and result
+
+Do not attempt backup-agent repair while offline.
+
+Enter state:
+
+offline_waiting
+
+Recheck the endpoint every hour while the BackupIQ ticket remains active.
+
+Each recheck must be documented.
+
+When the device becomes online:
+
+- document the observation time
+- begin the two-hour continuous-online qualification window
+- transition to waiting_backup_cycle
+
+If it goes offline during the qualification window, reset the two-hour window.
+
+OFFLINE MORE THAN 10 DAYS
+
+After the device has been offline for more than 10 days, stop treating this as a normal hourly-retry condition.
+
+Investigate whether the endpoint is:
+
+- retired
+- replaced
+- stale
+- renamed/reimaged
+- duplicated in DRMM/Autotask
+- experiencing a larger connectivity or management issue
+
+Document findings and either correct the monitoring/asset condition where authorized or escalate.
+
+The playbook must prevent endless hourly retry loops after this threshold.
+
+4. TWO-HOUR BACKUP-CYCLE GATE
+
+AOT’s Datto Endpoint Backup cycle is approximately two hours.
+
+Before diagnosing or reinstalling Endpoint Backup, Jason must establish that the endpoint has been continuously available long enough to complete a full two-hour backup cycle.
+
+Prefer DRMM connectivity/check-in evidence.
+
+System uptime alone may support the conclusion but does not prove continuous Internet/DRMM availability.
+
+States:
+
+waiting_backup_cycle -> diagnosing
+
+If the endpoint has not completed the full two-hour window:
+
+- document that fact
+- do not reinstall Endpoint Backup
+- continue periodic rechecks
+
+5. ENDPOINT BACKUP DIAGNOSTICS
+
+Once the two-hour gate is satisfied:
+
+Check:
+
+- whether Datto Endpoint Backup is installed
+- relevant service/process state
+- version where available
+- obvious service/install abnormalities
+
+Document each read/command and its result.
+
+Do not assume the BackupIQ alert itself proves an agent failure.
+
+6. REQUIRED DRMM SITE VARIABLE
+
+The prescribed remediation component is:
+
+Datto Endpoint Backup Agent v2 [WIN]
+
+This component depends on a DRMM site variable.
+
+Jason must determine the exact required site-variable name from authoritative component/provider metadata.
+
+Do not hard-code or invent the variable name if it can be discovered authoritatively.
+
+Do not guess, fabricate, or copy a value from another client/site.
+
+IF THE SITE VARIABLE IS MISSING
+
+Do not execute the component.
+
+First search Autotask for an existing open ticket covering the missing variable for that same site.
+
+If an appropriate open ticket exists:
+
+- reference it in the BackupIQ ticket
+- do not create a duplicate
+
+If none exists:
+
+create a governed Autotask configuration/dependency ticket containing:
+
+- client/site
+- affected device
+- original BackupIQ ticket number
+- required site-variable name
+- statement that the value is missing
+- dependent component: Datto Endpoint Backup Agent v2 [WIN]
+
+Never include the secret value.
+
+Cross-reference the dependency ticket in the original BackupIQ ticket.
+
+The original BackupIQ ticket remains open/blocked.
+
+7. REMEDIATION
+
+If:
+
+- endpoint has completed the two-hour online qualification
+- required site variable exists and is usable
+
+then execute:
+
+Datto Endpoint Backup Agent v2 [WIN]
+
+This is the defined playbook remediation/reinstall component.
+
+Execution must remain governed.
+
+For each attempt:
+
+- record component name
+- endpoint
+- job ID
+- execution status
+- terminal result
+- actual governed StdOut/StdErr
+- interpretation
+
+Do not treat job submitted as success.
+
+Verify terminal completion and retrieve actual execution output.
+
+8. RETRY POLICY
+
+Allow no more than two full remediation attempts.
+
+A full attempt includes:
+
+- pre-check
+- site-variable validation
+- component execution
+- terminal-result verification
+- actual output retrieval
+- post-install/service validation
+
+If the first attempt fails, document the failure and perform one additional full attempt if appropriate.
+
+If the second full attempt fails:
+
+- stop automatic remediation
+- transition to escalated
+- create a comprehensive internal escalation note
+- do not loop indefinitely
+
+9. POST-REMEDIATION VERIFICATION
+
+A successful component execution does not resolve the BackupIQ ticket by itself.
+
+After remediation, verify:
+
+- Endpoint Backup agent is installed
+- required service/process state is healthy
+- no relevant installation/service error remains
+
+Then wait for and confirm an actual successful backup.
+
+The ticket must not be completed until Jason has authoritative evidence that a successful backup occurred.
+
+Where available, document:
+
+- successful backup timestamp
+- provider/BackupIQ status
+- backup object/device identity
+
+10. COMPLETION CRITERIA
+
+The BackupIQ ticket may only be completed when:
+
+1. the correct endpoint has been identified;
+2. the endpoint has been sufficiently available;
+3. any required remediation has succeeded;
+4. the backup agent is healthy;
+5. a successful backup has been confirmed;
+6. all commands/actions/results are documented;
+7. the final resolution note has been added.
+
+Final resolution note should summarize:
+
+- root cause
+- device availability history relevant to the incident
+- commands/components used
+- remediation attempts
+- results
+- successful backup timestamp
+- final verified state
+
+STATE MODEL
+
+Implement explicit persisted playbook state so Jason does not repeat completed work unnecessarily.
+
+Suggested states:
+
+identified
+-> offline_waiting
+-> waiting_backup_cycle
+-> diagnosing
+-> blocked_missing_variable
+-> remediating
+-> verifying
+-> complete
+
+or:
+
+escalated
+
+The state needs to survive periodic rechecks and conversation/session boundaries.
+
+PERIODIC RECHECK REQUIREMENTS
+
+Jason needs a governed mechanism to resume this playbook without relying on a human to repeatedly ask.
+
+For offline devices:
+
+- recheck hourly
+
+For devices waiting to complete the two-hour window:
+
+- recheck sufficiently often to establish the qualification window without excessive polling; hourly is acceptable
+
+For remediation verification:
+
+- recheck until a successful backup is observed or escalation criteria are reached
+
+Do not create duplicate scheduled/recheck jobs for the same BackupIQ ticket.
+
+Stop future rechecks when the ticket reaches complete, escalated, or another terminal state.
+
+CAPABILITY WORK REQUIRED
+
+Architect should determine the narrowest governed capabilities necessary to complete this workflow.
+
+At minimum, verify or add:
+
+- Autotask ticket search/read
+- Autotask internal note create
+- Autotask ticket create
+- DRMM endpoint search/read
+- DRMM software/service diagnostic capability
+- DRMM component search/metadata read
+- governed DRMM component execution
+- DRMM component job-status read
+- DRMM component StdOut/StdErr read
+- DRMM site-variable existence/metadata read without exposing secret values
+- persisted workflow/state support
+- scheduled/periodic recheck support
+
+Do not broaden capabilities beyond what this playbook requires.
+
+GOVERNANCE
+
+Preserve:
+
+- direct_provider_access=false
+- Central Orchestrator authority
+- exact Jason grants
+- requester identity
+- provider isolation
+- audit trail
+- bounded retries
+- existing role controls
+
+This playbook must not authorize disruptive actions such as rebooting the endpoint.
+
+The Endpoint Backup reinstall component should only execute if it is classified under AOT/Jason governance as an approved non-destructive component for the requester’s role. Do not silently weaken approval requirements.
+
+ACCEPTANCE TEST
+
+After implementation, use the existing BackupIQ ticket for:
+
+AOT-50740
+
+as the controlled end-to-end validation target where appropriate.
+
+Current known condition from the initial test: the endpoint was offline when checked.
+
+The acceptance test should demonstrate:
+
+1. correct ticket/device association
+2. offline detection
+3. internal note creation
+4. persisted hourly recheck state
+5. transition when the device returns online
+6. two-hour availability qualification
+7. Endpoint Backup diagnostics
+8. site-variable validation
+9. dependency-ticket creation if variable is missing
+10. component discovery and governed execution if variable exists
+11. terminal job/result/StdOut retrieval
+12. maximum two remediation attempts
+13. successful-backup verification
+14. final internal resolution note
+15. stopping scheduled rechecks after completion/escalation
+
+Do not modify unrelated production systems or tickets during development/testing.
+
+When complete, document the implementation, tests, capability changes, and remaining limitations, and update the appropriate Project Jason/Grafana Section Goal status.
+```
+
 ---
 
 ## Communication and audience controls
