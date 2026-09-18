@@ -619,7 +619,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-004 — Governed DRMM monitor suppression for known accepted conditions
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Blocked — provider automation surface (`SUPPORT-CAP-015`)
 - **Risk level:** High
 - **Idea:** Add a governed capability for Jason to disable, suppress, mute, or otherwise prevent a specific Datto RMM monitor from generating repeated alerts/tickets when the underlying condition is known, understood, documented, and intentionally accepted until a larger corrective action is completed.
 - **Why it matters:** Some alerts are technically accurate but cannot be permanently remediated immediately. In those cases, repeatedly generating Autotask tickets creates noise without improving service. Jason should be able to recognize a documented known condition, preserve the real root-cause/remediation plan, and suppress only the specific monitor scope that is producing duplicate operational work.
@@ -644,6 +644,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** Governed DRMM monitor/policy read capability; exact monitor identity and assignment resolution; narrowly scoped monitor enable/disable or mute/unmute action; approval policy; exception-state persistence; Autotask/IT Glue linkage; expiration/review scheduling; readback verification; audit trail.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement when DRMM write capabilities are expanded beyond alert resolution, and validate first against a controlled known-condition case such as `APD-HYPERV`.
+- **Implementation checkpoint (2026-09-18):** Datto RMM 15.1 product UI supports device-level monitor/policy enablement toggles, but the vendor-documented REST API v2 does not currently expose a supported exact per-device monitor enable/disable mutation. Jason will fail closed rather than use an undocumented/private web endpoint, broad policy suppression, maintenance mode, or direct-provider bypass. `SUPPORT-CAP-015` tracks the provider-interface blocker.
 
 ---
 
