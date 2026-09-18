@@ -178,7 +178,7 @@
     {
       "id": "FIX-DATTO-ENDPOINT-DISCOVERY-20260918",
       "title": "Datto endpoint hostname/site discovery completeness",
-      "status": "blocked",
+      "status": "active",
       "phase": "Capabilities"
     }
   ]
