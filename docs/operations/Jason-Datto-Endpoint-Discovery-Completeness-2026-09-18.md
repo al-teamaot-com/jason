@@ -2,7 +2,7 @@
 
 **Section Goal:** Fix Datto RMM endpoint discovery so Jason can resolve an existing endpoint from hostname/site without pre-supplied Datto UID and so incomplete enumeration cannot be represented as definitive not-found evidence.
 
-**Status:** PRODUCTION CORE DEPLOYMENT AND GOVERNED VALIDATION PASS / OBSERVABILITY RECONCILIATION PENDING
+**Status:** COMPLETE — PRODUCTION DEPLOYMENT, GOVERNED VALIDATION, AND OBSERVABILITY ACCEPTANCE PASS
 
 ## Reproduction
 
@@ -155,10 +155,34 @@ The returned UID was then read successfully:
 
 This live proof demonstrates the corrected search continues beyond the initial provider pages and reaches genuine provider exhaustion rather than treating an early short page as authoritative completion.
 
-## Remaining acceptance item
+## Observability acceptance
 
-Repository observability has been prepared to expect the new production image/source revision. The Section Goal remains open only until the production-health/Grafana monitoring layer is reconciled and verified against this release.
+The rollback-protected monitoring-only deployment ran from repository head `1db42f49def2fff95ee65ae216be6f7c1839192a` and completed successfully.
+
+Acceptance evidence:
+
+- `PRECHECK=PASS`;
+- `SOURCE_VALIDATION=PASS`;
+- `PRODUCTION_HEALTH_EXPORTER=PASS`;
+- `MONITORING_CONTAINERS=PASS`;
+- `CORE_ISOLATION=PASS`;
+- `PROMETHEUS_PRODUCTION_HEALTH=UP`;
+- `PROMETHEUS_PRODUCTION_RULES=PASS`;
+- `GRAFANA_PRODUCTION_HEALTH_DASHBOARD=PASS`;
+- `METRIC_CONTRACT=PASS`;
+- `OBSERVABILITY_DEPLOYMENT=PASS`;
+- `MCP_CHANGED=NO`;
+- `RUNTIME_CHANGED=NO`;
+- `OPENBAO_CHANGED=NO`;
+- `PROVIDER_ACCESS=NO`;
+- `PROVIDER_WRITES=NO`.
+
+Monitoring rollback directory:
+
+- `/tmp/jason-production-health-rollback-20260918T110416Z`.
+
+The observability deployment updated only the monitoring layer and verified the production-health dashboard against the Datto discovery release. It did not alter Jason MCP, runtime, OpenBao, or provider state.
 
 ## Section Goal final status
 
-**CORE FUNCTIONAL GOAL PASS / OBSERVABILITY CLOSEOUT PENDING.**
+**PASS / COMPLETE — the Datto endpoint hostname/site discovery defect is corrected, production-proven across the 749-device inventory, governance is unchanged, rollback is preserved, and Prometheus/Grafana observability is reconciled and passing.**
