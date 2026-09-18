@@ -569,25 +569,25 @@ def test_datto_action_accepts_second_exact_allowlisted_component(
     )
 
 
-def test_datto_action_rejects_crossed_component_identity_pair(
+def test_datto_action_live_name_overrides_stale_component_uid(
     monkeypatch,
 ):
     _set_datto_multi_component_scope(monkeypatch)
 
-    try:
-        server._canonicalize_governed_action_arguments(
-            "automation.component.execute",
-            {
-                "device_uid": "device-123",
-                "component_uid": "component-789",
-                "component_name":
-                    "Get-DNS Settings AOT Ver 06042025-1",
-            },
-        )
-    except ValueError as exc:
-        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
-    else:
-        raise AssertionError("crossed component identity must fail closed")
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_uid": "stale-component-uid",
+            "component_name":
+                "Get-DNS Settings AOT Ver 06042025-1",
+        },
+    )
+
+    assert result["component_uid"] == "component-456"
+    assert result["component_name"] == (
+        "Get-DNS Settings AOT Ver 06042025-1"
+    )
 
 
 def test_datto_action_rejects_unknown_component_in_multi_scope(

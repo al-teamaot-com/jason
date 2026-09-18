@@ -1818,15 +1818,10 @@ def _canonicalize_governed_action_arguments(
             supplied_component_name
         )
 
-        if (
-            supplied_component_uid
-            and supplied_component_uid
-            != live_component_uid
-        ):
-            raise ValueError(
-                "DATTO_COMPONENT_IDENTITY_MISMATCH"
-            )
-
+        # Exact live name resolution is authoritative. Some callers retain a
+        # stale provider UID in conversation/tool state; that advisory hint must
+        # not block an otherwise exact, uniquely resolved component name. Jason
+        # always replaces any supplied UID with the current live Datto UID.
         supplied_component_uid = (
             live_component_uid
         )
