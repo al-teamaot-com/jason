@@ -69,10 +69,14 @@ services:
       - prometheus
     networks:
       - observability
+      - jason-core
 
 networks:
   observability:
     name: jason-observability
+  jason-core:
+    external: true
+    name: jason-core
 
 volumes:
   prometheus-data:
