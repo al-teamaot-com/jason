@@ -26,3 +26,6 @@ The production Resolution Memory store currently contains zero cases. The reuse/
 
 ## Section Goal closure
 **PARTIAL / FOUNDATION LIVE.** Governed reuse is integrated and live, but this Section Goal is not complete until verified resolved work is ingested and a controlled similar-case retrieval is proven against real AOT history.
+
+## Grafana / Prometheus reconciliation
+The canonical roadmap status now exposes `RESMEM-001` as `active`. The live status exporter was reconciled and Prometheus returned one `jason_roadmap_item_info` series for `RESMEM-001` with status `active` and phase `Reasoning Quality`. Aggregate-only Resolution Memory exporter source and Prometheus file-discovery configuration are committed. The current session could not install the new systemd unit because the remote command policy blocks privileged service installation; this does not affect the live MCP capability. The existing roadmap panel therefore reflects the active implementation now, while dedicated case-count metrics await exporter service installation.
