@@ -465,6 +465,9 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
         if total_count is None or value > total_count:
             total_count = value
 
+    discovery_complete = data.get("discovery_complete")
+    incomplete_reason = data.get("incomplete_reason")
+
     return {
         "provider": _safe(output.get("provider")),
         "provider_capability": _safe(
@@ -472,6 +475,15 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "resource_matches": matches,
         "match_count": len(matches),
+        "discovery_complete": (
+            True
+            if discovery_complete is True
+            else (
+                False
+                if discovery_complete is False
+                else None
+            )
+        ),
         "search": {
             "discovery_mode": _safe(
                 provider_data.get("discovery_mode")
@@ -479,9 +491,17 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
             "hostname_reference": _safe(
                 provider_data.get("hostname_reference")
             ),
+            "site_reference": _safe(
+                provider_data.get("site_reference")
+            ),
             "provider_pages_examined": len(pages),
             "provider_total_count": total_count,
             "match_output_bounded": len(raw_matches) > 100,
+            "incomplete_reason": (
+                _safe(incomplete_reason)
+                if discovery_complete is False
+                else None
+            ),
         },
     }
 
