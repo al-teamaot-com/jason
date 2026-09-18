@@ -150,7 +150,7 @@ class HttpTransport(Protocol):
         params: Mapping[str, Any] | None = None,
         json: Mapping[str, Any] | None = None,
         timeout_seconds: float = 30.0,
-    ) -> Mapping[str, Any]: ...
+    ) -> Any: ...
 
 
 class Connector(Protocol):

@@ -8,6 +8,7 @@ from connectors.autotask.capability_manifest import build_autotask_manifest
 from connectors.autotask.impersonating_connector import AutotaskImpersonatingConnector
 from connectors.core.contracts import AuditSink, HttpTransport, SecretResolver
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
+from connectors.datto_rmm.automation_reads import DattoRmmAutomationReadConnector
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
@@ -17,6 +18,7 @@ from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
     AutotaskImpersonationInformationAuthorizer,
 )
+from orchestrator.capability_routing_invoker import CanonicalCapabilityRoutingInvoker
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
@@ -60,6 +62,12 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
+from orchestrator.resource_capability_catalog import (
+    AUTOMATION_COMPONENT_SEARCH,
+    AUTOMATION_JOB_READ,
+    AUTOMATION_JOB_OUTPUT_READ,
+    DATTO_RMM_PROVIDER,
+)
 from orchestrator.service import CapabilityInvoker
 from orchestrator.teams_identity_binding_sqlite import (
     DirectoryEnrichedMicrosoftIdentityBindingResolver,
@@ -93,6 +101,20 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_ENTITY_DESCRIBE): "autotask.entity.describe",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_SEARCH): "microsoft_graph.user.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_READ): "microsoft_graph.user.get",
+}
+
+_DATTO_AUTOMATION_CAPABILITIES = frozenset(
+    {
+        AUTOMATION_COMPONENT_SEARCH,
+        AUTOMATION_JOB_READ,
+        AUTOMATION_JOB_OUTPUT_READ,
+    }
+)
+
+_DATTO_AUTOMATION_PROVIDER_CAPABILITY_MAP = {
+    (DATTO_RMM_PROVIDER, AUTOMATION_COMPONENT_SEARCH): "datto_rmm.component.search",
+    (DATTO_RMM_PROVIDER, AUTOMATION_JOB_READ): "datto_rmm.job.read",
+    (DATTO_RMM_PROVIDER, AUTOMATION_JOB_OUTPUT_READ): "datto_rmm.job.output.read",
 }
 
 _RUNTIME_OPENBAO_ROOT = Path("/run/jason-secrets/openbao")
@@ -243,12 +265,18 @@ def build_provider_read_invoker(
     autotask_secrets: SecretResolver | None = None,
     bindings: TrustedPrincipalBindingResolver | None = None,
 ) -> CapabilityInvoker:
-    """Compose governed IT Glue, Autotask, and Microsoft Graph reads.
+    """Compose governed provider reads plus Datto automation evidence reads.
 
     Microsoft Entra user reads use the existing validated Microsoft tenant boundary and
     dedicated directory-read credential profile. The target tenant is derived only from
     the durable Microsoft/Jason binding; conversation input never chooses a tenant.
+
+    Datto automation component/job reads are routed separately through the existing
+    read-only Datto credential when the shared runtime resolver is supplied. They do not
+    inherit IT Glue/Autotask requester-impersonation behavior and expose no write action.
     """
+
+    shared_secrets = secrets
 
     if secrets is not None and it_glue_secrets is None and autotask_secrets is None:
         it_glue_secrets, autotask_secrets = scope_runtime_provider_secret_resolvers(
@@ -303,10 +331,35 @@ def build_provider_read_invoker(
         delegate=source_authorized,
         bindings=effective_bindings,
     )
-    return MicrosoftGraphInformationAuthorizer(
+    governed_provider_reads: CapabilityInvoker = MicrosoftGraphInformationAuthorizer(
         delegate=autotask_authorized,
         bindings=effective_bindings,
     )
+
+    standard_capabilities = (
+        IT_GLUE_CAPABILITIES
+        | AUTOTASK_CAPABILITIES
+        | MICROSOFT_GRAPH_CAPABILITIES
+    )
+    routes: dict[str, CapabilityInvoker] = {
+        capability: governed_provider_reads
+        for capability in standard_capabilities
+    }
+
+    if shared_secrets is not None:
+        datto_automation = DattoRmmAutomationReadConnector(
+            secrets=shared_secrets,
+            transport=transport,
+            audit=audit,
+        )
+        datto_automation_invoker = GovernedConnectorCapabilityInvoker(
+            connectors={DATTO_RMM_PROVIDER: datto_automation},
+            provider_capability_map=_DATTO_AUTOMATION_PROVIDER_CAPABILITY_MAP,
+        )
+        for capability in _DATTO_AUTOMATION_CAPABILITIES:
+            routes[capability] = datto_automation_invoker
+
+    return CanonicalCapabilityRoutingInvoker(routes=routes)
 
 
 def register_provider_read_invokers(
@@ -314,7 +367,14 @@ def register_provider_read_invokers(
     invokers: CapabilityInvokerRegistry,
     invoker: CapabilityInvoker,
 ) -> None:
-    for capability in sorted(
-        IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES | MICROSOFT_GRAPH_CAPABILITIES
-    ):
+    capabilities = set(
+        IT_GLUE_CAPABILITIES
+        | AUTOTASK_CAPABILITIES
+        | MICROSOFT_GRAPH_CAPABILITIES
+    )
+
+    if isinstance(invoker, CanonicalCapabilityRoutingInvoker):
+        capabilities.update(invoker.routes)
+
+    for capability in sorted(capabilities):
         invokers.register(capability, invoker)

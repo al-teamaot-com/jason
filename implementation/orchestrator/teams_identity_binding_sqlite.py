@@ -51,7 +51,14 @@ class SQLiteMicrosoftIdentityBindingStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(str(self._path))
+        # MCP synchronous tools are dispatched through worker threads while the
+        # runtime is process-cached. Allow this durable connection to follow the
+        # governed runtime across those threads instead of failing before authority
+        # evaluation with sqlite3.ProgrammingError.
+        self._connection = sqlite3.connect(
+            str(self._path),
+            check_same_thread=False,
+        )
         self._connection.executescript(_SCHEMA)
         self._migrate_email_address()
         self._connection.commit()

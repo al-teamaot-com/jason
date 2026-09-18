@@ -73,6 +73,27 @@ A candidate-improvement lifecycle should support at least:
 
 `observed -> proposed -> tested -> approved -> promoted/rejected`
 
+## Operational Resolution Memory extension
+
+`TODO-OPS-001 — Operational Resolution Memory and case-based troubleshooting reuse` extends REFLECT-001 from learning about execution quality into learning from repeated operational incidents.
+
+Reflection and Resolution Memory have different responsibilities:
+
+- **Reflection** asks whether Jason's own search, orchestration, evidence, and reasoning path can be improved generically.
+- **Resolution Memory** asks whether a new alert/ticket materially resembles prior incidents and whether verified historical outcomes can improve the order of diagnostics and recommendations.
+
+A future `ResolutionRecord` should preserve a bounded incident signature and outcome trail, including relevant product/device/client context, symptoms, error codes, diagnostic evidence, actions attempted, which actions failed, which action resolved the issue, confirmed root cause when known, disruption/approval requirements, recency, source correlations, and technician confirmation.
+
+Resolution Memory should support similarity ranking by current evidence, not keyword matching alone. It should favor repeated and recently verified patterns, reduce confidence when contradictory cases exist, and allow stale patterns to be deprecated. A single successful case is observation, not institutional truth.
+
+The intended operational lifecycle is:
+
+`observed -> repeated -> verified pattern -> playbook candidate -> promoted/deprecated`
+
+Historical evidence must never create execution authority. If a prior modifying action repeatedly fixed comparable incidents, Jason may use that evidence to recommend or prioritize the action, but the current request still passes through the normal component/command classifier, approval policy, client scope, disruption policy, and Central Orchestrator.
+
+The Datto EDR workstream provides an initial motivating example: a stale EDR version plus stopped `EndpointProtectionService` can be correlated with previous diagnostic/output evidence. If comparable cases show that a service-only attempt repeatedly failed while an approved EDR reinstall resolved the problem, Jason should use that history to choose a better first diagnostic/remediation path while still verifying current evidence and obtaining any required approval.
+
 ## Governance boundaries
 
 Reflection must not create a second authority system. Existing Jason identity, authorization, capability, provider, approval, audit, and Central Orchestrator boundaries remain controlling.
@@ -87,11 +108,22 @@ The reflection capability must never autonomously:
 - convert one client/resource-specific observation into a global rule without bounded validation;
 - add a second hosted model merely to restate or summarize deterministic execution telemetry.
 
+Resolution Memory inherits all of those limits and additionally must not:
+
+- treat one successful fix as a global playbook;
+- erase or hide failed troubleshooting attempts;
+- silently generalize client-specific exceptions;
+- use historical success as approval for a current modifying/disruptive action;
+- recommend a historical path without checking materially relevant current evidence;
+- cross client/tenant boundaries when retrieving similar cases.
+
 Where an improvement would materially change target, authority, action, risk, or meaning, normal Jason fail-closed and approval principles continue to apply.
 
 ## Cost and reasoning direction
 
 Prefer deterministic reflection signals and metrics first. Examples include call count, pagination, exact-search miss followed by contains-search success, repeated fallback sequences, latency thresholds, evidence size, and user-correction events.
+
+For Resolution Memory, prefer structured signatures and auditable ranking factors such as product/version, error code, alert type, service state, device class, client-scoped configuration, action outcome, recency, and technician confirmation before relying on free-form semantic similarity alone.
 
 Optional model-assisted analysis may later be used offline or periodically when deterministic heuristics are insufficient, but ChatGPT Business should remain Jason's primary reasoning layer and a second hosted model should not be added merely for classification, summarization, or correlation that Jason can perform deterministically.
 
@@ -106,9 +138,19 @@ REFLECT-001 should eventually prove at least the following:
 - An accepted learning is represented by durable regression coverage and documentation.
 - No reflection record or accepted learning can grant itself provider access, write authority, tenant scope, or client scope.
 
+Resolution Memory should eventually prove at least the following:
+
+- repeated alerts/tickets with materially similar evidence can retrieve prior successful and failed cases;
+- ranking considers similarity, recency, evidence quality, and verified outcomes;
+- a known failed step is not repeatedly chosen first when stronger comparable evidence exists;
+- a historically successful modifying action still triggers current per-run approval when required;
+- contradictory outcomes lower confidence and are visible to the technician;
+- client-specific exceptions remain client-scoped;
+- repeated verified outcomes can be proposed for playbook promotion but cannot promote themselves.
+
 ## Near-term construction direction
 
-The first implementation slice should remain small and deterministic:
+The first REFLECT-001 implementation slice should remain small and deterministic:
 
 1. define the `ReflectionRecord` schema and lifecycle;
 2. collect correlation-linked execution metrics from the Central Orchestrator/provider-read path;
@@ -118,11 +160,23 @@ The first implementation slice should remain small and deterministic:
 6. connect accepted candidates to regression-harness cases;
 7. do not enable autonomous production self-editing.
 
+After that foundation is stable, the first Resolution Memory slice should:
+
+1. define a provider-neutral `ResolutionRecord` and normalized issue signature;
+2. ingest only verified/correlation-linked ticket, alert, diagnostic, job-output, and technician-outcome evidence;
+3. keep success and failure steps in the same historical record;
+4. implement client-isolated similarity search and deterministic ranking factors;
+5. expose similar-case evidence to Jason's normal reasoning path;
+6. record current case outcome and technician confirmation;
+7. propose, but never self-promote, repeated verified patterns into playbooks.
+
 ## Relationship to current architecture
 
 Reflection is subordinate to Jason's existing provider-neutral capability/resource model. It should improve the generic construction paths Jason already uses rather than creating bespoke scripts or locked-in workflows.
 
-The Central Orchestrator remains the sole coordination/execution authority. Reflection observes and evaluates executions; it does not become a parallel execution path.
+Resolution Memory is likewise an evidence/reasoning capability, not an execution path. It may influence which diagnostic Jason chooses to try first, but the Central Orchestrator, capability registry, command/component classification, approvals, provider boundaries, and audit chain remain authoritative.
+
+The Central Orchestrator remains the sole coordination/execution authority. Reflection observes and evaluates executions; Resolution Memory retrieves historical evidence; neither becomes a parallel execution path.
 
 ## Decision owner
 
@@ -130,4 +184,6 @@ Jason Governance Authority / Technology Steward.
 
 ## Review trigger
 
-Begin design after the current governed provider-read foundation is stable enough to provide reliable execution telemetry, and before broad provider expansion makes repeated inefficiencies expensive to rediscover manually.
+Begin REFLECT-001 design after the current governed provider-read foundation is stable enough to provide reliable execution telemetry, and before broad provider expansion makes repeated inefficiencies expensive to rediscover manually.
+
+Begin Resolution Memory design once governed ticket/alert reads, Datto job/output correlation, and reliable resolution outcomes are stable enough to distinguish verified repeated patterns from anecdotal fixes.

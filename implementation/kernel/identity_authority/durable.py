@@ -88,7 +88,13 @@ class SQLiteIdentityAuthorityStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(str(self.path))
+        # Runtime composition is cached process-wide while MCP synchronous tools may
+        # execute in worker threads. Keep the same governed durable store available
+        # across those threads; authority checks and SQLite transactions remain intact.
+        self.connection = sqlite3.connect(
+            str(self.path),
+            check_same_thread=False,
+        )
         self.connection.row_factory = sqlite3.Row
         self.connection.executescript(_SCHEMA)
         self.connection.commit()

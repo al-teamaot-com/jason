@@ -1,5 +1,7 @@
 # Autotask Governed CRUD Pilot — 2026-09-14
 
+> **Current-state note — 2026-09-16:** This document preserves the design, authority model, and acceptance plan as they existed on 2026-09-14. It is no longer the current resume point. The later bounded live pilot successfully exercised `service.ticket.update` on controlled ticket `T20191013.0001`, changing priority `3` to `2`, and a fresh governed read on 2026-09-16 confirmed `priority=2`. Current state and next actions are recorded in `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md` and `docs/control/CURRENT.md`. Nothing in this historical document independently authorizes another mutation.
+
 ## Accepted authority model
 
 AOT approved Autotask's requester security profile as the authoritative maximum permission boundary for Autotask operations performed through Jason.

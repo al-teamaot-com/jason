@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/tests/test_autotask_connector.py'
       - 'implementation/connectors/tests/test_autotask_live_read.py'
       - 'implementation/connectors/tests/test_autotask_operations.py'
       - 'tools/autotask_live_read.py'
@@ -11,6 +12,7 @@ on:
   push:
     paths:
       - 'implementation/connectors/autotask/**'
+      - 'implementation/connectors/tests/test_autotask_connector.py'
       - 'implementation/connectors/tests/test_autotask_live_read.py'
       - 'implementation/connectors/tests/test_autotask_operations.py'
       - 'tools/autotask_live_read.py'
@@ -35,10 +37,12 @@ jobs:
           python -m py_compile implementation/connectors/autotask/connector.py
           python -m py_compile implementation/connectors/autotask/operations.py
           python -m py_compile implementation/connectors/autotask/live_read.py
+          python -m py_compile implementation/connectors/tests/test_autotask_connector.py
           python -m py_compile tools/autotask_live_read.py
       - name: Run Autotask operation and live-read contract tests
         run: |
           python -m pytest -q \
+            implementation/connectors/tests/test_autotask_connector.py \
             implementation/connectors/tests/test_autotask_operations.py \
             implementation/connectors/tests/test_autotask_live_read.py
       - name: Verify credential-safe Autotask live-read preflight

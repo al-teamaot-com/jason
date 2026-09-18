@@ -38,6 +38,11 @@ from jason_runtime.autotask_internal_note import (
     autotask_internal_note_mcp_surface_enabled,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from jason_runtime.datto_component_scope import (
+    configured_datto_components,
+    effective_datto_component_approval_mode,
+    resolve_datto_component,
+)
 
 
 JASON_ENTRA_TENANT_ID = os.environ.get(
@@ -460,6 +465,9 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
         if total_count is None or value > total_count:
             total_count = value
 
+    discovery_complete = data.get("discovery_complete")
+    incomplete_reason = data.get("incomplete_reason")
+
     return {
         "provider": _safe(output.get("provider")),
         "provider_capability": _safe(
@@ -467,6 +475,15 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "resource_matches": matches,
         "match_count": len(matches),
+        "discovery_complete": (
+            True
+            if discovery_complete is True
+            else (
+                False
+                if discovery_complete is False
+                else None
+            )
+        ),
         "search": {
             "discovery_mode": _safe(
                 provider_data.get("discovery_mode")
@@ -474,9 +491,17 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
             "hostname_reference": _safe(
                 provider_data.get("hostname_reference")
             ),
+            "site_reference": _safe(
+                provider_data.get("site_reference")
+            ),
             "provider_pages_examined": len(pages),
             "provider_total_count": total_count,
             "match_output_bounded": len(raw_matches) > 100,
+            "incomplete_reason": (
+                _safe(incomplete_reason)
+                if discovery_complete is False
+                else None
+            ),
         },
     }
 
@@ -1085,6 +1110,720 @@ def _governed_read(
     }
 
 
+def _project_action_result(
+    capability_name: str,
+    output: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose only capability-specific verified action evidence."""
+
+    data = output.get("data")
+
+    if not isinstance(data, Mapping):
+        data = {}
+
+    result: dict[str, Any] = {
+        "raw_provider_evidence_exposed": False,
+    }
+
+    if capability_name == "service.ticket.note.create":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        note_id = verification.get("ticketNoteId")
+
+        if note_id is not None:
+            result["ticket_note_id"] = _safe(note_id)
+
+        result["impersonator_recorded"] = bool(
+            verification.get("impersonatorRecorded")
+        )
+
+        return result
+
+    if capability_name == "service.ticket.update":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(
+            verification.get("readbackVerified")
+        )
+
+        ticket_id = verification.get("ticketId")
+
+        if ticket_id is not None:
+            result["ticket_id"] = _safe(ticket_id)
+
+        fields = verification.get("verifiedFields")
+
+        if isinstance(fields, (list, tuple)):
+            result["verified_fields"] = [
+                str(value)
+                for value in fields[:20]
+            ]
+            result["verified_fields_bounded"] = (
+                len(fields) > 20
+            )
+
+        return result
+
+    if capability_name == "automation.component.execute":
+        for source, target in (
+            ("status", "status"),
+            ("job_status", "job_status"),
+            ("readback_verified", "readback_verified"),
+            ("completion_verified", "completion_verified"),
+            ("allowlist_name", "allowlist_name"),
+        ):
+            if source in data:
+                result[target] = _safe(data.get(source))
+
+        job_uid = str(
+            data.get("job_uid") or ""
+        ).strip()
+        device_uid = str(
+            data.get("device_uid") or ""
+        ).strip()
+        component_uid = str(
+            data.get("component_uid") or ""
+        ).strip()
+        component_name = str(
+            data.get("component_name") or ""
+        ).strip()
+
+        if job_uid:
+            result["job_uid"] = _safe(job_uid)
+            result["job_read_arguments"] = {
+                "resource_id": job_uid,
+            }
+
+        if device_uid:
+            result["device_uid"] = _safe(device_uid)
+
+        if component_uid:
+            result["component_uid"] = _safe(
+                component_uid
+            )
+
+        if component_name:
+            result["component_name"] = _safe(
+                component_name
+            )
+
+        if job_uid and device_uid and component_uid:
+            result["output_read_arguments"] = {
+                "resource_id": job_uid,
+                "device_uid": device_uid,
+                "component_uid": component_uid,
+                "stream": "stdout",
+            }
+            result["follow_up_contract"] = {
+                "poll_same_job": True,
+                "read_output_after_terminal": True,
+                "do_not_redispatch": True,
+            }
+
+        result["job_reference_present"] = bool(job_uid)
+
+        return result
+
+    result["result_exposed"] = False
+    return result
+
+
+
+def _canonical_datto_component_search_arguments(
+    arguments: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Use one stable provider page size while Jason completes the catalog."""
+
+    normalized = dict(arguments or {})
+
+    # Provider page navigation is internal to Jason. Every conversational
+    # component lookup begins at Datto page zero and Jason follows all pages
+    # before applying the requested name filter.
+    normalized["page"] = 0
+    normalized["max"] = 100
+
+    return normalized
+
+
+def _resolve_live_datto_component_name(
+    component_name: object,
+) -> tuple[str, str]:
+    """Resolve one exact component name through governed live catalog discovery."""
+
+    requested_name = str(
+        component_name or ""
+    ).strip()
+
+    if not requested_name:
+        raise ValueError(
+            "DATTO_COMPONENT_NAME_REQUIRED"
+        )
+
+    lookup = _governed_read(
+        capability_name="automation.component.search",
+        arguments=_canonical_datto_component_search_arguments(
+            {
+                "name": requested_name,
+            }
+        ),
+    )
+
+    if lookup.get("status") != "succeeded":
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    evidence = lookup.get("evidence")
+
+    if not isinstance(evidence, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    data = evidence.get("data")
+
+    if not isinstance(data, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    if data.get("discovery_complete") is not True:
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE"
+        )
+
+    matches = data.get("resource_matches")
+
+    if not isinstance(matches, (list, tuple)):
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
+        )
+
+    exact: list[tuple[str, str]] = []
+
+    for item in matches:
+        if not isinstance(item, Mapping):
+            continue
+
+        live_name = str(
+            item.get("name") or ""
+        ).strip()
+
+        if (
+            live_name.casefold()
+            != requested_name.casefold()
+        ):
+            continue
+
+        live_uid = str(
+            item.get("resource_id") or ""
+        ).strip()
+
+        if not live_uid:
+            raise ValueError(
+                "DATTO_COMPONENT_IDENTITY_MISMATCH"
+            )
+
+        exact.append(
+            (
+                live_uid,
+                live_name,
+            )
+        )
+
+    if not exact:
+        raise ValueError(
+            "DATTO_COMPONENT_NAME_MISMATCH"
+        )
+
+    unique = {
+        (
+            uid,
+            name.casefold(),
+        )
+        for uid, name in exact
+    }
+
+    if len(unique) != 1:
+        raise ValueError(
+            "DATTO_COMPONENT_CATALOG_AMBIGUOUS"
+        )
+
+    return exact[0]
+
+
+
+def _canonicalize_governed_action_arguments(
+    capability_name: str,
+    arguments: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Canonicalize server-controlled action arguments before approval/execution.
+
+    ChatGPT may express the same governed action with slightly different
+    argument shapes. Provider containment must not depend on the model
+    remembering internal allowlist/profile fields.
+
+    For bounded Datto component execution, Jason supplies its own
+    server-controlled allowlist, endpoint and device class. The caller must
+    still identify the exact target and component. Component identity is
+    resolved against an exact server-controlled UID/name pair set before the
+    request can enter approval or provider execution.
+    """
+
+    raw = dict(arguments or {})
+
+    if capability_name != "automation.component.execute":
+        return raw
+
+    expected = {
+        "allowlist_name": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
+            "",
+        ).strip(),
+        "device_uid": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
+            "",
+        ).strip(),
+        "device_class": os.environ.get(
+            "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
+            "",
+        ).strip(),
+    }
+
+    components = configured_datto_components()
+
+    if not all(expected.values()) or not components:
+        raise ValueError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
+        )
+
+    requested_device = str(
+        raw.get("device_uid")
+        or raw.get("resource_id")
+        or raw.get("target_device_uid")
+        or ""
+    ).strip()
+
+    if not requested_device:
+        raise ValueError(
+            "DATTO_COMPONENT_TARGET_REQUIRED"
+        )
+
+    if requested_device != expected["device_uid"]:
+        raise ValueError(
+            "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+        )
+
+    supplied_allowlist = str(
+        raw.get("allowlist_name") or ""
+    ).strip()
+
+    if (
+        supplied_allowlist
+        and supplied_allowlist != expected["allowlist_name"]
+    ):
+        raise ValueError(
+            "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
+        )
+
+    # device_class is server-controlled metadata.
+    # Caller/model-provided class labels are deliberately ignored because
+    # provider terminology can differ (for example Desktop vs Workstation).
+    # Exact endpoint identity remains independently enforced above.
+    supplied_class = expected["device_class"]
+
+    supplied_component_uid = str(
+        raw.get("component_uid")
+        or raw.get("component_id")
+        or ""
+    ).strip()
+
+    supplied_component_name = str(
+        raw.get("component_name") or ""
+    ).strip()
+
+    # Human callers identify components by their Datto display name.
+    # Jason resolves that name against the complete governed live catalog
+    # before selecting approval policy or creating a provider mutation.
+    if supplied_component_name:
+        (
+            live_component_uid,
+            live_component_name,
+        ) = _resolve_live_datto_component_name(
+            supplied_component_name
+        )
+
+        if (
+            supplied_component_uid
+            and supplied_component_uid
+            != live_component_uid
+        ):
+            raise ValueError(
+                "DATTO_COMPONENT_IDENTITY_MISMATCH"
+            )
+
+        supplied_component_uid = (
+            live_component_uid
+        )
+        supplied_component_name = (
+            live_component_name
+        )
+
+    selected_component = resolve_datto_component(
+        components,
+        component_uid=supplied_component_uid,
+        component_name=supplied_component_name,
+        catalog_verified=bool(supplied_component_name),
+    )
+
+    variables = raw.get("variables", {})
+    if variables is None:
+        variables = {}
+
+    if not isinstance(variables, Mapping):
+        raise ValueError(
+            "DATTO_COMPONENT_VARIABLES_INVALID"
+        )
+
+    # Only exact server-resolved component identity and provider-neutral values
+    # required by the runtime are forwarded. The model cannot widen the set.
+    return {
+        "allowlist_name": expected["allowlist_name"],
+        "device_uid": expected["device_uid"],
+        "device_class": expected["device_class"],
+        "component_uid": selected_component.uid,
+        "component_name": selected_component.name,
+        "variables": dict(variables),
+    }
+
+
+def _governed_execute(
+    *,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+    explicit_approval: bool = False,
+) -> dict[str, Any]:
+    """Execute one explicitly MCP-enabled mutation through Jason governance."""
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_write_identity()
+
+    try:
+        capability = app.capabilities.get_current(
+            capability_name=capability_name
+        )
+    except LookupError:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_active",
+        }
+
+    metadata = dict(capability.metadata or {})
+
+    if (
+        str(metadata.get("mcp_action_enabled", "")).casefold()
+        != "true"
+    ):
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_mcp_action_enabled",
+        }
+
+    try:
+        canonical_arguments = (
+            _canonicalize_governed_action_arguments(
+                capability_name,
+                arguments,
+            )
+        )
+    except ValueError as exc:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "invalid_action_arguments",
+            "reason_codes": [str(exc)],
+        }
+
+    datto_approval_mode: str | None = None
+    datto_approval_reason_code: str | None = None
+
+    if capability_name == "automation.component.execute":
+        try:
+            selected_component = resolve_datto_component(
+                configured_datto_components(),
+                component_uid=canonical_arguments.get("component_uid"),
+                component_name=canonical_arguments.get("component_name"),
+                catalog_verified=True,
+            )
+        except ValueError as exc:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": "invalid_action_arguments",
+                "reason_codes": [str(exc)],
+            }
+
+        (
+            datto_approval_mode,
+            datto_approval_reason_code,
+        ) = effective_datto_component_approval_mode(
+            selected_component,
+            canonical_arguments.get(
+                "variables",
+                {},
+            ),
+        )
+
+    execution_id = f"exec_mcp_action_{uuid4().hex}"
+    correlation_id = f"corr_mcp_action_{uuid4().hex}"
+
+    decision = app.identity_authority.evaluate(
+        AuthorityRequest(
+            request_id=execution_id,
+            correlation_id=correlation_id,
+            principal_id=principal,
+            organization_id=organization,
+            client_id=client_id,
+            capability=capability_name,
+            requested_mode=PermissionMode.EXECUTE,
+            authentication_assurance=assurance,
+        )
+    )
+
+    approval_present = False
+
+    if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
+        approval_decided_by = principal
+
+        if capability_name == "automation.component.execute":
+            if datto_approval_mode == "standing_safe":
+                imperative_approval = True
+
+                if (
+                    datto_approval_reason_code
+                    == "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+                ):
+                    approval_decided_by = (
+                        "policy:datto-powershell-readonly"
+                    )
+                else:
+                    approval_decided_by = (
+                        "policy:datto-standing-safe"
+                    )
+            elif datto_approval_mode == "per_run":
+                imperative_approval = explicit_approval is True
+
+                if not imperative_approval:
+                    return {
+                        "status": "approval_required",
+                        "capability": capability_name,
+                        "reason_codes": [
+                            *(
+                                [datto_approval_reason_code]
+                                if datto_approval_reason_code
+                                else []
+                            ),
+                            "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED",
+                            *list(decision.reason_codes),
+                        ],
+                        "correlation_id": correlation_id,
+                        "approval_signal": {
+                            "argument": "explicit_approval",
+                            "required_value": True,
+                            "scope": "exact_execution",
+                        },
+                    }
+            else:
+                return {
+                    "status": "denied",
+                    "capability": capability_name,
+                    "reason_codes": [
+                        "DATTO_COMPONENT_APPROVAL_MODE_INVALID",
+                    ],
+                    "correlation_id": correlation_id,
+                }
+        else:
+            imperative_approval = (
+                str(
+                    metadata.get(
+                        "conversation_authenticated_imperative_is_approval",
+                        "",
+                    )
+                ).casefold()
+                == "true"
+            )
+
+        if not imperative_approval:
+            return {
+                "status": "approval_required",
+                "capability": capability_name,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+
+        approval_repository = getattr(
+            app.identity_authority,
+            "approvals",
+            None,
+        )
+        approval_writer = getattr(
+            approval_repository,
+            "put",
+            None,
+        )
+
+        if not callable(approval_writer):
+            return {
+                "status": "denied",
+                "capability": capability_name,
+                "reason_codes": [
+                    "APPROVAL_PERSISTENCE_UNAVAILABLE",
+                ],
+                "correlation_id": correlation_id,
+            }
+
+        now = datetime.now(timezone.utc)
+        approval_id = f"approval_mcp_{uuid4().hex}"
+
+        approval_writer(
+            ApprovalRecord(
+                approval_id=approval_id,
+                request_id=execution_id,
+                capability=capability_name,
+                organization_id=organization,
+                client_id=client_id,
+                requested_by=principal,
+                status="approved",
+                decided_by=approval_decided_by,
+                decided_at=now,
+                expires_at=now + timedelta(minutes=5),
+            )
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=execution_id,
+                correlation_id=correlation_id,
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=capability_name,
+                requested_mode=PermissionMode.EXECUTE,
+                authentication_assurance=assurance,
+                approval_id=approval_id,
+            )
+        )
+
+        approval_present = True
+
+    if decision.outcome is not AuthorityOutcome.ALLOWED:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": list(decision.reason_codes),
+            "correlation_id": correlation_id,
+        }
+
+    context = decision.execution_context
+
+    if context is None:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": [
+                "AUTHORITY_CONTEXT_MISSING",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    if capability.approval.required and not context.approval_required:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": [
+                "ACTION_GRANT_APPROVAL_POLICY_MISMATCH",
+            ],
+            "correlation_id": correlation_id,
+        }
+
+    request = OrchestrationRequest(
+        execution_id=execution_id,
+        correlation_id=correlation_id,
+        principal_id=principal,
+        organization_id=organization,
+        client_id=client_id,
+        capability_name=capability_name,
+        capability_version=None,
+        requested_mode="deterministic",
+        orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True,
+        approval_present=(
+            approval_present
+            or not capability.approval.required
+            or context.approval_required
+        ),
+        risk=capability.risk_level.value,
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+            retention_allowed=False,
+        ),
+        budget=ExecutionBudget(
+            maximum_estimated_cost=Decimal("1.00"),
+            maximum_attempts=1,
+        ),
+        arguments=canonical_arguments,
+        requester_kind="human",
+        permission_mode="execute",
+        policy_ids=("mcp-governed-execution-v1",),
+        authority_context_id=context.context_id,
+        idempotency_key=f"idem_mcp_action_{uuid4().hex}",
+    )
+
+    result = app.governed_orchestrator.execute(request)
+
+    response = {
+        "status": result.status.value,
+        "stage": result.stage.value,
+        "capability": result.capability_name,
+        "provider": result.provider_id,
+        "reason_codes": list(result.reason_codes),
+        "error_code": result.error_code,
+        "correlation_id": result.correlation_id,
+        "provider_attempts": result.attempts,
+    }
+
+    if isinstance(result.output, Mapping):
+        response["result"] = _project_action_result(
+            capability_name,
+            result.output,
+        )
+
+    return response
+
+
 def create_autotask_internal_note(
     ticket_id: int,
     note: str,
@@ -1113,36 +1852,37 @@ if _MCP_INTERNAL_NOTE_SURFACE_ENABLED:
 
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
-    """Return Jason MCP pilot state."""
+    """Return Jason MCP governed capability state."""
 
-    write_enabled = (
-        _MCP_INTERNAL_NOTE_SURFACE_ENABLED
-    )
+    actions = _active_action_capabilities()
+    write_enabled = bool(actions)
 
     return {
         "status": "ok",
         "service": "jason-mcp",
         "mode": (
-            "governed-read-plus-internal-note"
+            "governed-read-plus-actions"
             if write_enabled
             else "read-only"
         ),
         "phase": (
-            "governed-internal-note-pilot"
+            "governed-action-pilot"
             if write_enabled
             else "governed-read-pilot"
         ),
         "governed_execution": "central-orchestrator",
+        "generic_execution_tool": True,
         "direct_provider_access": False,
         "write_tools_enabled": write_enabled,
-        "write_capabilities": (
-            [SERVICE_TICKET_NOTE_CREATE]
-            if write_enabled
-            else []
-        ),
+        "write_capabilities": actions,
         "write_authority": (
-            "jason_exact_grant_plus_per_execution_approval"
+            "jason_exact_grant_plus_server_governed_approval_policy"
             if write_enabled
+            else None
+        ),
+        "datto_component_approval_policy": (
+            "server_classified_standing_safe_or_per_run"
+            if "automation.component.execute" in actions
             else None
         ),
     }
@@ -1161,14 +1901,33 @@ def jason_mcp_status() -> dict[str, object]:
 def _capability_metadata(capability: Any) -> dict[str, Any]:
     metadata = dict(capability.metadata or {})
 
+    read_only = (
+        str(metadata.get("read_only", "")).strip().lower()
+        == "true"
+    )
+    write_capability = (
+        str(metadata.get("write_capability", "")).strip().lower()
+        == "true"
+    )
+    action_enabled = (
+        str(metadata.get("mcp_action_enabled", "")).strip().lower()
+        == "true"
+    )
+
     return {
         "capability": capability.capability_name,
         "display_name": capability.display_name,
         "lifecycle": capability.lifecycle_status.value,
         "risk": capability.risk_level.value,
-        "read_only": (
-            str(metadata.get("read_only", "")).strip().lower()
-            == "true"
+        "read_only": read_only,
+        "write_capability": write_capability,
+        "action_enabled": action_enabled,
+        "classification": (
+            "read"
+            if read_only
+            else "action"
+            if write_capability
+            else "operation"
         ),
         "resource_types": [
             value.strip()
@@ -1224,10 +1983,17 @@ def _discoverable_capabilities() -> list[dict[str, Any]]:
         if projected["lifecycle"] != "active":
             continue
 
-        if not projected["read_only"]:
+        if not projected["resource_types"]:
             continue
 
-        if not projected["resource_types"]:
+        # Reads are discoverable when active. Mutating capabilities require an
+        # explicit MCP action activation flag in addition to ACTIVE lifecycle.
+        # This prevents a provider/runtime activation from silently exposing a
+        # new conversational write surface.
+        if (
+            not projected["read_only"]
+            and not projected["action_enabled"]
+        ):
             continue
 
         result.append(projected)
@@ -1236,6 +2002,103 @@ def _discoverable_capabilities() -> list[dict[str, Any]]:
         result,
         key=lambda item: item["capability"],
     )
+
+
+def _active_action_capabilities() -> list[str]:
+    return sorted(
+        item["capability"]
+        for item in _discoverable_capabilities()
+        if (
+            item["read_only"] is False
+            and item["action_enabled"] is True
+        )
+    )
+
+
+def _annotate_requester_eligibility(
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Add bounded requester-specific authority eligibility to discovery."""
+
+    app = _runtime()
+
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_identity()
+
+    def annotate(
+        item: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        projected = dict(item)
+
+        requested_mode = (
+            PermissionMode.OBSERVE
+            if projected.get("read_only") is True
+            else PermissionMode.EXECUTE
+        )
+
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=(
+                    f"discover_{uuid4().hex}"
+                ),
+                correlation_id=(
+                    f"corr_discover_{uuid4().hex}"
+                ),
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=str(
+                    projected.get("capability")
+                    or ""
+                ),
+                requested_mode=requested_mode,
+                authentication_assurance=assurance,
+            )
+        )
+
+        projected["permission_mode"] = (
+            requested_mode.value
+        )
+
+        projected["authority_outcome"] = (
+            decision.outcome.value
+        )
+
+        projected["potentially_eligible"] = (
+            decision.outcome
+            in {
+                AuthorityOutcome.ALLOWED,
+                AuthorityOutcome.APPROVAL_REQUIRED,
+            }
+        )
+
+        return projected
+
+    output = dict(result)
+
+    capabilities = output.get("capabilities")
+
+    if isinstance(capabilities, list):
+        output["capabilities"] = [
+            annotate(item)
+            for item in capabilities
+            if isinstance(item, Mapping)
+        ]
+
+    alternatives = output.get("alternatives")
+
+    if isinstance(alternatives, list):
+        output["alternatives"] = [
+            annotate(item)
+            for item in alternatives
+            if isinstance(item, Mapping)
+        ]
+
+    return output
 
 
 def _dynamic_capability_allowed(
@@ -1247,6 +2110,30 @@ def _dynamic_capability_allowed(
         item["capability"] == target
         for item in _discoverable_capabilities()
     )
+
+
+def _dynamic_read_capability_allowed(
+    capability_name: str,
+) -> bool:
+    target = str(capability_name).strip()
+
+    return any(
+        item["capability"] == target
+        and item["read_only"] is True
+        for item in _discoverable_capabilities()
+    )
+
+
+def _discoverable_capability(
+    capability_name: str,
+) -> dict[str, Any] | None:
+    target = str(capability_name).strip()
+
+    for item in _discoverable_capabilities():
+        if item["capability"] == target:
+            return item
+
+    return None
 
 
 
@@ -1467,14 +2354,14 @@ def _filter_discoverable_capabilities(
     if alternatives:
         result["selection_guidance"] = (
             "No exact registry filter match was found, but active governed "
-            "read capabilities exist for this resource type. Evaluate the "
+            "capabilities exist for this resource type. Evaluate the "
             "listed alternatives before concluding that the resource cannot "
             "be read. A search operation can be the supported lookup path "
             "for an exact identifier or number."
         )
     else:
         result["selection_guidance"] = (
-            "No active governed read capability is registered for this "
+            "No active governed capability is registered for this "
             "resource type."
         )
 
@@ -1487,7 +2374,7 @@ def discover_capabilities(
     operation: str = "",
     facts: str = "",
 ) -> dict[str, Any]:
-    """Discover Jason's currently active governed read capabilities.
+    """Discover Jason's currently active governed capabilities.
 
     resource_type, operation, and facts are registry filters. In particular,
     operation is an exact registry operation and must not be inferred directly
@@ -1499,10 +2386,12 @@ def discover_capabilities(
     before concluding that Jason lacks a capability for the resource.
     """
 
-    return _filter_discoverable_capabilities(
-        resource_type=resource_type,
-        operation=operation,
-        facts=facts,
+    return _annotate_requester_eligibility(
+        _filter_discoverable_capabilities(
+            resource_type=resource_type,
+            operation=operation,
+            facts=facts,
+        )
     )
 
 
@@ -1516,6 +2405,12 @@ def execute_read_capability(
     The capability must currently be active, read-only, and present in Jason's
     live capability registry. Jason performs identity/authority evaluation and
     Central Orchestrator execution. Provider credentials are never exposed.
+
+    For automation.job.output.read, use the exact output_read_arguments
+    returned by automation.component.execute. Missing job/device/component
+    selectors are a request-construction error, not evidence of a Datto or
+    provider failure. Correct the selectors and retry the read-only operation;
+    never redispatch a component because an output-read request was incomplete.
     """
 
     capability_name = str(capability).strip()
@@ -1526,7 +2421,7 @@ def execute_read_capability(
             "error_code": "capability_required",
         }
 
-    if not _dynamic_capability_allowed(
+    if not _dynamic_read_capability_allowed(
         capability_name
     ):
         return {
@@ -1537,9 +2432,152 @@ def execute_read_capability(
             ),
         }
 
+    read_arguments = dict(arguments or {})
+
+    if capability_name == "automation.job.output.read":
+        selector_bundle = read_arguments.get(
+            "output_read_arguments"
+        )
+
+        if isinstance(selector_bundle, Mapping):
+            for key in (
+                "resource_id",
+                "device_uid",
+                "component_uid",
+                "stream",
+            ):
+                if (
+                    not read_arguments.get(key)
+                    and selector_bundle.get(key)
+                ):
+                    read_arguments[key] = (
+                        selector_bundle.get(key)
+                    )
+
+        resource_id = str(
+            read_arguments.get("resource_id")
+            or read_arguments.get("job_uid")
+            or ""
+        ).strip()
+
+        device_uid = str(
+            read_arguments.get("device_uid")
+            or read_arguments.get(
+                "target_device_uid"
+            )
+            or ""
+        ).strip()
+
+        component_uid = str(
+            read_arguments.get("component_uid")
+            or read_arguments.get("component_id")
+            or ""
+        ).strip()
+
+        stream = str(
+            read_arguments.get("stream")
+            or "stdout"
+        ).strip().casefold()
+
+        missing_arguments = []
+
+        if not resource_id:
+            missing_arguments.append(
+                "resource_id"
+            )
+
+        if not device_uid:
+            missing_arguments.append(
+                "device_uid"
+            )
+
+        if not component_uid:
+            missing_arguments.append(
+                "component_uid"
+            )
+
+        if missing_arguments:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": (
+                    "AUTOMATION_JOB_OUTPUT_SELECTORS_REQUIRED"
+                ),
+                "reason_codes": [
+                    "AUTOMATION_JOB_OUTPUT_SELECTORS_REQUIRED",
+                ],
+                "failure_domain": (
+                    "request_construction"
+                ),
+                "provider_called": False,
+                "retryable": True,
+                "missing_arguments": (
+                    missing_arguments
+                ),
+                "required_arguments": [
+                    "resource_id",
+                    "device_uid",
+                    "component_uid",
+                ],
+                "defaulted_arguments": {
+                    "stream": "stdout",
+                },
+                "do_not_redispatch": True,
+                "operator_message": (
+                    "The output-read request is incomplete. "
+                    "This is not evidence of a Datto/provider "
+                    "failure. Supply the exact job, device, and "
+                    "component selectors and retry this read-only "
+                    "operation. Do not rerun the component."
+                ),
+            }
+
+        if stream not in {
+            "stdout",
+            "stderr",
+            "all",
+        }:
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": (
+                    "AUTOMATION_JOB_OUTPUT_STREAM_INVALID"
+                ),
+                "reason_codes": [
+                    "AUTOMATION_JOB_OUTPUT_STREAM_INVALID",
+                ],
+                "failure_domain": (
+                    "request_construction"
+                ),
+                "provider_called": False,
+                "retryable": True,
+                "allowed_streams": [
+                    "stdout",
+                    "stderr",
+                    "all",
+                ],
+                "do_not_redispatch": True,
+            }
+
+        # Only the exact provider-neutral selectors required by the governed
+        # Datto read path are forwarded.
+        read_arguments = {
+            "resource_id": resource_id,
+            "device_uid": device_uid,
+            "component_uid": component_uid,
+            "stream": stream,
+        }
+
+    if capability_name == "automation.component.search":
+        read_arguments = (
+            _canonical_datto_component_search_arguments(
+                read_arguments
+            )
+        )
+
     result = _governed_read(
         capability_name=capability_name,
-        arguments=dict(arguments or {}),
+        arguments=read_arguments,
     )
 
     if result.get("status") != "succeeded":
@@ -1621,16 +2659,97 @@ def execute_read_capability(
     return result
 
 
+@mcp.tool()
+def execute_governed_capability(
+    capability: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute one active governed Jason capability.
+
+    Reads continue through Jason's governed read path. Mutating actions must be
+    ACTIVE in the live capability registry and explicitly MCP-action-enabled.
+    Microsoft Entra authenticates the caller; Jason authority, approval policy,
+    Central Orchestrator routing, provider isolation, attempt limits and audit
+    remain authoritative. For Datto component execution, Jason derives
+    approval server-side. The exact reviewed ad-hoc PowerShell component may
+    execute a narrowly classified deterministic read-only command under standing
+    policy. Mutating, sensitive, ambiguous or unclassified commands remain
+    per_run and arguments.explicit_approval must be true only after the
+    authenticated technician explicitly approved that exact execution.
+    Classification is never accepted from action arguments.
+    """
+
+    capability_name = str(capability).strip()
+
+    if not capability_name:
+        return {
+            "status": "rejected",
+            "error_code": "capability_required",
+        }
+
+    execution_arguments = dict(arguments or {})
+
+    # The live MCP contract intentionally exposes only capability + arguments.
+    # Carry current conversational approval inside the governed argument
+    # envelope so approval does not depend on an out-of-band tool parameter.
+    #
+    # This reserved value is consumed here and is never forwarded to Datto.
+    datto_explicit_approval = False
+
+    if capability_name == "automation.component.execute":
+        datto_explicit_approval = (
+            execution_arguments.pop(
+                "explicit_approval",
+                False,
+            )
+            is True
+        )
+
+    projected = _discoverable_capability(
+        capability_name
+    )
+
+    if projected is None:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_active_or_exposed",
+        }
+
+    if projected["read_only"]:
+        return execute_read_capability(
+            capability=capability_name,
+            arguments=execution_arguments,
+        )
+
+    if not projected["action_enabled"]:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": "capability_not_mcp_action_enabled",
+        }
+
+    return _governed_execute(
+        capability_name=capability_name,
+        arguments=execution_arguments,
+        explicit_approval=datto_explicit_approval,
+    )
+
+
 async def healthz(_request):
+    actions = _active_action_capabilities()
+
     return JSONResponse(
         {
             "status": "ok",
             "service": "jason-mcp",
             "mode": (
-                "governed-read-plus-internal-note"
-                if _MCP_INTERNAL_NOTE_SURFACE_ENABLED
+                "governed-read-plus-actions"
+                if actions
                 else "read-only"
             ),
+            "write_tools_enabled": bool(actions),
+            "write_capabilities": actions,
             "mcp_path": "/mcp",
         }
     )

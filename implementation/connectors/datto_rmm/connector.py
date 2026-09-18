@@ -273,6 +273,25 @@ class DattoRmmConnector(ConnectorBase):
             )
             matches = discovery["resource_matches"]
 
+            hostname_reference = self._hostname_reference(
+                request.arguments
+            )
+            site_reference = self._site_reference(
+                request.arguments
+            )
+
+            if hostname_reference:
+                exact_matches = self._exact_hostname_site_matches(
+                    matches=matches,
+                    hostname_reference=hostname_reference,
+                    site_reference=site_reference,
+                )
+                discovery = {
+                    **dict(discovery),
+                    "resource_matches": exact_matches,
+                }
+                matches = exact_matches
+
         hostname_reference = self._hostname_reference(request.arguments)
         if not matches and hostname_reference:
             discovery = self._execute_hostname_fragment_discovery(
@@ -371,6 +390,19 @@ class DattoRmmConnector(ConnectorBase):
         matches = discovery["resource_matches"]
 
         hostname_reference = self._hostname_reference(request.arguments)
+        site_reference = self._site_reference(request.arguments)
+
+        if hostname_reference:
+            exact_matches = self._exact_hostname_site_matches(
+                matches=matches,
+                hostname_reference=hostname_reference,
+                site_reference=site_reference,
+            )
+            discovery = {
+                **dict(discovery),
+                "resource_matches": exact_matches,
+            }
+            matches = exact_matches
 
         if not matches and hostname_reference:
             discovery = self._execute_hostname_fragment_discovery(
@@ -474,13 +506,8 @@ class DattoRmmConnector(ConnectorBase):
                     )
                 ).strip()
                 == "complete"
-                or (
-                    request.context.capability
-                    == "datto_rmm.site.search"
-                    and self._site_selector_present(
-                        request.arguments
-                    )
-                )
+                or request.context.capability
+                == "datto_rmm.site.search"
             ),
         )
 
@@ -626,31 +653,37 @@ class DattoRmmConnector(ConnectorBase):
         token_type: str,
         hostname_reference: str,
     ) -> Mapping[str, Any]:
-        """Discover provider hostnames matching one grounded human identifier segment.
+        """Complete bounded local hostname discovery after provider-filter failure.
 
-        The fallback deliberately removes only the hostname filter that produced zero
-        results. A human-supplied site constraint, when present, is retained. Pages are
-        bounded and must reach a short page before discovery is considered complete.
-        The connector never treats a single candidate from an incomplete scan as unique.
+        Datto's account-device hostname filter is useful as a fast positive lookup but
+        has proven unsafe as definitive negative evidence. If that filtered lookup
+        returns no exact match, Jason enumerates the authorized account device
+        collection from Datto page zero and matches only provider-returned hostnames
+        and sites locally.
+
+        Exact case-insensitive hostname matches always take precedence over delimited
+        identifier-segment matches. A supplied site is used as an exact
+        case-insensitive disambiguator. Enumeration is complete only after Datto
+        returns an empty provider page. Safety bounds and repeated-page stalls are
+        explicit incomplete discovery, never definitive not-found evidence.
         """
 
-        site = str(request.arguments.get("site") or "").strip()
+        site_reference = self._site_reference(request.arguments)
         provider_pages: list[Any] = []
-        matches: list[Mapping[str, str]] = []
-        seen_resource_ids: set[str] = set()
+        exact_matches: list[Mapping[str, str]] = []
+        fragment_matches: list[Mapping[str, str]] = []
+        seen_matches: set[str] = set()
+        seen_provider_records: set[str] = set()
         discovery_complete = False
+        incomplete_reason = ""
 
-        for page in range(1, self.fallback_discovery_max_pages + 1):
-            arguments: dict[str, Any] = {
-                "page": page,
-                "max": self.fallback_discovery_page_size,
-            }
-            if site:
-                arguments["site"] = site
-
+        for page in range(self.fallback_discovery_max_pages):
             prepared = self._prepare_provider_request(
                 capability="datto_rmm.device.search",
-                arguments=arguments,
+                arguments={
+                    "page": page,
+                    "max": self.fallback_discovery_page_size,
+                },
                 credentials=credentials,
                 access_token=access_token,
                 token_type=token_type,
@@ -662,34 +695,79 @@ class DattoRmmConnector(ConnectorBase):
             provider_pages.append(payload)
             records = self._device_records(payload)
 
+            if not records:
+                discovery_complete = True
+                break
+
+            new_provider_records = 0
+
             for record in records:
                 match = self._canonical_device_match(record)
+                provider_key = self._device_match_key(match)
+
+                if provider_key and provider_key not in seen_provider_records:
+                    seen_provider_records.add(provider_key)
+                    new_provider_records += 1
+
                 hostname = str(match.get("hostname", "")).strip()
-                if not hostname or not self._hostname_reference_matches(
+                if not hostname:
+                    continue
+
+                if site_reference and not self._site_reference_matches(
+                    reference=site_reference,
+                    site=str(match.get("site", "")),
+                ):
+                    continue
+
+                is_exact = (
+                    hostname_reference.strip().casefold()
+                    == hostname.casefold()
+                )
+
+                if not is_exact and not self._hostname_reference_matches(
                     reference=hostname_reference,
                     hostname=hostname,
                 ):
                     continue
-                resource_id = str(match.get("resource_id", "")).strip()
-                dedupe_key = resource_id or f"{hostname.casefold()}|{match.get('site_id', '')}"
-                if dedupe_key in seen_resource_ids:
-                    continue
-                seen_resource_ids.add(dedupe_key)
-                matches.append(match)
 
-            if len(records) < self.fallback_discovery_page_size:
-                discovery_complete = True
+                dedupe_key = self._device_match_key(match)
+                if not dedupe_key or dedupe_key in seen_matches:
+                    continue
+
+                seen_matches.add(dedupe_key)
+                if is_exact:
+                    exact_matches.append(match)
+                else:
+                    fragment_matches.append(match)
+
+            if records and new_provider_records == 0:
+                incomplete_reason = "pagination_stalled"
                 break
 
-        return {
+        if not discovery_complete and not incomplete_reason:
+            incomplete_reason = "page_limit_reached"
+
+        matches = (
+            exact_matches
+            if exact_matches
+            else fragment_matches
+        )
+
+        result: dict[str, Any] = {
             "resource_matches": matches,
             "provider_data": {
-                "discovery_mode": "hostname_fragment",
+                "discovery_mode": "hostname_local_enumeration",
                 "hostname_reference": hostname_reference,
+                "site_reference": site_reference or None,
                 "pages": provider_pages,
             },
             "discovery_complete": discovery_complete,
         }
+
+        if not discovery_complete:
+            result["incomplete_reason"] = incomplete_reason
+
+        return result
 
     @staticmethod
     def _has_device_discovery_selector(
@@ -717,23 +795,15 @@ class DattoRmmConnector(ConnectorBase):
         access_token: str,
         token_type: str,
     ) -> Mapping[str, Any]:
-        """Enumerate the bounded authorized endpoint collection.
-
-        This is the selectorless form of the existing provider-neutral device
-        search. It stays inside the already-authorized Datto account boundary,
-        preserves provider-returned durable identities, de-duplicates results,
-        and explicitly reports whether bounded pagination completed.
-        """
+        """Enumerate the bounded authorized endpoint collection from Datto page zero."""
 
         provider_pages: list[Any] = []
         matches: list[Mapping[str, str]] = []
         seen: set[str] = set()
         discovery_complete = False
+        incomplete_reason = ""
 
-        for page in range(
-            1,
-            self.fallback_discovery_max_pages + 1,
-        ):
+        for page in range(self.fallback_discovery_max_pages):
             prepared = self._prepare_provider_request(
                 capability="datto_rmm.device.search",
                 arguments={
@@ -749,49 +819,46 @@ class DattoRmmConnector(ConnectorBase):
                 request=request,
                 prepared=prepared,
             )
-
             provider_pages.append(payload)
-
             records = self._device_records(payload)
+
+            if not records:
+                discovery_complete = True
+                break
+
+            added = 0
 
             for record in records:
                 match = self._canonical_device_match(record)
+                key = self._device_match_key(match)
 
-                resource_id = str(
-                    match.get("resource_id", "")
-                ).strip()
-
-                key = (
-                    resource_id
-                    or (
-                        f"{match.get('hostname', '').casefold()}"
-                        f"|{match.get('site_id', '')}"
-                    )
-                )
-
-                if key in seen:
+                if not key or key in seen:
                     continue
 
                 seen.add(key)
                 matches.append(match)
+                added += 1
 
-            if (
-                len(records)
-                < self.fallback_discovery_page_size
-            ):
-                discovery_complete = True
+            if records and added == 0:
+                incomplete_reason = "pagination_stalled"
                 break
 
-        return {
+        if not discovery_complete and not incomplete_reason:
+            incomplete_reason = "page_limit_reached"
+
+        result: dict[str, Any] = {
             "resource_matches": matches,
             "provider_data": {
-                "discovery_mode": (
-                    "authorized_account_collection"
-                ),
+                "discovery_mode": "authorized_account_collection",
                 "pages": provider_pages,
             },
             "discovery_complete": discovery_complete,
         }
+
+        if not discovery_complete:
+            result["incomplete_reason"] = incomplete_reason
+
+        return result
 
     def _execute_user_identity_discovery(
         self,
@@ -802,30 +869,47 @@ class DattoRmmConnector(ConnectorBase):
         token_type: str,
         user_reference: str,
     ) -> Mapping[str, Any]:
-        """Resolve endpoint association from provider-reported user identity evidence.
+        """Resolve endpoint association from complete bounded provider user evidence."""
 
-        The provider-neutral contract supplies ``user_identity``. Datto adaptation
-        performs bounded account discovery and compares only provider-returned user
-        evidence. It preserves ambiguity and never selects the first device.
-        """
         provider_pages: list[Any] = []
         matches: list[Mapping[str, str]] = []
         seen: set[str] = set()
+        seen_provider_records: set[str] = set()
         discovery_complete = False
+        incomplete_reason = ""
 
-        for page in range(1, self.fallback_discovery_max_pages + 1):
+        for page in range(self.fallback_discovery_max_pages):
             prepared = self._prepare_provider_request(
                 capability="datto_rmm.device.search",
-                arguments={"page": page, "max": self.fallback_discovery_page_size},
+                arguments={
+                    "page": page,
+                    "max": self.fallback_discovery_page_size,
+                },
                 credentials=credentials,
                 access_token=access_token,
                 token_type=token_type,
             )
-            payload = self._execute_prepared_request(request=request, prepared=prepared)
+            payload = self._execute_prepared_request(
+                request=request,
+                prepared=prepared,
+            )
             provider_pages.append(payload)
             records = self._device_records(payload)
 
+            if not records:
+                discovery_complete = True
+                break
+
+            new_provider_records = 0
+
             for record in records:
+                provider_match = self._canonical_device_match(record)
+                provider_key = self._device_match_key(provider_match)
+
+                if provider_key and provider_key not in seen_provider_records:
+                    seen_provider_records.add(provider_key)
+                    new_provider_records += 1
+
                 provider_user = self._first_scalar(
                     record,
                     "lastUser",
@@ -841,19 +925,21 @@ class DattoRmmConnector(ConnectorBase):
                 ):
                     continue
 
-                match = self._canonical_device_match(record)
-                resource_id = str(match.get("resource_id", "")).strip()
-                key = resource_id or f"{match.get('hostname', '').casefold()}|{match.get('site_id', '')}"
-                if key in seen:
+                key = self._device_match_key(provider_match)
+                if not key or key in seen:
                     continue
-                seen.add(key)
-                matches.append(match)
 
-            if len(records) < self.fallback_discovery_page_size:
-                discovery_complete = True
+                seen.add(key)
+                matches.append(provider_match)
+
+            if records and new_provider_records == 0:
+                incomplete_reason = "pagination_stalled"
                 break
 
-        return {
+        if not discovery_complete and not incomplete_reason:
+            incomplete_reason = "page_limit_reached"
+
+        result: dict[str, Any] = {
             "resource_matches": matches,
             "provider_data": {
                 "discovery_mode": "user_identity_relationship",
@@ -861,6 +947,11 @@ class DattoRmmConnector(ConnectorBase):
             },
             "discovery_complete": discovery_complete,
         }
+
+        if not discovery_complete:
+            result["incomplete_reason"] = incomplete_reason
+
+        return result
 
     @staticmethod
     def _user_identity_reference(arguments: Mapping[str, Any]) -> str:
@@ -886,6 +977,58 @@ class DattoRmmConnector(ConnectorBase):
     @staticmethod
     def _hostname_reference(arguments: Mapping[str, Any]) -> str:
         return str(arguments.get("hostname") or arguments.get("name") or "").strip()
+
+    @staticmethod
+    def _site_reference(arguments: Mapping[str, Any]) -> str:
+        return str(arguments.get("site") or "").strip()
+
+    @staticmethod
+    def _site_reference_matches(*, reference: str, site: str) -> bool:
+        normalized_reference = " ".join(reference.split()).casefold()
+        normalized_site = " ".join(site.split()).casefold()
+        return bool(
+            normalized_reference
+            and normalized_site
+            and normalized_reference == normalized_site
+        )
+
+    @classmethod
+    def _exact_hostname_site_matches(
+        cls,
+        *,
+        matches: Sequence[Mapping[str, str]],
+        hostname_reference: str,
+        site_reference: str = "",
+    ) -> list[Mapping[str, str]]:
+        hostname_key = hostname_reference.strip().casefold()
+        if not hostname_key:
+            return []
+
+        exact: list[Mapping[str, str]] = []
+        for match in matches:
+            hostname = str(match.get("hostname", "")).strip()
+            if hostname.casefold() != hostname_key:
+                continue
+            if site_reference and not cls._site_reference_matches(
+                reference=site_reference,
+                site=str(match.get("site", "")),
+            ):
+                continue
+            exact.append(match)
+        return exact
+
+    @staticmethod
+    def _device_match_key(match: Mapping[str, str]) -> str:
+        resource_id = str(match.get("resource_id", "")).strip()
+        if resource_id:
+            return resource_id
+
+        hostname = str(match.get("hostname", "")).strip().casefold()
+        site_id = str(match.get("site_id", "")).strip()
+        site = str(match.get("site", "")).strip().casefold()
+        if not hostname:
+            return ""
+        return f"{hostname}|{site_id or site}"
 
     @staticmethod
     def _hostname_reference_matches(*, reference: str, hostname: str) -> bool:
@@ -978,7 +1121,10 @@ class DattoRmmConnector(ConnectorBase):
         if capability == "datto_rmm.device.search":
             requested_max = int(arguments.get("max", cls.default_device_search_max))
             params: dict[str, Any] = {
-                "page": max(int(arguments.get("page", 1)), 1),
+                # Datto account-device pagination is zero-based. Starting at page
+                # one silently skips the first provider page and can turn a partial
+                # scan into false not-found evidence.
+                "page": max(int(arguments.get("page", 0)), 0),
                 # Discovery must be able to observe ambiguity. Never let a caller
                 # collapse a name/hostname search to a single provider result.
                 "max": max(2, min(requested_max, 250)),

@@ -1,213 +1,225 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-09  
-**Status:** ChatGPT Business is the preferred primary technician conversational surface, with Jason exposed through a governed read-only MCP/tool boundary. The ChatGPT/Entra/MCP path is functionally and durably proven from committed source. Command Center usage/attribution telemetry is deployed and healthy. The MCP, public edge, and observability topology is now represented and verified in the governed System Registry. MCP-001 is complete; the next technician-experience workstream is the remaining MCP-002 identity/workspace isolation proof.  
-**Canonical purpose:** Human-readable resume point. Current production/runtime facts must still be established from current Git, the System Registry, and fresh host evidence when required.
+**Updated:** 2026-09-18  
+**Status:** A new Section Goal is active: Datto endpoint hostname/site discovery completeness. The source fix is merged to the authoritative branch at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`, but production deployment is blocked because this session has no authorized production deployment capability/host access. The live MCP remains healthy and governed, but still exhibits the pre-fix endpoint-search contract; therefore this Section Goal is not complete.  
+**Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
-## Read first
-
-1. `docs/index.md`
-2. `docs/control/JASON-FUNDAMENTALS.md`
-3. this file
-4. `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`
-5. `docs/architecture/J-104-ChatGPT-Jason-Access-Architecture.md`
-6. `docs/engineering/interfaces/Jason-MCP-Construction-Guide.md`
-7. `docs/roadmaps/ChatGPT-Jason-MCP-Migration-Plan.md`
-8. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
-9. `docs/operations/System-Registry-Current-Operational-State.md`
-10. `docs/sessions/ChatGPT-Business-MCP-Architecture-Pivot-2026-09-08.md`
-11. `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`
-12. `docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`
-13. `docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md`
-14. `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
-15. `docs/control/DOCUMENTATION-REGISTER.md`
-16. current Git and fresh host evidence before asserting volatile production state
-
-Conversation memory is context only. It is not authority.
-
-## Active architecture
-
-```text
-Technician
-    ↓
-ChatGPT Business session
-    ↓
-ChatGPT conversation / reasoning / session context
-    ↓
-Jason governed MCP/tool service
-    ↓
-Jason identity / scope / authority / policy / approvals / audit
-    ↓
-Central Orchestrator
-    ↓
-Governed capabilities / connectors
-    ↓
-Approved providers
-```
-
-Durable principle:
+## Durable operating principle
 
 > **ChatGPT reasons. Jason governs and executes.**
 
-A ChatGPT tool request is a request for governed execution, not authority.
+ChatGPT is the primary technician conversational surface. Jason remains authoritative for identity, scope, grants, approval policy, provider isolation, Central Orchestrator execution, evidence, and audit. A ChatGPT tool call is a governed request, not provider authority.
 
-## Last durable success
+## Current live MCP boundary
 
-### ChatGPT / Jason MCP
+The production MCP service is `jason-mcp-pilot`.
 
-GitHub Issue #166 is complete.
+The currently established live MCP code/image boundary is:
 
-Accepted source-built MCP checkpoint:
+- source commit: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
+- image: `jason-mcp:generic-governed-26704f0600bb`;
+- mode: `governed-read-plus-actions`;
+- phase: `governed-action-pilot`;
+- governed execution: Central Orchestrator;
+- generic governed execution tool: enabled;
+- `direct_provider_access=false`;
+- write tools enabled;
+- active write/action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
+- Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
+- write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
+- Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
-`727c3fa6cbcb59dab32f77632393bc5407826ed0`
+Repository documentation/observability commits are newer than the deployed MCP code source. Do not equate branch HEAD with deployed MCP code without fresh runtime evidence.
 
-Accepted live image:
+## Autotask governed proof
 
-`jason-mcp:source-727c3fa`
+The bounded controlled pilot used XYZ Test Company ticket `T20191013.0001` (Autotask ticket ID `8870`). Jason changed the reversible priority from `3` to `2` through `service.ticket.update`, and a later governed read independently confirmed `priority=2`.
 
-The accepted MCP surface is exactly:
+This proves the bounded Autotask ticket-update path, not arbitrary Autotask CRUD. Activated capabilities, exact Jason grants, provider authority, and required per-execution approval remain authoritative.
 
-- `jason_mcp_status`
-- `discover_capabilities`
-- `execute_read_capability`
+## Datto RMM governed proof — cross-chat execution and output
 
-The baseline is read-only. No write/consequential MCP tool exists. The accepted path preserves Jason identity, authority, client/scope controls, Central Orchestrator execution, provider credential isolation, evidence, provenance, and audit. Public authentication/metadata/transport acceptance and ChatGPT live tool/read acceptance were completed after source-built recreation.
+Controlled target:
 
-### Command Center usage and attribution telemetry
+- endpoint: `AOT-50282`;
+- device UID: `69571572-83f7-1e33-9cdf-01717d4e74a4`;
+- site: Atlantic Office Machines.
 
-Accepted live dashboard deployment checkpoint:
+Controlled diagnostic component:
 
-`ecc265ee59645154f0bc86b5aa0dc5a2e375f022`
+- `Get-DNS Settings AOT Ver 06042025-1`;
+- component UID `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
+- allowlist `AOT governed diagnostic pilot`;
+- variables: none.
 
-The live observability stack includes:
+The earlier same-day governed execution proof remains valid and is preserved at `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`; its completed job UID was `422d680b-a5ce-4473-b8e8-5d682ec85682`.
 
-- `jason-prometheus`
-- `jason-grafana`
-- `jason-usage-exporter.service`
-- `jason-usage-attribution-exporter.service`
+The later cross-chat proof deliberately treated the prior approval as consumed. Fresh governed reads resolved the exact endpoint and component. The AOT Owner then explicitly approved exactly one new non-disruptive diagnostic execution.
 
-The live dashboard worktree remains detached and clean at the accepted deployment checkpoint.
+Jason executed one `automation.component.execute` request, one provider mutation, and one provider attempt. Datto accepted:
 
-Later telemetry source work is represented by:
+- job UID: `741a2d02-587d-4348-9f26-b4982d337732`;
+- action correlation: `corr_mcp_action_d49b19600e6f4c50a60f43892af66458`;
+- immediate result: `accepted`;
+- immediate job state: `active`;
+- `readback_verified=true`;
+- `completion_verified=false` at action return because the job was asynchronous.
 
-`e245fef72d220cce1fea63cb811a10c8196657b8`
+Jason issued no retry or second component execution. It used only `automation.job.read` until the exact job reached terminal `completed`:
 
-The scoped Showcase Telemetry validation is green at that source checkpoint. The later source has not been used to replace the accepted live dashboard worktree or activate runtime-side attribution instrumentation.
+- terminal read correlation: `corr_mcp_12eafe5022dc42cb8a42091be669d8cf`.
 
-### System Registry reconciliation
+Jason then retrieved actual component StdOut through `automation.job.output.read`, bound to the exact job UID, device UID, component UID, and `stream=stdout`:
 
-The 2026-09-09 MCP and observability reconciliation is represented by governed registry entities and append-only verification events.
+- output-read correlation: `corr_mcp_2c624f2cda234afab3be73b70906e8b0`;
+- output matches: `1`;
+- truncated: `false`.
 
-The current generated operational view contains `31` registered entities with effective lifecycle counts:
+The returned diagnostic data included:
 
-- `verified=14`
-- `configured=4`
-- `registered=13`
+- ZeroTier `192.168.193.90`;
+- ZeroTier `10.148.127.90`;
+- `vEthernet (NDA-External-VS)` `192.168.12.33`;
+- gateway `192.168.12.1`;
+- DNS `103.247.36.36`, `103.247.37.37`, `8.8.8.8`;
+- Hyper-V Default Switch `172.23.176.1`.
 
-New verified topology includes:
+The provider output endpoint returns a JSON array. Successful live output retrieval on `e9c7a763...` proves the bounded JSON-array transport fix is active and the previous `PROVIDER_TRANSPORT_FAILURE` is not present in this workflow.
 
-- `resource.aws-zerotier-relay`
-- `component.jason-mcp`
-- `component.jason-usage-exporter`
-- `component.jason-usage-attribution-exporter`
-- `component.jason-prometheus`
-- `component.jason-grafana`
-- `deployment.jason-chatgpt-mcp-observability-pilot`
+Authoritative cross-chat/output proof: `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`.
 
-The new deployment is modeled as an extension of the previously verified single-host pilot rather than rewriting the historical Teams/OpenClaw deployment declaration.
+## Datto asynchronous execution rule
 
-MCP-001 — ChatGPT Business + Jason read-only MCP foundation — is therefore complete.
+An approved Datto quick job may legitimately return `status=accepted`, `job_status=active`, `readback_verified=true`, `completion_verified=false`, and a durable `job_uid`. That is accepted asynchronous execution, not failure.
 
-## Current workstream
+Do not issue a second provider mutation because the first job is still active. Use the returned `job_uid` with read-only `automation.job.read` until terminal state. If actual component output is required, retrieve it afterward through `automation.job.output.read` using the exact job UID, target device UID, component UID, and requested stream.
 
-The active technician-experience workstream is **MCP-002 — ChatGPT Business identity/workspace binding pilot**.
+## Security boundary that remains mandatory
 
-The positive path is already proven: ChatGPT authenticates through Entra, discovers the intended three-tool read-only surface, and completes governed live reads.
+- `direct_provider_access=false`;
+- Central Orchestrator remains the governed execution coordinator;
+- provider credentials are never released to ChatGPT;
+- read and write/execution identities remain separated where required;
+- Datto execution remains bounded to approved component/target policy rather than arbitrary script text;
+- failed authority/provider checks fail closed;
+- provider actions do not retry through a broader credential;
+- exact Jason grants remain mandatory;
+- Datto component approval classification is server-controlled and cannot be supplied or overridden by the caller;
+- `standing_safe` is reserved for explicitly classified non-disruptive diagnostics and does not require a separate per-run technician approval;
+- `per_run` requires explicit technician approval for the exact execution;
+- unknown, missing, or invalid component classification fails closed;
+- user-disruptive actions require explicit technician approval for the exact disruptive action.
 
-The remaining work is to preserve durable negative/isolation evidence for the identity/workspace boundary before calling MCP-002 complete. This should use the existing read-only service and must not introduce a write surface or direct provider bypass.
+## Grafana / production observability — current release accepted
 
-Do not resume expansion of the legacy custom conversation stack merely because older Conversation Experience tests remain in the repository.
+The authoritative Grafana/Prometheus source remains repository-provisioned under `infrastructure/showcase`.
 
-Do not perform a runtime rebuild merely because later attribution instrumentation exists in source. Runtime-side attribution activation remains a separate governed decision.
+The production-health unit now expects the exact live MCP boundary:
 
-## Production/runtime boundary
+- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-26704f0600bb`;
+- `JASON_EXPECTED_MCP_SOURCE_REVISION=26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`.
 
-### ChatGPT / MCP
+The active Datto production scope contains exactly two server-classified `standing_safe` components:
 
-The read-only Jason MCP service is live, source-durable, publicly accepted, and represented as a verified System Registry component. It remains an interface adapter and capability projection layer, not a second Central Orchestrator, provider client, unrestricted API proxy, secret broker, write authority, or replacement for Jason governance.
+- `Get-DNS Settings AOT Ver 06042025-1` — `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
+- `Check Datto EDR/AV Status AOT Ver 12122025-1` — `8cb0f063-5875-452e-88ad-2e1748ed0fd0`.
 
-### Public edge
+No reboot component is included in the production component scope.
 
-The existing AWS Caddy/ZeroTier relay is represented as `resource.aws-zerotier-relay` and verified from the September 8/9 edge and MCP acceptance evidence. It remains the public ingress relay for the separately named Teams and MCP routes.
+The latest rollback-protected monitoring-only deployment used repository head `cefa32e9b14db97fb8c6e703ad467a9eda33c32b` and reconciled production observability to the `26704f...` MCP release.
 
-### Jason Runtime
+Acceptance returned:
 
-`jason-runtime` remains the governed execution/orchestration boundary. The 2026-09-09 reconciliation snapshot observed it healthy. No runtime rebuild or restart was required by the documentation or System Registry reconciliation.
+- `PRECHECK=PASS`;
+- `SOURCE_VALIDATION=PASS`;
+- `PRODUCTION_HEALTH_EXPORTER=PASS`;
+- `MONITORING_CONTAINERS=PASS`;
+- `CORE_ISOLATION=PASS`;
+- `PROMETHEUS_PRODUCTION_HEALTH=UP`;
+- `PROMETHEUS_PRODUCTION_RULES=PASS`;
+- `GRAFANA_PRODUCTION_HEALTH_DASHBOARD=PASS`;
+- `METRIC_CONTRACT=PASS`;
+- `RUNTIME_CHANGED=NO`;
+- `MCP_CHANGED=NO`;
+- `OPENBAO_CHANGED=NO`;
+- `PROVIDER_ACCESS=NO`;
+- `PROVIDER_WRITES=NO`.
 
-### Teams
+Latest monitoring deployment source: `cefa32e9b14db97fb8c6e703ad467a9eda33c32b`.
 
-The direct `jason-teams-gateway` remains deployed and owns ordinary inbound Teams transport under the existing Teams architecture. Teams remains a valid secondary interface for approvals, notifications, proactive messaging, concise requests, and fallback access. Do not resume building a duplicate ChatGPT-quality conversation engine in Teams by default.
+Latest monitoring rollback directory: `/tmp/jason-production-health-rollback-20260916T173323Z`.
 
-### OpenClaw
+Production MCP rollback container: `jason-mcp-pilot-rollback-20260916T172806Z`.
 
-OpenClaw remains deployed for independently justified secondary functions. It is not the preferred primary technician conversational brain and must not bypass Jason identity, authority, policy, approvals, Central Orchestrator, provider governance, secrets, evidence, or audit.
+Final read-only live metrics returned `1` for:
 
-### Observability
+- `jason_mcp_contract{check="datto_execution_profile"}`;
+- `jason_mcp_contract{check="datto_execution_scope"}`;
+- `jason_mcp_contract{check="image"}`;
+- `jason_mcp_contract{check="source_revision"}`;
+- `jason_datto_governed_execution_contract`.
 
-Prometheus, Grafana, the model/API usage exporter, and the usage-attribution exporter are now represented as verified observational components in the System Registry. They do not grant execution authority.
+Grafana returned dashboard UID `jason-governed-actions` with title `Jason Governed Actions`.
 
-## System Registry reconciliation state
+Monitoring remains observational only. It does not call Datto directly and grants no provider or execution authority.
 
-The MCP and current observability topology reconciliation is complete for the evidence available on 2026-09-09.
+## System Registry
 
-The registry deliberately records these entities as `configured` baseline declarations with append-only transitions to effective `verified` state. It does not call them `active`; `verified` means the registered verification method is satisfied by governed evidence.
+Narrative proof does not itself promote System Registry lifecycle state. The prior wrap-up found no matching structured resource for this proof state and no governed registry write surface exposed to the ChatGPT session.
 
-The reconciliation does not claim that unrelated logical providers, capabilities, identity bindings, or governance gates are verified merely because the physical topology is healthy.
+No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
-The generated human view remains subordinate to the machine-readable registry and lifecycle history.
+## Current Section Goal — ACTIVE / BLOCKED
 
-## Source/worktree safety
+**Goal:** make Datto RMM endpoint discovery reliably resolve endpoints by exact hostname/site without pre-supplied Datto UID, and prevent incomplete provider enumeration from being represented as definitive not-found evidence.
 
-The primary worktree `/home/al/projects/jason` contains unrelated active development and must not be reset, cleaned, stashed, switched, or used as the reconciliation workspace.
+Authoritative source work is merged at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`. Root cause, implementation, regression tests, governance verification, and production acceptance criteria are recorded in:
 
-The accepted live monitoring worktree `/home/al/projects/jason-dashboard-usage-telemetry-20260909` must remain at `ecc265ee59645154f0bc86b5aa0dc5a2e375f022` unless a separate governed dashboard deployment is approved.
+- `docs/operations/Jason-Datto-Endpoint-Discovery-Completeness-2026-09-18.md`.
 
-Documentation/System Registry reconciliation uses isolated Git branches and does not require touching either protected worktree.
+Post-merge governed production evidence still shows the old behavior for `SOSServer2024` at `Star of the Sea Catholic Church`:
 
-## Documentation classification correction
+- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
+- zero matches;
+- old MCP projection without `discovery_complete`.
 
-Several September 9 MCP proof records were historically committed on another branch beneath the retired `07-Operations/` root. Their evidence remains valuable. Their correct canonical classification is point-in-time evidence under `docs/sessions/`. Do not recreate the retired root merely to preserve those records.
+This is expected until deployment. Do not report the Section Goal complete or the production defect fixed until the normal production deployment occurs and governed search/read validation passes for SOSServer2024 plus at least one additional endpoint.
 
-## Prior lessons that must not be rediscovered
+Blocker: no active Jason `deployment.*` capability and no connected authorized Jason production host are exposed to this session. Do not invent a deployment bypass.
 
-1. Do not solve arbitrary technician questions with phrase-specific code.
-2. Do not reduce the architecture goal to a proving endpoint or wording.
-3. ChatGPT Business owns ordinary conversational reasoning for the primary path.
-4. Jason owns identity, authority, scope, policy, approvals, orchestration, provider boundaries, evidence, audit, and deterministic operational processing.
-5. Do not invoke a second Jason-hosted model merely to re-reason an ordinary ChatGPT MCP request.
-6. Provider collection completeness and pagination matter for exact answers.
-7. Model-facing excerpts are not substitutes for deterministic complete-data analysis.
-8. Provider documentation/schema is descriptive knowledge, not authority.
-9. New provider integration should expand governed capabilities rather than add question logic.
-10. System Registry observed state must not be promoted to verified/active without its defined lifecycle proof.
+## Current Section Goal — CLOSED
 
-## Known remaining work
+The requested cross-chat Datto workflow is complete:
 
-MCP-002 remains active until negative/isolation behavior for the ChatGPT/Entra/workspace identity boundary is durably proven.
+1. exact endpoint resolution — **proven**;
+2. exact component resolution — **proven**;
+3. fresh explicit per-execution approval — **proven and consumed**;
+4. one governed diagnostic execution — **proven**;
+5. exactly one provider mutation / one attempt / no retry — **proven**;
+6. durable Datto job reference — **proven**;
+7. terminal completion through governed read-only polling — **proven (`completed`)**;
+8. actual component StdOut through `automation.job.output.read` — **proven**;
+9. bounded JSON-array provider transport — **live-proven**;
+10. `direct_provider_access=false`, Central Orchestrator, exact grants, and the then-required fresh per-execution approval — **preserved in the historical proof**;
+11. durable proof/current-state reconciliation — **complete**;
+12. Grafana/Prometheus current-release observability — **live and passing**.
 
-MCP-003 cross-provider ChatGPT technician proof remains planned.
+## Remaining follow-ups — not blockers
 
-MCP-004 legacy conversational-stack simplification remains planned.
+- Add first-class lifecycle/rotation tooling for the dedicated `datto_rmm.execution` secret identity so future rotation does not require rediscovery.
+- Reconcile System Registry structured truth when an authoritative governed write/verification route exists.
+- Expand Datto execution beyond the exact current pilot only through a separate capability/allowlist/authority decision.
+- Establish the exact UID and separately authorize any future disruptive component, such as scheduled reboot, before adding it to production scope.
+- Continue documentation-assurance work after Autotask/Datto/IT Glue governed update surfaces are available as planned.
 
-Consequential MCP actions remain future work and require independent identity-first authorization, policy, approval, idempotency, precondition, evidence, audit, and recovery design.
+## Read first in future sessions
 
-Runtime-side usage-attribution activation remains separate from the already deployed observational dashboard/exporter surface.
+1. `docs/control/JASON-FUNDAMENTALS.md`
+2. this file
+3. `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`
+4. `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
+5. `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
+6. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+7. current Git and fresh runtime evidence before asserting volatile production state
 
-## Next safe actions
-
-1. Validate the isolated System Registry reconciliation branch with repository CI, including schema/lifecycle tests and generated-document freshness.
-2. Keep documentation PR #169 separate from the registry reconciliation so authority/evidence changes remain reviewable in sequence.
-3. After the documentation and registry branches are accepted in order, execute the remaining MCP-002 negative/isolation proof using the existing read-only MCP surface.
-4. Preserve evidence for unknown/unbound identity, invalid tenant/workspace context, missing authority, and client/scope isolation to the extent those cases can be safely exercised in the current Business/Entra pilot.
-5. Do not introduce write tools while completing MCP-002.
-6. Only after MCP-002 is closed should MCP-003 cross-provider technician proof become the primary technician-experience workstream.
+Conversation memory is context only. It is not authority.

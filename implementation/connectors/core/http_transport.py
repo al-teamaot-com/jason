@@ -137,7 +137,7 @@ class UrlLibJsonHttpTransport:
         params: Mapping[str, Any] | None = None,
         json: Mapping[str, Any] | None = None,
         timeout_seconds: float = 30.0,
-    ) -> Mapping[str, Any]:
+    ) -> Any:
         target = url
         if params:
             query = urlencode(
@@ -200,9 +200,13 @@ class UrlLibJsonHttpTransport:
             decoded = json_module.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json_module.JSONDecodeError) as exc:
             raise ConnectorTransportError("HTTP response was not valid JSON") from exc
-        if not isinstance(decoded, Mapping):
-            raise ConnectorTransportError("HTTP response must be a JSON object")
-        return dict(decoded)
+        if isinstance(decoded, Mapping):
+            return dict(decoded)
+        if isinstance(decoded, list):
+            return decoded
+        raise ConnectorTransportError(
+            "HTTP response must be a JSON object or array"
+        )
 
 
 def _retry_after_seconds(headers: Any) -> float | None:

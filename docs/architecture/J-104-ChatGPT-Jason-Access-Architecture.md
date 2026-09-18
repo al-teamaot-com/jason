@@ -2,6 +2,7 @@
 
 **Status:** Active target architecture  
 **Date:** 2026-09-08  
+**Implementation status reconciled:** 2026-09-16  
 **Owner:** Jason Architecture Authority  
 **Decision:** `docs/decisions/ADR-010-ChatGPT-Business-Primary-Conversational-Interface.md`
 
@@ -10,6 +11,8 @@
 Define the target technician interaction architecture in which ChatGPT Business provides the primary conversational experience and Jason provides governed operational capabilities through MCP/tool interfaces.
 
 This architecture deliberately separates **conversation intelligence** from **operational authority**.
+
+The read-first foundation described below has now advanced into a bounded governed-action pilot. This does not alter the architectural authority boundary: ChatGPT can request actions, but Jason remains responsible for identity, exact authority, scope, policy, approval, orchestration, provider isolation, evidence, and audit. Current implementation state is recorded in `docs/control/CURRENT.md` and `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md` rather than duplicated here as volatile inventory.
 
 ## Target topology
 
@@ -80,6 +83,8 @@ It must:
 - never expose secrets or raw secret-management interfaces;
 - never grant authority based merely on possession of the MCP connection.
 
+Backend MCP registration and actual ChatGPT client delivery are separate states. A tool is not operationally available to a technician merely because it exists in source or server registration; the live client session must actually receive it under the approved app/workspace permission configuration.
+
 ## Tool-surface architecture
 
 ### Model-facing tool qualities
@@ -93,8 +98,13 @@ Tools should be:
 - rich enough to avoid dozens of phrase-specific tools;
 - stable when a provider changes implementation details.
 
+The preferred reusable pattern is a small generic surface that discovers and executes governed capabilities rather than a provider-specific tool for every operation. Reads and actions remain distinct internally even when they share a generic model-facing execution pattern.
+
 Examples of preferred concepts:
 
+- discover governed capabilities;
+- execute a governed read capability;
+- execute a governed action capability when explicitly activated and authorized;
 - search managed endpoints;
 - read managed endpoint;
 - read endpoint audit/inventory;
@@ -113,7 +123,8 @@ Avoid:
 - question/phrase-specific tools;
 - unrestricted provider HTTP;
 - direct connector handles;
-- opaque internal operation references as the principal model vocabulary.
+- opaque internal operation references as the principal model vocabulary;
+- arbitrary script/shell text execution supplied by the model.
 
 ## Integration knowledge
 
@@ -206,7 +217,7 @@ ChatGPT Business subscription usage and OpenAI API usage are separate. The archi
 
 ## Security model
 
-Before production pilot:
+For production read/action use:
 
 1. establish supported ChatGPT/MCP caller authentication;
 2. map caller to Jason identity;
@@ -216,15 +227,26 @@ Before production pilot:
 6. rate-limit/resource-bound tool usage;
 7. sanitize provider evidence;
 8. log/audit each governed execution;
-9. validate write tools separately from reads;
+9. validate action tools separately from reads;
 10. preserve approval/precondition/idempotency controls;
-11. provide rapid disable/revocation of the MCP service/app.
+11. preserve provider-specific execution credential separation where required;
+12. fail closed on provider authorization denial rather than retrying through a broader credential;
+13. require durable-state/job readback for consequential operations where available;
+14. provide rapid disable/revocation of the MCP service/app.
+
+A ChatGPT client confirmation or app-permission prompt is an additional client-side control. It does not replace Jason identity, exact capability authority, policy, or per-execution approval.
 
 ## Action model
 
-Read-only capability exposure comes first.
+Read-only capability exposure came first and remains the foundation.
 
-Consequential actions remain a later phase and must satisfy all existing Jason controls. ChatGPT may request an action, but Jason decides whether it is authorized, whether approval is required, whether preconditions are satisfied, and whether execution may proceed.
+Governed actions may now be layered on top of that foundation, but every consequential action must satisfy the existing Jason controls. ChatGPT may request an action; Jason decides whether it is active, authorized, correctly scoped, approved, safe under policy, and eligible for provider execution.
+
+For actions requiring exact per-execution approval, the approval must remain bound to the exact requester, capability, target/scope, and approval-relevant arguments/request digest. Changing those inputs after approval creates a different request.
+
+Provider execution authority is independent. A Jason-approved request may still be denied by the provider, and such a denial must fail closed without broader credential fallback.
+
+An action is not accepted as complete solely because a request was dispatched. Jason should verify the durable resulting state or job outcome through a governed read path whenever the provider makes that possible.
 
 ## Teams architecture after this pivot
 
@@ -248,20 +270,20 @@ Retain it only where it provides justified capabilities. It must not bypass Jaso
 
 ## Migration safety
 
-The current Teams/OpenClaw/Jason topology remains valid production/historical evidence until actually changed and verified.
+Historical Teams/OpenClaw/Jason topology remains valid evidence for the time it was observed. Current production/runtime claims must come from the System Registry plus fresh runtime evidence where required.
 
-This target architecture is not a claim that MCP is already deployed.
-
-Production transition requires:
+MCP deployment and action-surface expansion require:
 
 - implementation;
 - deterministic tests;
 - identity/authority proof;
-- pilot evidence;
-- System Registry registration;
+- bounded pilot evidence;
+- System Registry registration/reconciliation where applicable;
 - current-state verification;
 - rollback plan;
 - documentation update after observed state changes.
+
+Source branch state must not be conflated with deployed runtime state.
 
 ## Measures of success
 
@@ -273,6 +295,7 @@ The target architecture succeeds when technicians can:
 - combine evidence across providers;
 - receive exact collection-wide results when source data permits;
 - request governed actions without gaining unauthorized authority;
+- receive client confirmation for consequential changes where appropriate while Jason independently enforces its own authority/approval controls;
 - see useful source/provenance context;
 - do all of the above with materially less custom conversation code and duplicate model spend.
 
@@ -285,5 +308,6 @@ This architecture does not:
 - eliminate Jason governance;
 - grant ChatGPT direct provider credentials;
 - permit unrestricted provider API access;
+- permit arbitrary model-supplied remote scripts merely because an execution provider exists;
 - require immediate retirement of Teams or OpenClaw;
-- declare MCP production-ready before verification.
+- declare a capability operational before its required verification.

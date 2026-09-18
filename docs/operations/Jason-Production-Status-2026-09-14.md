@@ -1,12 +1,14 @@
 # Jason Production Status — 2026-09-14
 
+> **Historical snapshot — superseded for current-state use on 2026-09-16.** This record accurately preserves the production state reached on 2026-09-14, but its statements that MCP is read-only and write tools are disabled are no longer current. The current governed-action checkpoint is `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`, and the canonical resume point is `docs/control/CURRENT.md`. Do not use this dated record to infer the live write/action surface without fresh runtime evidence.
+
 ## Purpose
 
-This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, production-health monitoring deployment, and accepted-level rollback checkpoint completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
+This record captures the current production state after the governed provider-read v4 cutover, host/OpenBao recovery, production-health monitoring deployment, accepted-level rollback checkpoint, and the governed Datto site-pagination correction completed on 2026-09-14. It is a factual operating record, not a replacement for architecture, recovery, or security-control documentation.
 
 ## Current production state
 
-Jason is operating in governed read-only mode. The live MCP is `jason-mcp-pilot` on image `jason-mcp:autotask-entra-67da8d80ca97-repaired`, sourced from Git commit `67da8d80ca9703505d651e9e0935f5bd1aa7c651`. The active provider-read profile is `itglue-autotask-entra-governed-catalog-v4`.
+Jason is operating in governed read-only mode. The live MCP is `jason-mcp-pilot` on image `jason-mcp:datto-pagination-6da45b3ef66d`, image ID `sha256:320015a9196bacab883149da8257a40f1061ab002c50b14c694975e979989b49`, sourced from Git commit `6da45b3ef66d08762cbeed66c5c540c873b20889`. The active provider-read profile remains `itglue-autotask-entra-governed-catalog-v4`.
 
 The live interface reports:
 
@@ -15,9 +17,9 @@ The live interface reports:
 - direct provider access: disabled;
 - write tools: disabled.
 
-The separate `jason-runtime` container is running and healthy. It was not restarted during the MCP v4 cutover, production-health monitoring deployment, exporter-v2 correction, or accepted-level checkpoint.
+The separate `jason-runtime` container is running and healthy. Its container identity remained unchanged during the Datto pagination deployment. OpenBao is initialized and unsealed, and its container identity also remained unchanged during that deployment.
 
-OpenBao is initialized, unsealed, and using raft storage. Runtime provider credentials are staged as read-only bind-mounted files under `/run/jason-runtime-credentials/openbao`; `/run` is ephemeral and the credential staging must be restored after a host reboot before dependent containers are started.
+The current MCP launch contract includes 15 bind mounts. Twelve credential-related mounts are read-only and are mounted inside the MCP under `/run/jason-secrets/openbao/...`. The deployment validation verified that all live bind sources were Docker-accessible and that the read-only credential source files matched the credential bytes already mounted in the running MCP without printing credential contents or host source paths.
 
 ## Governed provider-read milestone
 
@@ -25,16 +27,34 @@ Live Jason has production governed read access to all four target operational da
 
 | Provider | Current governed surface | Production validation |
 | --- | --- | --- |
-| Datto RMM | managed endpoint/site/alert reads already present in the governed catalog | live governed site read completed after v4 cutover |
+| Datto RMM | managed endpoint/site/alert reads already present in the governed catalog | live governed site search now completes the full provider-reported 45-site collection |
 | IT Glue | 10 documentation search/read capabilities | live governed organization search completed after v4 cutover; broad unscoped disclosure correctly failed closed at the information-release boundary |
 | Autotask | 11 service-management search/read/count capabilities | live governed ticket count completed after v4 cutover |
 | Microsoft Entra / Graph | exact user search and exact user read | live governed user search and read completed after v4 cutover |
 
-The v4 authority cutover added 23 observe-only provider grants: 10 IT Glue, 11 Autotask, and 2 Microsoft Entra. Existing Datto RMM observe grants were preserved. No provider write grant was introduced.
+The v4 authority cutover added 23 observe-only provider grants: 10 IT Glue, 11 Autotask, and 2 Microsoft Entra. Existing Datto RMM observe grants were preserved. The Datto pagination correction introduced no new authority grants and no provider write grant.
+
+## Datto site-pagination correction
+
+A real-world governed `management.site.search` exposed a correctness defect: Datto returned a successful first provider page containing 10 sites while `pageDetails.totalCount` reported 45. Ordinary unfiltered site enumeration could treat that first successful page as sufficient evidence instead of completing the provider collection.
+
+Source commit `6da45b3ef66d08762cbeed66c5c540c873b20889` corrects this by making `datto_rmm.site.search` request complete bounded collection handling by default. The existing provider-neutral pagination adapter remains bounded to a maximum of 20 pages and 1000 items and fails closed on incomplete or unsafe continuation behavior.
+
+Focused regression coverage models five provider pages totaling 45 sites (`10 + 10 + 10 + 10 + 5`) and verifies a final complete collection of 45. Focused provider-adaptation and Datto connector tests passed before production deployment.
+
+After production cutover, a live governed MCP `management.site.search` succeeded against Datto RMM with:
+
+- `pageDetails.count = 45`;
+- `pageDetails.totalCount = 45`;
+- `discovery_complete = true`.
+
+This is the production proof that Jason no longer stops at the first 10-site provider page for ordinary governed site enumeration.
+
+Detailed deployment evidence is recorded in `docs/operations/Jason-Datto-Site-Pagination-Production-Deployment-2026-09-14.md`.
 
 ## Autotask ticket-status correction
 
-The Autotask status-label defect discovered during acceptance was fixed before production cutover. Autotask's `Tickets/entityInformation` endpoint returns entity-level metadata only; field/picklist data must be read from `Tickets/entityInformation/fields`. The connector now resolves labels such as `New` through that field metadata and then uses the numeric picklist value for the bounded count/search operation.
+The Autotask status-label defect discovered during acceptance was fixed before production cutover. Autotask's `Tickets/entityInformation` endpoint returns entity-level metadata only; field/picklist data must be read from `Tickets/entityInformation/fields`. The connector resolves labels such as `New` through that field metadata and then uses the numeric picklist value for the bounded count/search operation.
 
 Focused Autotask + Microsoft Entra regression tests passed before cutover. A live patched connector proof successfully resolved `Status = New` and executed the Autotask `/query/count` path before production activation.
 
@@ -64,19 +84,25 @@ If corruption recurs, stop normal change work and investigate the board/memory-c
 
 ## Rollback and recovery assets
 
-The pre-v4 MCP is preserved as container `jason-mcp-pilot-pre-v4-20260914T085704` using image `jason-mcp:ticket-read-e91d5925290b`.
+The immediate pre-pagination MCP is preserved as:
+
+- rollback container: `jason-mcp-pilot-pre-pagination-20260914T154422Z`;
+- rollback image: `jason-mcp:pre-pagination-20260914T154154Z`;
+- rollback image ID: `sha256:6d9303e501fac2690110f7526520ce2947be8783dcf3106be5709da1e1e5006d`.
+
+The older pre-v4 MCP remains preserved as container `jason-mcp-pilot-pre-v4-20260914T085704` using image `jason-mcp:ticket-read-e91d5925290b`.
 
 The pre-v4 authority database backup is `/var/lib/jason/authority/authority-pre-v4-20260914T085704.sqlite3`; the backup passed SQLite integrity validation at creation time.
 
-OpenBao's canonical non-secret recovery documentation remains `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`. Protected initialization material is not to be copied into documentation, logs, Prometheus labels, dashboard panels, or chat.
+OpenBao's canonical non-secret recovery documentation remains `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`. Protected initialization material must not be copied into documentation, logs, Prometheus labels, dashboard panels, or chat.
 
-The accepted current-level checkpoint was successfully created at:
+The accepted provider-read-v4 checkpoint remains preserved at:
 
 - directory: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z`;
 - archive: `/home/al/Jason-Evidence/Accepted-Checkpoints/jason-accepted-level-20260914T135724Z.tar.gz`;
 - archive SHA-256: `2193e1f7a28616f84ca55bf07d44b968e196077291c32e040c5319a23619b864`.
 
-That checkpoint includes integrity-verified current authority and identity-binding SQLite backups, a secret-safe container contract snapshot, safe production-health metrics, alert state, rollback material, a manifest, and SHA-256 hashes. It changed no services, made no provider requests, and made no authority mutation. The detailed checkpoint record is `docs/operations/Jason-Checkpoint-2026-09-14-Provider-Read-v4.md`.
+That checkpoint is a historical rollback/reference point representing the accepted v4 state before the pagination correction. It is intentionally not rewritten to imply that its older MCP image remains the current live image. The detailed checkpoint record remains `docs/operations/Jason-Checkpoint-2026-09-14-Provider-Read-v4.md`.
 
 ## Monitoring and dashboard state
 
@@ -90,17 +116,17 @@ Production observability state after exporter version 2 acceptance:
 - Prometheus production-health target: UP;
 - Grafana dashboard UID: `jason-production-health`;
 - Prometheus production alert rules: loaded;
-- `jason-runtime`: running/healthy and container identity unchanged;
-- `jason-mcp-pilot`: running and container identity unchanged;
-- OpenBao: running, initialized, unsealed, and container identity unchanged;
-- Prometheus and Grafana were not restarted for the exporter-v2 correction;
-- MCP required secret-mount contract: pass;
+- `jason-runtime`: running/healthy;
+- `jason-mcp-pilot`: running on the pagination-corrected image/source above;
+- OpenBao: running, initialized, and unsealed;
+- required MCP secret-mount contract: pass;
+- immediate pre-pagination rollback available: yes;
 - pre-v4 MCP rollback available: yes;
 - root filesystem host-namespace writable metric: 1;
 - current-boot kernel error signature count: 0;
 - failed systemd unit count: 0.
 
-The production-health monitor correctly detects the known duplicate MCP environment configuration: `environment_unique=0` and one extra value each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The accepted effective image/source/profile/requester-mode checks all remain PASS, so this is configuration ambiguity rather than a current runtime outage. `JasonMCPDuplicateEnvironment` is firing as expected. Issue #180 tracks cleanup.
+The production-health monitor detects the known duplicate MCP environment configuration: two entries each for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The Datto pagination deployment deliberately preserved those duplicate-entry counts exactly rather than mixing issue #180 cleanup into an unrelated correctness change. The active/effective source revision is the pagination source commit above; the provider profile and requester mode remain unchanged.
 
 ### Root-filesystem monitor correction
 
@@ -116,13 +142,13 @@ The monitoring system intentionally does not direct-call external providers or e
 
 ### Duplicate MCP environment entries
 
-The v4 MCP was created from the old environment file plus explicit v4 overrides. `docker inspect` therefore shows duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. Runtime composition proved that the active process is using the v4 profile and live Microsoft capabilities prove the v4 surface is active, so this is not currently a functional outage. It should nevertheless be removed during a controlled MCP recreation because duplicated configuration is ambiguous. The production-health monitor explicitly exposes the duplicate count until corrected. Tracked in GitHub issue #180.
+The live MCP still contains duplicate entries for `JASON_SOURCE_REVISION`, `JASON_PROVIDER_READ_ACTIVATION_PROFILE`, and `JASON_AUTOTASK_REQUESTER_AUTH_MODE`. The pagination deployment used a raw Docker Engine API recreation path specifically to preserve the existing duplicate-entry counts rather than silently normalizing them. Runtime composition and live provider reads prove the effective configuration is working, but duplicated configuration remains ambiguous and should be cleaned up during a separately controlled MCP recreation. Tracked in GitHub issue #180.
 
 ### User-relevant output enrichment
 
-A real-world test asked who was assigned to an Autotask ticket and Jason returned an Autotask resource ID instead of the technician's name. This is a product-quality defect. Provider foreign keys must be resolved through authoritative governed reads before being presented when the user needs the business meaning rather than the implementation identifier.
+Real-world tests have shown provider-native implementation identifiers in user-facing evidence, including Autotask foreign keys and raw Datto site fields. Provider foreign keys and implementation details should be translated into authoritative business values before presentation when the user needs the meaning rather than the implementation identifier.
 
-Immediate design need: add canonical service-resource/technician read/search capabilities backed by Autotask Resources and use them to resolve assigned resource, creator, owner, technician, queue/status and similar foreign-key references as needed. Tracked in GitHub issue #178.
+Immediate design need: add canonical service-resource/technician read/search capabilities backed by Autotask Resources and continue tightening generic dynamic evidence projection so provider-native IDs remain internal unless needed for disambiguation, troubleshooting, audit, or an explicit user request. Tracked in existing user-relevant-output work.
 
 ### Microsoft tenant-wide coverage
 
@@ -136,18 +162,21 @@ Temporary Jason-managed requester authorization remains an approved transitional
 
 ### Provider health canaries
 
-Live provider reads were proven during acceptance, but continuous external-provider canaries have not yet been added to the monitoring stack. Any such canary must remain low cadence, bounded, governed, read-only, non-disclosing, and must not bypass Jason by calling provider APIs with raw credentials from the monitoring system. Tracked in GitHub issue #181.
+Live provider reads were proven during acceptance and again through the Datto pagination production verification, but continuous external-provider canaries have not yet been added to the monitoring stack. Any such canary must remain low cadence, bounded, governed, read-only, non-disclosing, and must not bypass Jason by calling provider APIs with raw credentials from the monitoring system. Tracked in GitHub issue #181.
 
 ## User-facing operating principles confirmed by real-world testing
 
 1. **User-Relevant Output Principle** — Jason translates provider-native evidence into canonical, human-relevant business information before presentation. Provider IDs and implementation details remain internal unless they are necessary to understand, disambiguate, troubleshoot, audit, or fulfill an explicit request.
 2. **Capability-Aware Answer Principle** — Jason distinguishes what it can know, what it actually checked, and which capability/resource family is missing. It must not imply an entire provider is unavailable when only one capability family is unavailable, and it must not substitute a non-authoritative source.
 3. **Authoritative-source principle** — Missing capability is preferable to invented or weakly sourced information. Foreign-key enrichment and cross-provider correlation must use governed authoritative reads.
+4. **Collection-completeness principle** — A successful provider page is not automatically a complete collection. When authoritative metadata proves additional records exist, Jason must follow governed pagination to the full feasible collection within bounded safety limits or explicitly report that the result is partial/bounded.
 
-The detailed architectural rule and acceptance criteria are in `docs/architecture/Jason-User-Relevant-Output-and-Capability-Awareness.md`.
+The detailed user-relevant output and capability-awareness rule is in `docs/architecture/Jason-User-Relevant-Output-and-Capability-Awareness.md`.
 
 ## Current change-control state
 
-PR #174 remains draft/open/unmerged. The v4 production cutover did not merge the PR and did not enable provider writes. Current operational work must preserve the rollback container, authority backups/checkpoints, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
+PR #174 remains draft/open/unmerged. Its current head includes the pagination source correction, but the production deployment did not merge the PR and did not enable provider writes.
 
-This state is now an **accepted stabilization checkpoint**. Do not make opportunistic cleanup changes merely because they are available. Changes should be driven by a real-world test failure, a monitored operational risk, an explicitly prioritized capability, or a security/reliability requirement. The duplicate MCP environment cleanup is real debt, but because effective v4 operation is proven, it should be scheduled deliberately rather than performed simply to make the dashboard green.
+The Datto site-pagination defect is corrected and live-proven in production. Current operational work must continue to preserve the rollback containers/images, authority backups/checkpoints, OpenBao recovery assets, and the read-only/Central-Orchestrator security boundary.
+
+The accepted provider-read-v4 checkpoint remains the historical recovery/reference level before this pagination change, while `docs/operations/Jason-Datto-Site-Pagination-Production-Deployment-2026-09-14.md` records the subsequent production promotion and live verification.
