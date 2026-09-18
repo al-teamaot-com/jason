@@ -1592,12 +1592,15 @@ def _resolve_live_datto_component_record(
     evidence = lookup.get("evidence")
     if not isinstance(evidence, Mapping):
         raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
-    data = evidence.get("data")
-    if not isinstance(data, Mapping):
-        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
-    if data.get("discovery_complete") is not True:
+    # automation.component.search is projected by the MCP read boundary with
+    # normalized resource_matches at the evidence root. Older internal callers
+    # expected those fields under evidence.data. Accept both governed shapes;
+    # never fall back to raw provider pages.
+    nested = evidence.get("data")
+    catalog = nested if isinstance(nested, Mapping) else evidence
+    if catalog.get("discovery_complete") is not True:
         raise ValueError("DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE")
-    matches = data.get("resource_matches")
+    matches = catalog.get("resource_matches")
     if not isinstance(matches, (list, tuple)):
         raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
 
