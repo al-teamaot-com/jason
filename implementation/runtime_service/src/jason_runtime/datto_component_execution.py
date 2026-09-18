@@ -275,8 +275,10 @@ def _capability_definition(
         stewardship=CapabilityStewardship(
             steward="technology-steward",
             business_justification=(
-                "Permit narrowly governed execution of existing "
-                "approved RMM automation components."
+                "Permit governed execution of exact Datto RMM components. "
+                "An authenticated technician imperative is approval for that "
+                "exact component, exact endpoint, and exact run; autonomous "
+                "execution remains limited to standing-safe classifications."
             ),
             review_interval_days=30,
             retirement_criteria=(
@@ -303,7 +305,7 @@ def _capability_definition(
             "mcp_action_enabled": "true",
             "mcp_tool_name": "execute_governed_capability",
             "conversation_authenticated_imperative_is_approval": (
-                "false"
+                "true"
             ),
             "component_approval_policy": (
                 "server_classified_standing_safe_or_per_run"

@@ -140,7 +140,7 @@ def test_per_run_rejected_before_orchestrator_without_explicit_approval(monkeypa
     assert calls == []
 
 
-def test_per_run_proceeds_with_current_explicit_approval(monkeypatch):
+def test_per_run_proceeds_when_current_technician_instruction_is_carried_as_approval(monkeypatch):
     set_scope(monkeypatch)
     approvals, calls = install_runtime(monkeypatch)
 

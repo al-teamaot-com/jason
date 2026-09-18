@@ -191,6 +191,13 @@ def test_exact_profile_activates_component_execution(
     )
 
     assert (
+        capability.metadata[
+            "conversation_authenticated_imperative_is_approval"
+        ]
+        == "true"
+    )
+
+    assert (
         provider.lifecycle_status
         is ProviderLifecycle.AVAILABLE
     )

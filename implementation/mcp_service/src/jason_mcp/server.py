@@ -3039,9 +3039,11 @@ def execute_governed_capability(
     remain authoritative. For Datto component execution, Jason derives
     approval server-side. The exact reviewed ad-hoc PowerShell component may
     execute a narrowly classified deterministic read-only command under standing
-    policy. Mutating, sensitive, ambiguous or unclassified commands remain
-    per_run and arguments.explicit_approval must be true only after the
-    authenticated technician explicitly approved that exact execution.
+    policy. For a per-run component, the authenticated technician's direct
+    imperative to run that exact component on that exact endpoint is itself the
+    approval; callers must carry that same-turn instruction as
+    arguments.explicit_approval=true. Autonomous selection of a per-run
+    component must not set that flag and must stop for technician instruction.
     Classification is never accepted from action arguments.
     """
 

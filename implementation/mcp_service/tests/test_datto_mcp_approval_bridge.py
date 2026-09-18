@@ -9,7 +9,7 @@ def action():
     }
 
 
-def test_explicit_approval_bridges_from_arguments(
+def test_current_technician_instruction_bridges_as_exact_run_approval(
     monkeypatch,
 ):
     monkeypatch.setattr(
