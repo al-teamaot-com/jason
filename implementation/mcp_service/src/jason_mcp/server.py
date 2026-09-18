@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -232,6 +233,9 @@ class EntraTokenVerifier(TokenVerifier):
 _MCP_INTERNAL_NOTE_SURFACE_ENABLED = (
     autotask_internal_note_mcp_surface_enabled()
 )
+
+logger = logging.getLogger("jason_mcp.server")
+
 
 mcp = MCPServer(
     "Jason",
@@ -3898,6 +3902,7 @@ async def grafana_component_control_components(request: StarletteRequest):
     except PermissionError as exc:
         return JSONResponse({"error": str(exc)}, status_code=403)
     except Exception:
+        logger.exception("Grafana component-control catalog failed")
         return JSONResponse({"error": "component_catalog_unavailable"}, status_code=502)
     return JSONResponse({
         "status": "ok",
@@ -3986,6 +3991,7 @@ async def grafana_component_control_bulk(request: StarletteRequest):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception:
+        logger.exception("Grafana component-control bulk update failed")
         return JSONResponse({"error": "component_control_failed"}, status_code=500)
     return JSONResponse({
         "status": "ok" if not failed else "partial",
