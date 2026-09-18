@@ -140,6 +140,46 @@ def test_status_read_uses_exact_rmm_device_uid_and_normalizes_av_health():
     assert "super-secret-token" not in str(result.data)
 
 
+def test_status_read_accepts_provider_neutral_resource_id():
+    transport = Transport([[agent_detail()]])
+    connector = DattoEdrConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        request(
+            "datto_edr.endpoint.status.read",
+            {"resource_id": "rmm-device-1"},
+        )
+    )
+
+    assert result.data["resolved"] is True
+    assert result.data["resource_matches"][0]["resource_id"] == "rmm-device-1"
+    filt = json.loads(transport.calls[0]["params"]["filter"])
+    assert filt["where"] == {"deviceId": "rmm-device-1"}
+
+
+def test_status_read_requires_durable_resource_selector():
+    connector = DattoEdrConnector(
+        secrets=Secrets(),
+        transport=Transport([]),
+        audit=Audit(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires device_uid or resource_id",
+    ):
+        connector.execute(
+            request(
+                "datto_edr.endpoint.status.read",
+                {},
+            )
+        )
+
+
 def test_status_read_preserves_ambiguity_instead_of_picking_a_hostname_match():
     other = dict(agent_detail())
     other["id"] = "agent-2"

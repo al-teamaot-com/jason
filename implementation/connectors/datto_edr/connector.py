@@ -142,7 +142,15 @@ class DattoEdrConnector(ConnectorBase):
         arguments: Mapping[str, Any],
     ) -> tuple[str, Mapping[str, Any]]:
         if capability == "datto_edr.endpoint.status.read":
-            device_uid = cls._required_text(arguments, "device_uid")
+            device_uid = str(
+                arguments.get("device_uid")
+                or arguments.get("resource_id")
+                or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError(
+                    "datto_edr.endpoint.status.read requires device_uid or resource_id"
+                )
             return (
                 "/AgentDetails",
                 {
