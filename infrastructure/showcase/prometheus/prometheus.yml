@@ -43,3 +43,9 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-playbooks.json
         refresh_interval: 30s
+
+  - job_name: jason-resolution-memory
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-resolution-memory.json
+        refresh_interval: 30s

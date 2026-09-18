@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:9470"],
+    "labels": {"job": "jason-resolution-memory"}
+  }
+]

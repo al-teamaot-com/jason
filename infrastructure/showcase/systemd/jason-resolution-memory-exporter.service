@@ -1,0 +1,15 @@
+[Unit]
+Description=Jason Resolution Memory Prometheus Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=al
+WorkingDirectory=/home/al/jason-worktrees/support-autotask-auth-split-20260918
+Environment=JASON_RESOLUTION_MEMORY_DB=/var/lib/jason/openclaw/resolution-memory.sqlite3
+ExecStart=/usr/bin/python3 /home/al/jason-worktrees/support-autotask-auth-split-20260918/infrastructure/showcase/resolution_memory_exporter.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
