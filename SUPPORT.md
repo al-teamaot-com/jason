@@ -1,6 +1,6 @@
 # Project Jason Support List
 
-This list tracks Jason operational blockers and missing capabilities discovered during real support work. An item closes only after the blocked workflow is reproduced, corrected through the governed architecture, and verified with authoritative readback or equivalent acceptance evidence.
+This list tracks Jason operational blockers and missing capabilities discovered during real support work. An item closes only after the blocked workflow is reproduced, corrected through the governed architecture, and verified with authoritative readback or equivalent acceptance evidence. Manually completing the blocked technician task is not a substitute for fixing Jason and must not be used as closure evidence for autonomous capability or playbook behavior; live mutations are reserved for an explicitly authorized controlled acceptance test after the capability is built.
 
 | ID | Priority | Status | Item | Current blocker / evidence | Acceptance criteria |
 | --- | --- | --- | --- | --- | --- |
