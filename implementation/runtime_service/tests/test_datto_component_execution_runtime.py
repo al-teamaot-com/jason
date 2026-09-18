@@ -298,6 +298,13 @@ class Transport:
             }
         )
 
+        if method == "GET" and "/api/v2/device/" in url:
+            return {
+                "uid": url.rsplit("/", 1)[-1],
+                "deleted": False,
+                "suspended": False,
+            }
+
         if method == "PUT":
             return {
                 "uid": "job-uid-1",
@@ -409,12 +416,13 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
 
     assert (
-        transport.calls[0]["json"]["jobComponent"][
+        transport.calls[1]["json"]["jobComponent"][
             "componentUid"
         ]
         == "component-uid-1"
@@ -443,7 +451,7 @@ def test_second_allowlisted_component_uses_exact_provider_uid(
 
     assert result.data["readback_verified"] is True
     assert (
-        transport.calls[0]["json"]["jobComponent"][
+        transport.calls[1]["json"]["jobComponent"][
             "componentUid"
         ]
         == "component-uid-2"
@@ -479,6 +487,7 @@ def test_async_quickjob_returns_durable_accepted_job_reference(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -511,6 +520,7 @@ def test_quickjob_readback_uid_mismatch_fails_closed(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -542,6 +552,7 @@ def test_quickjob_terminal_failure_fails_closed(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -553,12 +564,35 @@ def test_quickjob_terminal_failure_fails_closed(
     )
 
 
+def test_execution_accepts_different_verified_managed_target(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector()
+
+    result = value.execute(
+        execution_request(
+            device_uid="other-managed-device",
+        )
+    )
+
+    assert result.data["device_uid"] == "other-managed-device"
+    assert transport.calls[0]["url"].endswith(
+        "/api/v2/device/other-managed-device"
+    )
+    assert transport.calls[1]["url"].endswith(
+        "/api/v2/device/other-managed-device/quickjob"
+    )
+    assert any(
+        event[0] == "connector.target.verified"
+        for event in audit.events
+    )
+
+
 @pytest.mark.parametrize(
     "override",
     [
-        {
-            "device_uid": "other-device",
-        },
         {
             "allowlist_name": "other-component",
         },

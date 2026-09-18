@@ -432,6 +432,19 @@ def test_unknown_action_result_fails_closed():
 
 
 def _set_datto_action_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (
+            "component-456",
+            "Get-DNS Settings AOT Ver 06042025-1",
+        ),
+    )
     monkeypatch.delenv(
         "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
         raising=False,
@@ -453,6 +466,20 @@ def _set_datto_action_scope(monkeypatch):
 
 
 def _set_datto_multi_component_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
+    live = {
+        "Get-DNS Settings AOT Ver 06042025-1": "component-456",
+        "Check Datto EDR/AV Status AOT Ver 12122025-1": "component-789",
+    }
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (live[str(name)], str(name)),
+    )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
         "AOT governed diagnostic pilot",
@@ -582,18 +609,44 @@ def test_datto_action_rejects_unknown_component_in_multi_scope(
         raise AssertionError("unknown component must fail closed")
 
 
-def test_datto_action_rejects_different_target(monkeypatch):
+def test_datto_action_accepts_different_verified_managed_target(monkeypatch):
     _set_datto_action_scope(monkeypatch)
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "other-managed-device",
+            "component_uid": "component-456",
+        },
+    )
+
+    assert result["device_uid"] == "other-managed-device"
+
+
+def test_datto_action_rejects_unverified_target(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    def reject(_value):
+        raise ValueError("DATTO_COMPONENT_TARGET_LOOKUP_FAILED")
+
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        reject,
+    )
 
     try:
         server._canonicalize_governed_action_arguments(
             "automation.component.execute",
-            {"device_uid": "wrong-device"},
+            {
+                "device_uid": "not-managed",
+                "component_uid": "component-456",
+            },
         )
     except ValueError as exc:
-        assert str(exc) == "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+        assert str(exc) == "DATTO_COMPONENT_TARGET_LOOKUP_FAILED"
     else:
-        raise AssertionError("target mismatch must fail closed")
+        raise AssertionError("unverified target must fail closed")
 
 
 def test_datto_action_rejects_different_component(monkeypatch):

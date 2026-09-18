@@ -642,9 +642,9 @@ class DattoRmmComponentExecutionConnector:
             or ""
         ).strip()
 
-        if requested_device != pilot.device_uid:
+        if not requested_device:
             raise PermissionError(
-                "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+                "DATTO_COMPONENT_TARGET_REQUIRED"
             )
 
         requested_class = str(
@@ -700,7 +700,7 @@ class DattoRmmComponentExecutionConnector:
 
         prepared = policy.prepare(
             allowlist_name=pilot.allowlist_name,
-            device_uid=pilot.device_uid,
+            device_uid=requested_device,
             device_class=pilot.device_class,
             component_uid=selected_component.uid,
             variables=variables,
@@ -730,6 +730,55 @@ class DattoRmmComponentExecutionConnector:
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+
+            target = self._transport.request(
+                method="GET",
+                url=(
+                    credentials["api_url"].rstrip("/")
+                    + f"/api/v2/device/{requested_device}"
+                ),
+                headers={
+                    "Authorization": (
+                        f"{token.token_type} {token.access_token}"
+                    ),
+                    "Accept": "application/json",
+                },
+                params=None,
+                json=None,
+                timeout_seconds=10.0,
+            )
+
+            if not isinstance(target, Mapping):
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target pre-read was not an object"
+                )
+
+            observed_target = str(
+                target.get("uid")
+                or target.get("deviceUid")
+                or target.get("resource_id")
+                or ""
+            ).strip()
+
+            if observed_target != requested_device:
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target pre-read uid did not match requested endpoint"
+                )
+
+            if target.get("deleted") is True or target.get("suspended") is True:
+                raise PermissionError(
+                    "DATTO_COMPONENT_TARGET_NOT_ACTIVE"
+                )
+
+            self._audit.record(
+                "connector.target.verified",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "capability": request.context.capability,
+                    "device_uid_present": True,
+                },
+            )
 
             url = (
                 credentials["api_url"].rstrip("/")
@@ -839,7 +888,7 @@ class DattoRmmComponentExecutionConnector:
                             "status": "verified",
                             "job_uid": job_uid,
                             "job_status": status,
-                            "device_uid": pilot.device_uid,
+                            "device_uid": requested_device,
                             "component_uid": selected_component.uid,
                             "component_name": selected_component.name,
                             "readback_verified": True,
@@ -887,7 +936,7 @@ class DattoRmmComponentExecutionConnector:
                     "status": "accepted",
                     "job_uid": job_uid,
                     "job_status": last_status,
-                    "device_uid": pilot.device_uid,
+                    "device_uid": requested_device,
                     "component_uid": selected_component.uid,
                     "component_name": selected_component.name,
                     "readback_verified": True,

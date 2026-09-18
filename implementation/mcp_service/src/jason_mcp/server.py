@@ -1637,6 +1637,41 @@ def _resolve_live_datto_component_name(
 
 
 
+def _verify_managed_datto_component_target(
+    device_uid: object,
+) -> str:
+    """Verify one exact Datto target through Jason's governed read path."""
+
+    requested = str(device_uid or "").strip()
+    if not requested:
+        raise ValueError("DATTO_COMPONENT_TARGET_REQUIRED")
+
+    lookup = _governed_read(
+        capability_name="endpoint.device.read",
+        arguments={"resource_id": requested},
+    )
+
+    if lookup.get("status") != "succeeded":
+        raise ValueError("DATTO_COMPONENT_TARGET_LOOKUP_FAILED")
+
+    evidence = lookup.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise ValueError("DATTO_COMPONENT_TARGET_LOOKUP_FAILED")
+
+    record = evidence.get("record")
+    if not isinstance(record, Mapping):
+        raise ValueError("DATTO_COMPONENT_TARGET_LOOKUP_FAILED")
+
+    observed = str(record.get("resource_id") or "").strip()
+    if observed != requested:
+        raise ValueError("DATTO_COMPONENT_TARGET_IDENTITY_MISMATCH")
+
+    if record.get("deleted") is True or record.get("suspended") is True:
+        raise ValueError("DATTO_COMPONENT_TARGET_NOT_ACTIVE")
+
+    return observed
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -1648,10 +1683,10 @@ def _canonicalize_governed_action_arguments(
     remembering internal allowlist/profile fields.
 
     For bounded Datto component execution, Jason supplies its own
-    server-controlled allowlist, endpoint and device class. The caller must
-    still identify the exact target and component. Component identity is
-    resolved against an exact server-controlled UID/name pair set before the
-    request can enter approval or provider execution.
+    server-controlled allowlist and policy class. The caller must identify the
+    exact managed target and component. Jason verifies the target through the
+    governed endpoint read path and resolves component identity through the live
+    Datto catalog before approval or provider execution.
     """
 
     raw = dict(arguments or {})
@@ -1741,10 +1776,9 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_TARGET_REQUIRED"
         )
 
-    if requested_device != expected["device_uid"]:
-        raise ValueError(
-            "DATTO_COMPONENT_TARGET_NOT_APPROVED"
-        )
+    requested_device = _verify_managed_datto_component_target(
+        requested_device
+    )
 
     supplied_allowlist = str(
         raw.get("allowlist_name") or ""
@@ -1758,10 +1792,9 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
         )
 
-    # device_class is server-controlled metadata.
-    # Caller/model-provided class labels are deliberately ignored because
-    # provider terminology can differ (for example Desktop vs Workstation).
-    # Exact endpoint identity remains independently enforced above.
+    # device_class is server-controlled policy metadata. Caller/model-provided
+    # class labels are deliberately ignored. Exact endpoint identity and active
+    # managed state are independently verified above.
     supplied_class = expected["device_class"]
 
     supplied_component_uid = str(
@@ -1821,7 +1854,7 @@ def _canonicalize_governed_action_arguments(
     # required by the runtime are forwarded. The model cannot widen the set.
     return {
         "allowlist_name": expected["allowlist_name"],
-        "device_uid": expected["device_uid"],
+        "device_uid": requested_device,
         "device_class": expected["device_class"],
         "component_uid": selected_component.uid,
         "component_name": selected_component.name,
