@@ -37,3 +37,16 @@ The remaining work is governed as `TODO-COMM-004`. The workflow must not be repr
 ## Section Goal closure
 
 **PARTIAL / BLOCKED.** The original Section Goal—governed proactive Teams message sending—is complete and production-proven. The follow-on interactive approval/information-request Section Goal is implemented through authenticated ingress but remains blocked at final decision processing by the external OpenAI API credit balance. No operational action was authorized or executed by the harmless approval-card test.
+
+## Grafana / Prometheus reconciliation
+
+The canonical roadmap source now includes milestone `COMM-TEAMS-APPROVAL-001`, title `Governed Teams approval and information-request workflow`, status `blocked`, phase `Technician Experience`. This accurately distinguishes the production-proven proactive send from the incomplete interactive approval closeout.
+
+Live observability verification on 2026-09-18 returned:
+
+- status exporter metric `jason_roadmap_item_info{milestone="COMM-TEAMS-APPROVAL-001",status="blocked",phase="Technician Experience"} 1`;
+- Prometheus query status `success` with exactly one matching roadmap series;
+- Grafana health database `ok`, Grafana `12.2.1`;
+- provisioned dashboard UID `jason-command-center`, title `Jason Command Center`, version `6`.
+
+Grafana/Prometheus remain observational only. This blocked roadmap state grants no approval or execution authority.
