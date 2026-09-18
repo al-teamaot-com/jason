@@ -142,3 +142,22 @@ def test_detected_contained_item_plus_clean_scan_can_resolve_security_assessment
     )
     assert result.disposition == SecurityDisposition.RESOLVED
     assert result.compromise_signal == CompromiseSignal.NOT_ESTABLISHED
+
+
+def test_recurrence_requires_exact_sha256_and_later_distinct_alert():
+    from datto_edr_av_security import find_exact_hash_recurrences
+    origin = ThreatObservation(alert_id="a1", sha256="ABC", first_seen="2026-09-11T08:27:32Z")
+    candidates = [
+        ThreatObservation(alert_id="a1", sha256="ABC", first_seen="2026-09-11T08:27:32Z"),
+        ThreatObservation(alert_id="a2", sha256="abc", first_seen="2026-09-18T08:40:41Z"),
+        ThreatObservation(alert_id="a3", sha256="different", first_seen="2026-09-18T08:40:41Z"),
+    ]
+    matches = find_exact_hash_recurrences(origin, candidates)
+    assert [item.alert_id for item in matches] == ["a2"]
+
+
+def test_recurrence_fails_closed_without_artifact_hash():
+    from datto_edr_av_security import find_exact_hash_recurrences
+    origin = ThreatObservation(alert_id="a1", threat_name="same", sha256="")
+    candidate = ThreatObservation(alert_id="a2", threat_name="same", sha256="")
+    assert find_exact_hash_recurrences(origin, [candidate]) == ()

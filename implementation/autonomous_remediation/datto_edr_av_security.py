@@ -287,3 +287,29 @@ def _source_set(
 
 def _dedupe(values) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(value) for value in values if str(value)))
+
+
+def find_exact_hash_recurrences(
+    origin: ThreatObservation,
+    candidates: Sequence[ThreatObservation],
+) -> tuple[ThreatObservation, ...]:
+    """Return later detections of the exact same artifact hash.
+
+    Recurrence is intentionally conservative. Jason will not infer that two
+    alerts are the same artifact from hostname, threat label, or filename
+    alone. An exact SHA-256 is required, the alert must be distinct, and when
+    both timestamps are present the candidate must be later than the origin.
+    """
+    origin_hash = str(origin.sha256 or "").strip().casefold()
+    if not origin_hash:
+        return ()
+    matches = []
+    for candidate in candidates:
+        if candidate.alert_id and candidate.alert_id == origin.alert_id:
+            continue
+        if str(candidate.sha256 or "").strip().casefold() != origin_hash:
+            continue
+        if origin.first_seen and candidate.first_seen and candidate.first_seen <= origin.first_seen:
+            continue
+        matches.append(candidate)
+    return tuple(matches)

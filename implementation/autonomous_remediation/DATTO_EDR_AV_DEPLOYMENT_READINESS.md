@@ -265,6 +265,10 @@ Completed on 2026-09-18:
 8. Controlled read-backend acceptance against AOT-50282 proved exact identity, health/threat separation, detection detail, policy, scan-history, and quarantine reads.
 9. Read-backend acceptance is recorded in `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`; provider-native scan-start acceptance was completed on AOT-50282 on 2026-09-18 through `endpoint.security.scan.start`, with terminal scan-history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`.
 
+Threat-branch activation checkpoint (2026-09-18):
+
+A controlled live recheck on AOT-50282 proved the critical fail-closed branch. Protection state was healthy and the exact AV artifact was quarantined/remediated, but provider evidence reported `compromised=true` and governed evidence showed the same SHA-256 recurring in separate 2026-09-11 and 2026-09-18 high-severity detections. Jason therefore did not treat healthy protection state as threat resolution. A Full AV scan was already in progress, so no duplicate scan was dispatched. Autotask internal note `30503131` preserves the acceptance evidence.
+
 Remaining gates before full threat-branch activation:
 
 1. Provider-native Datto AV scan execution is available through governed `endpoint.security.scan.start` with exact endpoint/agent binding, Quick/Full scan type, one-hour provider guard, single-attempt execution, and status/history readback. Full threat-branch activation must still enforce `completed ScanHistoryTracking + clear post-scan governed detection search`; scan completion alone never means clean.
