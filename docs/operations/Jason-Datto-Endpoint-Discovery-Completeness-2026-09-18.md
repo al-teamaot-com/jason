@@ -71,6 +71,12 @@ MCP contract tests cover complete zero-match versus incomplete zero-match projec
 
 The focused Datto connector suite passed before an unrelated pre-existing Datto component-catalog workflow fixture failure. The same Datto workflow already failed on the authoritative base commit `d8552b3a57a2859ffba8459f0f10cc93fd6d5394`, so that unrelated baseline failure is not attributed to this endpoint-discovery change.
 
+## Hardening disposition
+
+The existing search contract already returns a durable `resolved_resource_id` after safe resolution. Downstream work should carry that identifier through the current workflow and feed it to exact device reads rather than rediscovering the hostname repeatedly. No new persistent cache is introduced; that avoids stale mappings when devices are renamed, moved, duplicated, or reconciled by the provider.
+
+Cross-source contradiction detection remains a post-core hardening item. It is intentionally not activated before the production discovery fix is proven, so the endpoint-discovery correction does not expand provider scope or introduce unrelated correlation behavior.
+
 ## Governance verification
 
 Required invariants remain:
