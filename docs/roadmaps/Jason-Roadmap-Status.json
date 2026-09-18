@@ -186,6 +186,12 @@
       "title": "Autotask ticket work-start lifecycle default",
       "status": "complete",
       "phase": "Operations"
+    },
+    {
+      "id": "COMM-TEAMS-APPROVAL-001",
+      "title": "Governed Teams approval and information-request workflow",
+      "status": "blocked",
+      "phase": "Technician Experience"
     }
   ]
 }

@@ -179,6 +179,12 @@ Narrative proof does not itself promote System Registry lifecycle state. The pri
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
+## Teams proactive messaging / approval workflow — production state
+
+Governed proactive Teams text sending is production-proven through `communication.teams.message.send` with tenant isolation, exact authority, Central Orchestrator routing, and `direct_provider_access=false`. The follow-on Adaptive Card approval path successfully delivers Approve/Deny cards and receives authenticated Microsoft tenant/AAD-object interactions back through Jason. Final decision processing is currently **blocked** by external OpenAI API `429 insufficient_quota / credit_balance_exhausted`; therefore interactive Teams approval is not represented as fully accepted. `TODO-COMM-004` tracks the remaining acceptance, including exact approval correlation, structured information requests, and typed overrides. The runtime `reasoning.effort` compatibility defect discovered during testing was corrected from `minimal` to `low` in commit `811b3af`.
+
+Authoritative session record: `docs/sessions/Jason-Governed-Teams-Proactive-Send-Proof-2026-09-18.md`.
+
 ## Current Section Goal — ACTIVE / PILOT CLOSEOUT
 
 **Goal:** finish the Datto EDR/AV Diagnose & Repair playbook as a governed, measurable MSP workflow without conflating product health, provider detections, contained artifacts, or confirmed compromise.
