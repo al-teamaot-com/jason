@@ -189,7 +189,7 @@ def test_datto_device_query_preserves_ambiguity_and_resource_selectors() -> None
     )
     assert invocation.capability == "datto_rmm.device.search"
     assert invocation.arguments == {
-        "page": 1,
+        "page": 0,
         "hostname": "SERVER",
         "site": "Customer-B",
         "max": 2,
@@ -208,7 +208,7 @@ def test_datto_legacy_search_filter_maps_to_hostname_without_first_match_semanti
         )
     )
     assert invocation.arguments == {
-        "page": 1,
+        "page": 0,
         "hostname": "SERVER",
         "max": 25,
     }
