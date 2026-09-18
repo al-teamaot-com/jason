@@ -246,15 +246,15 @@ class GovernedResolutionMemoryCapabilityInvoker:
             raise PermissionError("resolution memory resolved to an unexpected provider")
         if request.capability_name != resolution.capability_name:
             raise ValueError("resolved resolution-memory capability does not match request")
-        if not request.client_id:
-            raise PermissionError("resolution memory requires current client scope")
+        if resolution.capability_name in {RESOLUTION_MEMORY_SEARCH, RESOLUTION_MEMORY_READ} and not request.client_id:
+            raise PermissionError("resolution memory raw case access requires current client scope")
 
         if resolution.capability_name == RESOLUTION_MEMORY_SEARCH:
             data = self._search(request)
         elif resolution.capability_name == RESOLUTION_MEMORY_READ:
             data = self._read(request)
         elif resolution.capability_name == RESOLUTION_MEMORY_SUMMARY:
-            data = self.service.summary(
+            data = self.service.summary_global(
                 organization_id=request.organization_id,
                 client_id=request.client_id,
             )

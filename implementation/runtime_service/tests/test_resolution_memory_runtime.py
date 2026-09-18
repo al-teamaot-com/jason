@@ -243,3 +243,20 @@ def test_summary_reports_same_client_case_count_without_authority(tmp_path) -> N
     )
     assert result.output["data"]["case_count"] == 1
     assert result.output["data"]["grants_authority"] is False
+
+
+def test_summary_allows_organization_aggregate_without_raw_case_scope(tmp_path) -> None:
+    store = SQLiteResolutionMemoryStore(str(tmp_path / "resolution.sqlite3"))
+    service = ResolutionMemoryService(store=store)
+    service.initialize()
+    service.record_case(build_case())
+    invoker = GovernedResolutionMemoryCapabilityInvoker(service=service)
+    result = invoker.invoke(
+        request=request(capability=RESOLUTION_MEMORY_SUMMARY, client_id=None, arguments={}),
+        resolution=resolution(RESOLUTION_MEMORY_SUMMARY),
+    )
+    data = result.output["data"]
+    assert data["case_count"] == 1
+    assert data["scope"] == "organization_aggregate"
+    assert data["raw_cases_exposed"] is False
+    assert data["grants_authority"] is False

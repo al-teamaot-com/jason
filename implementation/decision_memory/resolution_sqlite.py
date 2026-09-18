@@ -256,6 +256,27 @@ class SQLiteResolutionMemoryStore:
             ).fetchone()
         return int(row["count"])
 
+    def count_cases_global(
+        self,
+        *,
+        organization_id: str,
+        client_id: str | None = None,
+    ) -> int:
+        if not organization_id.strip():
+            raise ValueError("organization_id must be non-empty")
+        with self._connect() as connection:
+            if client_id:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM resolution_cases WHERE organization_id = ? AND client_id = ?",
+                    (organization_id, client_id),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM resolution_cases WHERE organization_id = ?",
+                    (organization_id,),
+                ).fetchone()
+        return int(row["count"])
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
             self.database_path,

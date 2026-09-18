@@ -72,6 +72,24 @@ class ResolutionMemoryService:
             "grants_authority": False,
         }
 
+    def summary_global(
+        self,
+        *,
+        organization_id: str,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "organization_id": organization_id,
+            "client_id": client_id,
+            "case_count": self.store.count_cases_global(
+                organization_id=organization_id,
+                client_id=client_id,
+            ),
+            "scope": "client" if client_id else "organization_aggregate",
+            "raw_cases_exposed": False,
+            "grants_authority": False,
+        }
+
     @staticmethod
     def project_search_result(
         result: ResolutionSearchResult,
