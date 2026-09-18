@@ -164,3 +164,63 @@ def test_uuid_alert_id_keeps_existing_direct_read_path(monkeypatch):
         "capability": "endpoint.security.detection.read",
         "arguments": {"alert_id": EDR_ALERT_ID},
     }
+
+
+def test_alert_resolution_action_canonicalizes_exact_target():
+    args = server._canonicalize_governed_action_arguments(
+        "endpoint.alert.resolve",
+        {
+            "alert_uid": DRMM_ALERT_UID,
+            "resource_id": DEVICE_UID,
+        },
+    )
+
+    assert args == {
+        "alert_uid": DRMM_ALERT_UID,
+        "device_uid": DEVICE_UID,
+    }
+
+
+def test_alert_resolution_action_rejects_extra_arguments():
+    try:
+        server._canonicalize_governed_action_arguments(
+            "endpoint.alert.resolve",
+            {
+                "alert_uid": DRMM_ALERT_UID,
+                "device_uid": DEVICE_UID,
+                "reason": "caller-controlled provider text",
+            },
+        )
+    except ValueError as exc:
+        assert "DATTO_ALERT_RESOLVE_UNSUPPORTED_ARGUMENTS" in str(exc)
+    else:
+        raise AssertionError("unsupported action arguments must fail closed")
+
+
+def test_alert_resolution_projection_exposes_only_verified_fields():
+    projected = server._project_action_result(
+        "endpoint.alert.resolve",
+        {
+            "data": {
+                "status": "verified",
+                "alert_uid": DRMM_ALERT_UID,
+                "device_uid": DEVICE_UID,
+                "resolved": True,
+                "already_resolved": False,
+                "mutation_performed": True,
+                "readback_verified": True,
+                "provider_secret": "must-not-escape",
+            }
+        },
+    )
+
+    assert projected == {
+        "raw_provider_evidence_exposed": False,
+        "status": "verified",
+        "alert_uid": DRMM_ALERT_UID,
+        "device_uid": DEVICE_UID,
+        "resolved": True,
+        "already_resolved": False,
+        "mutation_performed": True,
+        "readback_verified": True,
+    }

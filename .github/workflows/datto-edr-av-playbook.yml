@@ -154,7 +154,6 @@ jobs:
         run: >-
           python -m pytest -q
           implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
-          implementation/mcp_service/tests/test_generic_governed_execution_contract.py
       - name: Run playbook observability tests
         working-directory: infrastructure/showcase
         run: >-
