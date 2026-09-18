@@ -3891,8 +3891,7 @@ def _component_control_catalog(
 async def grafana_component_control_components(request: StarletteRequest):
     try:
         principal, organization = _grafana_component_control_identity(request)
-        rows = await asyncio.to_thread(
-            _component_control_catalog,
+        rows = _component_control_catalog(
             principal=principal,
             organization=organization,
         )
@@ -3933,8 +3932,7 @@ async def grafana_component_control_bulk(request: StarletteRequest):
         if overlap:
             raise ValueError("COMPONENT_CONTROL_SELECTION_CONFLICT")
         reason = str(body.get("reason") or "Grafana Component Control").strip()[:500]
-        rows = await asyncio.to_thread(
-            _component_control_catalog,
+        rows = _component_control_catalog(
             principal=principal,
             organization=organization,
         )
