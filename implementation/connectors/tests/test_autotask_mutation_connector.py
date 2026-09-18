@@ -388,7 +388,7 @@ def test_none_profile_access_denies_before_mutation_and_is_audited() -> None:
     }
 
 
-def test_jason_managed_mode_fails_before_secret_resolution_or_provider_io(
+def test_jason_managed_read_mode_keeps_provider_impersonated_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
@@ -400,22 +400,19 @@ def test_jason_managed_mode_fails_before_secret_resolution_or_provider_io(
     audit = _Audit()
     connector = _connector(transport, secrets=secrets, audit=audit)
 
-    with pytest.raises(
-        PermissionError,
-        match="AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION",
-    ):
-        connector.execute(
-            _request(
-                "autotask.ticket.create",
-                {"companyID": 999, "title": "Must not be sent"},
-            )
+    connector.execute(
+        _request(
+            "autotask.ticket.create",
+            {"companyID": 999, "title": "Synthetic split-mode write"},
         )
+    )
 
-    assert secrets.logical_names == []
-    assert transport.requests == []
+    assert secrets.logical_names == ["autotask.write"]
+    assert transport.requests[-1]["method"] == "POST"
+    assert transport.requests[-1]["headers"]["ImpersonationResourceId"] == "77"
     assert _event_names(audit) == [
         "connector.mutation.requested",
-        "connector.mutation.failed",
+        "connector.mutation.completed",
     ]
 
 

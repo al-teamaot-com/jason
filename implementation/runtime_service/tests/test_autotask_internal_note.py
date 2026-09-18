@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import pytest
 
 from connectors.autotask.impersonating_connector import (
-    AUTOTASK_AUTH_MODE_IMPERSONATED,
+    AUTOTASK_AUTH_MODE_JASON_MANAGED,
     AUTOTASK_REQUESTER_AUTH_MODE_ENV,
 )
 from connectors.autotask.mutation_connector import (
@@ -125,7 +125,7 @@ def test_exact_profile_activates_only_internal_note(
 
     monkeypatch.setenv(
         AUTOTASK_REQUESTER_AUTH_MODE_ENV,
-        AUTOTASK_AUTH_MODE_IMPERSONATED,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
     )
 
     capabilities, providers = _registries()
@@ -201,7 +201,7 @@ def test_profile_fails_closed_without_mutation_gate(
 
     monkeypatch.setenv(
         AUTOTASK_REQUESTER_AUTH_MODE_ENV,
-        AUTOTASK_AUTH_MODE_IMPERSONATED,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
     )
 
     capabilities, providers = _registries()
@@ -417,7 +417,7 @@ def _enable_mutation(
 
     monkeypatch.setenv(
         AUTOTASK_REQUESTER_AUTH_MODE_ENV,
-        AUTOTASK_AUTH_MODE_IMPERSONATED,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
     )
 
 
