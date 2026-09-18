@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-18  
-**Status:** A new Section Goal is active: Datto endpoint hostname/site discovery completeness. The source fix is merged to the authoritative branch at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`, but production deployment is blocked because this session has no authorized production deployment capability/host access. The live MCP remains healthy and governed, but still exhibits the pre-fix endpoint-search contract; therefore this Section Goal is not complete.  
+**Updated:** 2026-09-18
+**Status:** Datto EDR/AV v1.2 governed read backend is production-deployed and accepted at source revision `b63798e048f4493d15b79565e997f43f8fd7edac`. All six `endpoint.security.*` read capabilities succeed through the authenticated Jason MCP path against AOT-50282 with exact DRMM UID -> EDR `deviceId` correlation. The playbook is in supervised pilot/read-ready state. Full threat-branch activation remains intentionally pending governed provider-native Datto AV scan execution and a complete remediation/scan/recurrence acceptance run.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** complete source and CI reconciliation, then perform a fresh production deployment preflight before any production change.
+- **Next safe actions:** finish playbook observability closeout, add governed provider-native Datto AV scan execution, then run the complete remediation/scan/recurrence acceptance path before enabling the full threat branch.
 
 ## Durable operating principle
 
@@ -23,8 +23,8 @@ The production MCP service is `jason-mcp-pilot`.
 
 The currently established live MCP code/image boundary is:
 
-- source commit: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
-- image: `jason-mcp:generic-governed-26704f0600bb`;
+- source commit: `b63798e048f4493d15b79565e997f43f8fd7edac`;
+- image: `jason-mcp:datto-edr-av-prod-b63798e` (`sha256:ef612ee0e4cb1779df5d8d765162f80c3b61f93816eb3a190673a66457df428f`);
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -33,10 +33,13 @@ The currently established live MCP code/image boundary is:
 - write tools enabled;
 - active write/action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
 - Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
+- Datto EDR/AV governed reads include `endpoint.security.status.read`, `endpoint.security.detection.search`, `endpoint.security.detection.read`, `endpoint.security.policy.read`, `endpoint.security.scan.history.search`, and `endpoint.security.quarantine.search`;
+- all six endpoint-security reads were production-accepted against AOT-50282 on 2026-09-18;
+- matching `jason-runtime` is healthy on image ID `sha256:6342f0b38abcbfdbe7545f5d5947a0c683b2a40b193c28de5b8864da68d73680`;
 - write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
 - Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
-Repository documentation/observability commits are newer than the deployed MCP code source. Do not equate branch HEAD with deployed MCP code without fresh runtime evidence.
+The live MCP and runtime were rebuilt from the Datto EDR/AV production-based branch and production-accepted at `b63798e...`. Continue to verify volatile runtime state before consequential change rather than assuming branch HEAD equals deployed state.
 
 ## Autotask governed proof
 
@@ -176,25 +179,31 @@ Narrative proof does not itself promote System Registry lifecycle state. The pri
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
-## Current Section Goal — ACTIVE / BLOCKED
+## Current Section Goal — ACTIVE / PILOT CLOSEOUT
 
-**Goal:** make Datto RMM endpoint discovery reliably resolve endpoints by exact hostname/site without pre-supplied Datto UID, and prevent incomplete provider enumeration from being represented as definitive not-found evidence.
+**Goal:** finish the Datto EDR/AV Diagnose & Repair playbook as a governed, measurable MSP workflow without conflating product health, provider detections, contained artifacts, or confirmed compromise.
 
-Authoritative source work is merged at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`. Root cause, implementation, regression tests, governance verification, and production acceptance criteria are recorded in:
+Production acceptance completed on 2026-09-18 for the governed read backend at source revision `b63798e048f4493d15b79565e997f43f8fd7edac`. All six `endpoint.security.*` reads succeeded through the authenticated Jason MCP path against AOT-50282 with exact DRMM UID -> EDR `deviceId` correlation.
 
-- `docs/operations/Jason-Datto-Endpoint-Discovery-Completeness-2026-09-18.md`.
+Authoritative acceptance record:
 
-Post-merge governed production evidence still shows the old behavior for `SOSServer2024` at `Star of the Sea Catholic Church`:
+- `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`.
 
-- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
-- zero matches;
-- old MCP projection without `discovery_complete`.
+Current playbook state:
 
-This is expected until deployment. Do not report the Section Goal complete or the production defect fixed until the normal production deployment occurs and governed search/read validation passes for SOSServer2024 plus at least one additional endpoint.
+- lifecycle: `pilot`;
+- runtime enabled: `false`;
+- review status: `read_backend_accepted_scan_execute_pending`;
+- EDR/AV read backend: **accepted**;
+- production runtime/MCP deployment: **accepted**;
+- exact read-only authority grants: **accepted**;
+- Grafana/Prometheus closeout: **accepted** — exporter active, Prometheus target `up=1`, Grafana dashboard UID `jason-playbook-control-center` provisioned;
+- governed provider-native Datto AV scan execution: **pending**;
+- complete remediation/scan/recurrence acceptance: **pending**.
 
-Blocker: no active Jason `deployment.*` capability and no connected authorized Jason production host are exposed to this session. Do not invent a deployment bypass.
+The full threat branch must continue to fail closed until scan execution and composite post-scan verification are available. Do not mark this Section Goal fully closed merely because the six reads are healthy.
 
-## Current Section Goal — CLOSED
+## Previous Section Goal — CLOSED
 
 The requested cross-chat Datto workflow is complete:
 
@@ -223,10 +232,12 @@ The requested cross-chat Datto workflow is complete:
 
 1. `docs/control/JASON-FUNDAMENTALS.md`
 2. this file
-3. `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`
-4. `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
-5. `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
-6. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
-7. current Git and fresh runtime evidence before asserting volatile production state
+3. `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`
+4. `docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md`
+5. `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`
+6. `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
+7. `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
+8. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+9. current Git and fresh runtime evidence before asserting volatile production state
 
 Conversation memory is context only. It is not authority.

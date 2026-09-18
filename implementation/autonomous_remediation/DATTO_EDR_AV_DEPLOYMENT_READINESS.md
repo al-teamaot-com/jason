@@ -1,6 +1,6 @@
 # Jason - Datto EDR/AV Diagnose & Repair - Deployment Readiness
 
-Status: v1.2 source implementation, dedicated OpenBao credential boundary, governed read-only Datto EDR connector, live tenant read proof, and observability source validation passed; no Datto EDR provider mutation or endpoint remediation was performed by this work. Remaining activation gates are production runtime deployment, a governed scan-execute path, controlled acceptance proof, and live observability verification.
+Status: v1.2 source, dedicated OpenBao credential boundary, production runtime/MCP deployment, exact read-only authority grants, all six governed `endpoint.security.*` reads, and playbook Prometheus/Grafana observability are production-accepted. No Datto EDR provider mutation authority was added. Remaining full-threat-branch gates are governed provider-native scan execution and a complete remediation/scan/recurrence acceptance run.
 
 ## Live Jason capability surface verified 2026-09-17
 
@@ -247,18 +247,27 @@ The Datto EDR/AV API credential is now stored in OpenBao as `datto_edr.readonly`
 
 The TeamAOT tenant LoopBack OpenAPI was discovered and inspected. The governed read-only connector is implemented and registered behind provider-neutral `endpoint.security.*` capabilities. AOT-50282 provided a live identity/health/security-evidence proof: the authoritative Datto RMM resource UID mapped exactly to one active Datto EDR `deviceId`, while a second same-hostname EDR record was stale/inactive. This proves hostname alone must not become EDR identity.
 
-## Remaining production activation prerequisites
+## Production activation status
 
-1. Deploy the Datto EDR connector, dedicated AppRole mounts, and provider-neutral `endpoint.security.*` read registrations into the production Jason runtime through the normal governed deployment path.
-2. Verify the live production MCP exposes and successfully executes the canonical read capabilities through Central Orchestrator, including status, detection search/detail, policies, scan history, and quarantine history.
-3. Wire persisted playbook runs and low-cardinality telemetry events through Central Orchestrator; the playbook itself must not create an unmanaged provider or telemetry persistence path.
-4. Add a governed provider-native Datto AV scan execute path. Scan verification readback is now defined as a completed `ScanHistoryTracking` record plus a clear post-scan governed detection search; scan history completion alone never means clean. Until governed scan execution exists, threat-triggered completion must fail closed or use a separately approved second-opinion scanner where appropriate.
-5. Retain clean uninstall/recovery as policy-gated for the first supervised pilot.
-6. Require explicit technician approval for **every reboot instance**, including the normal 02:30 scheduled reboot. Approval of the playbook itself is not standing reboot authority.
-7. Confirm the live `Run Ad Hoc Command (PowerShell 2-5) [WIN]` component still uses the expected `Command` variable contract before first live use; this confirmation does not require endpoint execution.
-8. Deploy the playbook exporter/Prometheus/Grafana source through the normal observability deployment process and verify the `Jason Playbook Control Center`.
-9. Run the controlled AOT-50282 / T20260918.0005 acceptance pattern. Prove exact ticket/device/EDR identity, healthy-stack versus threat-state separation, composite clean scan verification, recurrence verification, and that the threat branch cannot close on `Status=Healthy` alone.
-10. Record acceptance evidence, known limitations, Grafana visibility, and final source revision before marking the Section Goal complete.
+Completed on 2026-09-18:
+
+1. Datto EDR connector, dedicated AppRole mounts, and provider-neutral `endpoint.security.*` reads are deployed in production.
+2. The live production MCP exposes and successfully executes all six canonical reads through Central Orchestrator.
+3. Exact AOT-wide `observe` grants are in place for the six read capabilities; no EDR execute/administer grants were added.
+4. Persisted playbook registry/event storage is live at `/var/lib/jason/playbooks`.
+5. The playbook exporter is active and persistent under the `al` user service manager.
+6. Prometheus scrapes `jason-playbooks` successfully with `up=1`.
+7. Grafana has provisioned dashboard UID `jason-playbook-control-center`.
+8. Controlled read-backend acceptance against AOT-50282 proved exact identity, health/threat separation, detection detail, policy, scan-history, and quarantine reads.
+9. Acceptance evidence and the known scan-execution limitation are recorded in `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`.
+
+Remaining gates before full threat-branch activation:
+
+1. Add a governed provider-native Datto AV scan execute path. Scan verification remains `completed ScanHistoryTracking + clear post-scan governed detection search`; scan completion alone never means clean.
+2. Retain clean uninstall/recovery as policy-gated for the supervised pilot.
+3. Require explicit technician approval for **every reboot instance**, including a normal 02:30 scheduled reboot.
+4. Confirm the live `Run Ad Hoc Command (PowerShell 2-5) [WIN]` component still uses the expected `Command` variable contract before first live use.
+5. Run the complete controlled AOT-50282 / T20260918.0005 remediation/scan/recurrence acceptance path and prove the threat branch cannot close on `Status=Healthy` alone.
 
 ## No-device-work boundary
 

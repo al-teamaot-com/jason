@@ -2,7 +2,7 @@
 
 Version: 1.2.0
 Playbook ID: `datto_edr_av`
-Status: v1.2 implementation and read-only Datto EDR/AV backend proof validated; production runtime deployment, governed provider-native scan execution, live observability verification, and controlled end-to-end acceptance remain before full threat-branch activation.
+Status: v1.2 governed read backend and playbook observability are deployed and production-accepted through Jason. All six `endpoint.security.*` reads are live and proven against AOT-50282; Prometheus and Grafana expose the pilot state and acceptance telemetry. The playbook remains in supervised pilot/read-ready state; full threat-branch activation remains fail-closed pending governed provider-native scan execution and a complete remediation/scan/recurrence acceptance run.
 
 ## 1. Section Goal
 
