@@ -14,6 +14,7 @@ on:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_capability_discovery.py'
       - 'implementation/mcp_service/tests/test_governed_read_failure_contract.py'
+      - 'implementation/mcp_service/tests/test_endpoint_device_search_contract.py'
       - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
 
