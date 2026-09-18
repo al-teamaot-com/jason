@@ -74,3 +74,15 @@ The controlled XYZ Test Company does not have a current DRMM-managed endpoint su
 - The **Jason Governed Actions** Grafana dashboard carries the production acceptance proof and current policy summary.
 - Per-run ticket-start counters are intentionally not exposed yet because a production playbook-event writer is not active. Add counters only when the orchestration path records authoritative ticket-start outcomes.
 - `SUPPORT-CONN-002` is open: intermittent MCP `UNAVAILABLE / Connection failed` was reproduced during this acceptance while the MCP container remained healthy and immediate retries succeeded. Do not treat the dashboard's MCP process-health indicator as proof that the end-to-end client transport is healthy.
+
+## Dashboard deployment verification
+
+Production observability was refreshed on 2026-09-18 after the lifecycle acceptance:
+
+- the status exporter emits `jason_roadmap_item_info{milestone="OPS-TICKET-WORK-001",status="complete",...} 1`;
+- Prometheus returned exactly one live series for that completed milestone;
+- Grafana's stored `jason-governed-actions` dashboard is version `2`;
+- the loaded proof panel is **Governed Production Proof — through 2026-09-18**;
+- the loaded panel includes both the Autotask ticket-work lifecycle acceptance and the open `SUPPORT-CONN-002` MCP transport warning.
+
+No per-run ticket-work counters were added because the production playbook-event writer is not yet active. This is intentional: dashboards must not imply event telemetry that Jason does not actually persist yet.
