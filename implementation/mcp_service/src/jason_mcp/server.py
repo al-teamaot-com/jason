@@ -8,7 +8,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Mapping
 from urllib.request import Request, urlopen
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.identity_authority import (
@@ -29,6 +29,11 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
+from orchestrator.datto_threat_correlation import (
+    AmbiguousThreatCorrelationError,
+    ThreatCorrelationError,
+    correlate_drmm_threat_to_edr_detection,
+)
 from pydantic import AnyHttpUrl
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
@@ -1110,6 +1115,242 @@ def _governed_read(
     }
 
 
+def _is_canonical_uuid(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        return str(UUID(text)) == text.casefold()
+    except ValueError:
+        return False
+
+
+def _correlation_collection(
+    result: Mapping[str, Any],
+    *keys: str,
+) -> list[Mapping[str, Any]]:
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return []
+
+    direct_items = evidence.get("items")
+    if isinstance(direct_items, list):
+        return [item for item in direct_items if isinstance(item, Mapping)]
+
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return []
+
+    for key in keys:
+        values = data.get(key)
+        if isinstance(values, list):
+            return [item for item in values if isinstance(item, Mapping)]
+
+    provider_data = data.get("provider_data")
+    if isinstance(provider_data, Mapping):
+        for key in keys:
+            values = provider_data.get(key)
+            if isinstance(values, list):
+                return [item for item in values if isinstance(item, Mapping)]
+
+    return []
+
+
+def _correlation_failure(
+    *,
+    error_code: str,
+    reason: str,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "stage": "failed",
+        "capability": "endpoint.security.detection.read",
+        "provider": None,
+        "reason_codes": [reason],
+        "error_code": error_code,
+        "correlation_id": correlation_id or f"corr_mcp_{uuid4().hex}",
+        "evidence": {},
+    }
+
+
+def _governed_datto_threat_correlation_read(
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    resource_id = str(
+        arguments.get("resource_id")
+        or arguments.get("device_uid")
+        or ""
+    ).strip()
+    threat_reference = str(
+        arguments.get("threat_reference")
+        or (
+            arguments.get("alert_id")
+            if not _is_canonical_uuid(arguments.get("alert_id"))
+            else ""
+        )
+        or ""
+    ).strip()
+    requested_drmm_alert_uid = str(
+        arguments.get("drmm_alert_uid") or ""
+    ).strip()
+
+    if not resource_id:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_DEVICE_REQUIRED",
+            reason="DATTO_THREAT_CORRELATION_DEVICE_REQUIRED",
+        )
+    if not threat_reference:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_REFERENCE_REQUIRED",
+            reason="DATTO_THREAT_REFERENCE_REQUIRED",
+        )
+
+    status_result = _governed_read(
+        capability_name="endpoint.security.status.read",
+        arguments={"resource_id": resource_id},
+    )
+    if status_result.get("status") != "succeeded":
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_STATUS_READ_FAILED",
+            reason="DATTO_THREAT_CORRELATION_STATUS_READ_FAILED",
+            correlation_id=str(status_result.get("correlation_id") or ""),
+        )
+
+    status_matches = _correlation_collection(
+        status_result,
+        "resource_matches",
+    )
+    exact_status = [
+        item
+        for item in status_matches
+        if str(item.get("resource_id") or "").strip() == resource_id
+        and str(item.get("agent_id") or "").strip()
+    ]
+    if len(exact_status) != 1:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_EDR_IDENTITY_AMBIGUOUS",
+            reason="DATTO_THREAT_CORRELATION_EDR_IDENTITY_AMBIGUOUS",
+        )
+    agent_id = str(exact_status[0]["agent_id"]).strip()
+
+    open_result = _governed_read(
+        capability_name="endpoint.alert.search",
+        arguments={"resource_id": resource_id},
+    )
+    open_alerts = (
+        _correlation_collection(open_result, "alerts")
+        if open_result.get("status") == "succeeded"
+        else []
+    )
+
+    def matching_drmm(items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        matches: list[Mapping[str, Any]] = []
+        for item in items:
+            context = item.get("alertContext")
+            source = item.get("alertSourceInfo")
+            if not isinstance(context, Mapping) or not isinstance(source, Mapping):
+                continue
+            if str(context.get("esAlertId") or "").strip() != threat_reference:
+                continue
+            if str(source.get("deviceUid") or "").strip() != resource_id:
+                continue
+            if requested_drmm_alert_uid and (
+                str(item.get("alertUid") or "").strip()
+                != requested_drmm_alert_uid
+            ):
+                continue
+            matches.append(item)
+        return matches
+
+    drmm_matches = matching_drmm(open_alerts)
+    history_result: Mapping[str, Any] | None = None
+    if not drmm_matches:
+        history_result = _governed_read(
+            capability_name="endpoint.alert.history.search",
+            arguments={"resource_id": resource_id},
+        )
+        if history_result.get("status") != "succeeded":
+            return _correlation_failure(
+                error_code="DATTO_THREAT_CORRELATION_ALERT_HISTORY_FAILED",
+                reason="DATTO_THREAT_CORRELATION_ALERT_HISTORY_FAILED",
+                correlation_id=str(history_result.get("correlation_id") or ""),
+            )
+        drmm_matches = matching_drmm(
+            _correlation_collection(history_result, "alerts")
+        )
+
+    if len(drmm_matches) == 0:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_DRMM_ALERT_NOT_FOUND",
+            reason="DATTO_THREAT_CORRELATION_DRMM_ALERT_NOT_FOUND",
+        )
+    if len(drmm_matches) != 1:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_DRMM_ALERT_AMBIGUOUS",
+            reason="DATTO_THREAT_CORRELATION_DRMM_ALERT_AMBIGUOUS",
+        )
+    drmm_alert = drmm_matches[0]
+
+    detections_result = _governed_read(
+        capability_name="endpoint.security.detection.search",
+        arguments={"agent_id": agent_id, "limit": 200},
+    )
+    if detections_result.get("status") != "succeeded":
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_DETECTION_SEARCH_FAILED",
+            reason="DATTO_THREAT_CORRELATION_DETECTION_SEARCH_FAILED",
+            correlation_id=str(detections_result.get("correlation_id") or ""),
+        )
+    detections = _correlation_collection(
+        detections_result,
+        "alerts",
+    )
+
+    try:
+        correlated = correlate_drmm_threat_to_edr_detection(
+            threat_reference=threat_reference,
+            drmm_alert=drmm_alert,
+            edr_detections=detections,
+            device_uid=resource_id,
+            agent_id=agent_id,
+        )
+    except AmbiguousThreatCorrelationError:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_EDR_ALERT_AMBIGUOUS",
+            reason="DATTO_THREAT_CORRELATION_EDR_ALERT_AMBIGUOUS",
+        )
+    except ThreatCorrelationError:
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_EDR_ALERT_NOT_FOUND",
+            reason="DATTO_THREAT_CORRELATION_EDR_ALERT_NOT_FOUND",
+        )
+
+    detail = _governed_read(
+        capability_name="endpoint.security.detection.read",
+        arguments={"alert_id": correlated.edr_alert_id},
+    )
+    if detail.get("status") != "succeeded":
+        return _correlation_failure(
+            error_code="DATTO_THREAT_CORRELATION_DETAIL_READ_FAILED",
+            reason="DATTO_THREAT_CORRELATION_DETAIL_READ_FAILED",
+            correlation_id=str(detail.get("correlation_id") or ""),
+        )
+
+    result = dict(detail)
+    result["correlation"] = {
+        "threat_reference": correlated.threat_reference,
+        "drmm_alert_uid": correlated.drmm_alert_uid,
+        "edr_alert_id": correlated.edr_alert_id,
+        "device_uid": correlated.device_uid,
+        "agent_id": correlated.agent_id,
+        "event_delta_seconds": correlated.event_delta_seconds,
+        "basis": correlated.basis,
+        "fail_closed": True,
+    }
+    return result
+
+
 def _project_action_result(
     capability_name: str,
     output: Mapping[str, Any],
@@ -1176,6 +1417,20 @@ def _project_action_result(
                 len(fields) > 20
             )
 
+        return result
+
+    if capability_name == "endpoint.alert.resolve":
+        for source in (
+            "status",
+            "alert_uid",
+            "device_uid",
+            "resolved",
+            "already_resolved",
+            "mutation_performed",
+            "readback_verified",
+        ):
+            if source in data:
+                result[source] = _safe(data.get(source))
         return result
 
     if capability_name == "automation.component.execute":
@@ -1385,6 +1640,29 @@ def _canonicalize_governed_action_arguments(
     """
 
     raw = dict(arguments or {})
+
+    if capability_name == "endpoint.alert.resolve":
+        allowed = {"alert_uid", "device_uid", "resource_id"}
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                "DATTO_ALERT_RESOLVE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        alert_uid = str(raw.get("alert_uid") or "").strip()
+        device_uid = str(
+            raw.get("device_uid")
+            or raw.get("resource_id")
+            or ""
+        ).strip()
+        if not alert_uid:
+            raise ValueError("DATTO_ALERT_UID_REQUIRED")
+        if not device_uid:
+            raise ValueError("DATTO_ALERT_DEVICE_UID_REQUIRED")
+        return {
+            "alert_uid": alert_uid,
+            "device_uid": device_uid,
+        }
 
     if capability_name != "automation.component.execute":
         return raw
@@ -2574,6 +2852,21 @@ def execute_read_capability(
                 read_arguments
             )
         )
+
+    if capability_name == "endpoint.security.detection.read":
+        correlation_requested = bool(
+            str(read_arguments.get("threat_reference") or "").strip()
+        )
+        supplied_alert_id = str(
+            read_arguments.get("alert_id") or ""
+        ).strip()
+        if supplied_alert_id and not _is_canonical_uuid(supplied_alert_id):
+            correlation_requested = True
+
+        if correlation_requested:
+            return _governed_datto_threat_correlation_read(
+                read_arguments
+            )
 
     result = _governed_read(
         capability_name=capability_name,

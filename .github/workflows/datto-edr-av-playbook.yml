@@ -23,6 +23,10 @@ on:
       - implementation/runtime_service/tests/test_composition.py
       - implementation/runtime_service/tests/test_autotask_internal_note.py
       - implementation/runtime_service/tests/test_autotask_ticket_update.py
+      - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+      - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
       - infrastructure/jason-runtime/compose.yaml
       - infrastructure/jason-runtime/jason-ops.sh
       - infrastructure/showcase/production_health_exporter.py
@@ -56,6 +60,10 @@ on:
       - implementation/runtime_service/tests/test_composition.py
       - implementation/runtime_service/tests/test_autotask_internal_note.py
       - implementation/runtime_service/tests/test_autotask_ticket_update.py
+      - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+      - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
       - infrastructure/jason-runtime/compose.yaml
       - infrastructure/jason-runtime/jason-ops.sh
       - infrastructure/showcase/production_health_exporter.py
@@ -97,7 +105,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Jason test dependencies
-        run: python -m pip install --disable-pip-version-check -e './implementation[dev]'
+        run: |
+          python -m pip install --disable-pip-version-check -e './implementation[dev]'
+          python -m pip install --disable-pip-version-check -e './implementation/mcp_service'
       - name: Compile Datto EDR AV modules
         run: >-
           python -m py_compile
@@ -105,6 +115,8 @@ jobs:
           implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
           implementation/autonomous_remediation/datto_edr_av_security.py
           implementation/autonomous_remediation/datto_edr_av_api_contract.py
+          implementation/orchestrator/datto_threat_correlation.py
+          implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
           implementation/connectors/datto_edr/connector.py
       - name: Run Datto EDR AV playbook and connector tests
         env:
@@ -117,6 +129,8 @@ jobs:
           implementation/autonomous_remediation/test_datto_edr_av_api_contract.py
           implementation/autonomous_remediation/test_datto_edr_av_playbook_security_integration.py
           implementation/connectors/tests/test_datto_edr_connector.py
+          implementation/autonomous_remediation/test_datto_edr_av_correlation.py
+          implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
           tools/tests/test_provider_secret_provision.py
       - name: Run production Autotask mutation compatibility tests
         env:
@@ -134,6 +148,13 @@ jobs:
         env:
           PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
         run: python -m pytest -q implementation/runtime_service/tests/test_composition.py
+      - name: Run Datto EDR MCP correlation contract tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src:implementation/mcp_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
+        run: >-
+          python -m pytest -q
+          implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
+          implementation/mcp_service/tests/test_generic_governed_execution_contract.py
       - name: Run playbook observability tests
         working-directory: infrastructure/showcase
         run: >-

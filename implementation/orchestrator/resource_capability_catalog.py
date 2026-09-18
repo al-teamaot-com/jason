@@ -637,15 +637,19 @@ def endpoint_security_detection_read(now: datetime) -> CapabilityDefinition:
         ),
         resource_types="endpoint_security_detection,endpoint_security,endpoint",
         operation="read",
-        selector_keys="alert_id",
+        selector_keys="alert_id,threat_reference,resource_id,drmm_alert_uid",
         fact_hints=(
             "detection detail,threat detail,quarantine status,sha256,"
-            "malicious,suspicious,containment"
+            "malicious,suspicious,containment,DRMM threat reference"
         ),
         canonical_facts="security detection disposition,quarantine state",
         planning_guidance=(
-            "Use an exact provider alert_id from a governed detection search. "
-            "A detection or quarantine state must not be relabeled as compromise."
+            "Use an exact provider alert_id when already known. When a Datto RMM "
+            "ticket/alert supplies only a numeric threat reference, supply that "
+            "threat_reference plus the authoritative endpoint resource_id; Jason "
+            "must correlate to exactly one provider-native EDR alert and fail closed "
+            "on ambiguity. Never select EDR identity by hostname alone. A detection "
+            "or quarantine state must not be relabeled as compromise."
         ),
         authoritative_change_sources=(
             "Datto EDR/AV API documentation",
