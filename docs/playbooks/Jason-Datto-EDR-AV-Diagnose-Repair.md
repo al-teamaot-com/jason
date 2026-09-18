@@ -339,7 +339,7 @@ Endpoint-security API capabilities:
 - `endpoint.security.policy.read`
 - `endpoint.security.scan.history.search`
 - `endpoint.security.quarantine.search`
-- `endpoint.security.scan.execute`
+- `endpoint.security.scan.start`
 
 Exact Datto API entities remain inside the connector and must be discovered from the tenant LoopBack Explorer rather than guessed.
 

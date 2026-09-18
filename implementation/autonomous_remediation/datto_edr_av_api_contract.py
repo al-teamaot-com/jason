@@ -27,7 +27,7 @@ ENDPOINT_SECURITY_DETECTION_READ = "endpoint.security.detection.read"
 ENDPOINT_SECURITY_POLICY_READ = "endpoint.security.policy.read"
 ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH = "endpoint.security.scan.history.search"
 ENDPOINT_SECURITY_QUARANTINE_SEARCH = "endpoint.security.quarantine.search"
-ENDPOINT_SECURITY_SCAN_EXECUTE = "endpoint.security.scan.execute"
+ENDPOINT_SECURITY_SCAN_START = "endpoint.security.scan.start"
 
 
 READ_CAPABILITIES = (

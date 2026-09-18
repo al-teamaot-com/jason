@@ -149,3 +149,26 @@ def test_ticket_work_start_omits_blank_classification_hints():
         "ticket_id": 123,
         "begin_work": True,
     }
+
+
+def test_threat_branch_binds_live_scan_start_and_verification_reads():
+    from datto_edr_av_runtime_contract import (
+        bind_security_detection_search,
+        bind_security_scan_history,
+        bind_security_scan_start,
+        bind_security_status_read,
+    )
+    scan = bind_security_scan_start(device_uid="device-1", agent_id="agent-1", scan_type="FULL")
+    assert scan.capability == "endpoint.security.scan.start"
+    assert scan.arguments == {"resource_id": "device-1", "agent_id": "agent-1", "scan_type": "full"}
+    assert bind_security_status_read(device_uid="device-1").capability == "endpoint.security.status.read"
+    assert bind_security_detection_search(agent_id="agent-1").capability == "endpoint.security.detection.search"
+    assert bind_security_scan_history(agent_id="agent-1").capability == "endpoint.security.scan.history.search"
+
+
+def test_threat_branch_scan_binding_fails_closed_on_ambiguous_inputs():
+    from datto_edr_av_runtime_contract import bind_security_scan_start
+    with pytest.raises(RuntimeBindingError):
+        bind_security_scan_start(device_uid="", agent_id="agent-1", scan_type="quick")
+    with pytest.raises(RuntimeBindingError):
+        bind_security_scan_start(device_uid="device-1", agent_id="agent-1", scan_type="custom")

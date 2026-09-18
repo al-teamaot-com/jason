@@ -25,6 +25,11 @@ AUTOMATION_JOB_READ = "automation.job.read"
 AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
+ENDPOINT_SECURITY_SCAN_START = "endpoint.security.scan.start"
+ENDPOINT_SECURITY_STATUS_READ = "endpoint.security.status.read"
+ENDPOINT_SECURITY_DETECTION_SEARCH = "endpoint.security.detection.search"
+ENDPOINT_SECURITY_DETECTION_READ = "endpoint.security.detection.read"
+ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH = "endpoint.security.scan.history.search"
 
 RUN_AD_HOC_POWERSHELL_COMPONENT = "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
 RUN_AD_HOC_POWERSHELL_UID = "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
@@ -263,3 +268,36 @@ def bind_playbook_internal_note(run: PlaybookRun, *, ticket_id: int) -> Capabili
     """
 
     return bind_internal_note(ticket_id, internal_ticket_note(run))
+
+
+def bind_security_scan_start(*, device_uid: str, agent_id: str, scan_type: str) -> CapabilityRequest:
+    device = str(device_uid or "").strip()
+    agent = str(agent_id or "").strip()
+    selected = str(scan_type or "").strip().casefold()
+    if not device or not agent:
+        raise RuntimeBindingError("exact Datto device UID and EDR agent ID are required")
+    if selected not in {"quick", "full"}:
+        raise RuntimeBindingError("scan_type must be quick or full")
+    return CapabilityRequest(ENDPOINT_SECURITY_SCAN_START, {"resource_id": device, "agent_id": agent, "scan_type": selected})
+
+def bind_security_status_read(*, device_uid: str) -> CapabilityRequest:
+    device = str(device_uid or "").strip()
+    if not device:
+        raise RuntimeBindingError("exact Datto device UID is required")
+    return CapabilityRequest(ENDPOINT_SECURITY_STATUS_READ, {"resource_id": device})
+
+def bind_security_detection_search(*, agent_id: str, limit: int = 100) -> CapabilityRequest:
+    agent = str(agent_id or "").strip()
+    if not agent:
+        raise RuntimeBindingError("exact EDR agent ID is required")
+    if not 1 <= int(limit) <= 100:
+        raise RuntimeBindingError("detection search limit must be between 1 and 100")
+    return CapabilityRequest(ENDPOINT_SECURITY_DETECTION_SEARCH, {"agent_id": agent, "limit": int(limit)})
+
+def bind_security_scan_history(*, agent_id: str, limit: int = 25) -> CapabilityRequest:
+    agent = str(agent_id or "").strip()
+    if not agent:
+        raise RuntimeBindingError("exact EDR agent ID is required")
+    if not 1 <= int(limit) <= 100:
+        raise RuntimeBindingError("scan history limit must be between 1 and 100")
+    return CapabilityRequest(ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH, {"agent_id": agent, "limit": int(limit)})
