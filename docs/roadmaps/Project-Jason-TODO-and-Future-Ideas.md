@@ -595,13 +595,12 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-003 — Complete Datto EDR/AV threat-branch activation
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** In progress
 - **Risk level:** High
-- **Idea:** Finish the `datto_edr_av` playbook by adding governed provider-native Datto AV scan execution and completing the controlled remediation/scan/recurrence acceptance path.
-- **Why it matters:** The production read backend is accepted and can now distinguish endpoint-security health, detections, policy, scan history, and quarantine state. The remaining gap prevents Jason from proving the complete threat-response closure sequence without relying on a separately approved scanner path.
-- **Current production proof:** Source revision `b63798e048f4493d15b79565e997f43f8fd7edac` is deployed. All six provider-neutral `endpoint.security.*` reads succeed through the authenticated Jason MCP path against AOT-50282. Grafana/Prometheus playbook observability is live. The playbook remains `pilot`, `enabled=false`, with review status `read_backend_accepted_scan_execute_pending`.
+- **Idea:** Finish the `datto_edr_av` playbook by completing the controlled remediation/scan/recurrence acceptance path now that provider-native Datto AV scan execution is governed and accepted.
+- **Why it matters:** The production backend can distinguish endpoint-security health, detections, policy, scan history, quarantine state, and can initiate an exact Quick/Full Datto AV scan. The remaining gap is proving the complete composite threat-response closure sequence, including post-scan detection verification, documentation, recurrence handling, and terminal disposition.
+- **Current production proof:** Source revision `8776ac5dc56c4a22e0f86dceb780f0cff4fd70f9` is deployed. All six provider-neutral `endpoint.security.*` reads succeed through the authenticated Jason MCP path. Governed `endpoint.security.scan.start` is active with exact endpoint/agent binding and an owner execute grant that still requires approval. Controlled acceptance on AOT-50282 produced terminal Quick Scan history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`, status `completed`. Grafana/Prometheus playbook observability remains live. The playbook remains `pilot`, `enabled=false`, with review status `scan_execute_accepted_full_threat_branch_pending`.
 - **Required completion work:**
-  - add a governed provider-native Datto AV scan execute capability;
   - preserve exact endpoint/agent identity and provider isolation;
   - do not treat `ScanHistoryTracking.status=completed` as a clean result;
   - require completed scan evidence plus a clear post-scan governed detection search;
@@ -609,9 +608,9 @@ When complete, document the implementation, tests, capability changes, and remai
   - retain clean uninstall/recovery as policy-gated during supervised pilot;
   - run the complete controlled AOT-50282 / T20260918.0005 remediation/scan/recurrence acceptance path;
   - verify ticket documentation, telemetry, duplicate suppression, and terminal disposition.
-- **Acceptance evidence:** `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`.
+- **Acceptance evidence:** `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md` and `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Begin immediately after the governed read-backend and observability closeout; complete before setting the playbook registry `enabled=true` or declaring the full threat branch production-ready.
+- **Review trigger:** Complete before setting the playbook registry `enabled=true` or declaring the full threat branch production-ready.
 
 ---
 ## Communication and audience controls

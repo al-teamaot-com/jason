@@ -167,23 +167,23 @@ The production acceptance proves:
 - Provider `compromised=true` is preserved as provider-indicated evidence rather than asserted as independent compromise proof.
 - `ScanHistoryTracking.status=completed` is not treated as a clean scan result.
 
-## Remaining limitation
+## Limitation at the time of read-backend acceptance
 
-The full threat-remediation branch is **not yet fully activated** because governed provider-native Datto AV scan execution is not implemented.
+At the time this read-backend acceptance was recorded, governed provider-native Datto AV scan execution was not yet implemented, so the full threat-remediation branch correctly remained fail-closed.
 
-Until that capability exists, threat-triggered completion must fail closed unless a separately approved governed scanner path provides the required verification evidence.
+That specific limitation was resolved later on 2026-09-18 through governed `endpoint.security.scan.start`. The live AOT-50282 Quick Scan acceptance is recorded separately in `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`. This historical read-backend proof remains valid and unchanged.
 
-The playbook registry therefore remains:
+The playbook remains:
 
 - lifecycle: `pilot`
 - enabled: `false`
-- review status: `read_backend_accepted_scan_execute_pending`
+- current review status: `scan_execute_accepted_full_threat_branch_pending`
 
 ## Acceptance disposition
 
 **Governed Datto EDR/AV read backend: ACCEPTED**
 
-**Full autonomous/supervised threat-branch playbook activation: PENDING scan-execute capability and complete remediation/scan/recurrence acceptance.**
+**Full autonomous/supervised threat-branch playbook activation: PENDING complete remediation/scan/recurrence acceptance. The scan-execute capability itself was subsequently accepted on 2026-09-18.**
 
 ## Live observability closeout
 
@@ -197,7 +197,7 @@ Completed 2026-09-18:
 - Prometheus target state: `up=1`
 - Grafana dashboard UID: `jason-playbook-control-center`
 - Grafana title: `Jason Playbook Control Center`
-- registry state shown by metrics: lifecycle `pilot`, enabled `0`, review `read_backend_accepted_scan_execute_pending`
+- original registry state shown by metrics at read-backend closeout: lifecycle `pilot`, enabled `0`, review `read_backend_accepted_scan_execute_pending`; after scan-start acceptance the review state advanced to `scan_execute_accepted_full_threat_branch_pending`
 - acceptance telemetry: one `acceptance_pass` event with verification `pass` and security disposition `detection_under_investigation`
 
 Monitoring remains observational. It does not add provider access, execution authority, or permission to mark the full threat branch production-ready.

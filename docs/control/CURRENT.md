@@ -183,25 +183,26 @@ No registry state was invented or manually promoted. Reconcile structured truth 
 
 **Goal:** finish the Datto EDR/AV Diagnose & Repair playbook as a governed, measurable MSP workflow without conflating product health, provider detections, contained artifacts, or confirmed compromise.
 
-Production acceptance completed on 2026-09-18 for the governed read backend at source revision `b63798e048f4493d15b79565e997f43f8fd7edac`. All six `endpoint.security.*` reads succeeded through the authenticated Jason MCP path against AOT-50282 with exact DRMM UID -> EDR `deviceId` correlation.
+Production acceptance completed on 2026-09-18 for both the governed read backend and provider-native Datto AV scan-start capability. All six `endpoint.security.*` reads succeed through the authenticated Jason MCP path with exact DRMM UID -> EDR `deviceId` correlation. Controlled AOT-50282 acceptance also proved governed `endpoint.security.scan.start` by starting a native Quick Scan and verifying terminal scan-history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`. Current hardened MCP source is `8776ac5dc56c4a22e0f86dceb780f0cff4fd70f9`.
 
-Authoritative acceptance record:
+Authoritative acceptance records:
 
-- `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`.
+- `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`;
+- `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`.
 
 Current playbook state:
 
 - lifecycle: `pilot`;
 - runtime enabled: `false`;
-- review status: `read_backend_accepted_scan_execute_pending`;
+- review status: `scan_execute_accepted_full_threat_branch_pending`;
 - EDR/AV read backend: **accepted**;
 - production runtime/MCP deployment: **accepted**;
 - exact read-only authority grants: **accepted**;
 - Grafana/Prometheus closeout: **accepted** — exporter active, Prometheus target `up=1`, Grafana dashboard UID `jason-playbook-control-center` provisioned;
-- governed provider-native Datto AV scan execution: **pending**;
+- governed provider-native Datto AV scan execution: **accepted**;
 - complete remediation/scan/recurrence acceptance: **pending**.
 
-The full threat branch must continue to fail closed until scan execution and composite post-scan verification are available. Do not mark this Section Goal fully closed merely because the six reads are healthy.
+The full threat branch must continue to fail closed until the complete composite remediation/scan/post-scan-verification/recurrence acceptance is proven. Do not mark this Section Goal fully closed merely because the reads and scan-start action are healthy.
 
 ## Previous Section Goal — CLOSED
 

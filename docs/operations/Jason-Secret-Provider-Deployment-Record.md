@@ -58,6 +58,7 @@ This is the canonical non-secret operational record for the secret provider used
 | `it_glue.readonly` | `secret/data/connectors/it-glue/production/read-only` | `api_key` | `itglue-read-approle` | Verified AppRole resolution and bounded live read on 2026-08-10 |
 | `datto_rmm.readonly` | `secret/data/connectors/datto-rmm/production/read-only` | `api_url`, `api_key`, `api_secret` | `datto-rmm-read-approle` | Verified AppRole resolution and bounded live read on 2026-08-10 |
 | `datto_edr.readonly` | `secret/data/connectors/datto-edr/production/read-only` | `api_url`, `api_token` | `datto-edr-read-approle` | Verified AppRole resolution and bounded live read on 2026-09-18 |
+| `datto_edr.execution` | `secret/data/connectors/datto-edr/production/read-only` | `api_url`, `api_token` | `datto-edr-read-approle` | Logical execution alias to the same protected provider credential; only the narrow governed `endpoint.security.scan.start` action may use it. Live Quick Scan accepted 2026-09-18. |
 | `microsoft_graph.directory_read` | `secret/data/connectors/microsoft-graph/production/directory-read` | `private_key_pem`, `certificate_pem`, `certificate_thumbprint`, `generation` | `microsoft-graph-directory-read-approle` | Verified lifecycle, AppRole access, MSAL token acquisition, and exact-user Graph lookup on 2026-08-11 |
 | `aws_ses.sendmail` | `secret/data/connectors/aws-ses/production/sendmail` | `access_key_id`, `secret_access_key`; optional `session_token` | `aws-ses-sendmail-approle` | Verified lifecycle, bounded runtime resolution, and successful governed CAP-007 send on 2026-08-11 |
 
@@ -73,6 +74,8 @@ Credential-safe AppRole resolution was proven without printing either
 `api_url` or `api_token`. A disposable read-only validation runtime then
 used the resolved credential to prove live reads against the TeamAOT Datto EDR
 tenant.
+
+After provider-native scan execution was implemented, Jason added logical name `datto_edr.execution` as an explicit action-layer alias to the same protected provider record and AppRole. This does not duplicate the API token or create a broader OpenBao policy. The read connector remains read-only; only the separately registered, approval-governed `endpoint.security.scan.start` action can invoke the native scan route.
 
 Verified read resources included:
 

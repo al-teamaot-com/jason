@@ -1,6 +1,6 @@
 # Jason - Datto EDR/AV Diagnose & Repair - Deployment Readiness
 
-Status: v1.2 source, dedicated OpenBao credential boundary, production runtime/MCP deployment, exact read-only authority grants, all six governed `endpoint.security.*` reads, and playbook Prometheus/Grafana observability are production-accepted. No Datto EDR provider mutation authority was added. Remaining full-threat-branch gates are governed provider-native scan execution and a complete remediation/scan/recurrence acceptance run.
+Status: v1.2 source, dedicated OpenBao credential boundary, production runtime/MCP deployment, all six governed `endpoint.security.*` reads, governed provider-native `endpoint.security.scan.start`, and playbook Prometheus/Grafana observability are production-accepted. Jason retains exact read authority plus one narrow owner-approved scan execute grant; no broad Datto EDR administer or generic mutation authority was added. Remaining full-threat-branch gates are the complete remediation/scan/recurrence acceptance run and policy-gated remediation behaviors.
 
 ## Live Jason capability surface verified 2026-09-17
 
