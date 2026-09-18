@@ -1,8 +1,8 @@
 # Project Jason TODO and Future Ideas
 
-This document is the governed backlog for ideas, enhancements, and capabilities that are valuable but may be premature, blocked, or intentionally deferred.
+This document is the governed backlog for ideas, enhancements, integrations, and capabilities Jason is not yet expected to provide.
 
-The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features.
+The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features. If Jason should already be able to perform a workflow and cannot, or a blocker/defect is discovered during real troubleshooting, that belongs in `SUPPORT.md` instead of this backlog.
 
 ## How to use this document
 
@@ -704,6 +704,67 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** review of OpenClaw outbound/proactive dependencies; governed Microsoft credential target (OpenBao, certificate, or federated identity); rotation/revocation procedure; rollback plan; current System Registry update/verification process.
 - **Decision owner:** Technology Steward / Jason Architecture Authority
 - **Review trigger:** Begin during the next Teams/OpenClaw security-hardening window; complete before the dedicated gateway client secret reaches its first planned rotation/expiry boundary.
+
+
+### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add narrow governed read-only capabilities for MFA registration/enforcement, Conditional Access, privileged-account MFA, legacy-authentication restrictions, Exchange Online protection configuration, external-message tagging, quarantine, attachment/link protection, and related tenant security posture.
+- **Why it matters:** Enables evidence-backed cyber-insurance and security-control reviews without manual tenant inspection.
+- **Origin:** Reclassified from `SUPPORT-CAP-007` on 2026-09-18 because this is a new capability/integration, not a break/fix defect.
+- **Prerequisites:** least-privilege Microsoft Graph/Exchange read scopes, tenant isolation, evidence normalization, and sanitized acceptance fixtures.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When Microsoft 365 security-posture automation becomes an approved implementation priority.
+
+### TODO-CONN-006 — Client backup-posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add governed provider reads for backup inventory, protection coverage, last successful backup, encryption/separation metadata where available, and restore-test evidence.
+- **Why it matters:** Lets Jason answer backup-control questions and identify protection gaps from authoritative evidence.
+- **Origin:** Reclassified from `SUPPORT-CAP-008` on 2026-09-18.
+- **Prerequisites:** provider selection, client-scoped read credentials, canonical backup model, and acceptance workflow.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When backup-provider integration is selected for implementation.
+
+### TODO-CONN-007 — Network/security-appliance posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add governed read-only access to network/security configuration sufficient to verify segmentation, perimeter firewall posture, IDS/IPS, DMZ use, and related controls.
+- **Why it matters:** Endpoint evidence alone cannot establish network control posture.
+- **Origin:** Reclassified from `SUPPORT-CAP-009` on 2026-09-18.
+- **Prerequisites:** supported network-provider integrations, client/site correlation, secret isolation, and normalized control evidence.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When network posture automation becomes an approved implementation priority.
+
+### TODO-CONN-008 — DNSFilter posture integration
+
+- **Priority:** P2
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed DNSFilter read capability for client/site policy assignment, expected coverage, agent/device state, protective-DNS status, and exceptions.
+- **Why it matters:** Provides authoritative DNS protection evidence rather than inferring posture from installed components.
+- **Origin:** Reclassified from `SUPPORT-CAP-010` on 2026-09-18.
+- **Prerequisites:** DNSFilter API/read contract, client/site mapping, least-privilege credentials, and acceptance fixtures.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When DNSFilter becomes an approved Jason data source.
+
+### TODO-CONN-009 — BullPhish/security-awareness posture integration
+
+- **Priority:** P2
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed read capability for client enrollment, covered users, phishing/training cadence, latest completion state, and exceptions.
+- **Why it matters:** Enables evidence-backed awareness-training and phishing-control verification.
+- **Origin:** Reclassified from `SUPPORT-CAP-011` on 2026-09-18.
+- **Prerequisites:** BullPhish/API access, client/user correlation, least-privilege credentials, and normalized campaign/training evidence.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When security-awareness integration becomes an approved implementation priority.
 
 ---
 
