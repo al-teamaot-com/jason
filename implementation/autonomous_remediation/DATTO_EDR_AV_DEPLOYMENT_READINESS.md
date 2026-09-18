@@ -68,6 +68,164 @@ A separate dedicated Datto AV component is not required. Per Owner direction and
 
 The generic component itself is not granted broad autonomous command authority by this playbook. The runtime binding only permits the exact logical operation `agent.exe datto-av --force-update`, generates the PowerShell payload server-side, fixes the Datto component UID/name, fixes the `Command` variable, and rejects any other predefined command.
 
+## Required playbook requirements for threat detection and AV-scan verification
+
+The production playbook must distinguish **EDR/AV product health** from **security-incident resolution**. A healthy agent does not prove that a detected threat has been contained or removed.
+
+### Trigger classification
+
+At intake, classify the ticket/alert into one or both branches:
+
+1. **Agent health / product repair** - EDR or AV is missing, stopped, stale, unhealthy, incorrectly registered, or otherwise not operating as expected.
+2. **Threat detection / incident response** - Datto AV/EDR has reported a malware, threat-hunting, suspicious-process, or other security detection.
+
+If both conditions exist, restore enough security-stack health to investigate safely, then continue through the threat-response branch. Do not close a threat-triggered incident solely because the EDR/AV health component returns `Status=Healthy`.
+
+### Threat evidence collection
+
+For a threat-triggered incident, Jason should retrieve and persist the narrowest available authoritative Datto threat evidence, including when available:
+
+- Datto threat/alert ID
+- detection/threat name and severity
+- original file path
+- SHA256 or other provider-reported hash
+- process and parent-process context
+- logged-on user
+- first-seen and last-seen timestamps
+- detection/trigger count
+- provider action/disposition
+- quarantine, blocked, cleaned, failed, or unresolved state
+- recurrence after remediation
+
+Evidence must be captured before any destructive cleanup when reasonably available. Secrets or credential material must never be written to ticket notes.
+
+### Separate health and incident state
+
+Persist separate normalized states for:
+
+- `SecurityStackHealthy`
+- `ThreatResolved`
+
+For agent-health-only tickets, authoritative EDR/AV health may satisfy the technical completion condition.
+
+For threat-triggered tickets, completion requires both:
+
+- `SecurityStackHealthy = true`
+- `ThreatResolved = true`
+
+### Malware / antivirus scanning
+
+An approved AV/malware scan is a required verification mechanism.
+
+- **Routine EDR/AV health repair:** once the protection stack is healthy, run an approved **quick scan** before completion when supported.
+- **Threat-triggered incident:** run an approved scan during investigation or immediately after remediation, then run a post-remediation verification scan before completion.
+- **Persistent, ambiguous, high-risk, or recurring detection:** permit a **full scan or approved second-opinion scanner** when warranted by the evidence.
+- Prefer a provider-native Datto AV scan when an authoritative governed capability exists.
+- An approved independent scanner such as Microsoft Safety Scanner may be used as a second opinion when Datto evidence is incomplete or the detection remains ambiguous.
+- Do not interpret "scan job completed" as "endpoint clean." The scan result must be read and evaluated.
+
+Full scans may be CPU/disk intensive. They should be scheduled intelligently when practical. Scanning is non-destructive, but any disruptive follow-up action remains subject to the normal approval rules.
+
+### Threat remediation and verification ladder
+
+The threat-response branch should follow a bounded flow equivalent to:
+
+`read threat evidence -> verify EDR/AV health -> scan -> remediate/quarantine when governed and appropriate -> rescan -> reread originating threat -> verify no recurrence -> verify EDR/AV health -> complete or escalate`
+
+If Datto has already successfully blocked or quarantined the object, Jason should verify that disposition and endpoint state rather than repeating remediation unnecessarily.
+
+### Containment and high-risk detections
+
+If evidence suggests ransomware, credential theft, active persistence, lateral movement, repeated execution, or another materially high-risk condition:
+
+- capture available evidence;
+- recommend endpoint/network isolation or other containment;
+- require explicit technician approval for user-disruptive containment actions unless a future separately approved policy grants that exact authority;
+- continue to preserve `direct_provider_access=false` and Central Orchestrator authority.
+
+### False-positive / business-application branch
+
+If the detected object may be legitimate:
+
+- inspect signer/publisher and available file metadata;
+- compare the detection with known business application context and prior documented exceptions;
+- preserve the hash/path/detection evidence;
+- route to false-positive/allowlist review rather than repeatedly repairing the AV agent.
+
+Jason must not autonomously create an AV exclusion merely because a user or application claims the file is safe. Exclusions and allowlisting require the applicable governed approval/policy.
+
+### Post-remediation recurrence check
+
+For threat-triggered incidents, do not close immediately after one clean action. Require a bounded verification period or reread sufficient to establish that:
+
+- the originating threat is no longer active;
+- no new matching detection has appeared;
+- the post-remediation AV scan is clean or otherwise has no unresolved malicious finding;
+- the EDR/AV stack still reports authoritative healthy state.
+
+The exact recurrence window may vary by severity and implementation policy; it must be explicit and persisted so Jason can resume the same run without duplicating remediation.
+
+### Required state additions
+
+The implementation should support terminal/intermediate states sufficient to distinguish at least:
+
+- `Healthy`
+- `ThreatContained`
+- `ThreatRemediated`
+- `AwaitingVerification`
+- `FalsePositiveReview`
+- `AwaitingApproval`
+- `EscalationRequired`
+
+A provider action succeeding is never itself a terminal incident-resolution condition.
+
+### Capability preflight
+
+Before claiming that Jason can fully resolve a playbook run, perform a capability preflight for the exact branch. The threat branch should identify whether governed capabilities exist for the equivalent of:
+
+- threat detail/status read
+- endpoint alert reread
+- component execution
+- automation job status and StdOut/result read
+- provider-native malware/AV scan
+- approved secondary scanner, if configured
+- threat quarantine/remediation or provider disposition action, if supported
+- internal Autotask ticket note creation
+- Autotask ticket update/closure
+
+Missing capabilities must be recorded as explicit implementation gaps before remediation begins when they prevent full resolution.
+
+### Ticket documentation
+
+For every meaningful diagnostic, scan, remediation, recheck, approval gate, and terminal decision, record an internal-only ticket note containing:
+
+- operation/component/scan performed
+- job/correlation ID when available
+- result or relevant StdOut
+- interpretation
+- resulting health/threat state
+- next decision or escalation reason
+
+For threat-triggered cases, the final note must include the originating threat ID, final threat disposition, final scan result, and final EDR/AV health result.
+
+### Completion criteria
+
+**Agent-health-only ticket:** complete only after authoritative EDR/AV health is restored and the required verification scan, when supported by the configured workflow, has no unresolved malicious finding.
+
+**Threat-triggered ticket:** complete only after all of the following are true:
+
+1. authoritative EDR/AV health is `Healthy`;
+2. an approved post-remediation AV/malware scan has completed with no unresolved malicious finding;
+3. the originating threat is no longer active or is authoritatively contained/remediated;
+4. the configured recurrence/recheck requirement has passed without a matching new detection;
+5. required Autotask documentation has been written successfully.
+
+If any required completion evidence cannot be obtained, the run must remain open or transition to `EscalationRequired`; it must not be falsely marked resolved.
+
+### Acceptance-test requirement
+
+Use AOT-50282 / T20260918.0005 as a controlled acceptance-test pattern for the threat branch because it demonstrates the important case where the security stack can report healthy while the originating Datto threat remains open. The acceptance test must prove that the future playbook does not close solely on `Status=Healthy`, performs the required scan/verification path, and requires authoritative threat resolution before completion.
+
 ## Remaining production activation prerequisites
 
 1. Unit tests for `datto_edr_av_playbook.py` and `datto_edr_av_runtime_contract.py` pass in the Jason build environment.
@@ -78,7 +236,7 @@ The generic component itself is not granted broad autonomous command authority b
 6. Immediate reboot remains approval-required; only the named 02:30 scheduled reboot path receives playbook standing authorization.
 7. Autotask notes remain internal-only and milestone-driven.
 8. Job status/StdOut read failures retry reads on the same job and never redispatch remediation.
-9. `Status=Healthy` from the authoritative health component remains the only success terminal state.
+9. `Status=Healthy` remains required for endpoint-security-stack health, but threat-triggered runs additionally require clean scan evidence, authoritative threat resolution/containment, recurrence verification, and successful ticket documentation before completion.
 10. Before first live use, confirm the live `Run Ad Hoc Command (PowerShell 2-5) [WIN]` component still uses the expected `Command` variable contract; this confirmation does not require running it on a device.
 
 ## No-device-work boundary
