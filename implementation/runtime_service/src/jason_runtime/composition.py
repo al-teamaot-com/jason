@@ -15,6 +15,7 @@ from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
 from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
+from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from jason_cap_007.kernel_registration import register_email_send
@@ -82,7 +83,14 @@ from orchestrator.ollama_reasoning import (
 )
 from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.resource_capability_catalog import (
+    DATTO_EDR_PROVIDER,
     DATTO_RMM_PROVIDER,
+    ENDPOINT_SECURITY_DETECTION_READ,
+    ENDPOINT_SECURITY_DETECTION_SEARCH,
+    ENDPOINT_SECURITY_POLICY_READ,
+    ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+    ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+    ENDPOINT_SECURITY_STATUS_READ,
     ENDPOINT_ALERT_SEARCH,
     ENDPOINT_ALERT_HISTORY_SEARCH,
     ENDPOINT_AUDIT_READ,
@@ -180,6 +188,12 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    datto_edr_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/datto-edr/role_id"
+    )
+    datto_edr_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/datto-edr/secret_id"
+    )
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     resolution_memory_db: Path = Path(
         "/var/lib/jason/openclaw/resolution-memory.sqlite3"
@@ -286,6 +300,18 @@ class RuntimeSettings:
             ),
             openbao_secret_id_path=Path(
                 os.getenv("JASON_OPENBAO_SECRET_ID_PATH", "/run/jason-secrets/openbao/secret_id")
+            ),
+            datto_edr_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_DATTO_EDR_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/datto-edr/role_id",
+                )
+            ),
+            datto_edr_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_DATTO_EDR_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/datto-edr/secret_id",
+                )
             ),
             ollama_url=os.getenv("JASON_OLLAMA_URL", "http://jason-ollama:11434").strip(),
             ollama_model=os.getenv("JASON_OLLAMA_MODEL", "").strip(),
@@ -799,8 +825,21 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    datto_edr_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.datto_edr_openbao_role_id_path,
+        secret_id_path=settings.datto_edr_openbao_secret_id_path,
+    )
+    datto_edr = DattoEdrConnector(
+        secrets=datto_edr_openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     datto_invoker = GovernedConnectorCapabilityInvoker(
-        connectors={DATTO_RMM_PROVIDER: datto},
+        connectors={
+            DATTO_RMM_PROVIDER: datto,
+            DATTO_EDR_PROVIDER: datto_edr,
+        },
         provider_capability_map={
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_SEARCH): "datto_rmm.device.search",
             (DATTO_RMM_PROVIDER, ENDPOINT_DEVICE_READ): "datto_rmm.device.get",
@@ -810,6 +849,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, ENDPOINT_SOFTWARE_SEARCH): "datto_rmm.device.software.list",
             (DATTO_RMM_PROVIDER, MANAGEMENT_ALERT_SEARCH): "datto_rmm.account.alerts.open",
             (DATTO_RMM_PROVIDER, MANAGEMENT_SITE_SEARCH): "datto_rmm.site.search",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_STATUS_READ): "datto_edr.endpoint.status.read",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_DETECTION_SEARCH): "datto_edr.alert.search",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_DETECTION_READ): "datto_edr.alert.read",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_POLICY_READ): "datto_edr.policy.search",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH): "datto_edr.scan_history.search",
+            (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_QUARANTINE_SEARCH): "datto_edr.quarantine.search",
         },
     )
     provider_read_invoker = build_provider_read_invoker(
@@ -881,6 +926,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_SITE_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_STATUS_READ, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_DETECTION_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_DETECTION_READ, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_POLICY_READ, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_SECURITY_QUARANTINE_SEARCH, datto_invoker)
     register_provider_read_invokers(
         invokers=invokers,
         invoker=provider_read_invoker,

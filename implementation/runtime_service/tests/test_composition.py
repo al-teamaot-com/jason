@@ -203,3 +203,32 @@ def test_runtime_composition_declares_integration_broker_foundation():
     assert "IntegrationBroker(" in source
     assert "build_datto_rmm_manifest()" in source
     assert "integration_broker.register(" in source
+
+
+def test_runtime_composition_registers_endpoint_security_reads_only(tmp_path):
+    from orchestrator.resource_capability_catalog import (
+        ENDPOINT_SECURITY_DETECTION_READ,
+        ENDPOINT_SECURITY_DETECTION_SEARCH,
+        ENDPOINT_SECURITY_POLICY_READ,
+        ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        ENDPOINT_SECURITY_STATUS_READ,
+    )
+
+    application = build_runtime_application(_settings(tmp_path))
+    invokers = (
+        application.ingress.ingress.flow.orchestrator._invoker.registered_capabilities()
+    )
+    expected = {
+        ENDPOINT_SECURITY_STATUS_READ,
+        ENDPOINT_SECURITY_DETECTION_SEARCH,
+        ENDPOINT_SECURITY_DETECTION_READ,
+        ENDPOINT_SECURITY_POLICY_READ,
+        ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+    }
+
+    assert expected <= set(invokers)
+    assert "endpoint.security.scan.execute" not in invokers
+    assert "endpoint.security.isolate" not in invokers
+    assert "endpoint.security.quarantine.execute" not in invokers

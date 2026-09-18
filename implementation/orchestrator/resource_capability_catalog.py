@@ -36,7 +36,14 @@ MANAGEMENT_SITE_SEARCH = "management.site.search"
 AUTOMATION_COMPONENT_SEARCH = "automation.component.search"
 AUTOMATION_JOB_READ = "automation.job.read"
 AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
+ENDPOINT_SECURITY_STATUS_READ = "endpoint.security.status.read"
+ENDPOINT_SECURITY_DETECTION_SEARCH = "endpoint.security.detection.search"
+ENDPOINT_SECURITY_DETECTION_READ = "endpoint.security.detection.read"
+ENDPOINT_SECURITY_POLICY_READ = "endpoint.security.policy.read"
+ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH = "endpoint.security.scan.history.search"
+ENDPOINT_SECURITY_QUARANTINE_SEARCH = "endpoint.security.quarantine.search"
 DATTO_RMM_PROVIDER = "datto_rmm"
+DATTO_EDR_PROVIDER = "datto_edr"
 
 
 def endpoint_device_search(now: datetime) -> CapabilityDefinition:
@@ -232,6 +239,9 @@ def _read_resource_capability(
     canonical_facts: str = "",
     collection_fact: str | None = None,
     inquiry_hints: str | None = None,
+    authoritative_change_sources: tuple[str, ...] = (
+        "Datto RMM API documentation",
+    ),
 ) -> CapabilityDefinition:
     """Construct one governed provider-neutral read-only resource capability."""
 
@@ -560,6 +570,206 @@ def automation_job_output_read(now: datetime) -> CapabilityDefinition:
     )
 
 
+def endpoint_security_status_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_STATUS_READ,
+        display_name="Read Endpoint Security Status",
+        business_purpose=(
+            "Read authoritative endpoint EDR/AV health, licensing, version, "
+            "signature, scan, and isolation state by durable endpoint identity."
+        ),
+        resource_types="endpoint_security,endpoint",
+        operation="read",
+        selector_keys="resource_id",
+        fact_hints=(
+            "edr status,av status,antivirus status,security status,agent version,"
+            "engine version,vdf version,signature version,definitions,license,"
+            "isolation,reboot required,last antivirus scan"
+        ),
+        canonical_facts=(
+            "endpoint security status,edr agent version,antivirus engine version,"
+            "antivirus definition version,security isolation state"
+        ),
+        planning_guidance=(
+            "Use after the managed endpoint has a durable resource_id. "
+            "The provider must map that identity exactly and preserve ambiguity."
+        ),
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def endpoint_security_detection_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_DETECTION_SEARCH,
+        display_name="Search Endpoint Security Detections",
+        business_purpose="Read bounded EDR/AV detections for one resolved security agent.",
+        resource_types="endpoint_security_detection,endpoint_security,endpoint",
+        operation="search",
+        selector_keys="agent_id,archived,limit",
+        fact_hints=(
+            "security detection,edr alert,av alert,malware alert,threat,"
+            "security alert,detection history"
+        ),
+        collection_fact="security detections",
+        planning_guidance=(
+            "Use the agent_id returned by endpoint.security.status.read; "
+            "do not resolve an agent from hostname alone."
+        ),
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def endpoint_security_detection_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_DETECTION_READ,
+        display_name="Read Endpoint Security Detection",
+        business_purpose=(
+            "Read one Datto EDR/AV detection plus its quarantine/containment evidence."
+        ),
+        resource_types="endpoint_security_detection,endpoint_security,endpoint",
+        operation="read",
+        selector_keys="alert_id",
+        fact_hints=(
+            "detection detail,threat detail,quarantine status,sha256,"
+            "malicious,suspicious,containment"
+        ),
+        canonical_facts="security detection disposition,quarantine state",
+        planning_guidance=(
+            "Use an exact provider alert_id from a governed detection search. "
+            "A detection or quarantine state must not be relabeled as compromise."
+        ),
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def endpoint_security_policy_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_POLICY_READ,
+        display_name="Read Endpoint Security Policies",
+        business_purpose="Read security policies assigned to one resolved Datto EDR agent.",
+        resource_types="endpoint_security_policy,endpoint_security,endpoint",
+        operation="read",
+        selector_keys="agent_id",
+        fact_hints="edr policy,av policy,response policy,ransomware policy,assigned policy",
+        collection_fact="assigned security policies",
+        planning_guidance="Use the exact Datto EDR agent_id returned by status resolution.",
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def endpoint_security_scan_history_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        display_name="Read Endpoint Security Scan History",
+        business_purpose="Read bounded Datto AV scan history for one resolved agent.",
+        resource_types="endpoint_security_scan,endpoint_security,endpoint",
+        operation="search",
+        selector_keys="agent_id,limit",
+        fact_hints="av scan,antivirus scan,quick scan,full scan,scan history,scan status",
+        collection_fact="security scans",
+        planning_guidance="Use the exact Datto EDR agent_id returned by status resolution.",
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def endpoint_security_quarantine_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        display_name="Read Endpoint Security Quarantine",
+        business_purpose="Read bounded Datto AV quarantine history for an agent or alert.",
+        resource_types="endpoint_security_quarantine,endpoint_security_detection,endpoint",
+        operation="search",
+        selector_keys="agent_id,alert_id,limit",
+        fact_hints="quarantine,quarantined file,restored file,containment,detection disposition",
+        collection_fact="quarantine records",
+        planning_guidance=(
+            "Require an exact agent_id or alert_id. Quarantine is containment evidence, "
+            "not independent proof of endpoint compromise."
+        ),
+        authoritative_change_sources=(
+            "Datto EDR/AV API documentation",
+            "Datto EDR tenant LoopBack OpenAPI",
+        ),
+    )
+
+
+def datto_edr_endpoint_security_provider(now: datetime) -> ExecutionProvider:
+    capabilities = frozenset(
+        {
+            ENDPOINT_SECURITY_STATUS_READ,
+            ENDPOINT_SECURITY_DETECTION_SEARCH,
+            ENDPOINT_SECURITY_DETECTION_READ,
+            ENDPOINT_SECURITY_POLICY_READ,
+            ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+            ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        }
+    )
+    return ExecutionProvider(
+        provider_id=DATTO_EDR_PROVIDER,
+        display_name="Datto EDR/AV",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=ProviderLifecycle.AVAILABLE,
+        health_status=ProviderHealth.HEALTHY,
+        approval_status=ProviderApproval.APPROVED,
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=capabilities,
+        supported_classifications=frozenset({"internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(
+            maximum_concurrent_executions=5,
+            maximum_requests_per_minute=120,
+            maximum_execution_seconds=60,
+        ),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="zero-cost-foundation",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification=(
+                "Use Datto EDR/AV as authoritative provider evidence for endpoint "
+                "security health and detections without duplicating provider state."
+            ),
+            review_interval_days=90,
+            last_reviewed_at=now,
+            retirement_criteria=(
+                "Datto EDR/AV is no longer the approved endpoint-security provider.",
+            ),
+            vendor_change_sources=(
+                "Datto EDR/AV API documentation",
+                "Datto EDR tenant LoopBack OpenAPI",
+            ),
+            operational_owner="AOT IT Operations",
+            approval_owner="Jason Architecture Authority",
+        ),
+        created_at=now,
+        metadata={
+            "connector_id": "datto_edr",
+            "resource_authority": "endpoint_security",
+            "read_only": "true",
+        },
+    )
+
+
 def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
         provider_id=DATTO_RMM_PROVIDER,
@@ -636,4 +846,11 @@ def register_endpoint_resource_foundation(
     capabilities.register(automation_component_search(now))
     capabilities.register(automation_job_read(now))
     capabilities.register(automation_job_output_read(now))
+    capabilities.register(endpoint_security_status_read(now))
+    capabilities.register(endpoint_security_detection_search(now))
+    capabilities.register(endpoint_security_detection_read(now))
+    capabilities.register(endpoint_security_policy_read(now))
+    capabilities.register(endpoint_security_scan_history_search(now))
+    capabilities.register(endpoint_security_quarantine_search(now))
     providers.register(datto_rmm_endpoint_provider(now))
+    providers.register(datto_edr_endpoint_security_provider(now))

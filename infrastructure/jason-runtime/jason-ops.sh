@@ -68,6 +68,8 @@ mounts = {item["Destination"]: item["Source"] for item in data.get("Mounts", [])
 required = {
     "JASON_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/role_id",
     "JASON_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/secret_id",
+    "JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/datto-edr/role_id",
+    "JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/datto-edr/secret_id",
     "JASON_SES_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/aws-ses/role_id",
     "JASON_SES_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/aws-ses/secret_id",
     "JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-graph/role_id",
@@ -96,6 +98,8 @@ validate_live_inputs() {
     required_names="
 JASON_OPENBAO_ROLE_ID_HOST_PATH
 JASON_OPENBAO_SECRET_ID_HOST_PATH
+JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH
+JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH
 JASON_SES_OPENBAO_ROLE_ID_HOST_PATH
 JASON_SES_OPENBAO_SECRET_ID_HOST_PATH
 JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH
