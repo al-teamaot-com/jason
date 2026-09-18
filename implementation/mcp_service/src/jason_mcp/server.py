@@ -1137,7 +1137,14 @@ def _governed_read_for_identity(
                                 collection_kind="software",
                             )
                             if capability_name == "endpoint.software.search"
-                            else _safe(dict(result.output))
+                            else (
+                                _project_dynamic_evidence(
+                                    capability_name,
+                                    result.output,
+                                )
+                                if capability_name == "automation.component.search"
+                                else _safe(dict(result.output))
+                            )
                         )
                     )
                 )
