@@ -20,13 +20,18 @@ class TeamsMessageSendInvoker:
         if request.capability_name != CAPABILITY or resolution.selected_provider_id != PROVIDER:
             raise PermissionError("Teams send provider/capability mismatch")
         args=dict(request.arguments or {})
-        allowed={"aad_object_id","tenant_id","text"}
+        allowed={"aad_object_id","tenant_id","text","card"}
         if set(args)-allowed: raise ValueError("unsupported Teams message arguments")
         aad=str(args.get("aad_object_id","")).strip(); tenant=str(args.get("tenant_id","")).strip(); text=str(args.get("text","")).strip()
         if not aad or not tenant or not text or len(text)>12000: raise ValueError("invalid Teams message request")
         token=Path(self.token_file).read_text().strip()
         if not token: raise PermissionError("Teams proactive token unavailable")
-        body=json.dumps({"aadObjectId":aad,"tenantId":tenant,"text":text}).encode()
+        payload={"aadObjectId":aad,"tenantId":tenant,"text":text}
+        card=args.get("card")
+        if card is not None:
+            if not isinstance(card, dict) or card.get("type") != "AdaptiveCard": raise ValueError("invalid Teams adaptive card")
+            payload["card"]=card
+        body=json.dumps(payload).encode()
         req=Request(self.gateway_url.rstrip("/")+"/internal/proactive/send",data=body,method="POST",headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"})
         with urlopen(req,timeout=20) as response: result=json.loads(response.read().decode())
         if result.get("status")!="succeeded" or not result.get("message_id"): raise RuntimeError("Teams proactive send failed")

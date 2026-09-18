@@ -169,6 +169,7 @@ agent.onActivity("message", async (context) => {
   const activity = context.activity;
   const text = cleanTeamsText(activity);
   const aadObjectId = activityAadObjectId(activity);
+  const submitValue = activity?.value && typeof activity.value === "object" ? activity.value : null;
   const conversationId = nonBlank(activity?.conversation?.id);
   const messageId = nonBlank(activity?.id);
   const tenantId = activityTenantId(activity) ?? auth.tenantId;
@@ -180,9 +181,9 @@ agent.onActivity("message", async (context) => {
     return;
   }
 
-  if (!text) {
+  if (!text && !submitValue) {
     await context.sendActivity(
-      "Jason currently requires a text request for this governed conversation path.",
+      "Jason currently requires text or a governed card response for this conversation path.",
     );
     return;
   }
@@ -201,8 +202,11 @@ agent.onActivity("message", async (context) => {
 
   try {
     storeConversationReference(context, aadObjectId, tenantId);
+    const governedText = submitValue?.approval_id && submitValue?.decision
+      ? `Jason approval response: ${String(submitValue.decision)} approval ${String(submitValue.approval_id)}`
+      : text;
     const envelope = buildConversationEnvelope({
-      text,
+      text: governedText,
       microsoftTenantId: auth.tenantId,
       microsoftObjectId: aadObjectId,
       conversationId,
@@ -262,6 +266,7 @@ server.post("/internal/proactive/send", async (req, res) => {
   const aadObjectId = nonBlank(req.body?.aadObjectId);
   const tenantId = nonBlank(req.body?.tenantId);
   const text = nonBlank(req.body?.text);
+  const card = req.body?.card && typeof req.body.card === "object" ? req.body.card : null;
   if (!aadObjectId || !isUuid(aadObjectId) || !tenantId || !isUuid(tenantId) || !text || text.length > 12000) {
     res.status(400).json({ status: "rejected", error_code: "invalid_request" });
     return;
@@ -278,7 +283,10 @@ server.post("/internal/proactive/send", async (req, res) => {
   try {
     let messageId;
     await adapter.continueConversation(record.identity, record.reference, async (ctx) => {
-      const result = await ctx.sendActivity(text);
+      const activity = card
+        ? { type: "message", text, attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: card }] }
+        : text;
+      const result = await ctx.sendActivity(activity);
       messageId = result?.id;
     });
     if (!messageId) throw new Error("Teams proactive send returned no message id");
