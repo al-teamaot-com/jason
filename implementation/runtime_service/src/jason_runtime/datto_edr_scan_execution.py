@@ -47,6 +47,7 @@ from orchestrator.service import CapabilityInvoker
 ENDPOINT_SECURITY_SCAN_START = "endpoint.security.scan.start"
 DATTO_EDR_SCAN_PROVIDER = "datto_edr_scan_execution"
 DATTO_EDR_PROVIDER_CAPABILITY = "datto_edr.scan.start"
+DATTO_EDR_EXECUTION_LOGICAL_SECRET = "datto_edr.execution"
 
 DATTO_EDR_SCAN_PROFILE_ENV = "JASON_DATTO_EDR_SCAN_MCP_PROFILE"
 DATTO_EDR_SCAN_PROFILE = "owner-av-scan-v1"
@@ -175,6 +176,7 @@ def _capability_definition(*, now: datetime) -> CapabilityDefinition:
             "mcp_tool_name": "execute_governed_capability",
             "conversation_authenticated_imperative_is_approval": "true",
             "pilot_scope": "aot_exact_endpoint_exact_agent",
+            "logical_secret": DATTO_EDR_EXECUTION_LOGICAL_SECRET,
             "activation_state": "datto_edr_scan_source_only_not_activated",
         },
     )
@@ -302,7 +304,9 @@ class DattoEdrScanConnector:
         if set(request.arguments) - {"resource_id", "agent_id", "scan_type"}:
             raise ValueError("unsupported Datto EDR scan arguments")
 
-        credentials = self._secrets.resolve("datto_edr.readonly", request.context)
+        credentials = self._secrets.resolve(
+            DATTO_EDR_EXECUTION_LOGICAL_SECRET, request.context
+        )
         api_url = str(credentials.get("api_url") or "").rstrip("/")
         api_token = str(credentials.get("api_token") or "")
         if not api_url or not api_token:
@@ -347,6 +351,7 @@ class DattoEdrScanConnector:
             "fullScan": scan_type == "full",
             "forensicScan": False,
             **_FORENSIC_FALSE,
+            "installed": True,
         }
         task_name = "Scan - AV Quick" if scan_type == "quick" else "Scan - AV Full"
         payload = {

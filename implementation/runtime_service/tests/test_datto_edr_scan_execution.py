@@ -16,7 +16,7 @@ AGENT_ID = "0cf9b495-879b-4b6c-8c60-ac229e01d136"
 
 class Secrets:
     def resolve(self, logical_name, context):
-        assert logical_name == "datto_edr.readonly"
+        assert logical_name == "datto_edr.execution"
         return {
             "api_url": "https://tenant.example/api",
             "api_token": "synthetic-token",
@@ -93,6 +93,7 @@ def test_quick_scan_uses_exact_datto_payload():
     assert payload["options"]["quickScan"] is True
     assert payload["options"]["fullScan"] is False
     assert payload["options"]["forensicScan"] is False
+    assert payload["options"]["installed"] is True
     assert result.data["task_id"] == "task-123"
 
 
