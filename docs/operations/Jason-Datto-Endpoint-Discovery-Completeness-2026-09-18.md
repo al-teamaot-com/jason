@@ -183,6 +183,31 @@ Monitoring rollback directory:
 
 The observability deployment updated only the monitoring layer and verified the production-health dashboard against the Datto discovery release. It did not alter Jason MCP, runtime, OpenBao, or provider state.
 
+## Final roadmap / Grafana display sync
+
+After the roadmap milestone was committed as `complete`, the observational status exporter was refreshed from repository head `c30cf6f1630b978c454436546a2bb3d571993688` so the live Jason Command Center immediately reflected the final state.
+
+Acceptance evidence:
+
+- source pin matched `c30cf6f1630b978c454436546a2bb3d571993688`;
+- status exporter unit generation passed;
+- status exporter restart passed;
+- status exporter HTTP check passed;
+- live roadmap metric reported `FIX-DATTO-ENDPOINT-DISCOVERY-20260918` with `status="complete"`;
+- Prometheus returned the completed roadmap milestone;
+- Grafana Jason Command Center loaded successfully;
+- `MCP_CHANGED=NO`;
+- `RUNTIME_CHANGED=NO`;
+- `OPENBAO_CHANGED=NO`;
+- `PROVIDER_ACCESS=NO`;
+- `PROVIDER_WRITES=NO`.
+
+Status exporter rollback directory:
+
+- `/tmp/jason-status-exporter-rollback-20260918T110816Z`.
+
+This final synchronization was observational only and did not change Jason authority, provider state, MCP, runtime, or OpenBao.
+
 ## Section Goal final status
 
 **PASS / COMPLETE — the Datto endpoint hostname/site discovery defect is corrected, production-proven across the 749-device inventory, governance is unchanged, rollback is preserved, and Prometheus/Grafana observability is reconciled and passing.**
