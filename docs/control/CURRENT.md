@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-18  
-**Status:** Datto endpoint hostname/site discovery is deployed and live-proven in production. SOSServer2024 now resolves by hostname/site without caller-supplied UID, and a second 749-device inventory search completed across four provider pages. Core Section Goal criteria pass; production-health/Grafana reconciliation is the only remaining closeout item.  
+**Status:** Datto endpoint hostname/site discovery Section Goal is complete. SOSServer2024 resolves by hostname/site without caller-supplied UID, generalized discovery completed across the 749-device Datto inventory, governance remained unchanged, rollback is preserved, and production-health/Prometheus/Grafana acceptance passed.  
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Durable operating principle
@@ -116,8 +116,8 @@ The authoritative Grafana/Prometheus source remains repository-provisioned under
 
 The production-health unit now expects the exact live MCP boundary:
 
-- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-26704f0600bb`;
-- `JASON_EXPECTED_MCP_SOURCE_REVISION=26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`.
+- `JASON_EXPECTED_MCP_IMAGE=jason-mcp:datto-discovery-bba491d87c65-ready`;
+- `JASON_EXPECTED_MCP_SOURCE_REVISION=bba491d87c65ec7a2977e565ca1ddfcb51707180`.
 
 The active Datto production scope contains exactly two server-classified `standing_safe` components:
 
@@ -126,7 +126,7 @@ The active Datto production scope contains exactly two server-classified `standi
 
 No reboot component is included in the production component scope.
 
-The latest rollback-protected monitoring-only deployment used repository head `cefa32e9b14db97fb8c6e703ad467a9eda33c32b` and reconciled production observability to the `26704f...` MCP release.
+The latest rollback-protected monitoring-only deployment used repository head `1db42f49def2fff95ee65ae216be6f7c1839192a` and reconciled production observability to the Datto discovery MCP release `bba491d87c65ec7a2977e565ca1ddfcb51707180`.
 
 Acceptance returned:
 
@@ -145,11 +145,11 @@ Acceptance returned:
 - `PROVIDER_ACCESS=NO`;
 - `PROVIDER_WRITES=NO`.
 
-Latest monitoring deployment source: `cefa32e9b14db97fb8c6e703ad467a9eda33c32b`.
+Latest monitoring deployment source: `1db42f49def2fff95ee65ae216be6f7c1839192a`.
 
-Latest monitoring rollback directory: `/tmp/jason-production-health-rollback-20260916T173323Z`.
+Latest monitoring rollback directory: `/tmp/jason-production-health-rollback-20260918T110416Z`.
 
-Production MCP rollback container: `jason-mcp-pilot-rollback-20260916T172806Z`.
+Production MCP rollback container: `jason-mcp-pilot-rollback-datto-discovery-20260918T105901Z`.
 
 Final read-only live metrics returned `1` for:
 
@@ -169,21 +169,24 @@ Narrative proof does not itself promote System Registry lifecycle state. The pri
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
-## Current Section Goal — ACTIVE / OBSERVABILITY CLOSEOUT
+## Datto endpoint discovery Section Goal — CLOSED / PASS
 
 **Goal:** make Datto RMM endpoint discovery reliably resolve endpoints by exact hostname/site without pre-supplied Datto UID, and prevent incomplete provider enumeration from being represented as definitive not-found evidence.
 
-Core production acceptance is now live-proven on source `bba491d87c65ec7a2977e565ca1ddfcb51707180`:
+Completion evidence:
 
-- `SOSServer2024` + `Star of the Sea Catholic Church` resolved to UID `52b4f1ad-d834-4c79-4955-8434101ccb7a` via governed search, correlation `corr_mcp_3a7de9116aba4270bd7b4541decdf076`;
-- the returned UID fed `endpoint.device.read` successfully, correlation `corr_mcp_cef7a6f047ba4708b5c957ec0f111e3f`;
-- generalized search for `50282` traversed 4 provider pages across a provider-reported 749-device inventory with `discovery_complete=true`, correlation `corr_mcp_cd8c7148e0ff404f9c7887e633cb4410`;
-- the returned AOT-50282 UID fed a successful exact read, correlation `corr_mcp_091d472c91ea47e599978247c0708006`;
-- MCP remains `governed-read-plus-actions`, Central Orchestrator authoritative, `direct_provider_access=false`, with the prior write/action capability and approval boundary unchanged.
+- production source: `bba491d87c65ec7a2977e565ca1ddfcb51707180`;
+- production image: `jason-mcp:datto-discovery-bba491d87c65-ready`;
+- rollback container: `jason-mcp-pilot-rollback-datto-discovery-20260918T105901Z`;
+- `SOSServer2024` + `Star of the Sea Catholic Church` resolved without caller-supplied UID, search correlation `corr_mcp_3a7de9116aba4270bd7b4541decdf076`;
+- returned UID read successfully, correlation `corr_mcp_cef7a6f047ba4708b5c957ec0f111e3f`;
+- generalized `50282` search traversed four provider pages across a provider-reported 749-device inventory with `discovery_complete=true`, correlation `corr_mcp_cd8c7148e0ff404f9c7887e633cb4410`;
+- returned AOT-50282 UID read successfully, correlation `corr_mcp_091d472c91ea47e599978247c0708006`;
+- live MCP remained `governed-read-plus-actions`, Central Orchestrator authoritative, `direct_provider_access=false`, with write/action scope and approval policy unchanged;
+- monitoring-only deployment from `1db42f49def2fff95ee65ae216be6f7c1839192a` passed production-health, Prometheus, Grafana, and metric-contract acceptance;
+- monitoring deployment confirmed `MCP_CHANGED=NO`, `RUNTIME_CHANGED=NO`, `OPENBAO_CHANGED=NO`, `PROVIDER_ACCESS=NO`, and `PROVIDER_WRITES=NO`.
 
-Rollback container: `jason-mcp-pilot-rollback-datto-discovery-20260918T105901Z`.
-
-Only observability reconciliation remains before marking the Section Goal fully closed: update production-health expectations to the new MCP image/source, deploy monitoring-only changes, and verify Prometheus/Grafana without changing MCP/runtime/OpenBao.
+The Section Goal is complete.
 
 ## Current Section Goal — CLOSED
 
