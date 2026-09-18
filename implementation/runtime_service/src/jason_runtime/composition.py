@@ -162,6 +162,11 @@ from .datto_alert_resolution import (
     register_datto_alert_resolution_invoker,
     register_datto_alert_resolution_runtime_foundation,
 )
+from .datto_edr_scan_execution import (
+    build_datto_edr_scan_invoker,
+    register_datto_edr_scan_invoker,
+    register_datto_edr_scan_runtime_foundation,
+)
 from .http import RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
 from .provider_reads import (
@@ -690,6 +695,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_datto_edr_scan_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
 
     identity_authority = IdentityAuthorityService(
         identities=SQLiteIdentityRepository(authority_store),
@@ -900,6 +910,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    datto_edr_scan_invoker = build_datto_edr_scan_invoker(
+        openbao_url=settings.openbao_url,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
         registry=load_production_system_registry()
     )
@@ -966,6 +981,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_datto_alert_resolution_invoker(
         invokers=invokers,
         invoker=datto_alert_resolution_invoker,
+    )
+    register_datto_edr_scan_invoker(
+        invokers=invokers,
+        invoker=datto_edr_scan_invoker,
     )
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)

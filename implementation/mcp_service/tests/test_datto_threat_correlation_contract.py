@@ -224,3 +224,66 @@ def test_alert_resolution_projection_exposes_only_verified_fields():
         "mutation_performed": True,
         "readback_verified": True,
     }
+
+
+def test_edr_scan_action_canonicalizes_exact_target():
+    args = server._canonicalize_governed_action_arguments(
+        "endpoint.security.scan.start",
+        {
+            "device_uid": DEVICE_UID,
+            "agent_id": AGENT_ID,
+            "scan_type": "Quick",
+        },
+    )
+    assert args == {
+        "resource_id": DEVICE_UID,
+        "agent_id": AGENT_ID,
+        "scan_type": "quick",
+    }
+
+
+def test_edr_scan_action_rejects_unknown_fields():
+    try:
+        server._canonicalize_governed_action_arguments(
+            "endpoint.security.scan.start",
+            {
+                "resource_id": DEVICE_UID,
+                "agent_id": AGENT_ID,
+                "scan_type": "quick",
+                "options": {"unsafe": True},
+            },
+        )
+    except ValueError as exc:
+        assert "DATTO_EDR_SCAN_UNSUPPORTED_ARGUMENTS" in str(exc)
+    else:
+        raise AssertionError("scan action must reject caller-supplied provider options")
+
+
+def test_edr_scan_projection_hides_provider_payload():
+    projected = server._project_action_result(
+        "endpoint.security.scan.start",
+        {
+            "data": {
+                "status": "accepted",
+                "resource_id": DEVICE_UID,
+                "agent_id": AGENT_ID,
+                "scan_type": "quick",
+                "task_name": "Scan - AV Quick",
+                "task_id": "task-123",
+                "provider_accepted": True,
+                "readback_required": True,
+                "provider_raw": {"secret": "must-not-escape"},
+            }
+        },
+    )
+    assert projected == {
+        "raw_provider_evidence_exposed": False,
+        "status": "accepted",
+        "resource_id": DEVICE_UID,
+        "agent_id": AGENT_ID,
+        "scan_type": "quick",
+        "task_name": "Scan - AV Quick",
+        "task_id": "task-123",
+        "provider_accepted": True,
+        "readback_required": True,
+    }

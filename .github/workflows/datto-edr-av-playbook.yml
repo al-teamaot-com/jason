@@ -25,6 +25,8 @@ on:
       - implementation/runtime_service/tests/test_autotask_ticket_update.py
       - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
       - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
+      - implementation/runtime_service/tests/test_datto_edr_scan_execution.py
       - implementation/mcp_service/src/jason_mcp/server.py
       - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
       - infrastructure/jason-runtime/compose.yaml
@@ -62,6 +64,8 @@ on:
       - implementation/runtime_service/tests/test_autotask_ticket_update.py
       - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
       - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
+      - implementation/runtime_service/tests/test_datto_edr_scan_execution.py
       - implementation/mcp_service/src/jason_mcp/server.py
       - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
       - infrastructure/jason-runtime/compose.yaml
@@ -117,6 +121,7 @@ jobs:
           implementation/autonomous_remediation/datto_edr_av_api_contract.py
           implementation/connectors/datto_edr/threat_correlation.py
           implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+          implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
           implementation/connectors/datto_edr/connector.py
       - name: Run Datto EDR AV playbook and connector tests
         env:
@@ -140,6 +145,7 @@ jobs:
           implementation/runtime_service/tests/test_autotask_internal_note.py
           implementation/runtime_service/tests/test_autotask_ticket_update.py
           implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+          implementation/runtime_service/tests/test_datto_edr_scan_execution.py
       - name: Run endpoint-security governance catalog tests
         env:
           PYTHONPATH: implementation

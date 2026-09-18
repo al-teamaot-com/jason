@@ -1433,6 +1433,21 @@ def _project_action_result(
                 result[source] = _safe(data.get(source))
         return result
 
+    if capability_name == "endpoint.security.scan.start":
+        for source in (
+            "status",
+            "resource_id",
+            "agent_id",
+            "scan_type",
+            "task_name",
+            "task_id",
+            "provider_accepted",
+            "readback_required",
+        ):
+            if source in data:
+                result[source] = _safe(data.get(source))
+        return result
+
     if capability_name == "automation.component.execute":
         for source, target in (
             ("status", "status"),
@@ -1662,6 +1677,31 @@ def _canonicalize_governed_action_arguments(
         return {
             "alert_uid": alert_uid,
             "device_uid": device_uid,
+        }
+
+    if capability_name == "endpoint.security.scan.start":
+        allowed = {"resource_id", "device_uid", "agent_id", "scan_type"}
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                "DATTO_EDR_SCAN_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        resource_id = str(
+            raw.get("resource_id") or raw.get("device_uid") or ""
+        ).strip()
+        agent_id = str(raw.get("agent_id") or "").strip()
+        scan_type = str(raw.get("scan_type") or "").strip().casefold()
+        if not resource_id:
+            raise ValueError("DATTO_EDR_SCAN_RESOURCE_REQUIRED")
+        if not agent_id:
+            raise ValueError("DATTO_EDR_SCAN_AGENT_REQUIRED")
+        if scan_type not in {"quick", "full"}:
+            raise ValueError("DATTO_EDR_SCAN_TYPE_INVALID")
+        return {
+            "resource_id": resource_id,
+            "agent_id": agent_id,
+            "scan_type": scan_type,
         }
 
     if capability_name != "automation.component.execute":
