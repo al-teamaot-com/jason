@@ -188,4 +188,5 @@ class InvestigationTeamsConversationFlow:
             organization_id=(
                 principal.organization_id
             ),
+            client_id=principal.client_id,
         )

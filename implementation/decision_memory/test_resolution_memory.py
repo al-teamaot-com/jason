@@ -279,3 +279,14 @@ def test_old_cases_outside_retention_window_are_ignored() -> None:
     )
     assert result.matches == ()
     assert result.step_evidence == ()
+
+
+def test_unconfirmed_observed_case_does_not_steer_live_troubleshooting() -> None:
+    item = case("OBS", technician_confirmed=False)
+    from dataclasses import replace
+    item = replace(item, status=ResolutionCaseStatus.OBSERVED)
+    result = ResolutionMemoryMatcher().search(
+        signature=signature(), organization_id="aot", client_id="client-a", cases=(item,), now=NOW
+    )
+    assert result.matches == ()
+    assert result.step_evidence == ()

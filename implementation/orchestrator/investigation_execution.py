@@ -338,6 +338,20 @@ class GovernedInvestigationExecutor:
         elif selector_names:
             arguments = {}
 
+        if target.resource.resource_type == "resolution_memory":
+            if not context.client_id:
+                raise InvestigationExecutionError(
+                    "resolution memory requires current client scope"
+                )
+            if target.operation.capability_name.endswith(".search"):
+                required = {"category", "product", "device_role", "platform"}
+                missing = sorted(required - set(arguments))
+                if missing:
+                    raise InvestigationExecutionError(
+                        "resolution memory search requires a grounded current incident signature: "
+                        + ", ".join(missing)
+                    )
+
         return ConversationIntent(
             capability_name=target.operation.capability_name,
             arguments=arguments,

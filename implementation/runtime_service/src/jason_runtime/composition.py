@@ -179,8 +179,10 @@ from .provider_reads import (
     register_provider_read_invokers,
     register_provider_read_runtime_foundation,
 )
+from .resolution_memory_manifest import build_resolution_memory_manifest
 from .resolution_memory_runtime import (
     RESOLUTION_MEMORY_READ,
+    RESOLUTION_MEMORY_SUMMARY,
     RESOLUTION_MEMORY_SEARCH,
     GovernedResolutionMemoryCapabilityInvoker,
     register_resolution_memory_runtime_foundation,
@@ -674,6 +676,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     integration_broker.register(
         build_datto_rmm_manifest()
     )
+    integration_broker.register(
+        build_resolution_memory_manifest()
+    )
     register_provider_read_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1000,6 +1005,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)
     invokers.register(RESOLUTION_MEMORY_SEARCH, resolution_memory_invoker)
     invokers.register(RESOLUTION_MEMORY_READ, resolution_memory_invoker)
+    invokers.register(RESOLUTION_MEMORY_SUMMARY, resolution_memory_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))

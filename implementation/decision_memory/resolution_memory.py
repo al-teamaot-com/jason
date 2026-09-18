@@ -234,6 +234,15 @@ class ResolutionMemoryMatcher:
                 continue
             if case.status is ResolutionCaseStatus.DEPRECATED:
                 continue
+            # Unconfirmed observed outcomes remain durable history but are not
+            # eligible to steer live troubleshooting. A technician-confirmed
+            # observation may contribute weak evidence; verified cases remain
+            # the strongest source.
+            if (
+                case.status is ResolutionCaseStatus.OBSERVED
+                and not case.technician_confirmed
+            ):
+                continue
 
             age_days = max(
                 0.0,

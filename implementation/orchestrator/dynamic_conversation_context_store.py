@@ -19,6 +19,7 @@ from .dynamic_conversation_kernel import (
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS dynamic_conversation_context (
     organization_id TEXT NOT NULL,
+    client_id TEXT,
     principal_id TEXT NOT NULL,
     conversation_id TEXT NOT NULL,
     entities_json TEXT NOT NULL,
@@ -45,6 +46,9 @@ class SQLiteDynamicConversationContextStore:
         self._ttl = timedelta(seconds=ttl_seconds)
         self._connection = sqlite3.connect(str(self._path))
         self._connection.executescript(_SCHEMA)
+        columns = {str(row[1]) for row in self._connection.execute("PRAGMA table_info(dynamic_conversation_context)").fetchall()}
+        if "client_id" not in columns:
+            self._connection.execute("ALTER TABLE dynamic_conversation_context ADD COLUMN client_id TEXT")
         self._connection.commit()
         os.chmod(self._path, 0o600)
 
@@ -60,7 +64,7 @@ class SQLiteDynamicConversationContextStore:
         row = self._connection.execute(
             """
             SELECT entities_json, active_entity_refs_json, active_topic,
-                   recent_resolutions_json, expires_at
+                   recent_resolutions_json, expires_at, client_id
             FROM dynamic_conversation_context
             WHERE organization_id = ? AND principal_id = ? AND conversation_id = ?
             """,
@@ -107,6 +111,7 @@ class SQLiteDynamicConversationContextStore:
             conversation_id=conversation_id,
             principal_id=principal_id,
             organization_id=organization_id,
+            client_id=None if row[5] is None else str(row[5]),
             entities=entities,
             active_entity_refs={str(key): str(value) for key, value in active_raw.items()},
             active_topic=None if row[2] is None else str(row[2]),
@@ -143,11 +148,12 @@ class SQLiteDynamicConversationContextStore:
             self._connection.execute(
                 """
                 INSERT INTO dynamic_conversation_context(
-                    organization_id, principal_id, conversation_id,
+                    organization_id, client_id, principal_id, conversation_id,
                     entities_json, active_entity_refs_json, active_topic,
                     recent_resolutions_json, updated_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(organization_id, principal_id, conversation_id) DO UPDATE SET
+                    client_id = excluded.client_id,
                     entities_json = excluded.entities_json,
                     active_entity_refs_json = excluded.active_entity_refs_json,
                     active_topic = excluded.active_topic,
@@ -157,6 +163,7 @@ class SQLiteDynamicConversationContextStore:
                 """,
                 (
                     context.organization_id,
+                    context.client_id,
                     context.principal_id,
                     context.conversation_id,
                     json.dumps(entities, sort_keys=True, separators=(",", ":")),

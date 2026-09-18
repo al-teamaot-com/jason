@@ -173,6 +173,15 @@ def _eligible_operation_targets(
     eligible = []
 
     for target in broker_operation_targets(broker):
+        # Raw Resolution Memory is client-isolated. Do not even expose its
+        # operations to the reasoning model when the authenticated conversation
+        # lacks a current client boundary.
+        if (
+            target.resource.resource_type == "resolution_memory"
+            and (context is None or not context.client_id)
+        ):
+            continue
+
         selector_names = tuple(
             target.operation.selector_names
         )

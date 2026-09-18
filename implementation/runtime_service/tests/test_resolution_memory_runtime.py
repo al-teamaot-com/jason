@@ -16,6 +16,7 @@ from jason_runtime.resolution_memory_runtime import (
     RESOLUTION_MEMORY_PROVIDER,
     RESOLUTION_MEMORY_READ,
     RESOLUTION_MEMORY_SEARCH,
+    RESOLUTION_MEMORY_SUMMARY,
     GovernedResolutionMemoryCapabilityInvoker,
     register_resolution_memory_runtime_foundation,
 )
@@ -217,3 +218,28 @@ def test_read_cannot_cross_client_boundary(tmp_path) -> None:
         assert "current client scope" in str(exc)
     else:
         raise AssertionError("resolution memory leaked a cross-client case")
+
+
+def test_resolution_memory_manifest_is_read_only_and_evidence_only():
+    from jason_runtime.resolution_memory_manifest import build_resolution_memory_manifest
+    manifest = build_resolution_memory_manifest()
+    assert manifest.provider_id == RESOLUTION_MEMORY_PROVIDER
+    resource = manifest.resource("resolution_memory")
+    assert resource is not None
+    assert {op.capability_name for op in resource.operations} == {RESOLUTION_MEMORY_SEARCH, RESOLUTION_MEMORY_READ}
+    assert all(op.read_only for op in resource.operations)
+    assert manifest.metadata["grants_authority"] == "false"
+
+
+def test_summary_reports_same_client_case_count_without_authority(tmp_path) -> None:
+    store = SQLiteResolutionMemoryStore(str(tmp_path / "resolution.sqlite3"))
+    service = ResolutionMemoryService(store=store)
+    service.initialize()
+    service.record_case(build_case())
+    invoker = GovernedResolutionMemoryCapabilityInvoker(service=service)
+    result = invoker.invoke(
+        request=request(capability=RESOLUTION_MEMORY_SUMMARY, client_id="client-a", arguments={}),
+        resolution=resolution(RESOLUTION_MEMORY_SUMMARY),
+    )
+    assert result.output["data"]["case_count"] == 1
+    assert result.output["data"]["grants_authority"] is False

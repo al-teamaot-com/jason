@@ -77,6 +77,7 @@ class DynamicConversationContext:
     conversation_id: str
     principal_id: str
     organization_id: str
+    client_id: str | None = None
     entities: tuple[ConversationEntity, ...] = ()
     active_entity_refs: Mapping[str, str] = field(default_factory=dict)
     active_topic: str | None = None
@@ -85,6 +86,8 @@ class DynamicConversationContext:
     def __post_init__(self) -> None:
         if not self.conversation_id.strip() or not self.principal_id.strip() or not self.organization_id.strip():
             raise ValueError("conversation, principal, and organization are required")
+        if self.client_id is not None and not self.client_id.strip():
+            raise ValueError("conversation client_id must be non-empty when supplied")
         if len(self.entities) > _MAX_ENTITIES:
             raise ValueError("conversation entity set exceeds safety bound")
         if len(self.recent_resolutions) > _MAX_RESOLUTIONS:
@@ -148,6 +151,7 @@ class DynamicConversationContext:
             conversation_id=self.conversation_id,
             principal_id=self.principal_id,
             organization_id=self.organization_id,
+            client_id=self.client_id,
             entities=merged_entities,
             active_entity_refs=active,
             active_topic=self.active_topic if topic is None else topic.strip() or None,

@@ -1369,6 +1369,15 @@ class SimpleReasoningLoop:
                 if target is None:
                     continue
 
+                # Raw historical cases are same-client evidence only. A
+                # conversation without an authenticated current client scope
+                # must not be offered Resolution Memory as a reasoning tool.
+                if (
+                    target.resource.resource_type == "resolution_memory"
+                    and not context.client_id
+                ):
+                    continue
+
                 selector_names = tuple(
                     target.operation.selector_names
                 )

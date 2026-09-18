@@ -34,6 +34,7 @@ from orchestrator.service import InvocationResult
 
 RESOLUTION_MEMORY_SEARCH = "operations.resolution.search"
 RESOLUTION_MEMORY_READ = "operations.resolution.read"
+RESOLUTION_MEMORY_SUMMARY = "operations.resolution.summary"
 RESOLUTION_MEMORY_PROVIDER = "resolution_memory"
 
 
@@ -157,6 +158,20 @@ def resolution_memory_read(now: datetime) -> CapabilityDefinition:
     )
 
 
+def resolution_memory_summary(now: datetime) -> CapabilityDefinition:
+    return _capability(
+        now=now,
+        capability_name=RESOLUTION_MEMORY_SUMMARY,
+        display_name="Summarize Operational Resolution Memory",
+        operation="summary",
+        selector_keys="none",
+        planning_guidance=(
+            "Read bounded same-client Resolution Memory health/count metadata. "
+            "This exposes no raw cross-client case content and grants no authority."
+        ),
+    )
+
+
 def resolution_memory_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
         provider_id=RESOLUTION_MEMORY_PROVIDER,
@@ -167,7 +182,7 @@ def resolution_memory_provider(now: datetime) -> ExecutionProvider:
         approval_status=ProviderApproval.APPROVED,
         execution_modes=frozenset({"deterministic"}),
         capabilities=frozenset(
-            {RESOLUTION_MEMORY_SEARCH, RESOLUTION_MEMORY_READ}
+            {RESOLUTION_MEMORY_SEARCH, RESOLUTION_MEMORY_READ, RESOLUTION_MEMORY_SUMMARY}
         ),
         supported_classifications=frozenset({"internal"}),
         regions=frozenset(),
@@ -211,6 +226,7 @@ def register_resolution_memory_runtime_foundation(
 ) -> None:
     capabilities.register(resolution_memory_search(now))
     capabilities.register(resolution_memory_read(now))
+    capabilities.register(resolution_memory_summary(now))
     providers.register(resolution_memory_provider(now))
 
 
@@ -237,6 +253,11 @@ class GovernedResolutionMemoryCapabilityInvoker:
             data = self._search(request)
         elif resolution.capability_name == RESOLUTION_MEMORY_READ:
             data = self._read(request)
+        elif resolution.capability_name == RESOLUTION_MEMORY_SUMMARY:
+            data = self.service.summary(
+                organization_id=request.organization_id,
+                client_id=request.client_id,
+            )
         else:
             raise LookupError(
                 f"unsupported resolution memory capability: {resolution.capability_name}"

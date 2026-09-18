@@ -277,6 +277,7 @@ class TeamsConversationExperienceFlow:
             conversation_id=identity.conversation_id,
             principal_id=principal.principal_id,
             organization_id=principal.organization_id,
+            client_id=principal.client_id,
         )
 
     def _internal_capability_identifiers(self) -> tuple[str, ...]:

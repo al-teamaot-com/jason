@@ -450,3 +450,32 @@ def test_decision_context_parameter_preserves_existing_behavior():
     )
 
     assert decision.operation_ref == allowed_ref
+
+
+def test_resolution_memory_hidden_without_current_client_scope():
+    from orchestrator.dynamic_conversation_kernel import DynamicConversationContext
+    from orchestrator.investigation_decision import _eligible_operation_targets
+    from jason_runtime.resolution_memory_manifest import build_resolution_memory_manifest
+    from jason_runtime.resolution_memory_runtime import register_resolution_memory_runtime_foundation
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    register_resolution_memory_runtime_foundation(capabilities=capabilities, providers=providers, now=datetime.now(timezone.utc))
+    item = IntegrationBroker(capabilities=capabilities, providers=providers)
+    item.register(build_resolution_memory_manifest())
+    context = DynamicConversationContext(conversation_id="c", principal_id="p", organization_id="aot")
+    assert _eligible_operation_targets(broker=item, context=context) == ()
+
+
+def test_resolution_memory_available_with_current_client_scope():
+    from orchestrator.dynamic_conversation_kernel import DynamicConversationContext
+    from orchestrator.investigation_decision import _eligible_operation_targets
+    from jason_runtime.resolution_memory_manifest import build_resolution_memory_manifest
+    from jason_runtime.resolution_memory_runtime import register_resolution_memory_runtime_foundation
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    register_resolution_memory_runtime_foundation(capabilities=capabilities, providers=providers, now=datetime.now(timezone.utc))
+    item = IntegrationBroker(capabilities=capabilities, providers=providers)
+    item.register(build_resolution_memory_manifest())
+    context = DynamicConversationContext(conversation_id="c", principal_id="p", organization_id="aot", client_id="client-a")
+    targets = _eligible_operation_targets(broker=item, context=context)
+    assert any(target.operation.capability_name == "operations.resolution.search" for target in targets)

@@ -660,3 +660,48 @@ def test_investigation_full_evidence_remains_unmodified():
     assert len(
         evidence.data["provider_data"]["records"]
     ) == 100
+
+
+def test_resolution_memory_execution_requires_grounded_signature_and_client_scope():
+    from jason_runtime.resolution_memory_manifest import build_resolution_memory_manifest
+    from jason_runtime.resolution_memory_runtime import register_resolution_memory_runtime_foundation
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    register_resolution_memory_runtime_foundation(capabilities=capabilities, providers=providers, now=datetime.now(timezone.utc))
+    broker = IntegrationBroker(capabilities=capabilities, providers=providers)
+    broker.register(build_resolution_memory_manifest())
+    selected = operation_ref(broker, resource_type="resolution_memory", kind="search")
+    bindings = {"bindings": [
+        {"argument":"category","source_type":"literal","source_id":None,"literal":"endpoint security"},
+        {"argument":"product","source_type":"literal","source_id":None,"literal":"Datto EDR AV"},
+        {"argument":"device_role","source_type":"literal","source_id":None,"literal":"workstation"},
+        {"argument":"platform","source_type":"literal","source_id":None,"literal":"Windows"},
+    ]}
+    bridge = GovernedInvestigationExecutor(broker=broker, grounding=GroundedConversationIntentBuilder(client=BindingClient(bindings)))
+    decision = InvestigationDecision(kind=InvestigationDecisionKind.INSPECT, operation_ref=selected, information_goal="Find similar prior cases")
+    with pytest.raises(InvestigationExecutionError, match="current client scope"):
+        bridge.execute(decision=decision, human_text="endpoint security Datto EDR AV workstation Windows", context=DynamicConversationContext(conversation_id="c", principal_id="p", organization_id="aot"), executor=Executor(), workspace=InvestigationEvidenceWorkspace())
+
+
+def test_resolution_memory_grounded_signature_executes_as_read_only_evidence():
+    from jason_runtime.resolution_memory_manifest import build_resolution_memory_manifest
+    from jason_runtime.resolution_memory_runtime import register_resolution_memory_runtime_foundation
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    register_resolution_memory_runtime_foundation(capabilities=capabilities, providers=providers, now=datetime.now(timezone.utc))
+    broker = IntegrationBroker(capabilities=capabilities, providers=providers)
+    broker.register(build_resolution_memory_manifest())
+    selected = operation_ref(broker, resource_type="resolution_memory", kind="search")
+    bindings = {"bindings": [
+        {"argument":"category","source_type":"literal","source_id":None,"literal":"endpoint security"},
+        {"argument":"product","source_type":"literal","source_id":None,"literal":"Datto EDR AV"},
+        {"argument":"device_role","source_type":"literal","source_id":None,"literal":"workstation"},
+        {"argument":"platform","source_type":"literal","source_id":None,"literal":"Windows"},
+    ]}
+    result = Result(provider_id="resolution_memory", capability_name="operations.resolution.search", output={"provider":"resolution_memory","data":{"matches":[],"step_evidence":[],"grants_authority":False},"evidence_ids":(),"warnings":()})
+    executor = Executor(result=result)
+    bridge = GovernedInvestigationExecutor(broker=broker, grounding=GroundedConversationIntentBuilder(client=BindingClient(bindings)))
+    bridge.execute(decision=InvestigationDecision(kind=InvestigationDecisionKind.INSPECT, operation_ref=selected, information_goal="Find similar prior cases"), human_text="endpoint security Datto EDR AV workstation Windows", context=DynamicConversationContext(conversation_id="c", principal_id="p", organization_id="aot", client_id="client-a"), executor=executor, workspace=InvestigationEvidenceWorkspace())
+    assert executor.intents[0].capability_name == "operations.resolution.search"
+    assert executor.intents[0].permission_mode == "observe"
+    assert set(executor.intents[0].arguments) >= {"category","product","device_role","platform"}
