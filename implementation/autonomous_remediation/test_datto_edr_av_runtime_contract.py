@@ -4,7 +4,9 @@ from datto_edr_av_playbook import (
     AV_FORCE_UPDATE_COMMAND,
     ActionKind,
     ApprovalClass,
+    HealthObservation,
     PlannedAction,
+    PlaybookRun,
     RepairStep,
 )
 from datto_edr_av_runtime_contract import (
@@ -19,6 +21,7 @@ from datto_edr_av_runtime_contract import (
     bind_execution,
     bind_job_output_read,
     bind_job_read,
+    bind_playbook_internal_note,
 )
 
 
@@ -101,3 +104,21 @@ def test_job_output_read_is_bound_to_job_device_component_and_stream():
     assert request.arguments["device_uid"] == "device-1"
     assert request.arguments["component_uid"] == "component-1"
     assert request.arguments["stream"] == "stdout"
+
+
+def test_playbook_state_generates_governed_internal_note_request():
+    run = PlaybookRun(
+        run_id="run-1",
+        ticket_id="T20260918.0005",
+        device_id="AOT-50282",
+        organization_id="ORG1",
+        client_id="CLIENT1",
+    )
+    run.record_health(HealthObservation(status="Healthy", edr_version="3.17.1.6224"))
+
+    request = bind_playbook_internal_note(run, ticket_id=140629)
+
+    assert request.capability == "service.ticket.note.create"
+    assert request.arguments["ticket_id"] == 140629
+    assert request.arguments["title"].startswith("Jason - Datto EDR/AV")
+    assert "Status=Healthy" in request.arguments["note"]

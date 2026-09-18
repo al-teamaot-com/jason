@@ -209,6 +209,8 @@ For every meaningful diagnostic, scan, remediation, recheck, approval gate, and 
 
 For threat-triggered cases, the final note must include the originating threat ID, final threat disposition, final scan result, and final EDR/AV health result.
 
+The playbook/orchestrator itself must generate and submit these notes through the governed `service.ticket.note.create` capability. An operator or ChatGPT manually creating the note may prove the primitive works, but it does **not** satisfy playbook acceptance or autonomous documentation requirements.
+
 ### Completion criteria
 
 **Agent-health-only ticket:** complete only after authoritative EDR/AV health is restored and the required verification scan, when supported by the configured workflow, has no unresolved malicious finding.

@@ -14,7 +14,9 @@ from datto_edr_av_playbook import (
     AV_FORCE_UPDATE_COMMAND,
     ActionKind,
     PlannedAction,
+    PlaybookRun,
     PLAYBOOK_NAME,
+    internal_ticket_note,
 )
 
 
@@ -204,3 +206,13 @@ def bind_internal_note(ticket_id: int, note: str) -> CapabilityRequest:
             "title": PLAYBOOK_NAME,
         },
     )
+
+
+def bind_playbook_internal_note(run: PlaybookRun, *, ticket_id: int) -> CapabilityRequest:
+    """Bind the playbook's own milestone summary to governed Autotask documentation.
+
+    Callers must execute this request through Central Orchestrator. This helper
+    prevents an operator/chat layer from composing an ad-hoc support note.
+    """
+
+    return bind_internal_note(ticket_id, internal_ticket_note(run))
