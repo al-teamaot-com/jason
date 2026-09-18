@@ -2,7 +2,7 @@
 
 **Section Goal:** Fix Datto RMM endpoint discovery so Jason can resolve an existing endpoint from hostname/site without pre-supplied Datto UID and so incomplete enumeration cannot be represented as definitive not-found evidence.
 
-**Status:** SOURCE FIX MERGED / PRODUCTION DEPLOYMENT BLOCKED BY UNAVAILABLE AUTHORIZED DEPLOYMENT ACCESS
+**Status:** PRODUCTION CORE DEPLOYMENT AND GOVERNED VALIDATION PASS / OBSERVABILITY RECONCILIATION PENDING
 
 ## Reproduction
 
@@ -88,37 +88,77 @@ Required invariants remain:
 - no endpoint mutation;
 - governed execution/approval behavior unchanged.
 
-## Production acceptance — blocked pending authorized deployment access
+## Production acceptance — core deployment and governed validation PASS
 
-Authoritative source merge commit:
+Production deployment source:
 
-- `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`
+- integration commit: `bba491d87c65ec7a2977e565ca1ddfcb51707180`;
+- image: `jason-mcp:datto-discovery-bba491d87c65-ready`;
+- rollback container: `jason-mcp-pilot-rollback-datto-discovery-20260918T105901Z`.
 
-A post-merge governed production search was executed through Jason without direct provider access:
+Cutover acceptance passed:
+
+- production container recreated with the preserved 19-mount launch contract;
+- source revision matched the integration commit;
+- internal MCP health passed;
+- public host-port health passed;
+- unauthenticated MCP returned HTTP 401;
+- hostile Host was rejected with HTTP 421;
+- runtime unchanged;
+- OpenBao unchanged;
+- no provider write occurred.
+
+Fresh governed MCP status after cutover confirmed:
+
+- mode: `governed-read-plus-actions`;
+- phase: `governed-action-pilot`;
+- governed execution: `central-orchestrator`;
+- generic governed execution enabled;
+- `direct_provider_access=false`;
+- write capability set unchanged: `automation.component.execute`, `service.ticket.note.create`, `service.ticket.update`;
+- Datto approval policy unchanged: `server_classified_standing_safe_or_per_run`.
+
+### SOSServer2024 production proof
+
+A fresh governed search used only hostname and site:
 
 - hostname: `SOSServer2024`;
 - site: `Star of the Sea Catholic Church`;
-- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
-- result: zero matches;
-- provider pages examined: 1;
-- provider total count in that scoped response: 26;
-- the MCP evidence still used the old projection shape and did not expose `discovery_complete`.
+- search correlation: `corr_mcp_3a7de9116aba4270bd7b4541decdf076`;
+- returned UID: `52b4f1ad-d834-4c79-4955-8434101ccb7a`;
+- match count: 1.
 
-This proves the merged source has **not** been deployed to the live MCP yet. The live MCP itself remains healthy in `governed-read-plus-actions` mode with Central Orchestrator authority and `direct_provider_access=false`.
+The returned UID was then used for a normal governed `endpoint.device.read`:
 
-The current ChatGPT session has no authorized Jason `deployment.*` capability and no connected Jason production host through Remote Desktop Commander. The repository also exposes no normal production MCP deployment workflow that can safely substitute for the established host deployment procedure. Creating a new remote deployment mechanism merely to bypass this access gap would be a governance/architecture change and is therefore not appropriate for this Section Goal.
+- read correlation: `corr_mcp_cef7a6f047ba4708b5c957ec0f111e3f`;
+- hostname: `SOSServer2024`;
+- site: `Star of the Sea Catholic Church`;
+- provider identity matched the search result.
 
-Deployment revision: **PENDING — no authorized production deployment path is exposed in this session.**
+This proves hostname/site discovery now resolves the previously missed endpoint without caller-supplied Datto UID.
 
-This record must not be marked complete until the normal production deployment is performed and governed production validation proves:
+### Generalized multi-page production proof
 
-1. `endpoint.device.search(hostname="SOSServer2024", site="Star of the Sea Catholic Church")` returns the correct endpoint and UID without caller-supplied UID;
-2. the returned UID feeds `endpoint.device.read` successfully;
-3. at least one additional existing endpoint validates generalized multi-page discovery;
-4. live MCP remains healthy in governed-read-plus-actions mode with unchanged governance;
-5. the deployed source/image revision and validation correlation IDs are recorded here;
-6. the roadmap milestone is changed from `active` to `complete` and deployed Grafana/Prometheus status is verified.
+A second governed search used hostname fragment `50282`:
+
+- search correlation: `corr_mcp_cd8c7148e0ff404f9c7887e633cb4410`;
+- returned hostname: `AOT-50282`;
+- returned UID: `69571572-83f7-1e33-9cdf-01717d4e74a4`;
+- provider pages examined: 4;
+- provider total count: 749;
+- `discovery_complete=true`;
+- match count: 1.
+
+The returned UID was then read successfully:
+
+- read correlation: `corr_mcp_091d472c91ea47e599978247c0708006`.
+
+This live proof demonstrates the corrected search continues beyond the initial provider pages and reaches genuine provider exhaustion rather than treating an early short page as authoritative completion.
+
+## Remaining acceptance item
+
+Repository observability has been prepared to expect the new production image/source revision. The Section Goal remains open only until the production-health/Grafana monitoring layer is reconciled and verified against this release.
 
 ## Section Goal final status
 
-**FAIL (BLOCKED) — source fix and pre-production validation pass, but the Section Goal cannot pass until the merged revision is deployed and the required governed production validations succeed.**
+**CORE FUNCTIONAL GOAL PASS / OBSERVABILITY CLOSEOUT PENDING.**
