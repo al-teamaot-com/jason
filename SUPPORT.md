@@ -39,24 +39,28 @@ Items remain on this list until the underlying issue is fixed and the expected b
 - **Priority:** P1
 - **Status:** Investigating
 - **Owner:** Jason Platform / Connector Support
-- **Issue:** Jason's governed Autotask ticket read path is failing for an active production ticket.
-- **Impact:** Jason can identify the Datto RMM alert and its associated Autotask ticket, but cannot reliably read the ticket details or ticket notes. This prevents complete autonomous troubleshooting documentation, ticket-state assessment, and normal ticket workflow processing.
+- **Issue:** Jason's governed Autotask ticket read and mutation paths are failing for an active production ticket.
+- **Impact:** Jason can identify the Datto RMM alert and its associated Autotask ticket, but cannot reliably read the ticket details/notes or perform the currently exposed governed ticket-note mutation. This prevents complete autonomous troubleshooting documentation, ticket-state assessment, and ticket closeout.
 - **Observed behavior:**
   - Datto RMM correctly identified critical antivirus alert `bd0882e0-8700-4985-ad89-f789b865c76e` on `AOT-50282`.
   - The alert correctly references Autotask ticket `T20260918.0005` / internal ticket ID `140629`.
   - `service.ticket.search` failed with `CAPABILITY_INVOCATION_FAILED`.
   - `service.ticket.read` failed with `CAPABILITY_INVOCATION_FAILED`.
   - `service.ticket.notes.search` was denied with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
-  - Governed Datto RMM reads and component execution continued to work, isolating the observed degradation to the Autotask read/authorization path rather than the entire Jason MCP service.
+  - Governed Datto RMM reads and component execution continued to work, isolating the observed degradation to the Autotask path rather than the endpoint itself.
+  - On 2026-09-18, an explicitly approved attempt to create an internal note on ticket `140629` using the dedicated `create_autotask_internal_note` governed tool failed with `CAPABILITY_INVOCATION_FAILED` and `provider_write_attempts=1`; no note was created.
+  - The active `service.ticket.update` capability requires a numeric tenant-specific Autotask status value and post-mutation readback verification. Because the read path is failing, Jason could not safely discover/verify the tenant's Complete status ID and did not guess or bypass governance.
 - **Expected behavior:** Jason should be able to search, read, and retrieve notes for authorized Autotask tickets through the governed read path, including `T20260918.0005`, without using direct provider access or bypassing governance.
-- **Scope:** Jason MCP -> governed Autotask read capabilities, especially `service.ticket.search`, `service.ticket.read`, and `service.ticket.notes.search`.
+- **Scope:** Jason MCP -> governed Autotask reads and bounded mutations, including `service.ticket.search`, `service.ticket.read`, `service.ticket.notes.search`, `service.ticket.note.create`, and `service.ticket.update`.
 - **Operational workaround:** Continue safe endpoint diagnostics through the governed Datto RMM path, but do not treat the Autotask ticket workflow as complete until ticket read access is restored.
 - **Verification required for closure:**
   1. Search for `T20260918.0005` succeeds through the governed Autotask path.
   2. Read the ticket by its governed resource identifier succeeds.
   3. Ticket notes can be retrieved by an authorized Jason request.
   4. No direct-provider bypass is required.
-  5. Repeat the reads in a fresh session to confirm the fix is durable.
+  5. Create and verify one bounded internal note on a controlled ticket through the governed mutation path.
+  6. Perform and verify one bounded ticket update through `service.ticket.update`.
+  7. Repeat the reads in a fresh session to confirm the fix is durable.
 - **Current diagnosis (2026-09-18):**
   - Reproduced `service.ticket.search` and `service.ticket.count` failures for `T20260918.0005` with `CAPABILITY_INVOCATION_FAILED`.
   - Reproduced the same `CAPABILITY_INVOCATION_FAILED` on a minimal `service.company.search`, showing the failure is broader than one ticket.
