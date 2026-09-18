@@ -68,3 +68,29 @@ Items remain on this list until the underlying issue is fixed and the expected b
 - **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`, reconfirmed during Support List processing.
 
 ---
+
+### SUPPORT-CONN-002 — Jason MCP transport intermittently returns UNAVAILABLE during governed work
+
+- **Priority:** P1
+- **Status:** Open
+- **Owner:** Jason Platform / Connector Support
+- **Issue:** The Jason MCP transport intermittently drops active governed requests with `UNAVAILABLE: McpServerError: Connection failed`.
+- **Impact:** Active endpoint troubleshooting is repeatedly interrupted. Readbacks and status polls must be retried, increasing latency and making long-running Datto jobs harder to monitor reliably.
+- **Observed behavior:**
+  - Multiple consecutive `UNAVAILABLE` transport failures occurred on 2026-09-18 while troubleshooting `AOT-50282`.
+  - Failures affected harmless reads such as `jason_mcp_status`, `automation.job.read`, `automation.job.output.read`, and alert reads.
+  - Successful retries often immediately followed failures, showing the issue is intermittent rather than a persistent Datto endpoint failure.
+  - The underlying Datto jobs remained intact across the transport failures; no evidence indicates the endpoint jobs themselves failed because of the disconnects.
+  - At the latest checkpoint, repeated consecutive failures made Jason MCP temporarily unreachable and blocked further governed endpoint work.
+- **Expected behavior:** Jason MCP should maintain reliable transport for governed reads/actions and allow stable polling of long-running provider jobs without repeated connection failures.
+- **Scope:** ChatGPT/connector -> Jason MCP transport/session reliability; affects governed Autotask and Datto workflows.
+- **Operational workaround:** Retry idempotent reads only; never redispatch a write or component solely because the readback transport failed. Preserve known job IDs and resume polling after MCP connectivity returns. Do not bypass Jason governance with direct-provider access.
+- **Verification required for closure:**
+  1. Run a sustained sequence of Jason status and governed read calls without `UNAVAILABLE` failures.
+  2. Launch one approved safe Datto diagnostic and poll it through terminal completion without transport loss.
+  3. Retrieve its StdOut successfully through the same governed session.
+  4. Confirm no provider job duplication occurred during the test.
+  5. Repeat from a fresh conversation/session.
+- **Last observed:** 2026-09-18 while troubleshooting `AOT-50282`; repeated failures culminated in multiple consecutive MCP connection failures that temporarily blocked further governed work.
+
+---
