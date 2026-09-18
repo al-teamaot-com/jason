@@ -11,11 +11,7 @@ from connectors.core.contracts import (
 )
 
 from .connector import AutotaskConnector
-from .impersonating_connector import (
-    AUTOTASK_AUTH_MODE_IMPERSONATED,
-    AutotaskImpersonatingConnector,
-    autotask_requester_authorization_mode,
-)
+from .impersonating_connector import AutotaskImpersonatingConnector
 
 
 AUTOTASK_MUTATION_ENABLED_ENV = "JASON_AUTOTASK_MUTATION_ENABLED"
@@ -126,11 +122,9 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
             if not autotask_mutation_execution_enabled():
                 raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
 
-            # Do not even resolve the write-capable execution credential unless
-            # provider-native requester authority is explicitly selected.
-            if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
-                raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
-
+            # Write requester authority is always provider-native and is
+            # enforced by prepare_request independently of the read requester
+            # authorization mode.
             credentials = self._secrets.resolve(
                 self.logical_secret,
                 request.context,
@@ -230,13 +224,10 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
                 f"{operation}"
             )
 
-        # Defense in depth for direct prepare_request callers. Mutations never
-        # use Jason-managed/service-account requester authority. This check is
-        # intentionally independent of the execute enablement gate so the
-        # dedicated read-only readiness tool can compile/preflight a future
-        # mutation without enabling or dispatching writes.
-        if autotask_requester_authorization_mode() != AUTOTASK_AUTH_MODE_IMPERSONATED:
-            raise PermissionError("AUTOTASK_WRITE_REQUIRES_REQUESTER_IMPERSONATION")
+        # Mutations are always provider-native requester-impersonated. The
+        # ordinary read requester-authorization mode is intentionally ignored
+        # here so reads can remain jason_managed while writes still resolve one
+        # trusted Autotask Resource and add ImpersonationResourceId.
 
         # Compile the bounded request using the base connector. Do not call the
         # parent impersonating prepare_request here because its supported

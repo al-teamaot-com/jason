@@ -8,8 +8,6 @@ from typing import Any, Mapping
 
 from connectors.autotask.connector import AutotaskConnector
 from connectors.autotask.impersonating_connector import (
-    AUTOTASK_AUTH_MODE_IMPERSONATED,
-    AUTOTASK_REQUESTER_AUTH_MODE_ENV,
     TrustedPrincipalBindingResolver,
 )
 from connectors.autotask.mutation_connector import (
@@ -99,16 +97,9 @@ def autotask_internal_note_mcp_surface_enabled() -> bool:
         "",
     ).strip().casefold()
 
-    requester_mode = os.getenv(
-        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
-        "",
-    ).strip().casefold()
-
     return (
         profile == AUTOTASK_INTERNAL_NOTE_PROFILE
         and mutation_enabled == "true"
-        and requester_mode
-        == AUTOTASK_AUTH_MODE_IMPERSONATED
     )
 
 
@@ -808,7 +799,7 @@ def apply_autotask_internal_note_activation(
     if not autotask_internal_note_mcp_surface_enabled():
         raise AutotaskInternalNoteActivationError(
             "internal-note MCP profile requires mutation "
-            "execution and requester impersonation gates"
+            "execution gate"
         )
 
     _validate_pre_activation_contract(

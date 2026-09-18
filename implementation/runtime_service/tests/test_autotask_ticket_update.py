@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from connectors.autotask.impersonating_connector import (
-    AUTOTASK_AUTH_MODE_IMPERSONATED,
+    AUTOTASK_AUTH_MODE_JASON_MANAGED,
     AUTOTASK_REQUESTER_AUTH_MODE_ENV,
 )
 from connectors.autotask.mutation_connector import (
@@ -105,7 +105,7 @@ def test_exact_profile_activates_generic_ticket_update(monkeypatch):
     )
     monkeypatch.setenv(
         AUTOTASK_REQUESTER_AUTH_MODE_ENV,
-        AUTOTASK_AUTH_MODE_IMPERSONATED,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
     )
 
     capabilities, providers = registries()
