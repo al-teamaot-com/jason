@@ -30,3 +30,8 @@ No endpoint remediation, reboot, isolation, or other disruptive action was perfo
 
 ## Closure state
 **PARTIAL / FAIL-CLOSED ACCEPTANCE PASSED.** The critical safety behavior is proven: healthy EDR/AV state cannot close a recurring/provider-indicated threat. Full production activation remains pending the terminal result/readback of the already-running Full scan plus final deployment/telemetry reconciliation. The playbook remains pilot/disabled until those gates are satisfied.
+
+## Continuation poll
+At the continuation poll, governed endpoint status still reported the Full Datto AV scan `in-progress` with provider scan timestamp `2026-09-18T22:30:51.452Z`. Governed scan history had not yet emitted a corresponding new terminal Full-scan record. Jason therefore preserved the scan-pending state and did not redispatch.
+
+Registry review status is now `threat_recurrence_gate_proven_scan_terminal_pending`; lifecycle remains `pilot` and `enabled=false`.
