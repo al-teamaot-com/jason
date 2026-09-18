@@ -45,9 +45,19 @@ from jason_runtime.autotask_internal_note import (
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.datto_component_scope import (
+    DATTO_AD_HOC_POWERSHELL_NAME,
+    DATTO_AD_HOC_POWERSHELL_UID,
+    DATTO_APPROVAL_MODE_PER_RUN,
     configured_datto_components,
     effective_datto_component_approval_mode,
     resolve_datto_component,
+)
+from jason_runtime.datto_component_approval_registry import (
+    approval_owner_identities,
+    approve_component as persist_component_approval,
+    component_metadata_fingerprint,
+    list_records as list_component_approval_records,
+    revoke_component as persist_component_revocation,
 )
 
 
@@ -1530,111 +1540,69 @@ def _canonical_datto_component_search_arguments(
     return normalized
 
 
-def _resolve_live_datto_component_name(
+def _resolve_live_datto_component_record(
     component_name: object,
-) -> tuple[str, str]:
-    """Resolve one exact component name through governed live catalog discovery."""
+) -> Mapping[str, Any]:
+    """Resolve one exact component through complete governed catalog discovery."""
 
-    requested_name = str(
-        component_name or ""
-    ).strip()
-
+    requested_name = str(component_name or "").strip()
     if not requested_name:
-        raise ValueError(
-            "DATTO_COMPONENT_NAME_REQUIRED"
-        )
+        raise ValueError("DATTO_COMPONENT_NAME_REQUIRED")
 
     lookup = _governed_read(
         capability_name="automation.component.search",
         arguments=_canonical_datto_component_search_arguments(
-            {
-                "name": requested_name,
-            }
+            {"name": requested_name}
         ),
     )
-
     if lookup.get("status") != "succeeded":
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
-        )
-
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
     evidence = lookup.get("evidence")
-
     if not isinstance(evidence, Mapping):
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
-        )
-
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
     data = evidence.get("data")
-
     if not isinstance(data, Mapping):
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
-        )
-
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
     if data.get("discovery_complete") is not True:
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE"
-        )
-
+        raise ValueError("DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE")
     matches = data.get("resource_matches")
-
     if not isinstance(matches, (list, tuple)):
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
-        )
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
 
-    exact: list[tuple[str, str]] = []
-
+    exact: list[Mapping[str, Any]] = []
     for item in matches:
         if not isinstance(item, Mapping):
             continue
-
-        live_name = str(
-            item.get("name") or ""
-        ).strip()
-
-        if (
-            live_name.casefold()
-            != requested_name.casefold()
-        ):
+        live_name = str(item.get("name") or "").strip()
+        if live_name.casefold() != requested_name.casefold():
             continue
-
-        live_uid = str(
-            item.get("resource_id") or ""
-        ).strip()
-
+        live_uid = str(item.get("resource_id") or "").strip()
         if not live_uid:
-            raise ValueError(
-                "DATTO_COMPONENT_IDENTITY_MISMATCH"
-            )
-
-        exact.append(
-            (
-                live_uid,
-                live_name,
-            )
-        )
+            raise ValueError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+        exact.append(dict(item))
 
     if not exact:
-        raise ValueError(
-            "DATTO_COMPONENT_NAME_MISMATCH"
-        )
-
+        raise ValueError("DATTO_COMPONENT_NAME_MISMATCH")
     unique = {
         (
-            uid,
-            name.casefold(),
+            str(item.get("resource_id") or "").strip(),
+            str(item.get("name") or "").strip().casefold(),
         )
-        for uid, name in exact
+        for item in exact
     }
-
     if len(unique) != 1:
-        raise ValueError(
-            "DATTO_COMPONENT_CATALOG_AMBIGUOUS"
-        )
-
+        raise ValueError("DATTO_COMPONENT_CATALOG_AMBIGUOUS")
     return exact[0]
+
+
+def _resolve_live_datto_component_name(
+    component_name: object,
+) -> tuple[str, str]:
+    record = _resolve_live_datto_component_record(component_name)
+    return (
+        str(record.get("resource_id") or "").strip(),
+        str(record.get("name") or "").strip(),
+    )
 
 
 
@@ -2181,6 +2149,32 @@ def _governed_execute(
             ),
         )
 
+        if (
+            datto_approval_mode != DATTO_APPROVAL_MODE_PER_RUN
+            and selected_component.approval_source == "durable_registry"
+            and selected_component.metadata_fingerprint
+        ):
+            try:
+                live_record = _resolve_live_datto_component_record(
+                    selected_component.name
+                )
+                current_fingerprint = component_metadata_fingerprint(
+                    live_record
+                )
+            except ValueError as exc:
+                return {
+                    "status": "rejected",
+                    "capability": capability_name,
+                    "error_code": "invalid_action_arguments",
+                    "reason_codes": [str(exc)],
+                }
+
+            if current_fingerprint != selected_component.metadata_fingerprint:
+                datto_approval_mode = DATTO_APPROVAL_MODE_PER_RUN
+                datto_approval_reason_code = (
+                    "DATTO_COMPONENT_STANDING_APPROVAL_STALE"
+                )
+
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
 
@@ -2444,6 +2438,375 @@ def create_autotask_internal_note(
 
 if _MCP_INTERNAL_NOTE_SURFACE_ENABLED:
     mcp.tool()(create_autotask_internal_note)
+
+
+_UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
+    "reboot",
+    "restart",
+    "shutdown",
+    "shut down",
+    "logoff",
+    "log off",
+    "poweroff",
+    "power off",
+    "uninstall",
+    "remove ",
+    "delete ",
+    "disable ",
+    "stop service",
+    "factory reset",
+    "wipe",
+    "format disk",
+)
+
+
+def _component_approval_owner() -> tuple[str, str]:
+    principal, organization, _, _ = _authenticated_write_identity()
+    owners = approval_owner_identities()
+    if not owners or principal not in owners:
+        raise PermissionError("DATTO_COMPONENT_APPROVAL_OWNER_REQUIRED")
+    return principal, organization
+
+
+def _component_unsupervised_block_reason(
+    record: Mapping[str, Any],
+) -> str | None:
+    uid = str(record.get("resource_id") or "").strip()
+    name = str(record.get("name") or "").strip()
+    if (
+        uid == DATTO_AD_HOC_POWERSHELL_UID
+        or name.casefold() == DATTO_AD_HOC_POWERSHELL_NAME.casefold()
+    ):
+        return "DATTO_COMPONENT_AD_HOC_SHELL_CANNOT_BE_UNSUPERVISED"
+
+    review_text = " ".join(
+        (
+            name,
+            str(record.get("description") or ""),
+        )
+    ).casefold()
+    for pattern in _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS:
+        if pattern in review_text:
+            return "DATTO_COMPONENT_DISRUPTIVE_OR_DESTRUCTIVE_REVIEW_REQUIRED"
+    return None
+
+
+@mcp.tool()
+def list_datto_component_approvals() -> dict[str, Any]:
+    """List server-controlled Datto component execution classifications.
+
+    Standing-safe components may be selected by Jason without a per-run
+    technician approval. Per-run components still require the exact technician
+    instruction for the specific execution. Durable registry approvals and
+    revocations are included without exposing provider credentials.
+    """
+
+    try:
+        _component_approval_owner()
+        configured = configured_datto_components()
+        records = list_component_approval_records()
+    except (PermissionError, ValueError) as exc:
+        return {
+            "status": "rejected",
+            "error_code": str(exc),
+        }
+
+    return {
+        "status": "succeeded",
+        "standing_safe": [
+            {
+                "uid": item.uid,
+                "name": item.name,
+                "approval_mode": item.approval_mode,
+                "approval_source": item.approval_source,
+                "metadata_fingerprint_present": bool(
+                    item.metadata_fingerprint
+                ),
+            }
+            for item in configured
+            if item.approval_mode == "standing_safe"
+        ],
+        "per_run": [
+            {
+                "uid": item.uid,
+                "name": item.name,
+                "approval_mode": item.approval_mode,
+                "approval_source": item.approval_source,
+            }
+            for item in configured
+            if item.approval_mode == "per_run"
+        ],
+        "durable_history": [
+            {
+                "uid": item.uid,
+                "name": item.name,
+                "status": item.status,
+                "approved_by": item.approved_by,
+                "approved_at": item.approved_at,
+                "reason": item.reason,
+                "revoked_by": item.revoked_by,
+                "revoked_at": item.revoked_at,
+                "revoke_reason": item.revoke_reason,
+            }
+            for item in records[-100:]
+        ],
+    }
+
+
+@mcp.tool()
+def approve_datto_component_for_unsupervised_use(
+    component_name: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only: approve one exact live Datto component for standing use.
+
+    The component is resolved from the complete governed Datto catalog. The
+    durable approval binds to its UID/name and reviewable metadata fingerprint.
+    Obvious disruptive/destructive components and the generic PowerShell runner
+    cannot be promoted to unsupervised authority by this tool.
+    """
+
+    try:
+        principal, _ = _component_approval_owner()
+        live = _resolve_live_datto_component_record(component_name)
+        blocked = _component_unsupervised_block_reason(live)
+        if blocked:
+            return {
+                "status": "rejected",
+                "error_code": blocked,
+                "component_name": str(live.get("name") or ""),
+            }
+        fingerprint = component_metadata_fingerprint(live)
+        record = persist_component_approval(
+            uid=str(live.get("resource_id") or "").strip(),
+            name=str(live.get("name") or "").strip(),
+            approved_by=principal,
+            metadata_fingerprint=fingerprint,
+            reason=reason,
+        )
+        selected = resolve_datto_component(
+            configured_datto_components(),
+            component_uid=record.uid,
+            component_name=record.name,
+            catalog_verified=True,
+        )
+    except (PermissionError, ValueError) as exc:
+        return {
+            "status": "rejected",
+            "error_code": str(exc),
+        }
+
+    if selected.approval_mode != "standing_safe":
+        return {
+            "status": "rejected",
+            "error_code": "DATTO_COMPONENT_CANNOT_BE_STANDING_SAFE",
+            "component_uid": record.uid,
+            "component_name": record.name,
+        }
+
+    return {
+        "status": "succeeded",
+        "component_uid": record.uid,
+        "component_name": record.name,
+        "approval_mode": "standing_safe",
+        "approved_by": record.approved_by,
+        "approved_at": record.approved_at,
+        "metadata_fingerprint": record.metadata_fingerprint,
+        "scope": "verified_managed_endpoints",
+        "variables": "empty_or_server-governed_only",
+    }
+
+
+@mcp.tool()
+def revoke_datto_component_unsupervised_approval(
+    component_name: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only: revoke standing approval and return the component to per-run."""
+
+    try:
+        principal, _ = _component_approval_owner()
+        requested = str(component_name or "").strip()
+        if not requested:
+            raise ValueError("DATTO_COMPONENT_NAME_REQUIRED")
+
+        configured = configured_datto_components()
+        matches = [
+            item
+            for item in configured
+            if item.name.casefold() == requested.casefold()
+        ]
+        if len(matches) == 1:
+            uid = matches[0].uid
+            name = matches[0].name
+        else:
+            live = _resolve_live_datto_component_record(requested)
+            uid = str(live.get("resource_id") or "").strip()
+            name = str(live.get("name") or "").strip()
+
+        record = persist_component_revocation(
+            uid=uid,
+            name=name,
+            revoked_by=principal,
+            reason=reason,
+        )
+        selected = resolve_datto_component(
+            configured_datto_components(),
+            component_uid=uid,
+            component_name=name,
+            catalog_verified=True,
+        )
+    except (PermissionError, ValueError) as exc:
+        return {
+            "status": "rejected",
+            "error_code": str(exc),
+        }
+
+    return {
+        "status": "succeeded",
+        "component_uid": record.uid,
+        "component_name": record.name,
+        "approval_mode": selected.approval_mode,
+        "revoked_by": record.revoked_by,
+        "revoked_at": record.revoked_at,
+    }
+
+
+def _component_bulk_names(component_names: list[str] | tuple[str, ...]) -> list[str]:
+    if not isinstance(component_names, (list, tuple)):
+        raise ValueError("DATTO_COMPONENT_BULK_SELECTION_INVALID")
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in component_names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        folded = name.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        names.append(name)
+    if not names:
+        raise ValueError("DATTO_COMPONENT_BULK_SELECTION_EMPTY")
+    if len(names) > 1000:
+        raise ValueError("DATTO_COMPONENT_BULK_SELECTION_TOO_LARGE")
+    return names
+
+
+@mcp.tool()
+def bulk_approve_datto_components_for_unsupervised_use(
+    component_names: list[str],
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only bulk standing approval for selected live Datto components."""
+
+    try:
+        principal, _ = _component_approval_owner()
+        names = _component_bulk_names(component_names)
+    except (PermissionError, ValueError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+    approved: list[dict[str, Any]] = []
+    ineligible: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    for name in names:
+        try:
+            live = _resolve_live_datto_component_record(name)
+            blocked = _component_unsupervised_block_reason(live)
+            if blocked:
+                ineligible.append({"name": name, "reason": blocked})
+                continue
+            fingerprint = component_metadata_fingerprint(live)
+            record = persist_component_approval(
+                uid=str(live.get("resource_id") or "").strip(),
+                name=str(live.get("name") or "").strip(),
+                approved_by=principal,
+                metadata_fingerprint=fingerprint,
+                reason=reason,
+            )
+            selected = resolve_datto_component(
+                configured_datto_components(),
+                component_uid=record.uid,
+                component_name=record.name,
+                catalog_verified=True,
+            )
+            if selected.approval_mode != "standing_safe":
+                ineligible.append({
+                    "name": record.name,
+                    "reason": "DATTO_COMPONENT_CANNOT_BE_STANDING_SAFE",
+                })
+                continue
+            approved.append({
+                "uid": record.uid,
+                "name": record.name,
+                "approved_at": record.approved_at,
+            })
+        except Exception as exc:
+            failed.append({"name": name, "reason": str(exc)})
+
+    return {
+        "status": "succeeded" if not failed else "partial",
+        "selected_count": len(names),
+        "approved_count": len(approved),
+        "ineligible_count": len(ineligible),
+        "failed_count": len(failed),
+        "approved": approved,
+        "ineligible": ineligible,
+        "failed": failed,
+    }
+
+
+@mcp.tool()
+def bulk_revoke_datto_component_unsupervised_approvals(
+    component_names: list[str],
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only bulk revoke of standing Datto component approvals."""
+
+    try:
+        principal, _ = _component_approval_owner()
+        names = _component_bulk_names(component_names)
+    except (PermissionError, ValueError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+    revoked: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for name in names:
+        try:
+            configured = configured_datto_components()
+            matches = [
+                item for item in configured
+                if item.name.casefold() == name.casefold()
+            ]
+            if len(matches) == 1:
+                uid, live_name = matches[0].uid, matches[0].name
+            else:
+                live = _resolve_live_datto_component_record(name)
+                uid = str(live.get("resource_id") or "").strip()
+                live_name = str(live.get("name") or "").strip()
+            record = persist_component_revocation(
+                uid=uid,
+                name=live_name,
+                revoked_by=principal,
+                reason=reason,
+            )
+            revoked.append({
+                "uid": record.uid,
+                "name": record.name,
+                "revoked_at": record.revoked_at,
+            })
+        except Exception as exc:
+            failed.append({"name": name, "reason": str(exc)})
+
+    return {
+        "status": "succeeded" if not failed else "partial",
+        "selected_count": len(names),
+        "revoked_count": len(revoked),
+        "failed_count": len(failed),
+        "revoked": revoked,
+        "failed": failed,
+    }
 
 
 @mcp.tool()
@@ -2806,6 +3169,37 @@ def _project_dynamic_evidence(
         return _safe(output)
 
     provider_data = data.get("provider_data")
+
+    if capability_name == "automation.component.search":
+        raw_matches = data.get("resource_matches")
+        if not isinstance(raw_matches, (list, tuple)):
+            raw_matches = []
+        projected_matches: list[dict[str, Any]] = []
+        for item in raw_matches[:5000]:
+            if not isinstance(item, Mapping):
+                continue
+            projected_matches.append(
+                {
+                    str(key): _safe(value)
+                    for key, value in item.items()
+                    if str(key) in {
+                        "resource_id",
+                        "name",
+                        "description",
+                        "category",
+                        "credentials_required",
+                        "variables",
+                    }
+                }
+            )
+        return {
+            "provider": _safe(output.get("provider")),
+            "provider_capability": _safe(output.get("provider_capability")),
+            "resource_matches": projected_matches,
+            "match_count": len(raw_matches),
+            "discovery_complete": data.get("discovery_complete") is True,
+            "raw_provider_evidence_exposed": False,
+        }
 
     # Never expose provider-wide raw discovery pages through the dynamic
     # interface. Prefer normalized resource matches when they exist.

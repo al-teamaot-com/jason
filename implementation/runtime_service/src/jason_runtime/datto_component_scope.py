@@ -6,6 +6,11 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
+from .datto_component_approval_registry import (
+    DattoComponentApprovalRegistryError,
+    latest_records_by_identity,
+)
+
 
 DATTO_EXECUTION_COMPONENTS_JSON_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON"
@@ -29,7 +34,7 @@ _VALID_APPROVAL_MODES = frozenset(
     }
 )
 
-_MAX_COMPONENTS = 16
+_MAX_COMPONENTS = 128
 _MAX_UID_LENGTH = 128
 _MAX_NAME_LENGTH = 255
 _FORBIDDEN_SCOPE_VALUES = frozenset(
@@ -147,6 +152,8 @@ class DattoApprovedComponent:
     uid: str
     name: str
     approval_mode: str = DATTO_APPROVAL_MODE_PER_RUN
+    metadata_fingerprint: str | None = None
+    approval_source: str = "server_config"
 
     @property
     def requires_explicit_approval(self) -> bool:
@@ -340,6 +347,9 @@ def _normalize_component(
     uid: object,
     name: object,
     approval_mode: object = DATTO_APPROVAL_MODE_PER_RUN,
+    *,
+    metadata_fingerprint: object = None,
+    approval_source: object = "server_config",
 ) -> DattoApprovedComponent:
     normalized_uid = str(uid or "").strip()
     normalized_name = str(name or "").strip()
@@ -387,11 +397,115 @@ def _normalize_component(
             "DATTO_COMPONENT_EXECUTION_APPROVAL_MODE_INVALID"
         )
 
+    normalized_fingerprint = str(
+        metadata_fingerprint or ""
+    ).strip().casefold() or None
+    normalized_source = str(
+        approval_source or "server_config"
+    ).strip() or "server_config"
+
+    if normalized_fingerprint is not None and (
+        len(normalized_fingerprint) != 64
+        or any(
+            ch not in "0123456789abcdef"
+            for ch in normalized_fingerprint
+        )
+    ):
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_APPROVAL_FINGERPRINT_INVALID"
+        )
+
     return DattoApprovedComponent(
         uid=normalized_uid,
         name=normalized_name,
         approval_mode=normalized_approval_mode,
+        metadata_fingerprint=normalized_fingerprint,
+        approval_source=normalized_source,
     )
+
+
+def _apply_durable_approval_registry(
+    components: tuple[DattoApprovedComponent, ...],
+) -> tuple[DattoApprovedComponent, ...]:
+    """Overlay durable owner approvals/revocations on server configuration.
+
+    The registry is control-plane state. An invalid present registry fails
+    closed rather than silently restoring previously revoked standing-safe
+    authority. Revocation downgrades an identity to per-run; approval may add
+    or upgrade one exact identity to standing-safe, subject to forced-per-run
+    exclusions in ``_normalize_component``.
+    """
+
+    try:
+        latest = latest_records_by_identity()
+    except DattoComponentApprovalRegistryError as error:
+        raise DattoComponentScopeError(str(error)) from error
+
+    if not latest:
+        return components
+
+    by_uid = {item.uid: item for item in latest.values()}
+    by_name = {item.name.casefold(): item for item in latest.values()}
+
+    output: list[DattoApprovedComponent] = []
+    consumed: set[tuple[str, str]] = set()
+
+    for component in components:
+        record = by_uid.get(component.uid)
+        if record is None:
+            record = by_name.get(component.name.casefold())
+
+        if record is None:
+            output.append(component)
+            continue
+
+        consumed.add((record.uid, record.name.casefold()))
+        if record.status == "revoked":
+            output.append(
+                _normalize_component(
+                    component.uid,
+                    component.name,
+                    DATTO_APPROVAL_MODE_PER_RUN,
+                    approval_source="durable_registry_revocation",
+                )
+            )
+            continue
+
+        output.append(
+            _normalize_component(
+                record.uid,
+                record.name,
+                DATTO_APPROVAL_MODE_STANDING_SAFE,
+                metadata_fingerprint=record.metadata_fingerprint,
+                approval_source="durable_registry",
+            )
+        )
+
+    for record in latest.values():
+        key = (record.uid, record.name.casefold())
+        if key in consumed or record.status != "approved":
+            continue
+        output.append(
+            _normalize_component(
+                record.uid,
+                record.name,
+                DATTO_APPROVAL_MODE_STANDING_SAFE,
+                metadata_fingerprint=record.metadata_fingerprint,
+                approval_source="durable_registry",
+            )
+        )
+
+    uids = [item.uid for item in output]
+    names = [item.name.casefold() for item in output]
+    if len(set(uids)) != len(uids) or len(set(names)) != len(names):
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS"
+        )
+    if len(output) > _MAX_COMPONENTS:
+        raise DattoComponentScopeError(
+            "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INVALID"
+        )
+    return tuple(output)
 
 
 def configured_datto_components() -> tuple[DattoApprovedComponent, ...]:
@@ -455,16 +569,20 @@ def configured_datto_components() -> tuple[DattoApprovedComponent, ...]:
                 "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_AMBIGUOUS"
             )
 
-        return tuple(components)
+        return _apply_durable_approval_registry(
+            tuple(components)
+        )
 
     legacy_uid = _env(DATTO_EXECUTION_COMPONENT_UID_ENV)
     legacy_name = _env(DATTO_EXECUTION_COMPONENT_NAME_ENV)
 
     if not legacy_uid and not legacy_name:
-        return ()
+        return _apply_durable_approval_registry(())
 
-    return (
-        _normalize_component(legacy_uid, legacy_name),
+    return _apply_durable_approval_registry(
+        (
+            _normalize_component(legacy_uid, legacy_name),
+        )
     )
 
 
