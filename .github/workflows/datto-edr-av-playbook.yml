@@ -13,10 +13,16 @@ on:
       - implementation/connectors/core/openbao_secrets.py
       - implementation/connectors/datto_edr/**
       - implementation/connectors/tests/test_datto_edr_connector.py
+      - implementation/connectors/autotask/mutation_connector.py
+      - implementation/connectors/tests/test_autotask_mutation_connector.py
       - implementation/orchestrator/resource_capability_catalog.py
       - implementation/orchestrator/tests/test_resource_capability_catalog.py
       - implementation/runtime_service/src/jason_runtime/composition.py
+      - implementation/runtime_service/src/jason_runtime/autotask_internal_note.py
+      - implementation/runtime_service/src/jason_runtime/autotask_ticket_update.py
       - implementation/runtime_service/tests/test_composition.py
+      - implementation/runtime_service/tests/test_autotask_internal_note.py
+      - implementation/runtime_service/tests/test_autotask_ticket_update.py
       - infrastructure/jason-runtime/compose.yaml
       - infrastructure/jason-runtime/jason-ops.sh
       - infrastructure/showcase/production_health_exporter.py
@@ -40,10 +46,16 @@ on:
       - implementation/connectors/core/openbao_secrets.py
       - implementation/connectors/datto_edr/**
       - implementation/connectors/tests/test_datto_edr_connector.py
+      - implementation/connectors/autotask/mutation_connector.py
+      - implementation/connectors/tests/test_autotask_mutation_connector.py
       - implementation/orchestrator/resource_capability_catalog.py
       - implementation/orchestrator/tests/test_resource_capability_catalog.py
       - implementation/runtime_service/src/jason_runtime/composition.py
+      - implementation/runtime_service/src/jason_runtime/autotask_internal_note.py
+      - implementation/runtime_service/src/jason_runtime/autotask_ticket_update.py
       - implementation/runtime_service/tests/test_composition.py
+      - implementation/runtime_service/tests/test_autotask_internal_note.py
+      - implementation/runtime_service/tests/test_autotask_ticket_update.py
       - infrastructure/jason-runtime/compose.yaml
       - infrastructure/jason-runtime/jason-ops.sh
       - infrastructure/showcase/production_health_exporter.py
@@ -94,6 +106,14 @@ jobs:
           implementation/autonomous_remediation/test_datto_edr_av_playbook_security_integration.py
           implementation/connectors/tests/test_datto_edr_connector.py
           tools/tests/test_provider_secret_provision.py
+      - name: Run production Autotask mutation compatibility tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
+        run: >-
+          python -m pytest -q
+          implementation/connectors/tests/test_autotask_mutation_connector.py
+          implementation/runtime_service/tests/test_autotask_internal_note.py
+          implementation/runtime_service/tests/test_autotask_ticket_update.py
       - name: Run endpoint-security governance catalog tests
         env:
           PYTHONPATH: implementation
