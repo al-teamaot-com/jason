@@ -255,17 +255,17 @@ Completed on 2026-09-18:
 
 1. Datto EDR connector, dedicated AppRole mounts, and provider-neutral `endpoint.security.*` reads are deployed in production.
 2. The live production MCP exposes and successfully executes all six canonical reads through Central Orchestrator.
-3. Exact AOT-wide `observe` grants are in place for the six read capabilities; no EDR execute/administer grants were added.
+3. Exact AOT-wide `observe` grants are in place for the six read capabilities. The separately governed `endpoint.security.scan.start` action has an exact AOT owner `execute` grant with approval required; no broad EDR administer grant exists.
 4. Persisted playbook registry/event storage is live at `/var/lib/jason/playbooks`.
 5. The playbook exporter is active and persistent under the `al` user service manager.
 6. Prometheus scrapes `jason-playbooks` successfully with `up=1`.
 7. Grafana has provisioned dashboard UID `jason-playbook-control-center`.
 8. Controlled read-backend acceptance against AOT-50282 proved exact identity, health/threat separation, detection detail, policy, scan-history, and quarantine reads.
-9. Acceptance evidence and the known scan-execution limitation are recorded in `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`.
+9. Read-backend acceptance is recorded in `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`; provider-native scan-start acceptance was completed on AOT-50282 on 2026-09-18 through `endpoint.security.scan.start`, with terminal scan-history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`.
 
 Remaining gates before full threat-branch activation:
 
-1. Add a governed provider-native Datto AV scan execute path. Scan verification remains `completed ScanHistoryTracking + clear post-scan governed detection search`; scan completion alone never means clean.
+1. Provider-native Datto AV scan execution is available through governed `endpoint.security.scan.start` with exact endpoint/agent binding, Quick/Full scan type, one-hour provider guard, single-attempt execution, and status/history readback. Full threat-branch activation must still enforce `completed ScanHistoryTracking + clear post-scan governed detection search`; scan completion alone never means clean.
 2. Retain clean uninstall/recovery as policy-gated for the supervised pilot.
 3. Require explicit technician approval for **every reboot instance**, including a normal 02:30 scheduled reboot.
 4. Confirm the live `Run Ad Hoc Command (PowerShell 2-5) [WIN]` component still uses the expected `Command` variable contract before first live use.
