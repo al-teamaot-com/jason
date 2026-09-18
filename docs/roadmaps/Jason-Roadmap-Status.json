@@ -180,6 +180,12 @@
       "title": "Datto endpoint hostname/site discovery completeness",
       "status": "blocked",
       "phase": "Capabilities"
+    },
+    {
+      "id": "OPS-TICKET-WORK-001",
+      "title": "Autotask ticket work-start lifecycle default",
+      "status": "complete",
+      "phase": "Operations"
     }
   ]
 }

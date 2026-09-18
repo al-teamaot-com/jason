@@ -67,12 +67,12 @@
     },
     {
       "type": "text",
-      "title": "Bounded Production Proof — 2026-09-16",
-      "description": "Historical proof context only; live authority is still evaluated per request.",
+      "title": "Governed Production Proof — through 2026-09-18",
+      "description": "Accepted production proofs and standing administrative policy. Live authority is still evaluated per request.",
       "gridPos": {"h": 7, "w": 24, "x": 0, "y": 4},
       "options": {
         "mode": "markdown",
-        "content": "### Datto RMM governed execution is live-proven for the controlled pilot\n\n- Controlled endpoint: **AOT-50282**\n- Controlled component: **Get-DNS Settings AOT Ver 06042025-1**\n- Final proof used **one provider mutation / one attempt** after explicit Owner approval.\n- Immediate Datto state was **active** with durable job reference and verified readback.\n- Jason used only read-only `automation.job.read` afterward until the job reached **completed**.\n- `direct_provider_access=false` remained intact; Central Orchestrator and exact-grant/per-execution approval remained authoritative.\n- No reboot or other disruptive action was used.\n\nThis proof does **not** authorize arbitrary Datto components, endpoints, shell text, or disruptive actions. Expansion requires a separate governed scope/authority decision."
+        "content": "### Governed execution and ticket-work lifecycle are production accepted\n\n**Datto component execution**\n- Standing-safe diagnostics can execute on verified managed endpoints.\n- An authenticated technician's direct instruction is approval for that exact per-run component/endpoint execution; Jason may warn but does not require a redundant second approval.\n- Live Datto component-name resolution is authoritative over stale caller component UID hints.\n- `direct_provider_access=false` and disruptive-action approval remain intact.\n\n**Autotask ticket work start**\n- When Jason begins substantive work, it claims the exact ticket to **Jason**, **In Progress**, **Remote Support**.\n- Existing device association is preserved. Missing device association is written only after exact DRMM UID ↔ active Autotask configuration correlation; hostname-only/ambiguous matches fail closed.\n- Ticket Type / Issue Type / Sub-Issue Type are preserved unless exact supported classification labels are available; labels are resolved from live Autotask metadata.\n- Controlled acceptance: `T20260914.0026` / ID `140439`; one bounded mutation, readback verified.\n\n**Known transport issue**\n- `SUPPORT-CONN-002` is open: intermittent client-side MCP `UNAVAILABLE / Connection failed` reproduced while `jason-mcp-pilot` remained healthy and immediate retries succeeded. Process health alone does not prove end-to-end MCP transport health."
       }
     },
     {
@@ -105,6 +105,6 @@
   "timezone": "browser",
   "title": "Jason Governed Actions",
   "uid": "jason-governed-actions",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

@@ -57,12 +57,14 @@ Preserve `direct_provider_access=false`, Central Orchestrator authority, exact r
 
 Before troubleshooting:
 1. Resolve the exact Autotask ticket.
-2. Resolve the client/organization.
-3. Extract the device selector from ticket/alert evidence.
-4. Resolve the exact DRMM device UID; never choose the first ambiguous match.
-5. Associate the ticket to the device/CI when available.
-6. Resolve the corresponding Datto EDR/AV endpoint using durable provider mapping.
-7. Record trigger timestamp, alert IDs, correlation IDs, and relevant provider IDs.
+2. Execute Jason's mandatory ticket-work-start lifecycle: queue **Jason**, status **In Progress**, Work Type **Remote Support**.
+3. Resolve the client/organization.
+4. Extract the device selector from ticket/alert evidence.
+5. Resolve the exact DRMM device UID; never choose the first ambiguous match.
+6. Preserve an existing ticket configuration item or associate one only through the deterministic DRMM UID ↔ active Autotask configuration relationship defined in `docs/operations/Jason-Autotask-Ticket-Work-Lifecycle.md`.
+7. Preserve existing Ticket Type / Issue Type / Sub-Issue Type unless the playbook has exact supported classification labels; resolve labels from live Autotask metadata before mutation.
+8. Resolve the corresponding Datto EDR/AV endpoint using durable provider mapping.
+9. Record trigger timestamp, alert IDs, correlation IDs, and relevant provider IDs.
 
 If identity remains ambiguous: `state=identification_blocked`; document and escalate.
 
