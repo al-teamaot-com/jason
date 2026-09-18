@@ -10,12 +10,14 @@ The workflow is intentionally bounded and deterministic:
 * provider job success is never interpreted as endpoint health;
 * every remediation step has an explicit per-run attempt limit;
 * duplicate provider jobs are prevented with deterministic idempotency keys;
-* scheduled 02:30 local reboot is standing-authorized only inside this named
-  playbook and always resumes verification at 03:30 local time;
-* immediate reboot remains approval-required;
+* every reboot, including a scheduled 02:30 local reboot, requires explicit
+  technician approval for that specific instance;
+* approved scheduled reboots resume verification at 03:30 local time;
 * clean uninstall/recovery remains policy-gated during the supervised pilot;
 * read/poll failure never causes a second remediation dispatch;
-* the only terminal outcomes are Healthy or EscalationRequired.
+* product health and security-incident resolution remain separate;
+* threat-triggered runs cannot close on product health alone;
+* the terminal outcomes remain Healthy or EscalationRequired.
 """
 
 from __future__ import annotations
@@ -24,9 +26,21 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
+from datto_edr_av_security import (
+    CompromiseSignal,
+    ScanObservation,
+    SecurityAssessment,
+    SecurityDisposition,
+    SecurityTrigger,
+    ThreatObservation,
+    classify_security,
+)
 
+
+PLAYBOOK_ID = "datto_edr_av"
+PLAYBOOK_ID = "datto_edr_av"
 PLAYBOOK_NAME = "Jason - Datto EDR/AV Diagnose & Repair"
-PLAYBOOK_VERSION = "1.1.0"
+PLAYBOOK_VERSION = "1.2.0"
 HEALTHY_STATUS = "Healthy"
 
 HEALTH_CHECK_COMPONENT = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -48,6 +62,10 @@ class PlaybookState(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     AWAITING_SCHEDULED_REBOOT = "awaiting_scheduled_reboot"
     AWAITING_POST_REBOOT_VERIFY = "awaiting_post_reboot_verify"
+    THREAT_INVESTIGATION = "threat_investigation"
+    THREAT_CONTAINED = "threat_contained"
+    AWAITING_SECURITY_VERIFICATION = "awaiting_security_verification"
+    FALSE_POSITIVE_REVIEW = "false_positive_review"
     HEALTHY = "healthy"
     ESCALATION_REQUIRED = "escalation_required"
 
@@ -155,6 +173,11 @@ class PlaybookRun:
     evidence_refs: list[str] = field(default_factory=list)
     provider_job_ids: list[str] = field(default_factory=list)
     last_health: HealthObservation | None = None
+    security_trigger: SecurityTrigger = SecurityTrigger.HEALTH_ONLY
+    last_threats: tuple[ThreatObservation, ...] = ()
+    last_security: SecurityAssessment | None = None
+    last_scan: ScanObservation | None = None
+    recurrence_verified: bool = False
     escalation_reasons: list[str] = field(default_factory=list)
     force_update_pending_reboot: bool = False
     scheduled_reboot_used: bool = False
@@ -174,8 +197,10 @@ class PlaybookRun:
         self.evidence_refs.extend(evidence_refs)
         if action.step == RepairStep.SCHEDULED_REBOOT:
             self.scheduled_reboot_used = True
+            self.state = PlaybookState.AWAITING_SCHEDULED_REBOOT
         if action.step == RepairStep.RECOVERY_REBOOT:
             self.recovery_reboot_used = True
+            self.state = PlaybookState.AWAITING_SCHEDULED_REBOOT
 
     def record_execution(self, action: PlannedAction, result: ExecutionObservation) -> None:
         """Attach provider evidence without treating provider success as health."""
@@ -195,14 +220,105 @@ class PlaybookRun:
         } and result.force_update_appears_hung:
             self.force_update_pending_reboot = True
 
+    @property
+    def security_resolution_required(self) -> bool:
+        return self.security_trigger.requires_threat_resolution
+
+    @property
+    def threat_resolved(self) -> bool:
+        return bool(self.last_security and self.last_security.resolution_proven)
+
+    @property
+    def completion_ready(self) -> bool:
+        health_ready = bool(
+            self.last_health and self.last_health.is_authoritatively_healthy
+        )
+        if not health_ready:
+            return False
+        if not self.security_resolution_required:
+            return True
+        return bool(
+            self.threat_resolved
+            and self.last_scan
+            and self.last_scan.clean_for_completion
+            and self.recurrence_verified
+        )
+
     def record_health(self, observation: HealthObservation) -> None:
         self.last_health = observation
         self.evidence_refs.extend(observation.evidence_refs)
         if observation.is_authoritatively_healthy:
             self.force_update_pending_reboot = False
-            self.state = PlaybookState.HEALTHY
+            if self.security_resolution_required:
+                self.state = (
+                    PlaybookState.HEALTHY
+                    if self.completion_ready
+                    else PlaybookState.AWAITING_SECURITY_VERIFICATION
+                )
+            else:
+                self.state = PlaybookState.HEALTHY
         else:
             self.state = PlaybookState.VERIFYING
+
+    def record_security_evidence(
+        self,
+        threats: Sequence[ThreatObservation],
+        *,
+        scan: ScanObservation | None = None,
+    ) -> SecurityAssessment:
+        self.last_threats = tuple(threats)
+        if scan is not None:
+            self.last_scan = scan
+            self.evidence_refs.extend(scan.evidence_refs)
+        assessment = classify_security(self.last_threats, scan=self.last_scan)
+        self.last_security = assessment
+        self.evidence_refs.extend(assessment.evidence_refs)
+
+        if assessment.disposition == SecurityDisposition.SECURITY_INCIDENT_ESCALATION:
+            self.escalate(assessment.reason)
+        elif assessment.disposition == SecurityDisposition.FALSE_POSITIVE_REVIEW:
+            self.state = PlaybookState.FALSE_POSITIVE_REVIEW
+        elif assessment.disposition in {
+            SecurityDisposition.DETECTION_CONTAINED,
+            SecurityDisposition.MALICIOUS_ARTIFACT_CONTAINED,
+        }:
+            self.state = PlaybookState.THREAT_CONTAINED
+        elif assessment.disposition == SecurityDisposition.RESOLVED:
+            self.state = (
+                PlaybookState.HEALTHY
+                if self.completion_ready
+                else PlaybookState.AWAITING_SECURITY_VERIFICATION
+            )
+        else:
+            self.state = PlaybookState.THREAT_INVESTIGATION
+        return assessment
+
+    def record_recurrence_check(
+        self,
+        *,
+        clear: bool,
+        evidence_refs: Sequence[str] = (),
+    ) -> None:
+        self.evidence_refs.extend(evidence_refs)
+        self.recurrence_verified = bool(clear)
+        if not clear:
+            self.state = PlaybookState.THREAT_INVESTIGATION
+            return
+        if self.security_resolution_required:
+            self.state = (
+                PlaybookState.HEALTHY
+                if self.completion_ready
+                else PlaybookState.AWAITING_SECURITY_VERIFICATION
+            )
+
+    def record_scan(self, scan: ScanObservation) -> SecurityAssessment | None:
+        self.last_scan = scan
+        self.evidence_refs.extend(scan.evidence_refs)
+        if self.last_threats:
+            return self.record_security_evidence(self.last_threats, scan=scan)
+        if self.security_resolution_required:
+            self.state = PlaybookState.AWAITING_SECURITY_VERIFICATION
+        return None
 
     def escalate(self, reason: str) -> None:
         if reason not in self.escalation_reasons:
@@ -244,6 +360,14 @@ def next_action(run: PlaybookRun, observation: HealthObservation | None = None) 
     health = run.last_health
     if health is None:
         return initial_health_check(run)
+
+    if health.is_authoritatively_healthy and run.security_resolution_required:
+        run.state = (
+            PlaybookState.HEALTHY
+            if run.completion_ready
+            else PlaybookState.AWAITING_SECURITY_VERIFICATION
+        )
+        return None
 
     if not health.endpoint_reachable:
         run.escalate("Endpoint is unreachable; governed remediation cannot be verified safely.")
@@ -396,13 +520,22 @@ def internal_ticket_note(run: PlaybookRun) -> str:
     if run.state == PlaybookState.HEALTHY:
         version = f" EDR {run.last_health.edr_version}." if run.last_health and run.last_health.edr_version else ""
         reboot = "Yes" if run.scheduled_reboot_used or run.recovery_reboot_used else "No"
+        if run.security_resolution_required:
+            scan = run.last_scan.status.value if run.last_scan else "not_run"
+            return (
+                f"{PLAYBOOK_NAME}: complete. SecurityStackHealthy=yes; "
+                f"ThreatResolved=yes; scan={scan}.{version} Reboot required: {reboot}."
+            )
         return f"{PLAYBOOK_NAME}: remediation complete. Status=Healthy.{version} Reboot required: {reboot}."
 
     if run.state == PlaybookState.AWAITING_SCHEDULED_REBOOT:
         return f"{PLAYBOOK_NAME}: repair pending 02:30 local reboot; automatic health verification scheduled for 03:30."
 
     if run.state == PlaybookState.AWAITING_APPROVAL:
-        return f"{PLAYBOOK_NAME}: standard repair exhausted; policy-gated clean recovery is pending authorization."
+        return (
+            f"{PLAYBOOK_NAME}: explicit technician approval is required "
+            "before the next disruptive or policy-gated action."
+        )
 
     if run.state == PlaybookState.ESCALATION_REQUIRED:
         reasons = "; ".join(run.escalation_reasons) or "bounded repair ladder exhausted"
@@ -416,16 +549,73 @@ def internal_ticket_note(run: PlaybookRun) -> str:
 def metrics_payload(run: PlaybookRun) -> Mapping[str, Any]:
     """Small stable payload for Jason/Grafana playbook metrics."""
 
+    security = run.last_security
+    scan = run.last_scan
     return {
+        "playbook_id": PLAYBOOK_ID,
         "playbook": PLAYBOOK_NAME,
         "version": PLAYBOOK_VERSION,
         "state": run.state.value,
+        "trigger": run.security_trigger.value,
         "healthy": run.state == PlaybookState.HEALTHY,
+        "security_stack_healthy": bool(
+            run.last_health and run.last_health.is_authoritatively_healthy
+        ),
+        "threat_resolution_required": run.security_resolution_required,
+        "threat_resolved": run.threat_resolved,
+        "security_disposition": (
+            security.disposition.value if security else SecurityDisposition.NOT_APPLICABLE.value
+        ),
+        "compromise_signal": (
+            security.compromise_signal.value
+            if security
+            else CompromiseSignal.NOT_ESTABLISHED.value
+        ),
+        "scan_status": scan.status.value if scan else "not_run",
+        "scan_clean": bool(scan and scan.clean_for_completion),
+        "recurrence_verified": run.recurrence_verified,
+        "evidence_sources": (
+            tuple(source.value for source in security.source_set) if security else ()
+        ),
         "escalated": run.state == PlaybookState.ESCALATION_REQUIRED,
         "attempt_count": len(run.attempt_order),
         "scheduled_reboot_used": run.scheduled_reboot_used,
         "recovery_reboot_used": run.recovery_reboot_used,
         "clean_recovery_used": RepairStep.CLEAN_UNINSTALL in run.attempted_steps,
+    }
+
+
+def telemetry_event(
+    run: PlaybookRun,
+    *,
+    timestamp: str,
+    outcome: str,
+    duration_seconds: float,
+    verification_passed: bool,
+    steps: Sequence[Mapping[str, str]] = (),
+    reopened: bool = False,
+) -> Mapping[str, Any]:
+    """Build the low-cardinality event consumed by playbook observability."""
+
+    metrics = metrics_payload(run)
+    return {
+        "timestamp": str(timestamp),
+        "playbook_id": PLAYBOOK_ID,
+        "version": PLAYBOOK_VERSION,
+        "outcome": str(outcome),
+        "classification": run.security_trigger.value,
+        "security_disposition": metrics["security_disposition"],
+        "compromise_signal": metrics["compromise_signal"],
+        "verification_passed": bool(verification_passed),
+        "recurrence_verified": run.recurrence_verified,
+        "attempt_count": len(run.attempt_order),
+        "duration_seconds": max(0.0, float(duration_seconds)),
+        "evidence_sources": list(metrics["evidence_sources"]),
+        "steps": [
+            {"name": str(item.get("name", "")), "result": str(item.get("result", ""))}
+            for item in steps
+        ],
+        "reopened": bool(reopened),
     }
 
 
@@ -449,6 +639,21 @@ def escalation_payload(run: PlaybookRun) -> Mapping[str, Any]:
         "av_healthy": health.av_healthy if health else None,
         "endpoint_protection_service_running": health.endpoint_protection_service_running if health else None,
         "security_center_healthy": health.security_center_healthy if health else None,
+        "security_trigger": run.security_trigger.value,
+        "security_disposition": (
+            run.last_security.disposition.value if run.last_security else None
+        ),
+        "compromise_signal": (
+            run.last_security.compromise_signal.value if run.last_security else None
+        ),
+        "scan_status": run.last_scan.status.value if run.last_scan else None,
+        "recurrence_verified": run.recurrence_verified,
+        "threat_ids": tuple(
+            value
+            for threat in run.last_threats
+            for value in (threat.alert_id, threat.detection_id)
+            if value
+        ),
         "reasons": tuple(run.escalation_reasons),
     }
 
@@ -494,13 +699,11 @@ def _av_update_action(
 
 
 def _scheduled_reboot_action(run: PlaybookRun, step: RepairStep) -> PlannedAction:
-    run.state = PlaybookState.AWAITING_SCHEDULED_REBOOT
+    run.state = PlaybookState.AWAITING_APPROVAL
     return PlannedAction(
         step=step,
         kind=ActionKind.SCHEDULED_REBOOT,
-        approval_class=(
-            ApprovalClass.STANDING_SAFE if step == RepairStep.SCHEDULED_REBOOT else ApprovalClass.POLICY_GATED
-        ),
+        approval_class=ApprovalClass.APPROVAL_REQUIRED,
         operation=SCHEDULED_REBOOT_COMPONENT,
         reason="Schedule the playbook's bounded 02:30 local reboot and resume verification at 03:30 local.",
         verify_after=True,

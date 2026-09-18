@@ -82,6 +82,8 @@ REQUIRED_SECRET_MOUNTS = frozenset(
         "/run/jason-secrets/openbao/autotask-write/secret_id",
         "/run/jason-secrets/openbao/it-glue/role_id",
         "/run/jason-secrets/openbao/it-glue/secret_id",
+        "/run/jason-secrets/openbao/datto-edr/role_id",
+        "/run/jason-secrets/openbao/datto-edr/secret_id",
         "/run/jason-secrets/openbao/microsoft-graph/role_id",
         "/run/jason-secrets/openbao/microsoft-graph/secret_id",
         "/run/jason-secrets/openbao/openai/role_id",

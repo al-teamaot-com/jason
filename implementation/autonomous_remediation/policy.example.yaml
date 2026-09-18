@@ -21,7 +21,7 @@ rules:
   - id: jason-datto-edr-av-standing-safe
     description: Permit bounded standing-safe steps inside Jason - Datto EDR/AV Diagnose & Repair for one exact workstation target.
     playbook: Jason - Datto EDR/AV Diagnose & Repair
-    playbook_version: 1.1.0
+    playbook_version: 1.2.0
     maximum_targets: 1
     outcome: allow
     autonomy_level: low_risk_autonomous
@@ -30,7 +30,6 @@ rules:
       - Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1
       - Datto EDR Maintenance [WIN]
       - Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024
-      - 230 AM Scheduled Reboot AOT Ver 11282024
     conditions:
       exact_device_identity_required: true
       exact_client_scope_required: true
@@ -39,6 +38,7 @@ rules:
       per_step_attempt_limit: 1
       duplicate_dispatch_prohibited: true
       direct_provider_access: false
+      scheduled_reboot_requires_approval: true
       scheduled_reboot_local_time: "02:30"
       scheduled_verify_local_time: "03:30"
       immediate_reboot_allowed: false
@@ -63,7 +63,7 @@ rules:
   - id: jason-datto-edr-av-clean-recovery-pilot
     description: Keep the clean EDR/AV uninstall and recovery branch approval-gated during supervised pilot validation.
     playbook: Jason - Datto EDR/AV Diagnose & Repair
-    playbook_version: 1.1.0
+    playbook_version: 1.2.0
     operations:
       - Uninstall Datto EDR / AV AOT Ver 11052025-1
       - recovery scheduled reboot

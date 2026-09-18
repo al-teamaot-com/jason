@@ -76,8 +76,12 @@ def test_hung_av_update_schedules_reboot_and_never_redispatches_same_step():
     )
     action2 = next_action(r, h)
     assert action2.step == RepairStep.SCHEDULED_REBOOT
+    assert action2.approval_class == ApprovalClass.APPROVAL_REQUIRED
+    assert r.state == PlaybookState.AWAITING_APPROVAL
     assert action2.schedule_local == "02:30"
     assert action2.resume_local == "03:30"
+    r.record_job(action2)
+    assert r.state == PlaybookState.AWAITING_SCHEDULED_REBOOT
 
 
 def test_post_reboot_allows_one_more_av_update_then_clean_recovery():
@@ -121,8 +125,10 @@ def test_clean_recovery_sequence_is_bounded():
     r.record_job(clean)
     recovery_reboot = next_action(r, h)
     assert recovery_reboot.step == RepairStep.RECOVERY_REBOOT
-    assert recovery_reboot.approval_class == ApprovalClass.POLICY_GATED
+    assert recovery_reboot.approval_class == ApprovalClass.APPROVAL_REQUIRED
+    assert r.state == PlaybookState.AWAITING_APPROVAL
     r.record_job(recovery_reboot)
+    assert r.state == PlaybookState.AWAITING_SCHEDULED_REBOOT
     maintenance = next_action(r, h)
     assert maintenance.step == RepairStep.RECOVERY_MAINTENANCE
     r.record_job(maintenance)

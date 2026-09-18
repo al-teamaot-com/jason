@@ -158,6 +158,37 @@ Runtime identity:
 
 The Datto bearer access token derived from these credentials is runtime-only and must never be persisted in OpenBao, Git, chat, normal logs, or evidence.
 
+## Datto EDR/AV contract
+
+Logical secret: `datto_edr.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/datto-edr/production/read-only`
+
+Durable OpenBao fields:
+
+- `api_url`
+- `api_token`
+
+Runtime identity:
+
+- policy: `jason-datto-edr-read`
+- AppRole: `jason-datto-edr-read`
+- protected artifacts: `/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle/`
+
+The provider-generated Datto EDR API token is durable only inside OpenBao. The
+runtime receives it only after a short-lived AppRole login and must not print,
+persist, log, or copy it into evidence. The tenant API currently authenticates
+this token through LoopBack's `access_token` request parameter. Jason audit
+records contain only the provider operation/path and never the token-bearing
+query string.
+
+The Datto EDR runtime policy is read-only at the Jason capability layer.
+Provider mutation routes such as scan, quarantine, restore, isolation, archive,
+and response are not registered by the read connector even if the associated
+provider user/token could technically access them.
+
 ## IT Glue contract
 
 Logical secret: `it_glue.readonly`

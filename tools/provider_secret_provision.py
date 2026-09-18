@@ -61,6 +61,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/datto-rmm-read-approle"
         ),
     },
+    "datto_edr": {
+        "logical_name": "datto_edr.readonly",
+        "secret_path": "secret/data/connectors/datto-edr/production/read-only",
+        "fields": ("api_url", "api_token"),
+        "required_fields": ("api_url", "api_token"),
+        "policy_name": "jason-datto-edr-read",
+        "role_name": "jason-datto-edr-read",
+        "connector_identity": "datto-edr-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle"
+        ),
+    },
     "it_glue": {
         "logical_name": "it_glue.readonly",
         "secret_path": "secret/data/connectors/it-glue/production/read-only",

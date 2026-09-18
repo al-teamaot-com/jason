@@ -129,6 +129,7 @@ def test_live_provisioning_uses_hidden_admin_and_secret_prompts() -> None:
     assert "OpenBao password for" in sources
     assert "api_key" in sources
     assert "api_secret" in sources
+    assert "api_token" in sources
     assert "access_key_id" in sources
     assert "secret_access_key" in sources
     assert "secret_values_printed" in sources
@@ -177,5 +178,22 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert "finally:" in source
     assert '"autotask.write"' in source
     assert '"datto_rmm.readonly"' in source
+    assert '"datto_edr.readonly"' in source
     assert '"it_glue.readonly"' in source
     assert '"aws_ses.sendmail"' in source
+
+
+def test_datto_edr_contract_uses_dedicated_readonly_identity() -> None:
+    spec = PROVIDERS["datto_edr"]
+    assert spec["logical_name"] == "datto_edr.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/datto-edr/production/read-only"
+    )
+    assert spec["fields"] == ("api_url", "api_token")
+    assert spec["required_fields"] == ("api_url", "api_token")
+    assert spec["policy_name"] == "jason-datto-edr-read"
+    assert spec["role_name"] == "jason-datto-edr-read"
+    assert spec["connector_identity"] == "datto-edr-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle"
+    )
