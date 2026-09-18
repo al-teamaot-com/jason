@@ -61,7 +61,7 @@ def test_plan_uses_existing_resource_gateway_and_bounded_connectors():
     assert plan.reads[1].invocation.capability == "datto_rmm.device.search"
     assert plan.reads[1].invocation.arguments == {
         "hostname": "device-a",
-        "page": 1,
+        "page": 0,
         "max": 3,
     }
 
@@ -76,7 +76,7 @@ def test_plan_preserves_at_least_two_datto_candidates_for_ambiguity_detection():
 
     assert plan.reads[1].invocation.arguments == {
         "hostname": "SERVER",
-        "page": 1,
+        "page": 0,
         "max": 2,
     }
 
