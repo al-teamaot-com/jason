@@ -4,6 +4,13 @@
 **Status:** A new Section Goal is active: Datto endpoint hostname/site discovery completeness. The source fix is merged to the authoritative branch at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`, but production deployment is blocked because this session has no authorized production deployment capability/host access. The live MCP remains healthy and governed, but still exhibits the pre-fix endpoint-search contract; therefore this Section Goal is not complete.  
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
+## Continuity control anchors
+
+- **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+- **Last durable success:** preserved in the governed production proof and observability sections below.
+- **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
+- **Next safe actions:** complete source and CI reconciliation, then perform a fresh production deployment preflight before any production change.
+
 ## Durable operating principle
 
 > **ChatGPT reasons. Jason governs and executes.**
