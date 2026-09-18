@@ -693,3 +693,24 @@ def test_non_datto_action_arguments_are_unchanged():
     )
 
     assert result == original
+
+
+def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.note.create",
+        {
+            "ticket_id": 123,
+            "note": "Diagnostic acceptance note",
+            "title": "Jason diagnostic",
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "ticketID": 123,
+            "description": "Diagnostic acceptance note",
+            "noteType": 3,
+            "publish": 1,
+            "title": "Jason diagnostic",
+        }
+    }

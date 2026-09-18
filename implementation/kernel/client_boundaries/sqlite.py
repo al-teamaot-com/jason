@@ -80,7 +80,14 @@ class SQLiteClientBoundaryStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(str(self.path))
+        # MCP synchronous tools are dispatched through worker threads while
+        # the runtime is process-cached. Allow this durable connection to be
+        # used by the governed runtime across those threads, matching the
+        # thread-safe configuration used by Jason's identity stores.
+        self.connection = sqlite3.connect(
+            str(self.path),
+            check_same_thread=False,
+        )
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(_SCHEMA)
         self.connection.commit()

@@ -1691,6 +1691,27 @@ def _canonicalize_governed_action_arguments(
 
     raw = dict(arguments or {})
 
+    if capability_name == SERVICE_TICKET_NOTE_CREATE:
+        if "payload" in raw:
+            return raw
+
+        allowed = {"ticket_id", "ticketID", "note", "description", "title"}
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                "AUTOTASK_INTERNAL_NOTE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+
+        ticket_id = raw.get("ticket_id", raw.get("ticketID"))
+        note = raw.get("note", raw.get("description"))
+        title = raw.get("title", "")
+        return _internal_note_arguments(
+            ticket_id=ticket_id,
+            note=note,
+            title=title,
+        )
+
     if capability_name == "endpoint.alert.resolve":
         allowed = {"alert_uid", "device_uid", "resource_id"}
         unknown = set(raw) - allowed
