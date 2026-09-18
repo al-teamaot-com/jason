@@ -115,7 +115,7 @@ jobs:
           implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
           implementation/autonomous_remediation/datto_edr_av_security.py
           implementation/autonomous_remediation/datto_edr_av_api_contract.py
-          implementation/orchestrator/datto_threat_correlation.py
+          implementation/connectors/datto_edr/threat_correlation.py
           implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
           implementation/connectors/datto_edr/connector.py
       - name: Run Datto EDR AV playbook and connector tests
@@ -130,9 +130,8 @@ jobs:
           implementation/autonomous_remediation/test_datto_edr_av_playbook_security_integration.py
           implementation/connectors/tests/test_datto_edr_connector.py
           implementation/autonomous_remediation/test_datto_edr_av_correlation.py
-          implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
           tools/tests/test_provider_secret_provision.py
-      - name: Run production Autotask mutation compatibility tests
+      - name: Run production mutation compatibility tests
         env:
           PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
         run: >-
@@ -140,6 +139,7 @@ jobs:
           implementation/connectors/tests/test_autotask_mutation_connector.py
           implementation/runtime_service/tests/test_autotask_internal_note.py
           implementation/runtime_service/tests/test_autotask_ticket_update.py
+          implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
       - name: Run endpoint-security governance catalog tests
         env:
           PYTHONPATH: implementation

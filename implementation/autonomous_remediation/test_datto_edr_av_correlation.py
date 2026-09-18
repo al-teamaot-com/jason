@@ -1,6 +1,6 @@
 import pytest
 
-from orchestrator.datto_threat_correlation import (
+from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
     ThreatCorrelationError,
     correlate_drmm_threat_to_edr_detection,

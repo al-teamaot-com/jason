@@ -29,7 +29,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
-from orchestrator.datto_threat_correlation import (
+from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
     ThreatCorrelationError,
     correlate_drmm_threat_to_edr_detection,
