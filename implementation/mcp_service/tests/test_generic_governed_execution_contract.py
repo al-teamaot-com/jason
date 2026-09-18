@@ -684,6 +684,159 @@ def test_datto_action_requires_component_identity(monkeypatch):
         )
 
 
+
+
+def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch):
+    calls = []
+
+    def governed_read(*, capability_name, arguments):
+        calls.append((capability_name, dict(arguments)))
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 140629,
+                                "companyID": 0,
+                                "configurationItemID": None,
+                                "issueType": None,
+                                "title": "Security alert for AOT-50282",
+                            }
+                        ]
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [
+                        {
+                            "resource_id": "device-uid-1",
+                            "hostname": "AOT-50282",
+                        }
+                    ]
+                },
+            }
+        if capability_name == "service.configuration.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 1120,
+                                "companyID": 0,
+                                "isActive": True,
+                                "referenceTitle": "AOT-50282",
+                                "referenceNumber": "device-uid-1",
+                            }
+                        ]
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 140629,
+            "begin_work": True,
+            "issue_type": "Endpoint Security",
+            "sub_issue_type": "Antivirus",
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "id": 140629,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+            "configurationItemID": 1120,
+            "issueType": "Endpoint Security",
+            "subIssueType": "Antivirus",
+        },
+        "jason_policy_class": "ticket_work_start",
+    }
+    assert calls[0][0] == "service.ticket.read"
+    assert calls[1][0] == "endpoint.device.search"
+    assert calls[2][0] == "service.configuration.search"
+
+
+def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        assert capability_name == "service.ticket.read"
+        return {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "items": [
+                        {
+                            "id": 123,
+                            "companyID": 99,
+                            "configurationItemID": 456,
+                            "issueType": 10,
+                            "title": "Alert for DEVICE-123",
+                        }
+                    ]
+                }
+            },
+        }
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 123, "begin_work": True},
+    )
+
+    assert result["payload"] == {
+        "id": 123,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+
+
+def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "items": [
+                        {
+                            "id": 123,
+                            "companyID": 99,
+                            "configurationItemID": 456,
+                            "issueType": 10,
+                            "title": "Generic ticket",
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "begin_work": True,
+            "sub_issue_type": "Workstation",
+        },
+    )
+
+    assert result["payload"]["issueType"] == 10
+    assert result["payload"]["subIssueType"] == "Workstation"
+
+
 def test_non_datto_action_arguments_are_unchanged():
     original = {"payload": {"ticketID": 123}}
 

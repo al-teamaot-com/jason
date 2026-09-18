@@ -22,6 +22,7 @@ from datto_edr_av_runtime_contract import (
     bind_job_output_read,
     bind_job_read,
     bind_playbook_internal_note,
+    bind_ticket_work_start,
 )
 
 
@@ -122,3 +123,29 @@ def test_playbook_state_generates_governed_internal_note_request():
     assert request.arguments["ticket_id"] == 140629
     assert request.arguments["title"].startswith("Jason - Datto EDR/AV")
     assert "Status=Healthy" in request.arguments["note"]
+
+
+def test_ticket_work_start_uses_standing_lifecycle_binding():
+    request = bind_ticket_work_start(
+        140629,
+        device_name="AOT-50282",
+        issue_type="Endpoint Security",
+        sub_issue_type="Antivirus",
+    )
+
+    assert request.capability == "service.ticket.update"
+    assert request.arguments == {
+        "ticket_id": 140629,
+        "begin_work": True,
+        "device_name": "AOT-50282",
+        "issue_type": "Endpoint Security",
+        "sub_issue_type": "Antivirus",
+    }
+
+
+def test_ticket_work_start_omits_blank_classification_hints():
+    request = bind_ticket_work_start(123, issue_type="  ")
+    assert request.arguments == {
+        "ticket_id": 123,
+        "begin_work": True,
+    }

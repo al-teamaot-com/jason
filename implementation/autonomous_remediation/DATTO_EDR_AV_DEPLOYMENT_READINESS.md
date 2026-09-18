@@ -198,6 +198,8 @@ Missing capabilities must be recorded as explicit implementation gaps before rem
 
 ### Ticket documentation
 
+Before the first diagnostic step, execute the governed ticket-work-start lifecycle for the exact Autotask ticket: move it to queue `Jason`, set status `In Progress`, set Work Type `Remote Support`, preserve or deterministically associate the primary configuration item, and apply Issue Type/Sub-Issue Type only when the playbook/triage has exact supported labels. This lifecycle claim is required before endpoint work begins and uses the standing Owner-approved administrative policy; it is not a substitute for approval of disruptive or otherwise separately gated remediation.
+
 For every meaningful diagnostic, scan, remediation, recheck, approval gate, and terminal decision, record an internal-only ticket note containing:
 
 - operation/component/scan performed

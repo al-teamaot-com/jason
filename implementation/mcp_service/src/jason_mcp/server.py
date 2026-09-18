@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
@@ -1672,6 +1673,218 @@ def _verify_managed_datto_component_target(
     return observed
 
 
+def _exact_ticket_record_for_work_start(ticket_id: int) -> Mapping[str, Any]:
+    result = _governed_read(
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": ticket_id},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_WORK_START_READ_FAILED")
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_READ_FAILED")
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_READ_FAILED")
+    items = data.get("items")
+    if not isinstance(items, list) or len(items) != 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_IDENTITY_NOT_UNIQUE")
+    record = items[0]
+    if not isinstance(record, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_READ_FAILED")
+    try:
+        observed = int(record.get("id"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_READ_FAILED") from error
+    if observed != ticket_id:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_IDENTITY_MISMATCH")
+    return record
+
+
+def _ticket_context_device_name(record: Mapping[str, Any]) -> str | None:
+    title = str(record.get("title") or "").strip()
+    if not title:
+        return None
+
+    patterns = (
+        r"\bfor\s+([A-Za-z0-9][A-Za-z0-9._-]{1,63})\s*$",
+        r"\bon\s+([A-Za-z0-9][A-Za-z0-9._-]{1,63})\s*$",
+        r"\bmachine\s+([A-Za-z0-9][A-Za-z0-9._-]{1,63})(?:\s|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, title, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = match.group(1).strip()
+        # Avoid treating ordinary trailing words as hostnames. AOT endpoint
+        # names consistently contain a digit and/or a hyphen.
+        if any(char.isdigit() for char in candidate) or "-" in candidate:
+            return candidate
+    return None
+
+
+def _exact_configuration_for_ticket_device(
+    *,
+    ticket: Mapping[str, Any],
+    device_name: str,
+) -> int | None:
+    endpoint = _governed_read(
+        capability_name="endpoint.device.search",
+        arguments={"name": device_name},
+    )
+    if endpoint.get("status") != "succeeded":
+        return None
+    evidence = endpoint.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return None
+    matches = evidence.get("resource_matches")
+    if not isinstance(matches, list):
+        return None
+    exact_endpoints = [
+        item
+        for item in matches
+        if isinstance(item, Mapping)
+        and str(item.get("hostname") or "").strip().casefold()
+        == device_name.casefold()
+        and str(item.get("resource_id") or "").strip()
+    ]
+    if len(exact_endpoints) != 1:
+        return None
+    device_uid = str(exact_endpoints[0]["resource_id"]).strip()
+
+    try:
+        company_id = int(ticket.get("companyID"))
+    except (TypeError, ValueError):
+        return None
+    if company_id < 0:
+        return None
+
+    configuration = _governed_read(
+        capability_name="service.configuration.search",
+        arguments={
+            "name": device_name,
+            "company_id": company_id,
+            "page_size": 50,
+        },
+    )
+    if configuration.get("status") != "succeeded":
+        return None
+    config_evidence = configuration.get("evidence")
+    if not isinstance(config_evidence, Mapping):
+        return None
+    data = config_evidence.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    items = data.get("items")
+    if not isinstance(items, list):
+        return None
+
+    exact_configs: list[int] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("isActive") is not True:
+            continue
+        if str(item.get("referenceTitle") or "").strip().casefold() != device_name.casefold():
+            continue
+        if str(item.get("referenceNumber") or "").strip() != device_uid:
+            continue
+        try:
+            observed_company = int(item.get("companyID"))
+            config_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if observed_company != company_id or config_id < 1:
+            continue
+        exact_configs.append(config_id)
+
+    unique = sorted(set(exact_configs))
+    if len(unique) != 1:
+        return None
+    return unique[0]
+
+
+def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "ticket_id",
+        "ticketID",
+        "resource_id",
+        "begin_work",
+        "device_name",
+        "issue_type",
+        "sub_issue_type",
+        "ticket_type",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_START_UNSUPPORTED_ARGUMENTS:"
+            + ",".join(sorted(unknown))
+        )
+
+    value = raw.get("ticket_id", raw.get("ticketID", raw.get("resource_id")))
+    if isinstance(value, bool):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_TICKET_ID_REQUIRED")
+    try:
+        ticket_id = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_TICKET_ID_REQUIRED") from error
+    if ticket_id < 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_TICKET_ID_REQUIRED")
+
+    ticket = _exact_ticket_record_for_work_start(ticket_id)
+    payload: dict[str, Any] = {
+        "id": ticket_id,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+
+    current_configuration = ticket.get("configurationItemID")
+    try:
+        current_configuration_id = int(current_configuration)
+    except (TypeError, ValueError):
+        current_configuration_id = 0
+
+    if current_configuration_id < 1:
+        requested_device = str(raw.get("device_name") or "").strip()
+        candidate = requested_device or _ticket_context_device_name(ticket)
+        if candidate:
+            configuration_id = _exact_configuration_for_ticket_device(
+                ticket=ticket,
+                device_name=candidate,
+            )
+            if configuration_id is not None:
+                payload["configurationItemID"] = configuration_id
+
+    issue_type = str(raw.get("issue_type") or "").strip()
+    sub_issue_type = str(raw.get("sub_issue_type") or "").strip()
+    ticket_type = str(raw.get("ticket_type") or "").strip()
+
+    if issue_type:
+        payload["issueType"] = issue_type
+    if sub_issue_type:
+        if "issueType" not in payload:
+            current_issue = ticket.get("issueType")
+            try:
+                current_issue_id = int(current_issue)
+            except (TypeError, ValueError):
+                current_issue_id = 0
+            if current_issue_id < 1:
+                raise ValueError(
+                    "AUTOTASK_TICKET_WORK_START_SUBISSUE_REQUIRES_ISSUE"
+                )
+            payload["issueType"] = current_issue_id
+        payload["subIssueType"] = sub_issue_type
+    if ticket_type:
+        payload["ticketType"] = ticket_type
+
+    return {
+        "payload": payload,
+        "jason_policy_class": "ticket_work_start",
+    }
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -1690,6 +1903,11 @@ def _canonicalize_governed_action_arguments(
     """
 
     raw = dict(arguments or {})
+
+    if capability_name == "service.ticket.update":
+        if raw.get("begin_work") is True:
+            return _ticket_work_start_arguments(raw)
+        return raw
 
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
         if "payload" in raw:
@@ -2031,6 +2249,17 @@ def _governed_execute(
                     ],
                     "correlation_id": correlation_id,
                 }
+        elif (
+            capability_name == "service.ticket.update"
+            and canonical_arguments.get("jason_policy_class")
+            == "ticket_work_start"
+        ):
+            # Owner-approved standing administrative lifecycle transition:
+            # claiming a ticket that Jason has begun working is not a second
+            # approval gate. The server, not the caller, fixes queue/status/
+            # work-type defaults and all provider labels are resolved live.
+            imperative_approval = True
+            approval_decided_by = "policy:ticket-work-start"
         else:
             imperative_approval = (
                 str(

@@ -24,6 +24,7 @@ AUTOMATION_COMPONENT_EXECUTE = "automation.component.execute"
 AUTOMATION_JOB_READ = "automation.job.read"
 AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
+SERVICE_TICKET_UPDATE = "service.ticket.update"
 
 RUN_AD_HOC_POWERSHELL_COMPONENT = "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
 RUN_AD_HOC_POWERSHELL_UID = "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
@@ -189,6 +190,52 @@ def bind_job_output_read(
             "component_uid": component,
             "stream": selected_stream,
         },
+    )
+
+
+def bind_ticket_work_start(
+    ticket_id: int,
+    *,
+    device_name: str | None = None,
+    issue_type: str | None = None,
+    sub_issue_type: str | None = None,
+    ticket_type: str | None = None,
+) -> CapabilityRequest:
+    """Bind Jason's standing Autotask ticket-work-start lifecycle transition.
+
+    The MCP server owns the fixed queue/status/work-type defaults and performs
+    exact device correlation. Playbooks may contribute classification labels only
+    when triage has enough evidence to do so; blank labels are omitted.
+    """
+
+    try:
+        durable_ticket_id = int(ticket_id)
+    except (TypeError, ValueError) as error:
+        raise RuntimeBindingError(
+            "Autotask ticket id must be positive"
+        ) from error
+    if durable_ticket_id <= 0:
+        raise RuntimeBindingError("Autotask ticket id must be positive")
+
+    arguments: dict[str, Any] = {
+        "ticket_id": durable_ticket_id,
+        "begin_work": True,
+    }
+
+    optional = {
+        "device_name": device_name,
+        "issue_type": issue_type,
+        "sub_issue_type": sub_issue_type,
+        "ticket_type": ticket_type,
+    }
+    for key, raw in optional.items():
+        value = str(raw or "").strip()
+        if value:
+            arguments[key] = value
+
+    return CapabilityRequest(
+        SERVICE_TICKET_UPDATE,
+        arguments,
     )
 
 

@@ -199,9 +199,95 @@ def test_ticket_update_payload_allows_only_safe_fields():
     )
 
     assert payload["id"] == 12345
-    assert set(payload) == (
-        SAFE_TICKET_UPDATE_FIELDS | {"id"}
+    assert set(payload) == {
+        "id",
+        "status",
+        "priority",
+        "queueID",
+        "assignedResourceID",
+        "dueDateTime",
+    }
+    assert set(payload) - {"id"} <= SAFE_TICKET_UPDATE_FIELDS
+
+
+
+
+def test_ticket_update_payload_accepts_work_lifecycle_fields():
+    payload = AutotaskTicketUpdateConnector.validated_payload(
+        request(
+            {
+                "id": 12345,
+                "configurationItemID": 1120,
+                "billingCodeID": 29682801,
+                "issueType": 10,
+                "subIssueType": 104,
+                "ticketType": 1,
+            }
+        )
     )
+
+    assert payload == {
+        "id": 12345,
+        "configurationItemID": 1120,
+        "billingCodeID": 29682801,
+        "issueType": 10,
+        "subIssueType": 104,
+        "ticketType": 1,
+    }
+
+
+def test_ticket_picklist_label_resolution_honors_parent_value():
+    fields_payload = {
+        "fields": [
+            {
+                "name": "issueType",
+                "picklistValues": [
+                    {"value": "10", "label": "Hardware", "isActive": True},
+                ],
+            },
+            {
+                "name": "subIssueType",
+                "picklistValues": [
+                    {
+                        "value": "104",
+                        "label": "Workstation",
+                        "parentValue": "10",
+                        "isActive": True,
+                    },
+                    {
+                        "value": "999",
+                        "label": "Workstation",
+                        "parentValue": "11",
+                        "isActive": True,
+                    },
+                ],
+            },
+        ]
+    }
+
+    assert (
+        AutotaskTicketUpdateConnector._picklist_value_for_label(
+            fields_payload=fields_payload,
+            field_name="issueType",
+            label="Hardware",
+        )
+        == 10
+    )
+    assert (
+        AutotaskTicketUpdateConnector._picklist_value_for_label(
+            fields_payload=fields_payload,
+            field_name="subIssueType",
+            label="Workstation",
+            parent_value=10,
+        )
+        == 104
+    )
+
+
+def test_symbolic_label_detection_keeps_numeric_strings_numeric():
+    assert AutotaskTicketUpdateConnector._label_requires_resolution("Jason") is True
+    assert AutotaskTicketUpdateConnector._label_requires_resolution("29682833") is False
+    assert AutotaskTicketUpdateConnector._label_requires_resolution(29682833) is False
 
 
 @pytest.mark.parametrize(
