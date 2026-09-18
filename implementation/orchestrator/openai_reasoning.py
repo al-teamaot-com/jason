@@ -62,7 +62,7 @@ class OpenAIStructuredJsonClient:
     input_cost_per_million_tokens: Decimal | None = None
     cached_input_cost_per_million_tokens: Decimal | None = None
     output_cost_per_million_tokens: Decimal | None = None
-    reasoning_effort: str | None = "minimal"
+    reasoning_effort: str | None = "low"
 
     def __post_init__(self) -> None:
         if not self.api_key.strip():
