@@ -4,6 +4,14 @@
 **Status:** The bounded governed-action path for Autotask and Datto RMM through ChatGPT is live-proven. Datto is additionally cross-chat proven for exact target/component resolution, fresh per-execution approval, one-attempt execution, terminal job verification, governed component StdOut retrieval, and current-release Grafana/Prometheus observability. The current Section Goal is complete.  
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
+## Continuity control anchors
+
+- **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+- **Last durable success:** preserved in the governed production proof and observability sections below.
+- **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
+- **Next safe actions:** complete source and CI reconciliation, then perform a fresh production deployment preflight before any production change.
+
+
 ## Durable operating principle
 
 > **ChatGPT reasons. Jason governs and executes.**

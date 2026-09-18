@@ -49,6 +49,7 @@ def _settings(tmp_path: Path, *, dynamic: bool) -> RuntimeSettings:
         replay_db=tmp_path / "replay.sqlite3",
         security_audit_db=tmp_path / "security.sqlite3",
         orchestration_events_db=tmp_path / "events.sqlite3",
+        resolution_memory_db=tmp_path / "resolution-memory.sqlite3",
         trusted_keys_registry=_trusted_registry(tmp_path),
         openbao_url="http://openbao:8200",
         openbao_role_id_path=tmp_path / "role_id",
