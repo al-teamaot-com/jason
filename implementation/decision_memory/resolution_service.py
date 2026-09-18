@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from .resolution_ingestion import ConfirmedResolutionIngestion
 from .resolution_memory import (
     ResolutionCase,
     ResolutionMemoryMatcher,
@@ -33,6 +34,11 @@ class ResolutionMemoryService:
 
     def record_case(self, case: ResolutionCase) -> None:
         self.store.add_case(case)
+
+    def ingest_confirmed_resolution(self, candidate: ConfirmedResolutionIngestion) -> ResolutionCase:
+        case = candidate.to_case()
+        self.store.add_case(case)
+        return case
 
     def search_similar(
         self,
