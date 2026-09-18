@@ -6,6 +6,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from functools import lru_cache
 from typing import Any, Mapping
 from urllib.request import Request, urlopen
@@ -700,6 +701,27 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _governed_read(
+    *,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    (
+        principal,
+        organization,
+        assurance,
+        client_id,
+    ) = _authenticated_identity()
+    return _governed_read_for_identity(
+        principal=principal,
+        organization=organization,
+        assurance=assurance,
+        client_id=client_id,
+        capability_name=capability_name,
+        arguments=arguments,
+    )
+
+
 def _internal_note_arguments(
     *,
     ticket_id: int,
@@ -1010,18 +1032,16 @@ def _governed_internal_note_create(
     }
 
 
-def _governed_read(
+def _governed_read_for_identity(
     *,
+    principal: str,
+    organization: str,
+    assurance: str,
+    client_id: str | None,
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
     app = _runtime()
-    (
-        principal,
-        organization,
-        assurance,
-        client_id,
-    ) = _authenticated_identity()
 
     execution_id = f"exec_mcp_{uuid4().hex}"
     correlation_id = f"corr_mcp_{uuid4().hex}"
@@ -2672,7 +2692,11 @@ def revoke_datto_component_unsupervised_approval(
     }
 
 
-def _component_bulk_names(component_names: list[str] | tuple[str, ...]) -> list[str]:
+def _component_bulk_names(
+    component_names: list[str] | tuple[str, ...],
+    *,
+    allow_empty: bool = False,
+) -> list[str]:
     if not isinstance(component_names, (list, tuple)):
         raise ValueError("DATTO_COMPONENT_BULK_SELECTION_INVALID")
     names: list[str] = []
@@ -2686,7 +2710,7 @@ def _component_bulk_names(component_names: list[str] | tuple[str, ...]) -> list[
             continue
         seen.add(folded)
         names.append(name)
-    if not names:
+    if not names and not allow_empty:
         raise ValueError("DATTO_COMPONENT_BULK_SELECTION_EMPTY")
     if len(names) > 1000:
         raise ValueError("DATTO_COMPONENT_BULK_SELECTION_TOO_LARGE")
@@ -3743,6 +3767,234 @@ def execute_governed_capability(
     )
 
 
+def _grafana_component_control_identity(request: StarletteRequest) -> tuple[str, str]:
+    expected = os.environ.get(
+        "JASON_GRAFANA_COMPONENT_CONTROL_TOKEN",
+        "",
+    ).strip()
+    if not expected:
+        token_file = os.environ.get(
+            "JASON_GRAFANA_COMPONENT_CONTROL_TOKEN_FILE",
+            "",
+        ).strip()
+        if token_file:
+            try:
+                expected = Path(token_file).read_text(encoding="utf-8").strip()
+            except OSError:
+                expected = ""
+    principal = os.environ.get(
+        "JASON_GRAFANA_COMPONENT_CONTROL_PRINCIPAL_ID",
+        "",
+    ).strip()
+    organization = os.environ.get(
+        "JASON_GRAFANA_COMPONENT_CONTROL_ORGANIZATION_ID",
+        "",
+    ).strip()
+    if not expected or not principal or not organization:
+        raise PermissionError("GRAFANA_COMPONENT_CONTROL_NOT_CONFIGURED")
+
+    auth = str(request.headers.get("authorization") or "").strip()
+    if not auth.lower().startswith("bearer "):
+        raise PermissionError("GRAFANA_COMPONENT_CONTROL_AUTH_REQUIRED")
+    supplied = auth.split(" ", 1)[1].strip()
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise PermissionError("GRAFANA_COMPONENT_CONTROL_AUTH_INVALID")
+
+    owners = approval_owner_identities()
+    if principal not in owners:
+        raise PermissionError("DATTO_COMPONENT_APPROVAL_OWNER_REQUIRED")
+    return principal, organization
+
+
+def _component_control_catalog(
+    *,
+    principal: str,
+    organization: str,
+) -> list[dict[str, Any]]:
+    result = _governed_read_for_identity(
+        principal=principal,
+        organization=organization,
+        assurance="grafana-component-control-token",
+        client_id=None,
+        capability_name="automation.component.search",
+        arguments={},
+    )
+    if result.get("status") != "succeeded":
+        raise RuntimeError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise RuntimeError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+    matches = evidence.get("resource_matches")
+    if not isinstance(matches, list):
+        raise RuntimeError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+
+    configured = configured_datto_components()
+    configured_by_uid = {item.uid: item for item in configured}
+    configured_by_name = {item.name.casefold(): item for item in configured}
+    latest = {
+        (item.uid, item.name.casefold()): item
+        for item in list_component_approval_records()
+    }
+
+    rows: list[dict[str, Any]] = []
+    for raw in matches:
+        if not isinstance(raw, Mapping):
+            continue
+        uid = str(raw.get("resource_id") or "").strip()
+        name = str(raw.get("name") or "").strip()
+        if not uid or not name:
+            continue
+        selected = configured_by_uid.get(uid) or configured_by_name.get(name.casefold())
+        approval_mode = selected.approval_mode if selected else "per_run"
+        approval_source = selected.approval_source if selected else "unclassified"
+        blocked = _component_unsupervised_block_reason(raw)
+        fingerprint = component_metadata_fingerprint(raw)
+        stale = False
+        history = latest.get((uid, name.casefold()))
+        if (
+            selected is not None
+            and selected.approval_source == "durable_registry"
+            and selected.metadata_fingerprint
+            and selected.metadata_fingerprint != fingerprint
+        ):
+            stale = True
+            approval_mode = "per_run"
+            approval_source = "durable_registry_stale"
+        rows.append({
+            "uid": uid,
+            "name": name,
+            "description": str(raw.get("description") or ""),
+            "category": str(raw.get("category") or ""),
+            "metadata_fingerprint": fingerprint,
+            "run_autonomously": approval_mode == "standing_safe" and not stale,
+            "approval_mode": approval_mode,
+            "approval_source": approval_source,
+            "eligible": blocked is None,
+            "blocked_reason": blocked,
+            "approved_by": getattr(history, "approved_by", None),
+            "approved_at": getattr(history, "approved_at", None),
+            "revoked_by": getattr(history, "revoked_by", None),
+            "revoked_at": getattr(history, "revoked_at", None),
+            "metadata_stale": stale,
+        })
+    rows.sort(key=lambda item: item["name"].casefold())
+    return rows
+
+
+async def grafana_component_control_components(request: StarletteRequest):
+    try:
+        principal, organization = _grafana_component_control_identity(request)
+        rows = await asyncio.to_thread(
+            _component_control_catalog,
+            principal=principal,
+            organization=organization,
+        )
+    except PermissionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    except Exception:
+        return JSONResponse({"error": "component_catalog_unavailable"}, status_code=502)
+    return JSONResponse({
+        "status": "ok",
+        "component_count": len(rows),
+        "components": rows,
+        "autonomous_names": [
+            item["name"] for item in rows if item["run_autonomously"]
+        ],
+        "eligible_names": [
+            item["name"] for item in rows if item["eligible"]
+        ],
+    })
+
+
+async def grafana_component_control_bulk(request: StarletteRequest):
+    try:
+        principal, organization = _grafana_component_control_identity(request)
+        body = await request.json()
+        if not isinstance(body, Mapping):
+            raise ValueError("COMPONENT_CONTROL_PAYLOAD_INVALID")
+        approve_names = _component_bulk_names(
+            body.get("approve_names") or [],
+            allow_empty=True,
+        )
+        revoke_names = _component_bulk_names(
+            body.get("revoke_names") or [],
+            allow_empty=True,
+        )
+        if not approve_names and not revoke_names:
+            raise ValueError("DATTO_COMPONENT_BULK_SELECTION_EMPTY")
+        overlap = set(x.casefold() for x in approve_names) & set(x.casefold() for x in revoke_names)
+        if overlap:
+            raise ValueError("COMPONENT_CONTROL_SELECTION_CONFLICT")
+        reason = str(body.get("reason") or "Grafana Component Control").strip()[:500]
+        rows = await asyncio.to_thread(
+            _component_control_catalog,
+            principal=principal,
+            organization=organization,
+        )
+        by_name = {item["name"].casefold(): item for item in rows}
+        approved = []
+        revoked = []
+        ineligible = []
+        failed = []
+        for name in approve_names:
+            row = by_name.get(name.casefold())
+            if row is None:
+                failed.append({"name": name, "reason": "COMPONENT_NOT_FOUND"})
+                continue
+            if not row["eligible"]:
+                ineligible.append({"name": name, "reason": row["blocked_reason"]})
+                continue
+            try:
+                live = next(
+                    item for item in rows
+                    if item["name"].casefold() == name.casefold()
+                )
+                record = persist_component_approval(
+                    uid=live["uid"],
+                    name=live["name"],
+                    approved_by=principal,
+                    metadata_fingerprint=str(
+                        live["metadata_fingerprint"]
+                    ),
+                    reason=reason,
+                )
+                approved.append({"uid": record.uid, "name": record.name})
+            except Exception as exc:
+                failed.append({"name": name, "reason": str(exc)})
+        for name in revoke_names:
+            row = by_name.get(name.casefold())
+            if row is None:
+                failed.append({"name": name, "reason": "COMPONENT_NOT_FOUND"})
+                continue
+            try:
+                record = persist_component_revocation(
+                    uid=row["uid"],
+                    name=row["name"],
+                    revoked_by=principal,
+                    reason=reason,
+                )
+                revoked.append({"uid": record.uid, "name": record.name})
+            except Exception as exc:
+                failed.append({"name": name, "reason": str(exc)})
+    except PermissionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        return JSONResponse({"error": "component_control_failed"}, status_code=500)
+    return JSONResponse({
+        "status": "ok" if not failed else "partial",
+        "approved_count": len(approved),
+        "revoked_count": len(revoked),
+        "ineligible_count": len(ineligible),
+        "failed_count": len(failed),
+        "approved": approved,
+        "revoked": revoked,
+        "ineligible": ineligible,
+        "failed": failed,
+    })
+
+
 async def healthz(_request):
     actions = _active_action_capabilities()
 
@@ -3929,6 +4181,18 @@ app.add_route(
     "/healthz",
     healthz,
     methods=["GET"],
+)
+
+app.add_route(
+    "/component-control/components",
+    grafana_component_control_components,
+    methods=["GET"],
+)
+
+app.add_route(
+    "/component-control/bulk",
+    grafana_component_control_bulk,
+    methods=["POST"],
 )
 
 app.add_route(
