@@ -160,3 +160,101 @@ Items remain on this list until the underlying issue is fixed and the expected b
 - **Last observed:** 2026-09-18 during antivirus investigation of `AOT-50282`.
 
 ---
+
+
+### SUPPORT-CAP-004 — Missing governed Datto RMM alert-resolution capability blocks alert closeout
+
+- **Priority:** P1
+- **Status:** Open
+- **Owner:** Jason Platform / Datto RMM Connector
+- **Issue:** Jason can read Datto RMM alerts but has no governed write capability to resolve/close an alert after troubleshooting and verification are complete.
+- **Production example:** `AOT-50282`, Datto RMM alert UID `bd0882e0-8700-4985-ad89-f789b865c76e`, Endpoint Security alert ID `15884344`, associated Autotask ticket `T20260918.0005`.
+- **What Jason needed to do:**
+  1. Resolve the exact Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`.
+  2. Supply a bounded closeout reason/evidence reference if the provider supports it.
+  3. Read the same alert back after mutation.
+  4. Verify `resolved=true`, capture `resolvedOn` / `resolvedBy` when available, and confirm the alert no longer appears in the open-alert set.
+  5. Perform this through Central Orchestrator with `direct_provider_access=false`.
+- **What was available:**
+  - `endpoint.alert.search` and `endpoint.alert.history.search` for read-only alert inspection.
+  - `management.alert.search` for broader read-only alert inspection.
+  - Governed Datto component execution for endpoint diagnostics.
+- **Exact blocker:**
+  - `discover_capabilities` returned only read-only Datto alert capabilities.
+  - No active write capability equivalent to `endpoint.alert.resolve`, `management.alert.resolve`, `endpoint.alert.update`, or a provider-specific Datto RMM alert-close action was exposed.
+  - Because `direct_provider_access=false` is an intentional security boundary, Jason was not permitted to call Datto directly or use an unmanaged API/shell bypass to close the alert.
+  - The user explicitly authorized closeout, but requester intent alone cannot create a capability that is absent from the governed registry.
+- **Impact:** Jason can troubleshoot and verify endpoint health but cannot finish the operational workflow by clearing the RMM alert. This leaves resolved or likely-resolved conditions visible as active monitoring work and prevents true end-to-end playbook completion.
+- **Expected behavior:** Expose a narrowly governed Datto alert-resolution action that targets one exact alert UID, requires the appropriate authority/approval, performs one provider mutation attempt, and requires provider readback before reporting success.
+- **Recommended capability design:**
+  - Capability: `endpoint.alert.resolve` or `management.alert.resolve`.
+  - Required selector: exact `alert_uid`; optional `device_uid` as an additional target guard.
+  - Optional bounded fields: resolution reason, evidence/correlation reference, ticket number.
+  - No arbitrary alert editing.
+  - One provider mutation attempt; no broad-credential fallback.
+  - Post-mutation verification must confirm the exact alert is resolved and absent from open-alert results.
+  - Keep `direct_provider_access=false`.
+- **Verification required for closure:**
+  1. Select a controlled Datto RMM test alert by exact alert UID.
+  2. Resolve it through the governed capability.
+  3. Confirm exactly one provider mutation attempt.
+  4. Read the alert back and verify resolved state.
+  5. Verify it no longer appears in `endpoint.alert.search(..., status='open')`.
+  6. Prove an unauthorized or ambiguous alert target fails closed.
+  7. Repeat using an Endpoint Security alert so the `AOT-50282` workflow is covered.
+- **Last observed:** 2026-09-18 when the user explicitly asked Jason to close Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`.
+
+---
+
+### SUPPORT-CONN-005 — Autotask closeout workflow blocked: ticket reads, internal-note write, status discovery, and verified completion unavailable
+
+- **Priority:** P1
+- **Status:** Open
+- **Owner:** Jason Platform / Autotask Connector
+- **Issue:** Jason could not complete Autotask ticket `T20260918.0005` because the governed Autotask read path and the tested internal-note mutation path failed, while the ticket-update capability requires a tenant-specific numeric status ID and successful post-mutation readback.
+- **Production example:** Autotask ticket `T20260918.0005`, internal ticket ID `140629`, associated with `AOT-50282`.
+- **What Jason needed to do:**
+  1. Read ticket `140629` and confirm its current state before mutation.
+  2. Read or otherwise authoritatively resolve the tenant-specific Autotask status value representing **Complete**.
+  3. Add an internal troubleshooting/closeout note documenting the AV/EDR findings and the Datto alert limitation.
+  4. Update the exact ticket to Complete using `service.ticket.update`.
+  5. Read the ticket back and verify the status change actually persisted.
+  6. Confirm no unrelated fields changed.
+- **Exact blockers encountered:**
+  - `service.ticket.read` for ticket `140629` failed with `CAPABILITY_INVOCATION_FAILED`.
+  - Earlier `service.ticket.search` for `T20260918.0005` also failed with `CAPABILITY_INVOCATION_FAILED`.
+  - Earlier `service.ticket.notes.search` failed information release with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
+  - An explicitly authorized attempt to create an internal note on ticket `140629` through `create_autotask_internal_note` failed with:
+    - `status=failed`
+    - `error_code=CAPABILITY_INVOCATION_FAILED`
+    - `provider_write_attempts=1`
+    - `note_id=null`
+  - The active `service.ticket.update` capability accepts a numeric `status` field, not a semantic value such as `Complete`.
+  - The valid numeric Complete status is tenant-specific and was not available from a working governed read/metadata capability during this incident.
+  - The ticket-update implementation requires requester-impersonated post-mutation GET readback and must fail if verification cannot be completed. With the Autotask read path broken, successful verified completion could not be guaranteed.
+- **What Jason deliberately did not do:**
+  - Did not guess a numeric Autotask status ID.
+  - Did not mark the ticket complete without first being able to verify the intended status value.
+  - Did not claim the failed internal-note mutation succeeded.
+  - Did not bypass requester impersonation, use the service account as fallback authority, or call Autotask directly outside the governed path.
+  - Did not bypass the required post-mutation verification contract.
+- **Impact:** Even when endpoint troubleshooting is complete, Jason cannot reliably document the work and complete the corresponding Autotask ticket. This breaks the final stage of autonomous ticket handling and prevents deterministic closeout.
+- **Expected behavior:** Jason should be able to resolve semantic ticket states such as **Complete** to the correct tenant-specific Autotask status ID, create an internal closeout note, perform one bounded ticket status update, and verify both mutations through provider readback.
+- **Recommended remediation:**
+  - Repair the governed Autotask read/authorization path described in `SUPPORT-CONN-001`.
+  - Restore reliable `service.ticket.read`, `service.ticket.search`, and `service.ticket.notes.search`.
+  - Restore the currently exposed `service.ticket.note.create` mutation path and its verification.
+  - Add a governed read capability for Autotask ticket field metadata/status picklist values, or a provider-neutral semantic status resolver so Jason can request `Complete` without hard-coding tenant IDs.
+  - Preserve the current safe `service.ticket.update` field allowlist and mandatory readback verification.
+- **Verification required for closure:**
+  1. Read a controlled ticket successfully.
+  2. Resolve semantic status `Complete` to the authoritative current Autotask status ID without hard-coded guessing.
+  3. Create an internal note and verify it exists.
+  4. Update the controlled ticket to Complete through `service.ticket.update`.
+  5. Verify the status through post-mutation readback.
+  6. Confirm no unrelated fields changed.
+  7. Repeat the sequence on a fresh session.
+  8. Re-run the exact `T20260918.0005` closeout flow if the ticket remains open.
+- **Last observed:** 2026-09-18 when the user explicitly asked Jason to complete `T20260918.0005`.
+
+---
