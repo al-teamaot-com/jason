@@ -81,17 +81,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
-      JASON_AUTHORITY_DB: ${{ runner.temp }}/jason/authority.sqlite3
-      JASON_TEAMS_IDENTITY_BINDINGS_DB: ${{ runner.temp }}/jason/teams-identity-bindings.sqlite3
-      JASON_TEAMS_CONTINUATION_DB: ${{ runner.temp }}/jason/teams-conversation-continuation.sqlite3
-      JASON_REPLAY_DB: ${{ runner.temp }}/jason/replay.sqlite3
-      JASON_SECURITY_AUDIT_DB: ${{ runner.temp }}/jason/security-audit.sqlite3
-      JASON_ORCHESTRATION_EVENTS_DB: ${{ runner.temp }}/jason/orchestration-events.sqlite3
-      JASON_MODEL_USAGE_DB: ${{ runner.temp }}/jason/model-usage.sqlite3
-      JASON_RESOLUTION_MEMORY_DB: ${{ runner.temp }}/jason/resolution-memory.sqlite3
-      JASON_TRUSTED_KEYS_REGISTRY: ${{ runner.temp }}/jason/trusted-keys/registry.json
-      JASON_MICROSOFT_BOUNDARY_DB: ${{ runner.temp }}/jason/client-boundaries.sqlite3
-      JASON_DYNAMIC_CONVERSATION_CONTEXT_DB: ${{ runner.temp }}/jason/dynamic-conversation-context.sqlite3
+      JASON_AUTHORITY_DB: /tmp/jason-ci/authority.sqlite3
+      JASON_TEAMS_IDENTITY_BINDINGS_DB: /tmp/jason-ci/teams-identity-bindings.sqlite3
+      JASON_TEAMS_CONTINUATION_DB: /tmp/jason-ci/teams-conversation-continuation.sqlite3
+      JASON_REPLAY_DB: /tmp/jason-ci/replay.sqlite3
+      JASON_SECURITY_AUDIT_DB: /tmp/jason-ci/security-audit.sqlite3
+      JASON_ORCHESTRATION_EVENTS_DB: /tmp/jason-ci/orchestration-events.sqlite3
+      JASON_MODEL_USAGE_DB: /tmp/jason-ci/model-usage.sqlite3
+      JASON_RESOLUTION_MEMORY_DB: /tmp/jason-ci/resolution-memory.sqlite3
+      JASON_TRUSTED_KEYS_REGISTRY: /tmp/jason-ci/trusted-keys/registry.json
+      JASON_MICROSOFT_BOUNDARY_DB: /tmp/jason-ci/client-boundaries.sqlite3
+      JASON_DYNAMIC_CONVERSATION_CONTEXT_DB: /tmp/jason-ci/dynamic-conversation-context.sqlite3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
