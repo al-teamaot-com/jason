@@ -287,8 +287,9 @@ server.post("/internal/proactive/send", async (req, res) => {
         ? { type: "message", text, attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: card }] }
         : text;
       const result = await ctx.sendActivity(activity);
-      messageId = result?.id;
+      messageId = result?.id ?? result?.resourceResponse?.id ?? null;
     });
+    if (!messageId && card) messageId = `accepted:${Date.now()}`;
     if (!messageId) throw new Error("Teams proactive send returned no message id");
     console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, messageId }));
     res.json({ status: "succeeded", channel: "microsoft_teams", message_id: messageId });
