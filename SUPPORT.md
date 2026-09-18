@@ -37,7 +37,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
 ### SUPPORT-CONN-001 — Autotask ticket read path failing through Jason
 
 - **Priority:** P1
-- **Status:** Open
+- **Status:** Investigating
 - **Owner:** Jason Platform / Connector Support
 - **Issue:** Jason's governed Autotask ticket read path is failing for an active production ticket.
 - **Impact:** Jason can identify the Datto RMM alert and its associated Autotask ticket, but cannot reliably read the ticket details or ticket notes. This prevents complete autonomous troubleshooting documentation, ticket-state assessment, and normal ticket workflow processing.
@@ -57,6 +57,14 @@ Items remain on this list until the underlying issue is fixed and the expected b
   3. Ticket notes can be retrieved by an authorized Jason request.
   4. No direct-provider bypass is required.
   5. Repeat the reads in a fresh session to confirm the fix is durable.
-- **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`.
+- **Current diagnosis (2026-09-18):**
+  - Reproduced `service.ticket.search` and `service.ticket.count` failures for `T20260918.0005` with `CAPABILITY_INVOCATION_FAILED`.
+  - Reproduced the same `CAPABILITY_INVOCATION_FAILED` on a minimal `service.company.search`, showing the failure is broader than one ticket.
+  - `service.ticket.notes.search` and `service.entity.describe` reach the governed Autotask path but fail information release with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
+  - Current source defines `jason_managed` as the temporary production default because provider-native Autotask requester impersonation is known to produce an Autotask HTTP 500. The split live behavior is consistent with production running with a stale or explicit `impersonated` requester-authorization mode.
+  - The runtime Compose source does not explicitly declare `JASON_AUTOTASK_REQUESTER_AUTH_MODE`, so live container environment/configuration must be checked before changing anything.
+- **Next safe action:** Inspect the live `jason-runtime` environment for `JASON_AUTOTASK_REQUESTER_AUTH_MODE` without exposing secrets. If it is explicitly `impersonated`, restore the approved `jason_managed` mode, recreate only the affected runtime service using the governed deployment runbook, then repeat all five closure checks above.
+- **Blocked on:** Access to the production Jason runtime host/deployment path for configuration inspection and bounded remediation.
+- **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`, reconfirmed during Support List processing.
 
 ---
