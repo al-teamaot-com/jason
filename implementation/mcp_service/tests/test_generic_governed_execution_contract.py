@@ -432,6 +432,19 @@ def test_unknown_action_result_fails_closed():
 
 
 def _set_datto_action_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (
+            "component-456",
+            "Get-DNS Settings AOT Ver 06042025-1",
+        ),
+    )
     monkeypatch.delenv(
         "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
         raising=False,
@@ -453,6 +466,20 @@ def _set_datto_action_scope(monkeypatch):
 
 
 def _set_datto_multi_component_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
+    live = {
+        "Get-DNS Settings AOT Ver 06042025-1": "component-456",
+        "Check Datto EDR/AV Status AOT Ver 12122025-1": "component-789",
+    }
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (live[str(name)], str(name)),
+    )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
         "AOT governed diagnostic pilot",
@@ -542,25 +569,25 @@ def test_datto_action_accepts_second_exact_allowlisted_component(
     )
 
 
-def test_datto_action_rejects_crossed_component_identity_pair(
+def test_datto_action_live_name_overrides_stale_component_uid(
     monkeypatch,
 ):
     _set_datto_multi_component_scope(monkeypatch)
 
-    try:
-        server._canonicalize_governed_action_arguments(
-            "automation.component.execute",
-            {
-                "device_uid": "device-123",
-                "component_uid": "component-789",
-                "component_name":
-                    "Get-DNS Settings AOT Ver 06042025-1",
-            },
-        )
-    except ValueError as exc:
-        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
-    else:
-        raise AssertionError("crossed component identity must fail closed")
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_uid": "stale-component-uid",
+            "component_name":
+                "Get-DNS Settings AOT Ver 06042025-1",
+        },
+    )
+
+    assert result["component_uid"] == "component-456"
+    assert result["component_name"] == (
+        "Get-DNS Settings AOT Ver 06042025-1"
+    )
 
 
 def test_datto_action_rejects_unknown_component_in_multi_scope(
@@ -582,18 +609,44 @@ def test_datto_action_rejects_unknown_component_in_multi_scope(
         raise AssertionError("unknown component must fail closed")
 
 
-def test_datto_action_rejects_different_target(monkeypatch):
+def test_datto_action_accepts_different_verified_managed_target(monkeypatch):
     _set_datto_action_scope(monkeypatch)
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "other-managed-device",
+            "component_uid": "component-456",
+        },
+    )
+
+    assert result["device_uid"] == "other-managed-device"
+
+
+def test_datto_action_rejects_unverified_target(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    def reject(_value):
+        raise ValueError("DATTO_COMPONENT_TARGET_LOOKUP_FAILED")
+
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        reject,
+    )
 
     try:
         server._canonicalize_governed_action_arguments(
             "automation.component.execute",
-            {"device_uid": "wrong-device"},
+            {
+                "device_uid": "not-managed",
+                "component_uid": "component-456",
+            },
         )
     except ValueError as exc:
-        assert str(exc) == "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+        assert str(exc) == "DATTO_COMPONENT_TARGET_LOOKUP_FAILED"
     else:
-        raise AssertionError("target mismatch must fail closed")
+        raise AssertionError("unverified target must fail closed")
 
 
 def test_datto_action_rejects_different_component(monkeypatch):
@@ -631,6 +684,159 @@ def test_datto_action_requires_component_identity(monkeypatch):
         )
 
 
+
+
+def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch):
+    calls = []
+
+    def governed_read(*, capability_name, arguments):
+        calls.append((capability_name, dict(arguments)))
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 140629,
+                                "companyID": 0,
+                                "configurationItemID": None,
+                                "issueType": None,
+                                "title": "Security alert for AOT-50282",
+                            }
+                        ]
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [
+                        {
+                            "resource_id": "device-uid-1",
+                            "hostname": "AOT-50282",
+                        }
+                    ]
+                },
+            }
+        if capability_name == "service.configuration.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 1120,
+                                "companyID": 0,
+                                "isActive": True,
+                                "referenceTitle": "AOT-50282",
+                                "referenceNumber": "device-uid-1",
+                            }
+                        ]
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 140629,
+            "begin_work": True,
+            "issue_type": "Endpoint Security",
+            "sub_issue_type": "Antivirus",
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "id": 140629,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+            "configurationItemID": 1120,
+            "issueType": "Endpoint Security",
+            "subIssueType": "Antivirus",
+        },
+        "jason_policy_class": "ticket_work_start",
+    }
+    assert calls[0][0] == "service.ticket.read"
+    assert calls[1][0] == "endpoint.device.search"
+    assert calls[2][0] == "service.configuration.search"
+
+
+def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        assert capability_name == "service.ticket.read"
+        return {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "items": [
+                        {
+                            "id": 123,
+                            "companyID": 99,
+                            "configurationItemID": 456,
+                            "issueType": 10,
+                            "title": "Alert for DEVICE-123",
+                        }
+                    ]
+                }
+            },
+        }
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 123, "begin_work": True},
+    )
+
+    assert result["payload"] == {
+        "id": 123,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+
+
+def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "items": [
+                        {
+                            "id": 123,
+                            "companyID": 99,
+                            "configurationItemID": 456,
+                            "issueType": 10,
+                            "title": "Generic ticket",
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "begin_work": True,
+            "sub_issue_type": "Workstation",
+        },
+    )
+
+    assert result["payload"]["issueType"] == 10
+    assert result["payload"]["subIssueType"] == "Workstation"
+
+
 def test_non_datto_action_arguments_are_unchanged():
     original = {"payload": {"ticketID": 123}}
 
@@ -640,3 +846,24 @@ def test_non_datto_action_arguments_are_unchanged():
     )
 
     assert result == original
+
+
+def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.note.create",
+        {
+            "ticket_id": 123,
+            "note": "Diagnostic acceptance note",
+            "title": "Jason diagnostic",
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "ticketID": 123,
+            "description": "Diagnostic acceptance note",
+            "noteType": 3,
+            "publish": 1,
+            "title": "Jason diagnostic",
+        }
+    }

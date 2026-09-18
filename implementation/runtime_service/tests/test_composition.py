@@ -57,6 +57,9 @@ def _settings(tmp_path: Path, *, ollama_model: str = "local-test") -> RuntimeSet
         replay_db=tmp_path / "replay.sqlite3",
         security_audit_db=tmp_path / "security.sqlite3",
         orchestration_events_db=tmp_path / "events.sqlite3",
+        model_usage_db=tmp_path / "model-usage.sqlite3",
+        resolution_memory_db=tmp_path / "resolution-memory.sqlite3",
+        dynamic_conversation_context_db=tmp_path / "dynamic-conversation-context.sqlite3",
         trusted_keys_registry=_trusted_registry(tmp_path),
         openbao_url="http://openbao:8200",
         openbao_role_id_path=tmp_path / "role_id",
@@ -203,3 +206,32 @@ def test_runtime_composition_declares_integration_broker_foundation():
     assert "IntegrationBroker(" in source
     assert "build_datto_rmm_manifest()" in source
     assert "integration_broker.register(" in source
+
+
+def test_runtime_composition_registers_endpoint_security_reads_only(tmp_path):
+    from orchestrator.resource_capability_catalog import (
+        ENDPOINT_SECURITY_DETECTION_READ,
+        ENDPOINT_SECURITY_DETECTION_SEARCH,
+        ENDPOINT_SECURITY_POLICY_READ,
+        ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        ENDPOINT_SECURITY_STATUS_READ,
+    )
+
+    application = build_runtime_application(_settings(tmp_path))
+    invokers = (
+        application.ingress.ingress.flow.orchestrator._invoker.registered_capabilities()
+    )
+    expected = {
+        ENDPOINT_SECURITY_STATUS_READ,
+        ENDPOINT_SECURITY_DETECTION_SEARCH,
+        ENDPOINT_SECURITY_DETECTION_READ,
+        ENDPOINT_SECURITY_POLICY_READ,
+        ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+    }
+
+    assert expected <= set(invokers)
+    assert "endpoint.security.scan.execute" not in invokers
+    assert "endpoint.security.isolate" not in invokers
+    assert "endpoint.security.quarantine.execute" not in invokers

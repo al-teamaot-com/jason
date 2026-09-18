@@ -4,6 +4,11 @@ from jason_mcp import server
 
 
 def set_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
         "AOT governed diagnostic pilot",
@@ -124,7 +129,7 @@ def test_per_run_rejected_before_orchestrator_without_explicit_approval(monkeypa
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
-            "device_uid": "device-123",
+            "device_uid": "other-managed-device",
             "component_uid": "component-reboot",
         },
     )
@@ -135,14 +140,14 @@ def test_per_run_rejected_before_orchestrator_without_explicit_approval(monkeypa
     assert calls == []
 
 
-def test_per_run_proceeds_with_current_explicit_approval(monkeypatch):
+def test_per_run_proceeds_when_current_technician_instruction_is_carried_as_approval(monkeypatch):
     set_scope(monkeypatch)
     approvals, calls = install_runtime(monkeypatch)
 
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
-            "device_uid": "device-123",
+            "device_uid": "other-managed-device",
             "component_uid": "component-reboot",
         },
         explicit_approval=True,

@@ -285,3 +285,53 @@ def test_reasoner_routes_reboot_required_through_primary_endpoint_search():
     assert len(plan.steps) == 1
     assert plan.steps[0].capability_name == ENDPOINT_DEVICE_SEARCH
     assert plan.steps[0].arguments["requested_facts"] == ("reboot required",)
+
+
+def test_datto_edr_provider_exposes_only_governed_endpoint_security_reads():
+    from orchestrator.resource_capability_catalog import (
+        DATTO_EDR_PROVIDER,
+        ENDPOINT_SECURITY_DETECTION_READ,
+        ENDPOINT_SECURITY_DETECTION_SEARCH,
+        ENDPOINT_SECURITY_POLICY_READ,
+        ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+        ENDPOINT_SECURITY_STATUS_READ,
+        datto_edr_endpoint_security_provider,
+        endpoint_security_detection_read,
+        endpoint_security_detection_search,
+        endpoint_security_policy_read,
+        endpoint_security_quarantine_search,
+        endpoint_security_scan_history_search,
+        endpoint_security_status_read,
+    )
+
+    expected = frozenset(
+        {
+            ENDPOINT_SECURITY_STATUS_READ,
+            ENDPOINT_SECURITY_DETECTION_SEARCH,
+            ENDPOINT_SECURITY_DETECTION_READ,
+            ENDPOINT_SECURITY_POLICY_READ,
+            ENDPOINT_SECURITY_SCAN_HISTORY_SEARCH,
+            ENDPOINT_SECURITY_QUARANTINE_SEARCH,
+        }
+    )
+    provider = datto_edr_endpoint_security_provider(NOW)
+
+    assert provider.provider_id == DATTO_EDR_PROVIDER
+    assert provider.capabilities == expected
+    assert provider.metadata["read_only"] == "true"
+    assert "endpoint.security.scan.execute" not in provider.capabilities
+    assert "endpoint.security.isolate" not in provider.capabilities
+    assert "endpoint.security.quarantine.execute" not in provider.capabilities
+
+    definitions = (
+        endpoint_security_status_read(NOW),
+        endpoint_security_detection_search(NOW),
+        endpoint_security_detection_read(NOW),
+        endpoint_security_policy_read(NOW),
+        endpoint_security_scan_history_search(NOW),
+        endpoint_security_quarantine_search(NOW),
+    )
+    assert all(item.metadata["provider_neutral"] == "true" for item in definitions)
+    assert all(item.metadata["read_only"] == "true" for item in definitions)
+    assert all(item.approval.required is False for item in definitions)

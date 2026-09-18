@@ -1,0 +1,173 @@
+name: Datto EDR AV Playbook
+
+on:
+  push:
+    branches:
+      - "feature/jason-datto-edr-av-**"
+    paths:
+      - docs/operations/Jason-Secret-Provider-Deployment-Record.md
+      - docs/operations/Provider-Secret-Provisioning.md
+      - docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md
+      - implementation/autonomous_remediation/**
+      - implementation/connectors/connector-catalog.yaml
+      - implementation/connectors/core/openbao_secrets.py
+      - implementation/connectors/datto_edr/**
+      - implementation/connectors/tests/test_datto_edr_connector.py
+      - implementation/connectors/autotask/mutation_connector.py
+      - implementation/connectors/tests/test_autotask_mutation_connector.py
+      - implementation/orchestrator/resource_capability_catalog.py
+      - implementation/orchestrator/tests/test_resource_capability_catalog.py
+      - implementation/runtime_service/src/jason_runtime/composition.py
+      - implementation/runtime_service/src/jason_runtime/autotask_internal_note.py
+      - implementation/runtime_service/src/jason_runtime/autotask_ticket_update.py
+      - implementation/runtime_service/tests/test_composition.py
+      - implementation/runtime_service/tests/test_autotask_internal_note.py
+      - implementation/runtime_service/tests/test_autotask_ticket_update.py
+      - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+      - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
+      - implementation/runtime_service/tests/test_datto_edr_scan_execution.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
+      - infrastructure/jason-runtime/compose.yaml
+      - infrastructure/jason-runtime/jason-ops.sh
+      - infrastructure/showcase/production_health_exporter.py
+      - infrastructure/showcase/playbook_exporter.py
+      - infrastructure/showcase/tests/test_playbook_exporter.py
+      - infrastructure/showcase/tests/test_production_health_exporter.py
+      - infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json
+      - infrastructure/showcase/prometheus/**
+      - infrastructure/showcase/systemd/jason-playbook-exporter.service
+      - infrastructure/showcase/install_showcase.sh
+      - tools/provider_secret_provision.py
+      - tools/tests/test_provider_secret_provision.py
+      - .github/workflows/datto-edr-av-playbook.yml
+  pull_request:
+    paths:
+      - docs/operations/Jason-Secret-Provider-Deployment-Record.md
+      - docs/operations/Provider-Secret-Provisioning.md
+      - docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md
+      - implementation/autonomous_remediation/**
+      - implementation/connectors/connector-catalog.yaml
+      - implementation/connectors/core/openbao_secrets.py
+      - implementation/connectors/datto_edr/**
+      - implementation/connectors/tests/test_datto_edr_connector.py
+      - implementation/connectors/autotask/mutation_connector.py
+      - implementation/connectors/tests/test_autotask_mutation_connector.py
+      - implementation/orchestrator/resource_capability_catalog.py
+      - implementation/orchestrator/tests/test_resource_capability_catalog.py
+      - implementation/runtime_service/src/jason_runtime/composition.py
+      - implementation/runtime_service/src/jason_runtime/autotask_internal_note.py
+      - implementation/runtime_service/src/jason_runtime/autotask_ticket_update.py
+      - implementation/runtime_service/tests/test_composition.py
+      - implementation/runtime_service/tests/test_autotask_internal_note.py
+      - implementation/runtime_service/tests/test_autotask_ticket_update.py
+      - implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+      - implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+      - implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
+      - implementation/runtime_service/tests/test_datto_edr_scan_execution.py
+      - implementation/mcp_service/src/jason_mcp/server.py
+      - implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
+      - infrastructure/jason-runtime/compose.yaml
+      - infrastructure/jason-runtime/jason-ops.sh
+      - infrastructure/showcase/production_health_exporter.py
+      - infrastructure/showcase/playbook_exporter.py
+      - infrastructure/showcase/tests/test_playbook_exporter.py
+      - infrastructure/showcase/tests/test_production_health_exporter.py
+      - infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json
+      - infrastructure/showcase/prometheus/**
+      - infrastructure/showcase/systemd/jason-playbook-exporter.service
+      - infrastructure/showcase/install_showcase.sh
+      - tools/provider_secret_provision.py
+      - tools/tests/test_provider_secret_provision.py
+      - .github/workflows/datto-edr-av-playbook.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    env:
+      JASON_AUTHORITY_DB: /tmp/jason-ci/authority.sqlite3
+      JASON_TEAMS_IDENTITY_BINDINGS_DB: /tmp/jason-ci/teams-identity-bindings.sqlite3
+      JASON_TEAMS_CONTINUATION_DB: /tmp/jason-ci/teams-conversation-continuation.sqlite3
+      JASON_REPLAY_DB: /tmp/jason-ci/replay.sqlite3
+      JASON_SECURITY_AUDIT_DB: /tmp/jason-ci/security-audit.sqlite3
+      JASON_ORCHESTRATION_EVENTS_DB: /tmp/jason-ci/orchestration-events.sqlite3
+      JASON_MODEL_USAGE_DB: /tmp/jason-ci/model-usage.sqlite3
+      JASON_RESOLUTION_MEMORY_DB: /tmp/jason-ci/resolution-memory.sqlite3
+      JASON_TRUSTED_KEYS_REGISTRY: /tmp/jason-ci/trusted-keys/registry.json
+      JASON_MICROSOFT_BOUNDARY_DB: /tmp/jason-ci/client-boundaries.sqlite3
+      JASON_DYNAMIC_CONVERSATION_CONTEXT_DB: /tmp/jason-ci/dynamic-conversation-context.sqlite3
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Jason test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e './implementation[dev]'
+          python -m pip install --disable-pip-version-check -e './implementation/mcp_service'
+      - name: Compile Datto EDR AV modules
+        run: >-
+          python -m py_compile
+          implementation/autonomous_remediation/datto_edr_av_playbook.py
+          implementation/autonomous_remediation/datto_edr_av_runtime_contract.py
+          implementation/autonomous_remediation/datto_edr_av_security.py
+          implementation/autonomous_remediation/datto_edr_av_api_contract.py
+          implementation/connectors/datto_edr/threat_correlation.py
+          implementation/runtime_service/src/jason_runtime/datto_alert_resolution.py
+          implementation/runtime_service/src/jason_runtime/datto_edr_scan_execution.py
+          implementation/connectors/datto_edr/connector.py
+      - name: Run Datto EDR AV playbook and connector tests
+        env:
+          PYTHONPATH: implementation
+        run: >-
+          python -m pytest -q
+          implementation/autonomous_remediation/test_datto_edr_av_playbook.py
+          implementation/autonomous_remediation/test_datto_edr_av_runtime_contract.py
+          implementation/autonomous_remediation/test_datto_edr_av_security.py
+          implementation/autonomous_remediation/test_datto_edr_av_api_contract.py
+          implementation/autonomous_remediation/test_datto_edr_av_playbook_security_integration.py
+          implementation/connectors/tests/test_datto_edr_connector.py
+          implementation/autonomous_remediation/test_datto_edr_av_correlation.py
+          tools/tests/test_provider_secret_provision.py
+      - name: Run production mutation compatibility tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
+        run: >-
+          python -m pytest -q
+          implementation/connectors/tests/test_autotask_mutation_connector.py
+          implementation/runtime_service/tests/test_autotask_internal_note.py
+          implementation/runtime_service/tests/test_autotask_ticket_update.py
+          implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py
+          implementation/runtime_service/tests/test_datto_edr_scan_execution.py
+      - name: Run endpoint-security governance catalog tests
+        env:
+          PYTHONPATH: implementation
+        run: python -m pytest -q implementation/orchestrator/tests/test_resource_capability_catalog.py
+      - name: Run runtime composition guardrail tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
+        run: python -m pytest -q implementation/runtime_service/tests/test_composition.py
+      - name: Run Datto EDR MCP correlation contract tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src:implementation/mcp_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
+        run: >-
+          python -m pytest -q
+          implementation/mcp_service/tests/test_datto_threat_correlation_contract.py
+      - name: Run playbook observability tests
+        working-directory: infrastructure/showcase
+        run: >-
+          python -m pytest -q
+          tests/test_playbook_exporter.py
+          tests/test_production_health_exporter.py
+      - name: Validate shell and dashboard source
+        run: |
+          bash -n infrastructure/showcase/install_showcase.sh
+          bash -n infrastructure/jason-runtime/jason-ops.sh
+          python -m json.tool infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json >/dev/null

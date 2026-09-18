@@ -135,6 +135,18 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
                 }
             ],
         },
+        {
+            "pageDetails": {
+                "count": 0,
+                "totalCount": 3,
+                "prevPageUrl": (
+                    "https://provider.example/api/v2/account/components"
+                    "?max=2&page=1"
+                ),
+                "nextPageUrl": None,
+            },
+            "components": [],
+        },
     ]
     audit = Audit()
     transport = Transport(responses)
@@ -151,13 +163,13 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
         )
     )
 
-    assert [call["method"] for call in transport.calls] == ["GET", "GET"]
+    assert [call["method"] for call in transport.calls] == ["GET", "GET", "GET"]
     assert all(
         call["url"].endswith("/api/v2/account/components")
         for call in transport.calls
     )
-    assert [call["params"]["page"] for call in transport.calls] == [0, 1]
-    assert [call["params"]["max"] for call in transport.calls] == [2, 2]
+    assert [call["params"]["page"] for call in transport.calls] == [0, 1, 2]
+    assert [call["params"]["max"] for call in transport.calls] == [2, 2, 2]
     assert result.data["discovery_complete"] is True
     assert result.data["match_count"] == 2
     assert [match["name"] for match in result.data["resource_matches"]] == [
@@ -180,7 +192,7 @@ def test_component_search_completes_catalog_and_filters_human_name(monkeypatch) 
         if event_type == "connector.adaptation_observed"
     ]
     assert len(adaptation) == 1
-    assert adaptation[0]["pages_aggregated"] == 2
+    assert adaptation[0]["pages_aggregated"] == 3
     assert adaptation[0]["final_count"] == 3
     assert adaptation[0]["complete"] is True
 

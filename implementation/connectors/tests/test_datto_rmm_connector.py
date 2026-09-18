@@ -68,7 +68,7 @@ def test_device_search_translates_hostname_without_collapsing_ambiguity() -> Non
 
     assert path == "/api/v2/account/devices"
     assert params == {
-        "page": 1,
+        "page": 0,
         "max": 25,
         "hostname": "AOT-50282",
     }
@@ -295,7 +295,14 @@ def test_fact_bearing_fragment_search_falls_back_without_inventing_hostname(monk
         "siteName": "Customer-A",
         "lastUser": "CUSTOMERA\\verified.user",
     }
-    transport = Transport([exact_search_payload, account_discovery_payload, exact_payload])
+    transport = Transport(
+        [
+            exact_search_payload,
+            account_discovery_payload,
+            {"devices": []},
+            exact_payload,
+        ]
+    )
     connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
 
     result = connector.execute(
@@ -307,11 +314,12 @@ def test_fact_bearing_fragment_search_falls_back_without_inventing_hostname(monk
         )
     )
 
-    assert len(transport.calls) == 3
+    assert len(transport.calls) == 4
     assert transport.calls[0]["params"]["hostname"] == "50282"
     assert "hostname" not in transport.calls[1]["params"]
-    assert transport.calls[1]["params"] == {"page": 1, "max": 250}
-    assert transport.calls[2]["url"].endswith("/api/v2/device/device-uid-50282")
+    assert transport.calls[1]["params"] == {"page": 0, "max": 250}
+    assert transport.calls[2]["params"] == {"page": 1, "max": 250}
+    assert transport.calls[3]["url"].endswith("/api/v2/device/device-uid-50282")
     assert result.data["resolved_resource_id"] == "device-uid-50282"
     assert result.data["resource_matches"] == [
         {
@@ -335,7 +343,13 @@ def test_fact_bearing_fragment_search_preserves_ambiguity_across_sites(monkeypat
             {"uid": "device-uid-b", "hostname": "LAB-50282", "siteName": "Customer-B"},
         ]
     }
-    transport = Transport([exact_search_payload, account_discovery_payload])
+    transport = Transport(
+        [
+            exact_search_payload,
+            account_discovery_payload,
+            {"devices": []},
+        ]
+    )
     connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
 
     result = connector.execute(
@@ -347,7 +361,7 @@ def test_fact_bearing_fragment_search_preserves_ambiguity_across_sites(monkeypat
         )
     )
 
-    assert len(transport.calls) == 2
+    assert len(transport.calls) == 3
     assert [match["resource_id"] for match in result.data["resource_matches"]] == [
         "device-uid-a",
         "device-uid-b",
@@ -566,7 +580,7 @@ def test_fact_bearing_user_relationship_discovery_preserves_provider_identity(mo
         "siteName": "AOT",
         "lastUser": "AzureAD\\LindseyCollins",
     }
-    transport = Transport([account_payload, exact_payload])
+    transport = Transport([account_payload, {"devices": []}, exact_payload])
     connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
     result = connector.execute(
         connector_request(
@@ -576,7 +590,9 @@ def test_fact_bearing_user_relationship_discovery_preserves_provider_identity(mo
             }
         )
     )
-    assert len(transport.calls) == 2
+    assert len(transport.calls) == 3
+    assert transport.calls[0]["params"]["page"] == 0
+    assert transport.calls[1]["params"]["page"] == 1
     assert "hostname" not in transport.calls[0]["params"]
     assert result.data["resolved_resource_id"] == "device-lindsey"
     assert result.data["resource_matches"] == [
@@ -675,3 +691,252 @@ def test_site_search_completes_provider_collection_by_default(monkeypatch) -> No
     assert adaptation_events[0]["pages_aggregated"] == 5
     assert adaptation_events[0]["final_count"] == 45
     assert adaptation_events[0]["complete"] is True
+
+
+def test_sosserver2024_exact_hostname_site_resolves_known_uid_beyond_page_two(
+    monkeypatch,
+) -> None:
+    """Regression for the Star of the Sea production discovery failure."""
+
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    target_uid = "52b4f1ad-d834-4c79-4955-8434101ccb7a"
+    responses = [
+        {"devices": []},
+        {
+            "devices": [
+                {
+                    "uid": "page-zero-device",
+                    "hostname": "OTHER-0",
+                    "siteName": "Other Site",
+                }
+            ]
+        },
+        {
+            "devices": [
+                {
+                    "uid": "page-one-device",
+                    "hostname": "OTHER-1",
+                    "siteName": "Other Site",
+                }
+            ]
+        },
+        {
+            "devices": [
+                {
+                    "uid": target_uid,
+                    "hostname": "SOSServer2024",
+                    "siteName": "Star of the Sea Catholic Church",
+                    "siteUid": "star-of-the-sea",
+                }
+            ]
+        },
+        {"devices": []},
+    ]
+
+    transport = Transport(responses)
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "sosserver2024",
+                "site": "Star of the Sea Catholic Church",
+            }
+        )
+    )
+
+    assert result.data["discovery_complete"] is True
+    assert result.data["resolved_resource_id"] == target_uid
+    assert result.data["resource_matches"] == [
+        {
+            "resource_id": target_uid,
+            "hostname": "SOSServer2024",
+            "site": "Star of the Sea Catholic Church",
+            "site_id": "star-of-the-sea",
+        }
+    ]
+    assert [
+        call["params"]["page"]
+        for call in transport.calls[1:]
+    ] == [0, 1, 2, 3]
+
+
+def test_hostname_discovery_continues_past_provider_page_two(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    transport = Transport(
+        [
+            {"devices": []},
+            {"devices": [{"uid": "d0", "hostname": "OTHER-0"}]},
+            {"devices": [{"uid": "d1", "hostname": "OTHER-1"}]},
+            {"devices": [{"uid": "d2", "hostname": "OTHER-2"}]},
+            {
+                "devices": [
+                    {
+                        "uid": "target-beyond-two",
+                        "hostname": "BEYOND-PAGE-TWO",
+                        "siteName": "Customer-Z",
+                    }
+                ]
+            },
+            {"devices": []},
+        ]
+    )
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        connector_request(
+            arguments={"hostname": "BEYOND-PAGE-TWO"}
+        )
+    )
+
+    assert result.data["discovery_complete"] is True
+    assert result.data["resolved_resource_id"] == "target-beyond-two"
+    assert [
+        call["params"]["page"]
+        for call in transport.calls[1:]
+    ] == [0, 1, 2, 3, 4]
+
+
+def test_genuine_not_found_requires_provider_exhaustion(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    transport = Transport(
+        [
+            {"devices": []},
+            {"devices": [{"uid": "d0", "hostname": "OTHER-0"}]},
+            {"devices": [{"uid": "d1", "hostname": "OTHER-1"}]},
+            {"devices": []},
+        ]
+    )
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        connector_request(arguments={"hostname": "DOES-NOT-EXIST"})
+    )
+
+    assert result.data["resource_matches"] == []
+    assert result.data["discovery_complete"] is True
+    assert "incomplete_reason" not in result.data
+
+
+def test_incomplete_device_enumeration_never_becomes_definitive_not_found(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    transport = Transport(
+        [
+            {"devices": []},
+            {"devices": [{"uid": "d0", "hostname": "OTHER-0"}]},
+            {"devices": [{"uid": "d1", "hostname": "OTHER-1"}]},
+        ]
+    )
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+    connector.fallback_discovery_max_pages = 2
+
+    result = connector.execute(
+        connector_request(arguments={"hostname": "UNKNOWN-ENDPOINT"})
+    )
+
+    assert result.data["resource_matches"] == []
+    assert result.data["discovery_complete"] is False
+    assert result.data["incomplete_reason"] == "page_limit_reached"
+
+
+def test_exact_hostname_matching_is_case_insensitive_and_preferred() -> None:
+    matches = [
+        {
+            "resource_id": "exact",
+            "hostname": "SOSServer2024",
+            "site": "Star of the Sea Catholic Church",
+        },
+        {
+            "resource_id": "fragment",
+            "hostname": "LAB-SOSServer2024-OLD",
+            "site": "Star of the Sea Catholic Church",
+        },
+    ]
+
+    exact = DattoRmmConnector._exact_hostname_site_matches(
+        matches=matches,
+        hostname_reference="sosserver2024",
+        site_reference="star of the sea catholic church",
+    )
+
+    assert [item["resource_id"] for item in exact] == ["exact"]
+
+
+def test_site_disambiguates_identical_exact_hostnames(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+
+    search_payload = {
+        "devices": [
+            {
+                "uid": "site-a-device",
+                "hostname": "SHARED-SERVER",
+                "siteName": "Customer A",
+            },
+            {
+                "uid": "site-b-device",
+                "hostname": "shared-server",
+                "siteName": "Customer B",
+            },
+        ]
+    }
+    transport = Transport([search_payload])
+    connector = DattoRmmConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        connector_request(
+            arguments={
+                "hostname": "SHARED-SERVER",
+                "site": "customer b",
+            }
+        )
+    )
+
+    assert result.data["resolved_resource_id"] == "site-b-device"
+    assert result.data["resource_matches"] == [
+        {
+            "resource_id": "site-b-device",
+            "hostname": "shared-server",
+            "site": "Customer B",
+        }
+    ]

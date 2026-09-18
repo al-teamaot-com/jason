@@ -4,7 +4,7 @@
 **Profile:** Pilot  
 **Status:** READY — OpenBao runtime, provider-specific AppRole paths, recovery, backup, restore, governed read-only provider bindings, Microsoft Graph identity enrichment, and CAP-007 SES send credential boundaries are verified for the currently approved pilot scope  
 **Owner:** Jason Architecture Authority  
-**Last reconciled:** 2026-08-11
+**Last reconciled:** 2026-09-18
 
 ## Purpose
 
@@ -25,7 +25,7 @@ This is the canonical non-secret operational record for the secret provider used
 | Historical/general wrapper | `/usr/local/bin/jason-secret` | Installed and executable; not the canonical provider runtime |
 | OpenBao configuration path | `/opt/jason/infrastructure/openbao/config` mounted read-only at `/openbao/config` | Verified |
 | Storage backend | Integrated Raft at `/opt/jason/infrastructure/openbao/data` | Verified |
-| Production provider authentication | Provider-specific OpenBao AppRole through JKD-003 | Verified for Autotask, IT Glue, Datto RMM, Microsoft Graph directory-read, and AWS SES sendmail bindings |
+| Production provider authentication | Provider-specific OpenBao AppRole through JKD-003 | Verified for Autotask, IT Glue, Datto RMM, Datto EDR/AV, Microsoft Graph directory-read, and AWS SES sendmail bindings |
 | Provider bootstrap credential pattern | `/opt/jason/bootstrap/secrets/openbao/<provider>-approle/{role-id,secret-id}` or provider-specific equivalent | Verified pattern |
 | Runtime provider token lifecycle | Short-lived AppRole service token; only allow-listed KV v2 read plus self-revoke; not persisted | Verified by tests and live provider proof |
 | Shared persistent provider runtime token | Prohibited | Verified architecture rule |
@@ -57,8 +57,49 @@ This is the canonical non-secret operational record for the secret provider used
 | `autotask.readonly` | `secret/data/connectors/autotask/production/read-only` | `username`, `secret`, `integration_code` | `autotask-read-approle` | Verified canonical read-only contract |
 | `it_glue.readonly` | `secret/data/connectors/it-glue/production/read-only` | `api_key` | `itglue-read-approle` | Verified AppRole resolution and bounded live read on 2026-08-10 |
 | `datto_rmm.readonly` | `secret/data/connectors/datto-rmm/production/read-only` | `api_url`, `api_key`, `api_secret` | `datto-rmm-read-approle` | Verified AppRole resolution and bounded live read on 2026-08-10 |
+| `datto_edr.readonly` | `secret/data/connectors/datto-edr/production/read-only` | `api_url`, `api_token` | `datto-edr-read-approle` | Verified AppRole resolution and bounded live read on 2026-09-18 |
+| `datto_edr.execution` | `secret/data/connectors/datto-edr/production/read-only` | `api_url`, `api_token` | `datto-edr-read-approle` | Logical execution alias to the same protected provider credential; only the narrow governed `endpoint.security.scan.start` action may use it. Live Quick Scan accepted 2026-09-18. |
 | `microsoft_graph.directory_read` | `secret/data/connectors/microsoft-graph/production/directory-read` | `private_key_pem`, `certificate_pem`, `certificate_thumbprint`, `generation` | `microsoft-graph-directory-read-approle` | Verified lifecycle, AppRole access, MSAL token acquisition, and exact-user Graph lookup on 2026-08-11 |
 | `aws_ses.sendmail` | `secret/data/connectors/aws-ses/production/sendmail` | `access_key_id`, `secret_access_key`; optional `session_token` | `aws-ses-sendmail-approle` | Verified lifecycle, bounded runtime resolution, and successful governed CAP-007 send on 2026-08-11 |
+
+## Datto EDR/AV provider boundary — 2026-09-18
+
+A dedicated Datto EDR/AV API token was provisioned through the canonical
+provider-secret lifecycle into `datto_edr.readonly`. The secret is isolated
+behind `jason-datto-edr-read` and the protected host AppRole directory:
+
+`/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle/`
+
+Credential-safe AppRole resolution was proven without printing either
+`api_url` or `api_token`. A disposable read-only validation runtime then
+used the resolved credential to prove live reads against the TeamAOT Datto EDR
+tenant.
+
+After provider-native scan execution was implemented, Jason added logical name `datto_edr.execution` as an explicit action-layer alias to the same protected provider record and AppRole. This does not duplicate the API token or create a broader OpenBao policy. The read connector remains read-only; only the separately registered, approval-governed `endpoint.security.scan.start` action can invoke the native scan route.
+
+Verified read resources included:
+
+- AgentDetails / endpoint security health;
+- Alerts and AlertDetails;
+- assigned agent policies;
+- scan history;
+- quarantine history.
+
+The live tenant requires the generated API token through LoopBack's
+`access_token` request parameter. Jason's connector keeps that parameter
+runtime-only; audit records contain provider path/operation metadata without
+the token-bearing query string.
+
+A controlled identity proof for AOT-50282 established the durable relationship
+`Datto RMM resource_id -> Datto EDR deviceId -> Datto EDR agent id`. Two EDR
+records shared the same hostname, demonstrating why hostname alone must never
+auto-select the EDR resource. The record whose `deviceId` exactly matched the
+authoritative Datto RMM UID was active/current; the duplicate record was
+inactive/stale.
+
+No Datto EDR/AV provider mutation was performed during this commissioning
+proof. Scan execution, quarantine/restore, isolation, alert response, archive,
+and other mutation routes remain outside the read-only connector surface.
 
 ## Microsoft Graph provider boundary — 2026-08-11
 

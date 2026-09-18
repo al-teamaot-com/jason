@@ -1,8 +1,15 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-16  
-**Status:** The bounded governed-action path for Autotask and Datto RMM through ChatGPT is live-proven. Datto is additionally cross-chat proven for exact target/component resolution, fresh per-execution approval, one-attempt execution, terminal job verification, governed component StdOut retrieval, and current-release Grafana/Prometheus observability. The current Section Goal is complete.  
+**Updated:** 2026-09-18
+**Status:** Datto EDR/AV v1.2 governed read backend is production-deployed and accepted at source revision `b63798e048f4493d15b79565e997f43f8fd7edac`. All six `endpoint.security.*` read capabilities succeed through the authenticated Jason MCP path against AOT-50282 with exact DRMM UID -> EDR `deviceId` correlation. The playbook is in supervised pilot/read-ready state. Full threat-branch activation remains intentionally pending governed provider-native Datto AV scan execution and a complete remediation/scan/recurrence acceptance run.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
+
+## Continuity control anchors
+
+- **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
+- **Last durable success:** preserved in the governed production proof and observability sections below.
+- **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
+- **Next safe actions:** finish playbook observability closeout, add governed provider-native Datto AV scan execution, then run the complete remediation/scan/recurrence acceptance path before enabling the full threat branch.
 
 ## Durable operating principle
 
@@ -16,8 +23,8 @@ The production MCP service is `jason-mcp-pilot`.
 
 The currently established live MCP code/image boundary is:
 
-- source commit: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
-- image: `jason-mcp:generic-governed-26704f0600bb`;
+- source commit: `b63798e048f4493d15b79565e997f43f8fd7edac`;
+- image: `jason-mcp:datto-edr-av-prod-b63798e` (`sha256:ef612ee0e4cb1779df5d8d765162f80c3b61f93816eb3a190673a66457df428f`);
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -26,10 +33,13 @@ The currently established live MCP code/image boundary is:
 - write tools enabled;
 - active write/action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
 - Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
+- Datto EDR/AV governed reads include `endpoint.security.status.read`, `endpoint.security.detection.search`, `endpoint.security.detection.read`, `endpoint.security.policy.read`, `endpoint.security.scan.history.search`, and `endpoint.security.quarantine.search`;
+- all six endpoint-security reads were production-accepted against AOT-50282 on 2026-09-18;
+- matching `jason-runtime` is healthy on image ID `sha256:6342f0b38abcbfdbe7545f5d5947a0c683b2a40b193c28de5b8864da68d73680`;
 - write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
 - Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
-Repository documentation/observability commits are newer than the deployed MCP code source. Do not equate branch HEAD with deployed MCP code without fresh runtime evidence.
+The live MCP and runtime were rebuilt from the Datto EDR/AV production-based branch and production-accepted at `b63798e...`. Continue to verify volatile runtime state before consequential change rather than assuming branch HEAD equals deployed state.
 
 ## Autotask governed proof
 
@@ -169,7 +179,32 @@ Narrative proof does not itself promote System Registry lifecycle state. The pri
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
-## Current Section Goal — CLOSED
+## Current Section Goal — ACTIVE / PILOT CLOSEOUT
+
+**Goal:** finish the Datto EDR/AV Diagnose & Repair playbook as a governed, measurable MSP workflow without conflating product health, provider detections, contained artifacts, or confirmed compromise.
+
+Production acceptance completed on 2026-09-18 for both the governed read backend and provider-native Datto AV scan-start capability. All six `endpoint.security.*` reads succeed through the authenticated Jason MCP path with exact DRMM UID -> EDR `deviceId` correlation. Controlled AOT-50282 acceptance also proved governed `endpoint.security.scan.start` by starting a native Quick Scan and verifying terminal scan-history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`. Current hardened MCP source is `8776ac5dc56c4a22e0f86dceb780f0cff4fd70f9`.
+
+Authoritative acceptance records:
+
+- `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`;
+- `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`.
+
+Current playbook state:
+
+- lifecycle: `pilot`;
+- runtime enabled: `false`;
+- review status: `scan_execute_accepted_full_threat_branch_pending`;
+- EDR/AV read backend: **accepted**;
+- production runtime/MCP deployment: **accepted**;
+- exact read-only authority grants: **accepted**;
+- Grafana/Prometheus closeout: **accepted** — exporter active, Prometheus target `up=1`, Grafana dashboard UID `jason-playbook-control-center` provisioned;
+- governed provider-native Datto AV scan execution: **accepted**;
+- complete remediation/scan/recurrence acceptance: **pending**.
+
+The full threat branch must continue to fail closed until the complete composite remediation/scan/post-scan-verification/recurrence acceptance is proven. Do not mark this Section Goal fully closed merely because the reads and scan-start action are healthy.
+
+## Previous Section Goal — CLOSED
 
 The requested cross-chat Datto workflow is complete:
 
@@ -198,10 +233,12 @@ The requested cross-chat Datto workflow is complete:
 
 1. `docs/control/JASON-FUNDAMENTALS.md`
 2. this file
-3. `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`
-4. `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
-5. `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
-6. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
-7. current Git and fresh runtime evidence before asserting volatile production state
+3. `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md`
+4. `docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md`
+5. `docs/sessions/Jason-Datto-RMM-Cross-Chat-Output-Proof-2026-09-16.md`
+6. `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`
+7. `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`
+8. `docs/operations/Runbook-ChatGPT-Business-Jason-MCP-Pilot.md`
+9. current Git and fresh runtime evidence before asserting volatile production state
 
 Conversation memory is context only. It is not authority.

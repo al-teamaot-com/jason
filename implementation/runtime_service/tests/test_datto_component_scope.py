@@ -174,3 +174,44 @@ def test_crossed_uid_name_pair_fails_closed(monkeypatch):
         )
 
     assert str(exc.value) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+
+
+def test_durable_registry_can_promote_and_revoke_component(monkeypatch, tmp_path):
+    from jason_runtime.datto_component_approval_registry import (
+        DATTO_COMPONENT_APPROVAL_REGISTRY_PATH_ENV,
+        approve_component,
+        revoke_component,
+    )
+
+    clear_component_env(monkeypatch)
+    path = tmp_path / "approvals.json"
+    monkeypatch.setenv(
+        DATTO_COMPONENT_APPROVAL_REGISTRY_PATH_ENV,
+        str(path),
+    )
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        '[{"uid":"component-1","name":"Diagnostic One","approval_mode":"per_run"}]',
+    )
+
+    approve_component(
+        uid="component-1",
+        name="Diagnostic One",
+        approved_by="person-al",
+        metadata_fingerprint="b" * 64,
+        path=path,
+    )
+    promoted = configured_datto_components()[0]
+    assert promoted.approval_mode == "standing_safe"
+    assert promoted.approval_source == "durable_registry"
+    assert promoted.metadata_fingerprint == "b" * 64
+
+    revoke_component(
+        uid="component-1",
+        name="Diagnostic One",
+        revoked_by="person-al",
+        path=path,
+    )
+    downgraded = configured_datto_components()[0]
+    assert downgraded.approval_mode == "per_run"
+    assert downgraded.approval_source == "durable_registry_revocation"

@@ -8,6 +8,11 @@ NAME = "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
 
 
 def set_scope(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_verify_managed_datto_component_target",
+        lambda value: str(value).strip(),
+    )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
         "AOT governed diagnostic pilot",
@@ -128,7 +133,7 @@ def test_read_only_powershell_needs_no_technician_approval(
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
-            "device_uid": "device-123",
+            "device_uid": "other-managed-device",
             "component_uid": UID,
             "variables": {
                 "usrInput": (
@@ -157,7 +162,7 @@ def test_mutating_powershell_requires_explicit_approval(
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
-            "device_uid": "device-123",
+            "device_uid": "other-managed-device",
             "component_uid": UID,
             "variables": {
                 "usrInput": (
@@ -186,7 +191,7 @@ def test_mutating_powershell_runs_after_explicit_approval(
     result = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={
-            "device_uid": "device-123",
+            "device_uid": "other-managed-device",
             "component_uid": UID,
             "variables": {
                 "usrInput": (

@@ -65,6 +65,35 @@ At the same time, the current catalog does not yet include tenant-wide resource 
 
 A question such as “what can you tell me about our Microsoft tenant?” should therefore produce a capability-aware answer: summarize the Microsoft facts Jason can actually read, identify missing tenant-level families precisely, and avoid inventing or substituting Jason System Registry data. The System Registry is authoritative for Jason topology and declared operational state, not for Microsoft tenant configuration.
 
+## Discovery completeness principle
+
+A provider search result is only definitive when Jason can distinguish complete
+enumeration from bounded or interrupted discovery.
+
+For canonical resource search capabilities:
+
+- an exact provider-side positive match may be used only when it preserves
+  ambiguity and yields durable provider identity;
+- a provider-side negative match is not authoritative when the provider search
+  can be incomplete, capped, paginated, or otherwise lossy;
+- local fallback enumeration must follow the provider's actual pagination
+  semantics until genuine exhaustion, or stop with an explicit incomplete
+  state when a safety bound, timeout, provider error, or pagination stall
+  prevents completion;
+- `match_count = 0` is definitive not-found evidence only when
+  `discovery_complete = true` (or an equivalent existing Jason success
+  contract);
+- `discovery_complete = false` must remain visible to the conversational layer
+  together with a bounded reason, and must never be paraphrased as "the
+  resource does not exist";
+- exact case-insensitive hostname matching takes precedence over fuzzy or
+  identifier-fragment matching. Site/organization is a disambiguator when
+  supplied.
+
+This rule generalizes the existing collection-completeness principle: a
+successful provider page is evidence, not proof that the applicable collection
+was exhausted.
+
 ## Authoritative-source selection
 
 For every requested fact Jason should prefer, in order:

@@ -1,0 +1,349 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Jason Component Control",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Datto RMM autonomous execution control\nThis page manages Jason's **standing autonomous approval registry** for the complete live Datto RMM component catalog.\n\n- **Checked:** Jason may select the component without asking for a per-run approval, subject to its normal managed-endpoint and variable guardrails.\n- **Unchecked:** exact technician instruction/approval is required for a run unless another standing policy applies.\n- Components classified as disruptive/destructive or generic ad-hoc PowerShell remain **ineligible** and cannot be bulk-approved here.\n- **Select All Eligible** selects every component that Jason's server-side safety policy currently permits; **Apply Autonomous Approvals** shows a confirmation before writing the bulk delta."
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Datto RMM Component Catalog and Autonomous Policy",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "jason-component-control"
+      },
+      "description": "Authoritative live Datto component catalog. Safety-blocked rows remain per-run even when bulk selection is used.",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "jason-component-control"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/component-control/components",
+          "root_selector": "components",
+          "columns": [
+            {
+              "selector": "name",
+              "text": "Component",
+              "type": "string"
+            },
+            {
+              "selector": "category",
+              "text": "Category",
+              "type": "string"
+            },
+            {
+              "selector": "run_autonomously",
+              "text": "Run autonomously",
+              "type": "boolean"
+            },
+            {
+              "selector": "eligible",
+              "text": "Eligible",
+              "type": "boolean"
+            },
+            {
+              "selector": "approval_source",
+              "text": "Policy source",
+              "type": "string"
+            },
+            {
+              "selector": "approved_by",
+              "text": "Approved by",
+              "type": "string"
+            },
+            {
+              "selector": "approved_at",
+              "text": "Approved at",
+              "type": "string"
+            },
+            {
+              "selector": "blocked_reason",
+              "text": "Blocked reason",
+              "type": "string"
+            },
+            {
+              "selector": "description",
+              "text": "Description",
+              "type": "string"
+            }
+          ],
+          "filters": [],
+          "global_query_id": "",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "headers": []
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        },
+        "enablePagination": true
+      }
+    },
+    {
+      "id": 3,
+      "type": "volkovlabs-form-panel",
+      "title": "Autonomous Component Approvals",
+      "description": "Select exactly which eligible Datto RMM components Jason may choose and run without a per-run technician approval. Safety-blocked components cannot be selected here.",
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "jason-component-control"
+      },
+      "pluginVersion": "6.2.0",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 30
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "jason-component-control"
+          },
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "parser": "backend",
+          "url": "/component-control/components",
+          "root_selector": "components",
+          "columns": [
+            {
+              "selector": "name",
+              "text": "Component",
+              "type": "string"
+            },
+            {
+              "selector": "category",
+              "text": "Category",
+              "type": "string"
+            },
+            {
+              "selector": "run_autonomously",
+              "text": "Run autonomously",
+              "type": "boolean"
+            },
+            {
+              "selector": "eligible",
+              "text": "Eligible",
+              "type": "boolean"
+            },
+            {
+              "selector": "approval_source",
+              "text": "Policy source",
+              "type": "string"
+            },
+            {
+              "selector": "approved_by",
+              "text": "Approved by",
+              "type": "string"
+            },
+            {
+              "selector": "approved_at",
+              "text": "Approved at",
+              "type": "string"
+            },
+            {
+              "selector": "blocked_reason",
+              "text": "Blocked reason",
+              "type": "string"
+            },
+            {
+              "selector": "description",
+              "text": "Description",
+              "type": "string"
+            }
+          ],
+          "filters": [],
+          "global_query_id": "",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "headers": []
+          }
+        }
+      ],
+      "options": {
+        "buttonGroup": {
+          "orientation": "center",
+          "size": "md"
+        },
+        "confirmModal": {
+          "body": "Confirm component approval changes",
+          "cancel": "Cancel",
+          "columns": {
+            "include": [
+              "name",
+              "oldValue",
+              "newValue"
+            ],
+            "name": "Label",
+            "oldValue": "Old Value",
+            "newValue": "New Value"
+          },
+          "confirm": "Confirm",
+          "elementDisplayMode": "modified",
+          "title": "Confirm changes"
+        },
+        "elementValueChanged": "",
+        "elements": [],
+        "initial": {
+          "code": "const frame = context.panel.data.series && context.panel.data.series[0];\nif (!frame) {\n  context.grafana.notifyError(['Component Control', 'Component catalog is unavailable.']);\n  return;\n}\n\nconst values = (name) => {\n  const field = frame.fields.find((item) => item.name === name);\n  return field ? Array.from(field.values) : [];\n};\n\nconst names = values('Component');\nconst eligible = values('Eligible');\nconst autonomous = values('Run autonomously');\nconst options = [];\nconst selected = [];\n\nfor (let i = 0; i < names.length; i += 1) {\n  const name = String(names[i] || '').trim();\n  if (!name || eligible[i] !== true) {\n    continue;\n  }\n  options.push({ id: name, label: name, value: name });\n  if (autonomous[i] === true) {\n    selected.push(name);\n  }\n}\n\nconst helpers = (opts = []) => ({\n  showIf: () => true,\n  disableIf: () => false,\n  getOptions: () => opts,\n});\n\ncontext.panel.onChangeElements([\n  {\n    uid: 'autonomous-components',\n    id: 'autonomous_components',\n    title: `Run autonomously (${selected.length} selected / ${options.length} eligible)`,\n    type: 'checkboxList',\n    optionsSource: 'Custom',\n    options,\n    allowCustomValue: false,\n    value: selected,\n    labelWidth: 20,\n    section: '',\n    tooltip: 'Checked components may be selected by Jason without a per-run technician approval. Ineligible components remain visible in the table above.',\n    unit: '',\n    helpers: helpers(options),\n  },\n  {\n    uid: 'select-all-components', id: 'select_all_components', title: 'Select All', type: 'button',\n    buttonLabel: 'Select All Eligible', show: 'form', size: 'md', variant: 'secondary',\n    foregroundColor: '', backgroundColor: '', labelWidth: 10, section: '', tooltip: '', unit: '',\n    customCode: `const target = context.panel.elements.find((e) => e.id === 'autonomous_components');\\nif (!target) return;\\nconst all = (target.options || []).map((o) => o.value);\\ncontext.panel.onChangeElements(context.panel.elements.map((e) => e.id === 'autonomous_components' ? { ...e, value: all } : e));`,\n    helpers: helpers(),\n  },\n  {\n    uid: 'select-none-components', id: 'select_none_components', title: 'Select None', type: 'button',\n    buttonLabel: 'Select None', show: 'form', size: 'md', variant: 'secondary',\n    foregroundColor: '', backgroundColor: '', labelWidth: 10, section: '', tooltip: '', unit: '',\n    customCode: `context.panel.onChangeElements(context.panel.elements.map((e) => e.id === 'autonomous_components' ? { ...e, value: [] } : e));`,\n    helpers: helpers(),\n  },\n  {\n    uid: 'refresh-components', id: 'refresh_components', title: 'Refresh', type: 'button',\n    buttonLabel: 'Refresh', show: 'form', size: 'md', variant: 'secondary',\n    foregroundColor: '', backgroundColor: '', labelWidth: 10, section: '', tooltip: '', unit: '',\n    customCode: `context.grafana.locationService.reload();`,\n    helpers: helpers(),\n  },\n  {\n    uid: 'apply-components', id: 'apply_components', title: 'Apply', type: 'button',\n    buttonLabel: 'Apply Autonomous Approvals', show: 'form', size: 'md', variant: 'primary',\n    foregroundColor: '', backgroundColor: '', labelWidth: 10, section: '', tooltip: '', unit: '',\n    customCode: `const target = context.panel.elements.find((e) => e.id === 'autonomous_components');\\nconst selected = Array.isArray(target?.value) ? target.value : [];\\nfetch('/api/datasources/proxy/uid/jason-component-control/component-control/components', { credentials: 'same-origin' })\\n  .then((response) => { if (!response.ok) throw new Error('Unable to refresh current approvals'); return response.json(); })\\n  .then((current) => {\\n    const currentSet = new Set(current.autonomous_names || []);\\n    const selectedSet = new Set(selected);\\n    const approve = selected.filter((name) => !currentSet.has(name));\\n    const revoke = Array.from(currentSet).filter((name) => !selectedSet.has(name));\\n    if (!approve.length && !revoke.length) {\\n      context.grafana.notifySuccess(['Component Control', 'No approval changes are required.']);\\n      return null;\\n    }\\n    if (!window.confirm('Apply ' + approve.length + ' autonomous approvals and ' + revoke.length + ' revocations?')) return null;\\n    return fetch('/api/datasources/proxy/uid/jason-component-control/component-control/bulk', {\\n      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },\\n      body: JSON.stringify({ approve_names: approve, revoke_names: revoke, reason: 'Grafana Component Control' })\\n    });\\n  })\\n  .then((response) => {\\n    if (!response) return null;\\n    return response.json().then((body) => ({ response, body }));\\n  })\\n  .then((result) => {\\n    if (!result) return;\\n    if (!result.response.ok) throw new Error(result.body?.error || 'Bulk approval update failed');\\n    const b = result.body || {};\\n    if (b.failed_count) {\\n      context.grafana.notifyError(['Component Control', 'Partial result: ' + (b.approved_count || 0) + ' approved, ' + (b.revoked_count || 0) + ' revoked, ' + b.failed_count + ' failed.']);\\n    } else {\\n      context.grafana.notifySuccess(['Component Control', (b.approved_count || 0) + ' approved, ' + (b.revoked_count || 0) + ' revoked.']);\\n    }\\n    setTimeout(() => context.grafana.locationService.reload(), 600);\\n  })\\n  .catch((error) => context.grafana.notifyError(['Component Control', String(error.message || error)]));`,\n    helpers: helpers(),\n  },\n]);",
+          "contentType": "application/json",
+          "getPayload": "return {};",
+          "highlight": false,
+          "highlightColor": "red",
+          "method": "-",
+          "payload": {}
+        },
+        "layout": {
+          "orientation": "vertical",
+          "padding": 10,
+          "sectionVariant": "default",
+          "variant": "single"
+        },
+        "reset": {
+          "backgroundColor": "",
+          "foregroundColor": "",
+          "icon": "process",
+          "text": "Reset",
+          "variant": "hidden"
+        },
+        "resetAction": {
+          "code": "",
+          "confirm": false,
+          "getPayload": "return {};",
+          "mode": "initial",
+          "payload": {}
+        },
+        "saveDefault": {
+          "icon": "save",
+          "text": "Save Default",
+          "variant": "hidden"
+        },
+        "submit": {
+          "backgroundColor": "",
+          "foregroundColor": "",
+          "icon": "cloud-upload",
+          "text": "Submit",
+          "variant": "hidden"
+        },
+        "sync": true,
+        "update": {
+          "code": "",
+          "confirm": false,
+          "contentType": "application/json",
+          "getPayload": "return {};",
+          "method": "-",
+          "payload": {},
+          "payloadMode": "all"
+        },
+        "updateEnabled": "disabled"
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": [
+    "jason",
+    "datto",
+    "governance",
+    "component-control"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason Component Control",
+  "uid": "jason-component-control",
+  "version": 1,
+  "weekStart": ""
+}

@@ -63,6 +63,12 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "datto_rmm.execution": (
         "secret/data/connectors/datto-rmm/production/execution"
     ),
+    "datto_edr.readonly": (
+        "secret/data/connectors/datto-edr/production/read-only"
+    ),
+    "datto_edr.execution": (
+        "secret/data/connectors/datto-edr/production/read-only"
+    ),
     "aws_ses.sendmail": (
         "secret/data/connectors/aws-ses/production/sendmail"
     ),
@@ -78,6 +84,8 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "it_glue.readonly": frozenset({"api_key"}),
     "datto_rmm.readonly": frozenset({"api_url", "api_key", "api_secret"}),
     "datto_rmm.execution": frozenset({"api_url", "api_key", "api_secret"}),
+    "datto_edr.readonly": frozenset({"api_url", "api_token"}),
+    "datto_edr.execution": frozenset({"api_url", "api_token"}),
     "aws_ses.sendmail": frozenset({"access_key_id", "secret_access_key"}),
     "microsoft_graph.directory_read": frozenset(
         {

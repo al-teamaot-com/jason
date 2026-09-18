@@ -275,8 +275,10 @@ def _capability_definition(
         stewardship=CapabilityStewardship(
             steward="technology-steward",
             business_justification=(
-                "Permit narrowly governed execution of existing "
-                "approved RMM automation components."
+                "Permit governed execution of exact Datto RMM components. "
+                "An authenticated technician imperative is approval for that "
+                "exact component, exact endpoint, and exact run; autonomous "
+                "execution remains limited to standing-safe classifications."
             ),
             review_interval_days=30,
             retirement_criteria=(
@@ -303,7 +305,7 @@ def _capability_definition(
             "mcp_action_enabled": "true",
             "mcp_tool_name": "execute_governed_capability",
             "conversation_authenticated_imperative_is_approval": (
-                "false"
+                "true"
             ),
             "component_approval_policy": (
                 "server_classified_standing_safe_or_per_run"
@@ -642,9 +644,9 @@ class DattoRmmComponentExecutionConnector:
             or ""
         ).strip()
 
-        if requested_device != pilot.device_uid:
+        if not requested_device:
             raise PermissionError(
-                "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+                "DATTO_COMPONENT_TARGET_REQUIRED"
             )
 
         requested_class = str(
@@ -700,7 +702,7 @@ class DattoRmmComponentExecutionConnector:
 
         prepared = policy.prepare(
             allowlist_name=pilot.allowlist_name,
-            device_uid=pilot.device_uid,
+            device_uid=requested_device,
             device_class=pilot.device_class,
             component_uid=selected_component.uid,
             variables=variables,
@@ -730,6 +732,55 @@ class DattoRmmComponentExecutionConnector:
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+
+            target = self._transport.request(
+                method="GET",
+                url=(
+                    credentials["api_url"].rstrip("/")
+                    + f"/api/v2/device/{requested_device}"
+                ),
+                headers={
+                    "Authorization": (
+                        f"{token.token_type} {token.access_token}"
+                    ),
+                    "Accept": "application/json",
+                },
+                params=None,
+                json=None,
+                timeout_seconds=10.0,
+            )
+
+            if not isinstance(target, Mapping):
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target pre-read was not an object"
+                )
+
+            observed_target = str(
+                target.get("uid")
+                or target.get("deviceUid")
+                or target.get("resource_id")
+                or ""
+            ).strip()
+
+            if observed_target != requested_device:
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target pre-read uid did not match requested endpoint"
+                )
+
+            if target.get("deleted") is True or target.get("suspended") is True:
+                raise PermissionError(
+                    "DATTO_COMPONENT_TARGET_NOT_ACTIVE"
+                )
+
+            self._audit.record(
+                "connector.target.verified",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "capability": request.context.capability,
+                    "device_uid_present": True,
+                },
+            )
 
             url = (
                 credentials["api_url"].rstrip("/")
@@ -839,7 +890,7 @@ class DattoRmmComponentExecutionConnector:
                             "status": "verified",
                             "job_uid": job_uid,
                             "job_status": status,
-                            "device_uid": pilot.device_uid,
+                            "device_uid": requested_device,
                             "component_uid": selected_component.uid,
                             "component_name": selected_component.name,
                             "readback_verified": True,
@@ -887,7 +938,7 @@ class DattoRmmComponentExecutionConnector:
                     "status": "accepted",
                     "job_uid": job_uid,
                     "job_status": last_status,
-                    "device_uid": pilot.device_uid,
+                    "device_uid": requested_device,
                     "component_uid": selected_component.uid,
                     "component_name": selected_component.name,
                     "readback_verified": True,

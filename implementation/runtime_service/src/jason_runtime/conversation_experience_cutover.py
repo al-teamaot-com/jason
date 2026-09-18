@@ -132,7 +132,7 @@ def select_conversation_experience_flow(
     settings: ConversationExperienceCutoverSettings,
     fallback_flow,
     capabilities,
-    providers,
+    providers=None,
     ollama_url: str,
     default_ollama_model: str,
     identity_binder,

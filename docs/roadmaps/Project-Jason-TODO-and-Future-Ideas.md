@@ -1,8 +1,8 @@
 # Project Jason TODO and Future Ideas
 
-This document is the governed backlog for ideas, enhancements, and capabilities that are valuable but may be premature, blocked, or intentionally deferred.
+This document is the governed backlog for ideas, enhancements, integrations, and capabilities Jason is not yet expected to provide.
 
-The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features.
+The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features. If Jason should already be able to perform a workflow and cannot, or a blocker/defect is discovered during real troubleshooting, that belongs in `SUPPORT.md` instead of this backlog.
 
 ## How to use this document
 
@@ -647,6 +647,27 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-OPS-003 — Complete Datto EDR/AV threat-branch activation
+
+- **Priority:** P1
+- **Status:** In progress
+- **Risk level:** High
+- **Idea:** Finish the `datto_edr_av` playbook by completing the controlled remediation/scan/recurrence acceptance path now that provider-native Datto AV scan execution is governed and accepted.
+- **Why it matters:** The production backend can distinguish endpoint-security health, detections, policy, scan history, quarantine state, and can initiate an exact Quick/Full Datto AV scan. The remaining gap is proving the complete composite threat-response closure sequence, including post-scan detection verification, documentation, recurrence handling, and terminal disposition.
+- **Current production proof:** Source revision `8776ac5dc56c4a22e0f86dceb780f0cff4fd70f9` is deployed. All six provider-neutral `endpoint.security.*` reads succeed through the authenticated Jason MCP path. Governed `endpoint.security.scan.start` is active with exact endpoint/agent binding and an owner execute grant that still requires approval. Controlled acceptance on AOT-50282 produced terminal Quick Scan history ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`, status `completed`. Grafana/Prometheus playbook observability remains live. The playbook remains `pilot`, `enabled=false`, with review status `scan_execute_accepted_full_threat_branch_pending`.
+- **Required completion work:**
+  - preserve exact endpoint/agent identity and provider isolation;
+  - do not treat `ScanHistoryTracking.status=completed` as a clean result;
+  - require completed scan evidence plus a clear post-scan governed detection search;
+  - keep reboot actions explicit-approval-per-instance;
+  - retain clean uninstall/recovery as policy-gated during supervised pilot;
+  - run the complete controlled AOT-50282 / T20260918.0005 remediation/scan/recurrence acceptance path;
+  - verify ticket documentation, telemetry, duplicate suppression, and terminal disposition.
+- **Acceptance evidence:** `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md` and `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Complete before setting the playbook registry `enabled=true` or declaring the full threat branch production-ready.
+
+---
 ## Communication and audience controls
 
 ### TODO-COMM-001 — Connect audience policy engine to all outbound channels
@@ -738,6 +759,67 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Technology Steward / Jason Architecture Authority
 - **Review trigger:** Begin during the next Teams/OpenClaw security-hardening window; complete before the dedicated gateway client secret reaches its first planned rotation/expiry boundary.
 
+
+### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add narrow governed read-only capabilities for MFA registration/enforcement, Conditional Access, privileged-account MFA, legacy-authentication restrictions, Exchange Online protection configuration, external-message tagging, quarantine, attachment/link protection, and related tenant security posture.
+- **Why it matters:** Enables evidence-backed cyber-insurance and security-control reviews without manual tenant inspection.
+- **Origin:** Reclassified from `SUPPORT-CAP-007` on 2026-09-18 because this is a new capability/integration, not a break/fix defect.
+- **Prerequisites:** least-privilege Microsoft Graph/Exchange read scopes, tenant isolation, evidence normalization, and sanitized acceptance fixtures.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When Microsoft 365 security-posture automation becomes an approved implementation priority.
+
+### TODO-CONN-006 — Client backup-posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add governed provider reads for backup inventory, protection coverage, last successful backup, encryption/separation metadata where available, and restore-test evidence.
+- **Why it matters:** Lets Jason answer backup-control questions and identify protection gaps from authoritative evidence.
+- **Origin:** Reclassified from `SUPPORT-CAP-008` on 2026-09-18.
+- **Prerequisites:** provider selection, client-scoped read credentials, canonical backup model, and acceptance workflow.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When backup-provider integration is selected for implementation.
+
+### TODO-CONN-007 — Network/security-appliance posture reads
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add governed read-only access to network/security configuration sufficient to verify segmentation, perimeter firewall posture, IDS/IPS, DMZ use, and related controls.
+- **Why it matters:** Endpoint evidence alone cannot establish network control posture.
+- **Origin:** Reclassified from `SUPPORT-CAP-009` on 2026-09-18.
+- **Prerequisites:** supported network-provider integrations, client/site correlation, secret isolation, and normalized control evidence.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When network posture automation becomes an approved implementation priority.
+
+### TODO-CONN-008 — DNSFilter posture integration
+
+- **Priority:** P2
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed DNSFilter read capability for client/site policy assignment, expected coverage, agent/device state, protective-DNS status, and exceptions.
+- **Why it matters:** Provides authoritative DNS protection evidence rather than inferring posture from installed components.
+- **Origin:** Reclassified from `SUPPORT-CAP-010` on 2026-09-18.
+- **Prerequisites:** DNSFilter API/read contract, client/site mapping, least-privilege credentials, and acceptance fixtures.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When DNSFilter becomes an approved Jason data source.
+
+### TODO-CONN-009 — BullPhish/security-awareness posture integration
+
+- **Priority:** P2
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed read capability for client enrollment, covered users, phishing/training cadence, latest completion state, and exceptions.
+- **Why it matters:** Enables evidence-backed awareness-training and phishing-control verification.
+- **Origin:** Reclassified from `SUPPORT-CAP-011` on 2026-09-18.
+- **Prerequisites:** BullPhish/API access, client/user correlation, least-privilege credentials, and normalized campaign/training evidence.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** When security-awareness integration becomes an approved implementation priority.
+
 ---
 
 ## Governance and operational maturity
@@ -820,3 +902,18 @@ Copy this section when adding an idea:
 4. Every custom capability should retain its business justification, review interval, and retirement criteria.
 5. The Technology Steward should identify items that can be replaced by improved vendor-native functionality.
 6. No item in this document overrides the Jason Constitution, policy engine, approval requirements, or human authority.
+---
+
+## Recently implemented operational defaults
+
+### TODO-OPS-003 — Autotask ticket work-start lifecycle
+
+- **Priority:** P1
+- **Status:** Implemented 2026-09-18
+- **Risk level:** Moderate
+- **Idea:** When Jason begins substantive work on an existing Autotask ticket, automatically claim the ticket into the Jason queue, set the active working status, set the standard remote-support work type, associate a deterministically proven device/configuration item when available, and normalize Ticket Type / Issue Type / Sub-Issue Type when supported by ticket/playbook evidence.
+- **Implemented behavior:** Queue **Jason**; status **In Progress**; Work Type **Remote Support**; preserve existing configuration association; otherwise require exact DRMM UID to active Autotask configuration correlation before writing `configurationItemID`; preserve existing classification unless exact supported labels are available; resolve all mutable labels from live Autotask metadata and require post-write readback.
+- **Governance:** Standing Owner-approved administrative start-work transition only. It does not broaden arbitrary ticket-update authority or disruptive-action authority.
+- **Production evidence:** Revision `5854cf670e33df473a37890ad9c28b7069510b3e`; controlled acceptance on `T20260914.0026` / ticket ID `140439` verified Jason queue, In Progress status, and Remote Support work type.
+- **Canonical documentation:** `docs/operations/Jason-Autotask-Ticket-Work-Lifecycle.md`.
+- **Decision owner:** Jason Governance Authority / AOT Owner
