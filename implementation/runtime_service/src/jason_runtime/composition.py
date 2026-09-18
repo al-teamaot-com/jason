@@ -157,6 +157,11 @@ from .datto_component_execution import (
     register_datto_component_execution_invoker,
     register_datto_component_execution_runtime_foundation,
 )
+from .teams_message_send import (
+    CAPABILITY as TEAMS_MESSAGE_SEND,
+    build_invoker as build_teams_message_send_invoker,
+    register_foundation as register_teams_message_send_foundation,
+)
 from .datto_alert_resolution import (
     build_datto_alert_resolution_invoker,
     register_datto_alert_resolution_invoker,
@@ -690,6 +695,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_teams_message_send_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_datto_alert_resolution_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -978,6 +986,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         invokers=invokers,
         invoker=datto_component_execution_invoker,
     )
+    invokers.register(TEAMS_MESSAGE_SEND, build_teams_message_send_invoker())
     register_datto_alert_resolution_invoker(
         invokers=invokers,
         invoker=datto_alert_resolution_invoker,

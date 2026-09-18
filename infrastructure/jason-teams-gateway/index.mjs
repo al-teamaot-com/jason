@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import express from "express";
 import JSON5 from "json5";
 import {
@@ -29,6 +29,28 @@ const REQUEST_TIMEOUT_MS = Number(
 );
 const SAFE_FAILURE_TEXT =
   "Jason could not safely process that request. No action was taken.";
+const PROACTIVE_STORE_PATH = process.env.JASON_TEAMS_PROACTIVE_STORE_PATH ?? "/var/lib/jason-teams/proactive.json";
+const PROACTIVE_TOKEN = nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN);
+
+function loadProactiveStore() {
+  if (!existsSync(PROACTIVE_STORE_PATH)) return {};
+  try { return JSON.parse(readFileSync(PROACTIVE_STORE_PATH, "utf8")); } catch { return {}; }
+}
+
+function saveProactiveStore(store) {
+  const dir = PROACTIVE_STORE_PATH.slice(0, PROACTIVE_STORE_PATH.lastIndexOf("/"));
+  if (dir) mkdirSync(dir, { recursive: true });
+  writeFileSync(PROACTIVE_STORE_PATH, JSON.stringify(store), { mode: 0o600 });
+}
+
+function storeConversationReference(context, aadObjectId, tenantId) {
+  const reference = context.activity.getConversationReference();
+  const identity = context.identity ?? {};
+  const store = loadProactiveStore();
+  store[aadObjectId.toLowerCase()] = { tenantId, reference, identity, updatedAt: new Date().toISOString() };
+  saveProactiveStore(store);
+}
+
 
 function nonBlank(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -178,6 +200,7 @@ agent.onActivity("message", async (context) => {
   }
 
   try {
+    storeConversationReference(context, aadObjectId, tenantId);
     const envelope = buildConversationEnvelope({
       text,
       microsoftTenantId: auth.tenantId,
@@ -231,6 +254,42 @@ server.get("/healthz", (_req, res) => {
     runtime: RUNTIME_URL,
   });
 });
+server.post("/internal/proactive/send", async (req, res) => {
+  if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
+    res.status(401).json({ status: "rejected", error_code: "unauthorized" });
+    return;
+  }
+  const aadObjectId = nonBlank(req.body?.aadObjectId);
+  const tenantId = nonBlank(req.body?.tenantId);
+  const text = nonBlank(req.body?.text);
+  if (!aadObjectId || !isUuid(aadObjectId) || !tenantId || !isUuid(tenantId) || !text || text.length > 12000) {
+    res.status(400).json({ status: "rejected", error_code: "invalid_request" });
+    return;
+  }
+  if (tenantId.toLowerCase() !== auth.tenantId.toLowerCase()) {
+    res.status(403).json({ status: "rejected", error_code: "tenant_mismatch" });
+    return;
+  }
+  const record = loadProactiveStore()[aadObjectId.toLowerCase()];
+  if (!record || record.tenantId?.toLowerCase() !== tenantId.toLowerCase()) {
+    res.status(404).json({ status: "rejected", error_code: "conversation_not_found" });
+    return;
+  }
+  try {
+    let messageId;
+    await adapter.continueConversation(record.identity, record.reference, async (ctx) => {
+      const result = await ctx.sendActivity(text);
+      messageId = result?.id;
+    });
+    if (!messageId) throw new Error("Teams proactive send returned no message id");
+    console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, messageId }));
+    res.json({ status: "succeeded", channel: "microsoft_teams", message_id: messageId });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "jason_teams_proactive_failed", aadObjectId, error: String(error?.message ?? error) }));
+    res.status(502).json({ status: "failed", error_code: "teams_send_failed" });
+  }
+});
+
 server.post(
   "/api/messages",
   createAgentRequestHandler(agent, authConfiguration),
