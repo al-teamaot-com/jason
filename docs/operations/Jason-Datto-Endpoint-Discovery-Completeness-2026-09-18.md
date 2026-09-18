@@ -2,7 +2,7 @@
 
 **Section Goal:** Fix Datto RMM endpoint discovery so Jason can resolve an existing endpoint from hostname/site without pre-supplied Datto UID and so incomplete enumeration cannot be represented as definitive not-found evidence.
 
-**Status:** SOURCE FIX IMPLEMENTED / PRODUCTION DEPLOYMENT PENDING
+**Status:** SOURCE FIX MERGED / PRODUCTION DEPLOYMENT BLOCKED BY UNAVAILABLE AUTHORIZED DEPLOYMENT ACCESS
 
 ## Reproduction
 
@@ -88,7 +88,27 @@ Required invariants remain:
 - no endpoint mutation;
 - governed execution/approval behavior unchanged.
 
-## Production acceptance — pending
+## Production acceptance — blocked pending authorized deployment access
+
+Authoritative source merge commit:
+
+- `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`
+
+A post-merge governed production search was executed through Jason without direct provider access:
+
+- hostname: `SOSServer2024`;
+- site: `Star of the Sea Catholic Church`;
+- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
+- result: zero matches;
+- provider pages examined: 1;
+- provider total count in that scoped response: 26;
+- the MCP evidence still used the old projection shape and did not expose `discovery_complete`.
+
+This proves the merged source has **not** been deployed to the live MCP yet. The live MCP itself remains healthy in `governed-read-plus-actions` mode with Central Orchestrator authority and `direct_provider_access=false`.
+
+The current ChatGPT session has no authorized Jason `deployment.*` capability and no connected Jason production host through Remote Desktop Commander. The repository also exposes no normal production MCP deployment workflow that can safely substitute for the established host deployment procedure. Creating a new remote deployment mechanism merely to bypass this access gap would be a governance/architecture change and is therefore not appropriate for this Section Goal.
+
+Deployment revision: **PENDING — no authorized production deployment path is exposed in this session.**
 
 This record must not be marked complete until the normal production deployment is performed and governed production validation proves:
 
@@ -101,4 +121,4 @@ This record must not be marked complete until the normal production deployment i
 
 ## Section Goal final status
 
-**PENDING — production deployment/validation not yet claimed.**
+**FAIL (BLOCKED) — source fix and pre-production validation pass, but the Section Goal cannot pass until the merged revision is deployed and the required governed production validations succeed.**
