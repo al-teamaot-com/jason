@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-16  
-**Status:** The bounded governed-action path for Autotask and Datto RMM through ChatGPT is live-proven. Datto is additionally cross-chat proven for exact target/component resolution, fresh per-execution approval, one-attempt execution, terminal job verification, governed component StdOut retrieval, and current-release Grafana/Prometheus observability. The current Section Goal is complete.  
+**Updated:** 2026-09-18  
+**Status:** A new Section Goal is active: Datto endpoint hostname/site discovery completeness. The source fix is merged to the authoritative branch at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`, but production deployment is blocked because this session has no authorized production deployment capability/host access. The live MCP remains healthy and governed, but still exhibits the pre-fix endpoint-search contract; therefore this Section Goal is not complete.  
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Durable operating principle
@@ -168,6 +168,24 @@ Monitoring remains observational only. It does not call Datto directly and grant
 Narrative proof does not itself promote System Registry lifecycle state. The prior wrap-up found no matching structured resource for this proof state and no governed registry write surface exposed to the ChatGPT session.
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
+
+## Current Section Goal — ACTIVE / BLOCKED
+
+**Goal:** make Datto RMM endpoint discovery reliably resolve endpoints by exact hostname/site without pre-supplied Datto UID, and prevent incomplete provider enumeration from being represented as definitive not-found evidence.
+
+Authoritative source work is merged at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`. Root cause, implementation, regression tests, governance verification, and production acceptance criteria are recorded in:
+
+- `docs/operations/Jason-Datto-Endpoint-Discovery-Completeness-2026-09-18.md`.
+
+Post-merge governed production evidence still shows the old behavior for `SOSServer2024` at `Star of the Sea Catholic Church`:
+
+- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
+- zero matches;
+- old MCP projection without `discovery_complete`.
+
+This is expected until deployment. Do not report the Section Goal complete or the production defect fixed until the normal production deployment occurs and governed search/read validation passes for SOSServer2024 plus at least one additional endpoint.
+
+Blocker: no active Jason `deployment.*` capability and no connected authorized Jason production host are exposed to this session. Do not invent a deployment bypass.
 
 ## Current Section Goal — CLOSED
 
