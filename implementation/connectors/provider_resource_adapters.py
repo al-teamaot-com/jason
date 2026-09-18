@@ -221,7 +221,7 @@ def translate_datto_rmm_resource(query: ResourceQuery) -> ConnectorInvocation:
             )
         if query.operation is ResourceOperation.QUERY:
             filters = query.filters or {}
-            arguments: dict[str, Any] = {"page": 1}
+            arguments: dict[str, Any] = {"page": 0}
             hostname = (
                 filters.get("hostname")
                 or filters.get("name")

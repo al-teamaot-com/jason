@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 REPO_ROOT = Path(os.environ.get("JASON_REPO_ROOT", Path(__file__).resolve().parents[2]))
-ROADMAP_PATH = REPO_ROOT / "07-Roadmap" / "Jason-Roadmap-Status.json"
+ROADMAP_PATH = REPO_ROOT / "docs" / "roadmaps" / "Jason-Roadmap-Status.json"
 OPENCLAW_AUTHORITY_HEALTH_PATH = Path(
     os.environ.get(
         "JASON_OPENCLAW_AUTHORITY_HEALTH_PATH",
