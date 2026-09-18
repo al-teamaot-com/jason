@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -159,17 +159,20 @@ def resolution_memory_read(now: datetime) -> CapabilityDefinition:
 
 
 def resolution_memory_summary(now: datetime) -> CapabilityDefinition:
-    return _capability(
+    base = _capability(
         now=now,
         capability_name=RESOLUTION_MEMORY_SUMMARY,
         display_name="Summarize Operational Resolution Memory",
         operation="summary",
         selector_keys="none",
         planning_guidance=(
-            "Read bounded same-client Resolution Memory health/count metadata. "
-            "This exposes no raw cross-client case content and grants no authority."
+            "Read bounded Resolution Memory aggregate health/count metadata. "
+            "This exposes no raw case content and grants no authority."
         ),
     )
+    # Aggregate health is organization-scoped and exposes no raw cases. Raw
+    # search/read capabilities remain client-isolated.
+    return dataclass_replace(base, client_isolation_required=False)
 
 
 def resolution_memory_provider(now: datetime) -> ExecutionProvider:
