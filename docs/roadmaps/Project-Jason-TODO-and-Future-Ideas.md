@@ -590,6 +590,31 @@ Do not modify unrelated production systems or tickets during development/testing
 When complete, document the implementation, tests, capability changes, and remaining limitations, and update the appropriate Project Jason/Grafana Section Goal status.
 ```
 
+
+### TODO-OPS-003 — Evidence-backed cyber insurance and security questionnaire readiness
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Give Jason a governed, evidence-backed workflow for answering client cyber-insurance, PII/security, compliance, and vendor-security questionnaires using authoritative client-specific data instead of assumptions or generic AOT standards.
+- **Why it matters:** AOT is regularly asked to complete technical portions of insurance/security forms. Jason should be able to collect current evidence across managed endpoints, Microsoft 365/Entra, email security, backup systems, DNS/security services, network/security appliances, security-awareness training, Autotask, and IT Glue; distinguish confirmed facts from client-owned business/legal questions; identify exceptions; and produce a traceable answer package.
+- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Active blockers are tracked in SUPPORT-CAP-006 through SUPPORT-CAP-011.
+- **Prerequisites:**
+  - standing-safe diagnostic execution for non-destructive endpoint checks;
+  - governed Microsoft 365 / Entra security-posture reads;
+  - governed client backup-posture reads;
+  - governed network/security-appliance posture reads;
+  - governed DNSFilter client posture reads;
+  - governed BullPhish/security-awareness posture reads;
+  - authoritative client/company/asset correlation across Autotask, Datto RMM, and IT Glue;
+  - evidence timestamps and source/correlation references;
+  - a questionnaire answer schema that supports `confirmed`, `exception`, `needs client confirmation`, and `not applicable`;
+  - explicit separation between technical evidence and business/legal/insurance attestations.
+- **Expected behavior:** Jason should parse a questionnaire, map each technical question to available governed evidence, perform only approved read-only verification, report exceptions rather than hiding them, identify questions that belong to the client/legal/insurance representative, and generate a draft answer key with evidence references and unresolved items. Jason must not sign, certify, or make business/legal representations on behalf of the insured.
+- **Learning behavior:** Any questionnaire item that cannot be verified because of a missing capability, provider read, or governance restriction should create or reference a Support List blocker rather than being guessed. Repeated questionnaire gaps should inform connector and documentation priorities.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Begin implementation after SUPPORT-CAP-006 through SUPPORT-CAP-011 have defined owners and the first required read surfaces are available.
+
 ---
 
 ## Communication and audience controls
