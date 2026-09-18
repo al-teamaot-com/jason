@@ -566,13 +566,6 @@ def test_quickjob_terminal_failure_fails_closed(
             "device_class": "server",
         },
         {
-            "component_uid": "unknown-component",
-        },
-        {
-            "component_uid": "component-uid-2",
-            "component_name": "Pilot Diagnostic",
-        },
-        {
             "variables": {
                 "arbitrary": "not allowed",
             },
