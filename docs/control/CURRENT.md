@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-18  
-**Status:** A new Section Goal is active: Datto endpoint hostname/site discovery completeness. The source fix is merged to the authoritative branch at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`, but production deployment is blocked because this session has no authorized production deployment capability/host access. The live MCP remains healthy and governed, but still exhibits the pre-fix endpoint-search contract; therefore this Section Goal is not complete.  
+**Status:** Datto endpoint hostname/site discovery is deployed and live-proven in production. SOSServer2024 now resolves by hostname/site without caller-supplied UID, and a second 749-device inventory search completed across four provider pages. Core Section Goal criteria pass; production-health/Grafana reconciliation is the only remaining closeout item.  
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Durable operating principle
@@ -16,8 +16,8 @@ The production MCP service is `jason-mcp-pilot`.
 
 The currently established live MCP code/image boundary is:
 
-- source commit: `26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`;
-- image: `jason-mcp:generic-governed-26704f0600bb`;
+- source commit: `bba491d87c65ec7a2977e565ca1ddfcb51707180`;
+- image: `jason-mcp:datto-discovery-bba491d87c65-ready`;
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -169,23 +169,21 @@ Narrative proof does not itself promote System Registry lifecycle state. The pri
 
 No registry state was invented or manually promoted. Reconcile structured truth only through the authoritative governed registry registration/verification path when available.
 
-## Current Section Goal — ACTIVE / BLOCKED
+## Current Section Goal — ACTIVE / OBSERVABILITY CLOSEOUT
 
 **Goal:** make Datto RMM endpoint discovery reliably resolve endpoints by exact hostname/site without pre-supplied Datto UID, and prevent incomplete provider enumeration from being represented as definitive not-found evidence.
 
-Authoritative source work is merged at `3b3441e0f47bae5e6d9ecd76c642fc995d3dbd76`. Root cause, implementation, regression tests, governance verification, and production acceptance criteria are recorded in:
+Core production acceptance is now live-proven on source `bba491d87c65ec7a2977e565ca1ddfcb51707180`:
 
-- `docs/operations/Jason-Datto-Endpoint-Discovery-Completeness-2026-09-18.md`.
+- `SOSServer2024` + `Star of the Sea Catholic Church` resolved to UID `52b4f1ad-d834-4c79-4955-8434101ccb7a` via governed search, correlation `corr_mcp_3a7de9116aba4270bd7b4541decdf076`;
+- the returned UID fed `endpoint.device.read` successfully, correlation `corr_mcp_cef7a6f047ba4708b5c957ec0f111e3f`;
+- generalized search for `50282` traversed 4 provider pages across a provider-reported 749-device inventory with `discovery_complete=true`, correlation `corr_mcp_cd8c7148e0ff404f9c7887e633cb4410`;
+- the returned AOT-50282 UID fed a successful exact read, correlation `corr_mcp_091d472c91ea47e599978247c0708006`;
+- MCP remains `governed-read-plus-actions`, Central Orchestrator authoritative, `direct_provider_access=false`, with the prior write/action capability and approval boundary unchanged.
 
-Post-merge governed production evidence still shows the old behavior for `SOSServer2024` at `Star of the Sea Catholic Church`:
+Rollback container: `jason-mcp-pilot-rollback-datto-discovery-20260918T105901Z`.
 
-- correlation: `corr_mcp_8fa87242a34646bc97a22825e8749a68`;
-- zero matches;
-- old MCP projection without `discovery_complete`.
-
-This is expected until deployment. Do not report the Section Goal complete or the production defect fixed until the normal production deployment occurs and governed search/read validation passes for SOSServer2024 plus at least one additional endpoint.
-
-Blocker: no active Jason `deployment.*` capability and no connected authorized Jason production host are exposed to this session. Do not invent a deployment bypass.
+Only observability reconciliation remains before marking the Section Goal fully closed: update production-health expectations to the new MCP image/source, deploy monitoring-only changes, and verify Prometheus/Grafana without changing MCP/runtime/OpenBao.
 
 ## Current Section Goal — CLOSED
 
