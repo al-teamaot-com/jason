@@ -615,6 +615,36 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Begin implementation after SUPPORT-CAP-006 through SUPPORT-CAP-011 have defined owners and the first required read surfaces are available.
 
+
+### TODO-OPS-004 — Governed DRMM monitor suppression for known accepted conditions
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add a governed capability for Jason to disable, suppress, mute, or otherwise prevent a specific Datto RMM monitor from generating repeated alerts/tickets when the underlying condition is known, understood, documented, and intentionally accepted until a larger corrective action is completed.
+- **Why it matters:** Some alerts are technically accurate but cannot be permanently remediated immediately. In those cases, repeatedly generating Autotask tickets creates noise without improving service. Jason should be able to recognize a documented known condition, preserve the real root-cause/remediation plan, and suppress only the specific monitor scope that is producing duplicate operational work.
+- **Initial motivating example:** Ticket `T20260828.0045` on `APD-HYPERV` reports Datto AV as Running & Not Up-to-Date. Troubleshooting indicates the durable fix is to upgrade/replace the legacy Microsoft Hyper-V Server 2012 host. Until that OS remediation occurs, repeatedly creating identical Datto AV monitor tickets is not useful. Jason currently can read and resolve DRMM alerts but cannot disable or suppress the underlying monitor for that device.
+- **Required behavior:**
+  1. Identify the exact monitor, device/site scope, and currently active alert/ticket.
+  2. Confirm the condition is understood and that an authoritative root-cause or accepted remediation plan exists.
+  3. Require explicit technician approval before suppressing or disabling monitoring unless a future narrowly defined standing exception policy explicitly permits it.
+  4. Scope the change as narrowly as possible: prefer one monitor on one device over site-wide or policy-wide suppression.
+  5. Record the reason, approving technician, related Autotask ticket/problem/change record, affected device/site, monitor identity, suppression method, start time, and intended review/expiration.
+  6. Support temporary suppression with an expiration/review date whenever possible; do not create indefinite silent exceptions by default.
+  7. Prevent duplicate tickets/alerts for the accepted condition while preserving visibility that an exception exists.
+  8. Re-enable/reassess the monitor automatically or through a governed review when the underlying remediation is completed, the expiration date is reached, device/OS state changes materially, or the documented exception is no longer valid.
+  9. Verify the monitor state after modification and document the result in Autotask.
+- **Safeguards:**
+  - Suppression must never be used merely to make an unresolved alert disappear.
+  - Jason must not suppress a broader policy/site when a device-specific exception is sufficient.
+  - Security, backup, availability, or other high-impact monitors require explicit evidence and approval before suppression.
+  - An accepted exception must remain discoverable in Autotask/IT Glue or another authoritative system so future technicians understand why monitoring is suppressed.
+  - Suppression authority must remain separate from alert-resolution authority; resolving one alert must not silently disable future monitoring.
+  - If the underlying condition changes or a new materially different failure appears, Jason must surface it rather than treating it as covered by the old exception.
+- **Prerequisites:** Governed DRMM monitor/policy read capability; exact monitor identity and assignment resolution; narrowly scoped monitor enable/disable or mute/unmute action; approval policy; exception-state persistence; Autotask/IT Glue linkage; expiration/review scheduling; readback verification; audit trail.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement when DRMM write capabilities are expanded beyond alert resolution, and validate first against a controlled known-condition case such as `APD-HYPERV`.
+
 ---
 
 ## Communication and audience controls
