@@ -951,6 +951,18 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Continue immediately with client-bound evidence mapping.
 
+### TODO-OPS-006 — Define posture-gap ticketing workflow
+
+- **Priority:** P2
+- **Status:** Proposed — hold until workflow intent and operator experience are reviewed
+- **Risk level:** Moderate
+- **Idea:** Decide how Jason should convert confirmed client-security posture gaps into Autotask work without duplicating existing tickets or creating excessive ticket noise. Candidate behavior is to correlate existing work first, then consolidate related remediation into client-level workstreams where appropriate (for example encryption remediation, Datto EDR/AV coverage remediation, or OS lifecycle remediation) while leaving unrelated DRMM alerts in their existing alert/playbook workflow.
+- **Why it matters:** The Atomic posture review proved Jason can identify meaningful client-wide gaps, but the desired operational behavior after detection is not yet clear enough to automate. Ticket structure affects technician workflow, ownership, reporting, client communication, and duplicate-work risk.
+- **Why not now:** Owner wants to understand and define the intended workflow before Jason creates consolidated posture-remediation tickets. No Atomic posture tickets were created from this proposal.
+- **Prerequisites:** Review examples of how a confirmed gap should be represented in Autotask; decide when to use an existing ticket, a consolidated remediation ticket, individual endpoint tickets, a project/opportunity, or an informational client-review item; define ownership/status/queue and closure criteria. Prefer existing Autotask/Kaseya processes over new Jason-specific mechanisms.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Revisit after the Client Security/Posture Review behavior is better understood or before enabling any automatic posture-gap ticket creation.
+
 ---
 
 ## New-item template
