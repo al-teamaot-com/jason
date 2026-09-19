@@ -15,6 +15,8 @@ PLAYBOOK_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-playbook-exporter.service"
 PLAYBOOK_SERVICE_DST="/etc/systemd/system/jason-playbook-exporter.service"
 PROMPT_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-prompt-exporter.service"
 PROMPT_SERVICE_DST="/etc/systemd/system/jason-prompt-exporter.service"
+COMPONENT_ENGINEERING_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-component-engineering-exporter.service"
+COMPONENT_ENGINEERING_SERVICE_DST="/etc/systemd/system/jason-component-engineering-exporter.service"
 ENV_FILE="$SHOWCASE_DIR/.env"
 DEFAULT_OLLAMA_MODEL="qwen3:1.7b"
 
@@ -69,6 +71,7 @@ install_service "$USAGE_SERVICE_SRC" "$USAGE_SERVICE_DST"
 install_service "$ATTRIBUTION_SERVICE_SRC" "$ATTRIBUTION_SERVICE_DST"
 install_service "$PLAYBOOK_SERVICE_SRC" "$PLAYBOOK_SERVICE_DST"
 install_service "$PROMPT_SERVICE_SRC" "$PROMPT_SERVICE_DST"
+install_service "$COMPONENT_ENGINEERING_SERVICE_SRC" "$COMPONENT_ENGINEERING_SERVICE_DST"
 sudo systemctl daemon-reload
 sudo systemctl enable --now jason-status-exporter.service
 sudo systemctl enable --now jason-production-health-exporter.service
@@ -76,6 +79,7 @@ sudo systemctl enable --now jason-usage-exporter.service
 sudo systemctl enable --now jason-usage-attribution-exporter.service
 sudo systemctl enable --now jason-playbook-exporter.service
 sudo systemctl enable --now jason-prompt-exporter.service
+sudo systemctl enable --now jason-component-engineering-exporter.service
 
 for endpoint in \
   "http://127.0.0.1:9464/metrics" \
@@ -83,7 +87,8 @@ for endpoint in \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics" \
   "http://127.0.0.1:9468/metrics" \
-  "http://127.0.0.1:9471/metrics"; do
+  "http://127.0.0.1:9471/metrics" \
+  "http://127.0.0.1:9472/metrics"; do
   for attempt in $(seq 1 20); do
     if curl -fsS "$endpoint" >/dev/null 2>&1; then
       break
@@ -161,7 +166,8 @@ for endpoint in \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics" \
   "http://127.0.0.1:9468/metrics" \
-  "http://127.0.0.1:9471/metrics"; do
+  "http://127.0.0.1:9471/metrics" \
+  "http://127.0.0.1:9472/metrics"; do
   curl -fsS "$endpoint" >/dev/null
 done
 
@@ -177,6 +183,7 @@ echo "Usage exporter: http://127.0.0.1:9465/metrics"
 echo "Usage attribution exporter: http://127.0.0.1:9466/metrics"
 echo "Playbook exporter: http://127.0.0.1:9468/metrics"
 echo "AI prompt exporter: http://127.0.0.1:9471/metrics"
+echo "Component engineering exporter: http://127.0.0.1:9472/metrics"
 echo "Prometheus: http://127.0.0.1:9090"
 echo "Ollama: http://127.0.0.1:11434"
 echo "Local model: $OLLAMA_MODEL"
