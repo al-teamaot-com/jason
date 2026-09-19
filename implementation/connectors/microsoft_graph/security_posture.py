@@ -80,7 +80,7 @@ class MicrosoftGraphSecurityPostureReader:
         maximum=int(maximum_records)
         if not 1 <= maximum <= 100:
             raise ValueError("page_size must be between 1 and 100")
-        response=self._get(tenant_id=microsoft_tenant_id,path="/directoryRoles",params={"$top":maximum,"$select":"id,displayName,roleTemplateId"})
+        response=self._get(tenant_id=microsoft_tenant_id,path="/directoryRoles",params={"$top":maximum})
         values=response.get("value")
         if not isinstance(values,list): raise ConnectorTransportError("Microsoft directory roles returned an unexpected shape")
         items=[{"id":x.get("id"),"display_name":x.get("displayName"),"role_template_id":x.get("roleTemplateId")} for x in values if isinstance(x,Mapping)]
@@ -91,7 +91,7 @@ class MicrosoftGraphSecurityPostureReader:
         rid=role_id.strip(); maximum=int(maximum_records)
         if not rid: raise ValueError("role_id is required")
         if not 1 <= maximum <= 100: raise ValueError("page_size must be between 1 and 100")
-        response=self._get(tenant_id=microsoft_tenant_id,path=f"/directoryRoles/{quote(rid,safe='')}/members",params={"$top":maximum,"$select":"id,displayName,userPrincipalName,accountEnabled"})
+        response=self._get(tenant_id=microsoft_tenant_id,path=f"/directoryRoles/{quote(rid,safe='')}/members",params={"$top":maximum})
         values=response.get("value")
         if not isinstance(values,list): raise ConnectorTransportError("Microsoft directory role members returned an unexpected shape")
         items=[]
