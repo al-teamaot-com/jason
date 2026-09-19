@@ -18,6 +18,11 @@ def test_all_observed_values_must_match_baseline():
  rule=next(x for x in AOT_BASELINE if x.control_id=="ENDPOINT-AV")
  a=assess_control(rule,[ev(managed_av_healthy=True),ev(managed_av_healthy=False)])
  assert a.state is PostureState.CONFIRMED_GAP
+
+def test_healthy_subset_cannot_prove_client_good():
+ rule=next(x for x in AOT_BASELINE if x.control_id=="ENDPOINT-AV")
+ assert assess_control(rule,[ev(managed_av_healthy=True)]).state is PostureState.UNKNOWN
+ assert assess_control(rule,[ev(managed_av_healthy=True)],coverage_complete=True).state is PostureState.CONFIRMED_GOOD
 def test_client_binding_requires_exact_autotask_identity():
  import pytest
  with pytest.raises(ValueError): ClientEvidenceBinding("", "XYZ")

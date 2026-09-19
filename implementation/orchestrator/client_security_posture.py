@@ -55,7 +55,7 @@ AOT_BASELINE: tuple[ControlRule,...]=(
     ControlRule("DOCUMENTATION","Required documentation completeness","documentation_complete",True,"Resolve missing, stale, or conflicting durable documentation."),
 )
 
-def assess_control(rule: ControlRule, observations: Sequence[EvidenceObservation], *, applicable: bool=True, source_available: bool=True) -> ControlAssessment:
+def assess_control(rule: ControlRule, observations: Sequence[EvidenceObservation], *, applicable: bool=True, source_available: bool=True, coverage_complete: bool=False) -> ControlAssessment:
     ev=tuple(observations)
     if not applicable:
         return ControlAssessment(rule.control_id,rule.title,PostureState.NOT_APPLICABLE,"Control marked not applicable for this client/resource.",ev)
@@ -66,14 +66,16 @@ def assess_control(rule: ControlRule, observations: Sequence[EvidenceObservation
         return ControlAssessment(rule.control_id,rule.title,PostureState.UNKNOWN,"No authoritative observation establishes this control state.",ev)
     if any(v != rule.expected for v in values):
         return ControlAssessment(rule.control_id,rule.title,PostureState.CONFIRMED_GAP,"Authoritative evidence contains a value outside the AOT baseline.",ev,rule.remediation_hint)
-    return ControlAssessment(rule.control_id,rule.title,PostureState.CONFIRMED_GOOD,"Available authoritative evidence matches the AOT baseline.",ev)
+    if not coverage_complete:
+        return ControlAssessment(rule.control_id,rule.title,PostureState.UNKNOWN,"Available evidence is healthy but does not cover the complete client scope.",ev)
+    return ControlAssessment(rule.control_id,rule.title,PostureState.CONFIRMED_GOOD,"Complete authoritative evidence matches the AOT baseline.",ev)
 
 
-def build_review(*, client_id: str, evidence_by_control: Mapping[str,Sequence[EvidenceObservation]], unavailable_controls: Sequence[str]=(), not_applicable_controls: Sequence[str]=()) -> Mapping[str,Any]:
+def build_review(*, client_id: str, evidence_by_control: Mapping[str,Sequence[EvidenceObservation]], unavailable_controls: Sequence[str]=(), not_applicable_controls: Sequence[str]=(), coverage_complete_controls: Sequence[str]=()) -> Mapping[str,Any]:
     cid=client_id.strip()
     if not cid: raise ValueError("client_id is required")
-    unavailable=set(unavailable_controls); na=set(not_applicable_controls)
-    assessments=[assess_control(r,evidence_by_control.get(r.control_id,()),applicable=r.control_id not in na,source_available=r.control_id not in unavailable) for r in AOT_BASELINE]
+    unavailable=set(unavailable_controls); na=set(not_applicable_controls); complete=set(coverage_complete_controls)
+    assessments=[assess_control(r,evidence_by_control.get(r.control_id,()),applicable=r.control_id not in na,source_available=r.control_id not in unavailable,coverage_complete=r.control_id in complete) for r in AOT_BASELINE]
     counts={state.value:sum(a.state is state for a in assessments) for state in PostureState}
     proposals=[{"control_id":a.control_id,"title":a.title,"rationale":a.rationale,"proposed_action":a.remediation_hint} for a in assessments if a.state is PostureState.CONFIRMED_GAP]
     return {"client_id":cid,"assessments":assessments,"counts":counts,"improvement_proposals":proposals,"automatic_changes_allowed":False}

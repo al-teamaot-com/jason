@@ -34,3 +34,14 @@ On 2026-09-19, Jason resolved `XYZ Test Company` to exact Autotask company ID `1
 The corresponding governed DRMM site search by exact company name returned zero sites (correlation `corr_mcp_d33b93ca77ea4318974a5a7892a6eeec`). IT Glue organization search was denied by the existing information-release gate and requested approval rather than releasing evidence (correlation `corr_mcp_436c6fb9086b4cc68f42a3178464131e`). Neither result is treated as a security gap: the DRMM-backed controls and documentation control are `evidence_unavailable` until an authoritative provider mapping/evidence path exists.
 
 This proof establishes the desired fail-closed behavior for a controlled test client: exact Autotask company identity is mandatory; absent DRMM mapping does not permit cross-client/site searching; denied IT Glue evidence is not bypassed; and unavailable evidence cannot become `confirmed_good` or `confirmed_gap`.
+
+## Mapped-client production proof — Atomic Plumbing & Drain Cleaning
+On 2026-09-19, governed DRMM site discovery returned `Atomic Plumbing & Drain Cleaning`, site UID `a6af04fc-2e2a-4236-82ca-9d47ac616524`, with provider-reported Autotask company ID `333`. Governed Autotask `service.company.read` independently resolved company 333 to the same exact company name. This is accepted as an authoritative Autotask↔DRMM client binding.
+
+The DRMM site contains 25 returned managed resources in the current search result. Exact endpoint-scoped reads for `Atomic-50291` (UID `8a19290c-7057-3567-a04a-2589b552a775`) proved Datto AV `RunningAndUpToDate`, Datto EDR active/online/authorized, AV enabled/connected/engine-ready, and a completed full AV scan on 2026-09-18. The same endpoint has current unresolved DRMM alerts, including a Critical Datto AV threat alert and Moderate monitoring alerts. These observations are valid endpoint evidence, but a single healthy endpoint is not sufficient to mark a client-wide control healthy.
+
+The evaluator therefore now requires explicit `coverage_complete` before any healthy observations can become client-wide `confirmed_good`. Any authoritative bad observation can still establish `confirmed_gap`. This prevents sampled or partial inventory evidence from overstating client posture.
+
+A provider issue was also observed: account-level `management.alert.search` with an Atomic site selector returned alerts belonging to multiple sites/clients. That response is excluded from client posture evidence. Client reviews must use provider results whose returned resource/site identity is independently verified against the bound client; exact endpoint-scoped alert reads are acceptable for the tested endpoint.
+
+IT Glue organization search for Atomic remains denied by the existing information-release gate, so `DOCUMENTATION` remains `evidence_unavailable`. No bypass was attempted.
