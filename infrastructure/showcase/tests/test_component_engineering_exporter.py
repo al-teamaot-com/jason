@@ -8,7 +8,7 @@ def load():
 
 def test_metrics_are_operational_and_hide_sensitive_context(tmp_path: Path):
  m=load(); rows=[
-  {"request_id":"CER-disk","title":"Improve disk evidence","problem_key":"disk-space:largest-files","kind":"improve_existing","lifecycle":"open","risk":"read_only","existing_component_name":"DattoSize","owner":"Jason Architecture Authority","occurrence_count":3,"source_ticket_ids":["TSECRET"],"source_run_ids":["RUNSECRET"],"evidence_refs":["EVSECRET"],"gap_summary":"SECRET SUMMARY","proposed_change":"SECRET CODE"},
+  {"request_id":"CER-disk","title":"Improve disk evidence","problem_key":"disk-space:largest-files","kind":"improve_existing","lifecycle":"open","risk":"read_only","existing_component_name":"DattoSize","proposed_component_name":"JASON | Disk Space | Diagnose [WIN] v1.0","proposed_component_description":"Collects disk facts without modifying state.","owner":"Jason Architecture Authority","occurrence_count":3,"source_ticket_ids":["TSECRET"],"source_run_ids":["RUNSECRET"],"evidence_refs":["EVSECRET"],"gap_summary":"SECRET SUMMARY","proposed_change":"SECRET CODE"},
   {"request_id":"CER-old","title":"Old","problem_key":"old","kind":"new_component","lifecycle":"resolved","risk":"modifying","occurrence_count":1}
  ]
  for r in rows: (tmp_path/(r['request_id']+'.json')).write_text(json.dumps(r))
@@ -17,4 +17,6 @@ def test_metrics_are_operational_and_hide_sensitive_context(tmp_path: Path):
  assert 'jason_component_engineering_active_requests 1' in metrics
  assert 'jason_component_engineering_occurrences{request_id="CER-disk"} 3' in metrics
  assert 'existing_component="DattoSize"' in metrics
+ assert 'proposed_component_name="JASON | Disk Space | Diagnose [WIN] v1.0"' in metrics
+ assert 'proposed_component_description="Collects disk facts without modifying state."' in metrics
  for secret in ('TSECRET','RUNSECRET','EVSECRET','SECRET SUMMARY','SECRET CODE'): assert secret not in metrics

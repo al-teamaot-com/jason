@@ -121,3 +121,22 @@ Jason currently has governed Datto component discovery and execution, but no gov
 ## First operational acceptance candidate
 
 The disk-space PlaybookRun for `T20260919.0012` revealed a concrete tooling-quality issue: `Get free hard drive (disk) space AOT Ver 09182025-1`, used as a diagnostic, created `HKLM:\SOFTWARE\AOT` and recorded an alert timestamp while collecting current disk state. Jason should treat this as evidence for a read-only diagnostic improvement request rather than waiting for a technician to request a new script.
+
+## Jason component naming standard
+
+New or materially improved components designed by Jason use:
+
+`JASON | <Function> | <Mode> [Platform] v<major.minor>`
+
+Allowed modes: `Check`, `Diagnose`, `Monitor`, `Remediate`, `Configure`, `Install`, `Update`, `Remove`.
+
+Allowed platforms: `WIN`, `MAC`, `LINUX`, `CROSS`.
+
+Examples:
+
+- `JASON | Disk Space | Diagnose [WIN] v1.0`
+- `JASON | EDR-AV | Diagnose [WIN] v1.0`
+- `JASON | HOSTS File | Check [WIN] v1.0`
+- `JASON | HOSTS File | Remediate [WIN] v1.0`
+
+`JASON` indicates provenance only. Read-only, autonomous, safe, approved, disruptive, and similar authority/risk claims do not belong in the component name; those remain authoritative metadata in Component Control. Every new/improved design also stores a production-ready component description as a first-class engineering field. Existing AOT components retain their current names unless Jason creates a materially new replacement/version.

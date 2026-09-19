@@ -1,5 +1,7 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -9,58 +11,347 @@
     {
       "type": "text",
       "title": "Jason Component Engineering",
-      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
-      "options": {"mode": "markdown", "content": "### Autonomous tooling-improvement queue\nJason creates or strengthens these requests when real playbook/ticket work shows that an existing component does not provide enough evidence, repeatedly fails, duplicates another tool, or a native provider capability should be preferred.\n\n**This page is observational.** A request does not grant authority to create, modify, promote, or execute a DRMM component. Existing Component Control, Central Orchestrator, approval, client isolation, and disruptive-action rules remain authoritative."}
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Autonomous tooling-improvement queue\nJason creates or strengthens these requests when real playbook/ticket work shows that an existing component does not provide enough evidence, repeatedly fails, duplicates another tool, or a native provider capability should be preferred.\n\n**This page is observational.** A request does not grant authority to create, modify, promote, or execute a DRMM component. Existing Component Control, Central Orchestrator, approval, client isolation, and disruptive-action rules remain authoritative."
+      }
     },
     {
-      "type": "stat", "title": "Active Engineering Requests", "datasource": {"type":"prometheus","uid":"jason-prometheus"},
-      "targets": [{"expr":"jason_component_engineering_active_requests","refId":"A"}],
-      "fieldConfig":{"defaults":{"unit":"short","decimals":0},"overrides":[]},
-      "gridPos":{"h":4,"w":6,"x":0,"y":4},
-      "options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"orientation":"auto","textMode":"auto","colorMode":"value","graphMode":"none","justifyMode":"auto"}
+      "type": "stat",
+      "title": "Active Engineering Requests",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_component_engineering_active_requests",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     },
     {
-      "type":"stat","title":"Total Requests","datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"jason_component_engineering_requests","refId":"A"}],
-      "fieldConfig":{"defaults":{"unit":"short","decimals":0},"overrides":[]},
-      "gridPos":{"h":4,"w":6,"x":6,"y":4},
-      "options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"orientation":"auto","textMode":"auto","colorMode":"value","graphMode":"none","justifyMode":"auto"}
+      "type": "stat",
+      "title": "Total Requests",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_component_engineering_requests",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     },
     {
-      "type":"stat","title":"Read-only Opportunities","datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"sum(jason_component_engineering_active_risk{risk=\"read_only\"})","refId":"A"}],
-      "fieldConfig":{"defaults":{"unit":"short","decimals":0},"overrides":[]},
-      "gridPos":{"h":4,"w":6,"x":12,"y":4},
-      "options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"orientation":"auto","textMode":"auto","colorMode":"value","graphMode":"none","justifyMode":"auto"}
+      "type": "stat",
+      "title": "Read-only Opportunities",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_component_engineering_active_risk{risk=\"read_only\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 4
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     },
     {
-      "type":"stat","title":"Modifying / Disruptive","datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"sum(jason_component_engineering_active_risk{risk=~\"modifying|disruptive\"})","refId":"A"}],
-      "fieldConfig":{"defaults":{"unit":"short","decimals":0},"overrides":[]},
-      "gridPos":{"h":4,"w":6,"x":18,"y":4},
-      "options":{"reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"orientation":"auto","textMode":"auto","colorMode":"value","graphMode":"none","justifyMode":"auto"}
+      "type": "stat",
+      "title": "Modifying / Disruptive",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_component_engineering_active_risk{risk=~\"modifying|disruptive\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 4
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     },
     {
-      "type":"table","title":"Engineering Queue","description":"Durable, de-duplicated improvement requests. Recurrence increases Occurrences rather than creating duplicates.",
-      "datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"jason_component_engineering_request_info","format":"table","instant":true,"refId":"A"}],
-      "transformations":[{"id":"organize","options":{"excludeByName":{"Time":true,"Value":true,"__name__":true,"instance":true,"job":true},"indexByName":{"request_id":0,"title":1,"kind":2,"lifecycle":3,"risk":4,"problem_key":5,"existing_component":6,"owner":7},"renameByName":{"request_id":"Request ID","title":"Request","kind":"Kind","lifecycle":"Lifecycle","risk":"Risk","problem_key":"Problem Key","existing_component":"Existing Component","owner":"Owner"}}}],
-      "gridPos":{"h":14,"w":24,"x":0,"y":8},"options":{"showHeader":true}
+      "type": "table",
+      "title": "Engineering Queue",
+      "description": "Durable, de-duplicated improvement requests with the proposed JASON production component name and ready-to-use description.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_component_engineering_request_info",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "indexByName": {
+              "request_id": 0,
+              "title": 1,
+              "proposed_component_name": 2,
+              "proposed_component_description": 3,
+              "kind": 4,
+              "lifecycle": 5,
+              "risk": 6,
+              "problem_key": 7,
+              "existing_component": 8,
+              "owner": 9
+            },
+            "renameByName": {
+              "request_id": "Request ID",
+              "title": "Request",
+              "kind": "Kind",
+              "lifecycle": "Lifecycle",
+              "risk": "Risk",
+              "problem_key": "Problem Key",
+              "existing_component": "Existing Component",
+              "owner": "Owner",
+              "proposed_component_name": "Proposed Component",
+              "proposed_component_description": "Description"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
-      "type":"table","title":"Top Recurring Gaps","datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"topk(20, jason_component_engineering_occurrences)","format":"table","instant":true,"refId":"A"}],
-      "transformations":[{"id":"organize","options":{"excludeByName":{"Time":true,"__name__":true,"instance":true,"job":true},"renameByName":{"request_id":"Request ID","Value":"Occurrences"}}}],
-      "gridPos":{"h":9,"w":12,"x":0,"y":22},"options":{"showHeader":true}
+      "type": "table",
+      "title": "Top Recurring Gaps",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "topk(20, jason_component_engineering_occurrences)",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "request_id": "Request ID",
+              "Value": "Occurrences"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "options": {
+        "showHeader": true
+      }
     },
     {
-      "type":"table","title":"Active Request Types","datasource":{"type":"prometheus","uid":"jason-prometheus"},
-      "targets":[{"expr":"jason_component_engineering_active_kind","format":"table","instant":true,"refId":"A"}],
-      "transformations":[{"id":"organize","options":{"excludeByName":{"Time":true,"__name__":true,"instance":true,"job":true},"renameByName":{"kind":"Request Type","Value":"Active"}}}],
-      "gridPos":{"h":9,"w":12,"x":12,"y":22},"options":{"showHeader":true}
+      "type": "table",
+      "title": "Active Request Types",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_component_engineering_active_kind",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "kind": "Request Type",
+              "Value": "Active"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "options": {
+        "showHeader": true
+      }
     }
   ],
-  "refresh":"30s","schemaVersion":39,"tags":["jason","components","engineering","governance"],
-  "templating":{"list":[]},"time":{"from":"now-30d","to":"now"},"timezone":"browser",
-  "title":"Jason Component Engineering","uid":"jason-component-engineering","version":1
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "jason",
+    "components",
+    "engineering",
+    "governance"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Jason Component Engineering",
+  "uid": "jason-component-engineering",
+  "version": 2
 }

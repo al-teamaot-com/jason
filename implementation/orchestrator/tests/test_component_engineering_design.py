@@ -6,7 +6,7 @@ class Client:
  def complete(self,**kwargs): self.calls.append(kwargs); return self.result
 
 def base(**x):
- d={"recommendation":"improve_existing","rationale":"Existing component is closest fit but lacks bounded structured output.","proposed_name":"Get Disk Usage Detail AOT Ver NEXT","purpose":"Return actionable disk growth evidence.","inputs":["Drive letter"],"result_fields":["status","used_pct","free_gb","largest_folders"],"safety_class":"read_only","implementation_requirements":["No file deletion","Emit JASON_RESULT block"],"test_plan":["Static parse test","Run on approved test device"],"acceptance_criteria":["Returns bounded structured data"],"promotion_requires_human_approval":False}; d.update(x); return d
+ d={"recommendation":"improve_existing","rationale":"Existing component is closest fit but lacks bounded structured output.","proposed_name":"JASON | Disk Space | Diagnose [WIN] v1.0","proposed_description":"Collects Windows disk capacity facts without modifying endpoint or monitoring state.","purpose":"Return actionable disk growth evidence.","inputs":["Drive letter"],"result_fields":["status","used_pct","free_gb","largest_folders"],"safety_class":"read_only","implementation_requirements":["No file deletion","Emit JASON_RESULT block"],"test_plan":["Static parse test","Run on approved test device"],"acceptance_criteria":["Returns bounded structured data"],"promotion_requires_human_approval":False}; d.update(x); return d
 
 def test_design_is_bounded_and_reuses_supplied_context():
  c=Client(base()); r=ComponentEngineeringDesigner(c).design(request={"request_id":"CER-1","gap":"x"},existing_components=[{"name":"Existing","satisfies_request":True}],native_capabilities=[],evidence_summaries=[{"summary":"gap"}]); assert r.recommendation=='improve_existing'; payload=json.loads(c.calls[0]['user']); assert payload['existing_components'][0]['name']=='Existing'; assert 'tools' not in c.calls[0]
@@ -31,3 +31,12 @@ def test_reuse_recommendations_require_explicitly_sufficient_supplied_option():
   ComponentEngineeringDesigner(Client(base(recommendation='use_existing'))).design(request={'request_id':'CER-1'},existing_components=[{'name':'Problematic','satisfies_request':False}],native_capabilities=[],evidence_summaries=[])
  with pytest.raises(ValueError,match='explicitly sufficient native'):
   ComponentEngineeringDesigner(Client(base(recommendation='prefer_native_capability'))).design(request={'request_id':'CER-1'},existing_components=[],native_capabilities=[{'capability':'x','satisfies_request':False}],evidence_summaries=[])
+
+
+def test_new_or_improved_component_name_must_follow_jason_convention():
+    with pytest.raises(ValueError,match="JASON naming convention"):
+        ComponentEngineeringDesigner(Client(base(proposed_name="AOT Disk Tool v1"))).design(request={"request_id":"CER-1"},existing_components=[],native_capabilities=[],evidence_summaries=[])
+
+def test_jason_component_name_rejects_authority_words_by_structure():
+    with pytest.raises(ValueError,match="JASON naming convention"):
+        ComponentEngineeringDesigner(Client(base(proposed_name="JASON | Disk Space Read-Only | Diagnose [WIN] v1.0 approved"))).design(request={"request_id":"CER-1"},existing_components=[],native_capabilities=[],evidence_summaries=[])

@@ -61,6 +61,8 @@ class ComponentEngineeringRequest:
     desired_capability: str = ""
     gap_summary: str = ""
     proposed_change: str = ""
+    proposed_component_name: str = ""
+    proposed_component_description: str = ""
     acceptance_criteria: list[str] = field(default_factory=list)
     dependent_playbooks: list[str] = field(default_factory=list)
     source_run_ids: list[str] = field(default_factory=list)
@@ -196,6 +198,8 @@ class ComponentEngineeringService:
         existing_component_uid: str = "",
         existing_component_name: str = "",
         proposed_change: str = "",
+        proposed_component_name: str = "",
+        proposed_component_description: str = "",
         acceptance_criteria: Iterable[str] = (),
     ) -> tuple[ComponentEngineeringRequest, bool]:
         if not problem_key.strip() or not title.strip() or not gap_summary.strip():
@@ -213,6 +217,7 @@ class ComponentEngineeringService:
             request_id=request_id,title=title.strip(),problem_key=problem_key.strip(),kind=kind,risk=risk,
             existing_component_uid=existing_component_uid.strip(),existing_component_name=existing_component_name.strip(),
             desired_capability=desired_capability.strip(),gap_summary=gap_summary.strip(),proposed_change=proposed_change.strip(),
+            proposed_component_name=proposed_component_name.strip(),proposed_component_description=proposed_component_description.strip(),
             acceptance_criteria=[str(x).strip() for x in acceptance_criteria if str(x).strip()],
         )
         _append_unique(req.dependent_playbooks,playbook_id); _append_unique(req.source_run_ids,run_id); _append_unique(req.source_ticket_ids,ticket_id)

@@ -7,6 +7,7 @@ DRMM components.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -15,15 +16,16 @@ class StructuredDesignClient(Protocol):
     def complete(self, *, system: str, user: str, schema: Mapping[str, Any], max_output_tokens: int = 1600) -> Mapping[str, Any]: ...
 
 
-_SYSTEM_INSTRUCTIONS = """You are Jason's bounded Component Engineering design reviewer for an MSP. Prefer existing native Kaseya/Datto/Autotask capabilities and existing AOT components before proposing new code. Treat supplied satisfies_request flags as authoritative: never recommend use_existing unless at least one supplied existing component has satisfies_request=true, and never recommend prefer_native_capability unless at least one supplied native capability has satisfies_request=true. Evaluate only the supplied governed request, existing component metadata, provider capability metadata, and operational evidence summaries. Never invent live provider capabilities or claim a component was tested, created, promoted, or executed. Choose exactly one recommendation: use_existing, improve_existing, new_component, or prefer_native_capability. For improvements/new components, design for deterministic machine-readable output plus useful technician-readable details, bounded execution, no secret exposure, explicit inputs, clear exit/result semantics, and authoritative verification. Preserve existing Jason governance: read-only designs may be candidates for autonomous bounded testing on approved test devices; modifying designs require controlled testing and promotion approval; disruptive actions always require instance-specific approval. Output a concrete design and acceptance plan, not provider execution instructions. Do not authorize publication or promotion."""
+_SYSTEM_INSTRUCTIONS = """You are Jason's bounded Component Engineering design reviewer for an MSP. Prefer existing native Kaseya/Datto/Autotask capabilities and existing AOT components before proposing new code. Treat supplied satisfies_request flags as authoritative: never recommend use_existing unless at least one supplied existing component has satisfies_request=true, and never recommend prefer_native_capability unless at least one supplied native capability has satisfies_request=true. Evaluate only the supplied governed request, existing component metadata, provider capability metadata, and operational evidence summaries. Never invent live provider capabilities or claim a component was tested, created, promoted, or executed. Choose exactly one recommendation: use_existing, improve_existing, new_component, or prefer_native_capability. For improvements/new components, design for deterministic machine-readable output plus useful technician-readable details, bounded execution, no secret exposure, explicit inputs, clear exit/result semantics, and authoritative verification. Preserve existing Jason governance: read-only designs may be candidates for autonomous bounded testing on approved test devices; modifying designs require controlled testing and promotion approval; disruptive actions always require instance-specific approval. Output a concrete design and acceptance plan, not provider execution instructions. For any improve_existing or new_component recommendation, proposed_name MUST follow exactly: JASON | <Function> | <Mode> [Platform] v<major.minor>. Allowed Mode values are Check, Diagnose, Monitor, Remediate, Configure, Install, Update, or Remove. Platform must be WIN, MAC, LINUX, or CROSS. JASON indicates provenance only, not execution authority. Do not put read-only, safe, approved, autonomous, or other authority claims in the component name. Also provide a concise production-ready proposed_description that states purpose, major output, and meaningful side-effect boundaries without implying approval. Do not authorize publication or promotion."""
 
 _SCHEMA: Mapping[str, Any] = {
  "type":"object","additionalProperties":False,
- "required":["recommendation","rationale","proposed_name","purpose","inputs","result_fields","safety_class","implementation_requirements","test_plan","acceptance_criteria","promotion_requires_human_approval"],
+ "required":["recommendation","rationale","proposed_name","proposed_description","purpose","inputs","result_fields","safety_class","implementation_requirements","test_plan","acceptance_criteria","promotion_requires_human_approval"],
  "properties":{
   "recommendation":{"type":"string","enum":["use_existing","improve_existing","new_component","prefer_native_capability"]},
   "rationale":{"type":"string","maxLength":1800},
   "proposed_name":{"type":"string","maxLength":240},
+  "proposed_description":{"type":"string","maxLength":1200},
   "purpose":{"type":"string","maxLength":1200},
   "inputs":{"type":"array","items":{"type":"string","maxLength":300},"maxItems":24},
   "result_fields":{"type":"array","items":{"type":"string","maxLength":200},"maxItems":40},
@@ -53,6 +55,7 @@ class ComponentDesignReview:
     recommendation: str
     rationale: str
     proposed_name: str
+    proposed_description: str
     purpose: str
     inputs: tuple[str,...]
     result_fields: tuple[str,...]
@@ -61,6 +64,16 @@ class ComponentDesignReview:
     test_plan: tuple[str,...]
     acceptance_criteria: tuple[str,...]
     promotion_requires_human_approval: bool
+
+
+_JASON_COMPONENT_NAME_RE = re.compile(
+    r"^JASON \| [^|\[\]]+ \| (Check|Diagnose|Monitor|Remediate|Configure|Install|Update|Remove) \[(WIN|MAC|LINUX|CROSS)\] v[0-9]+\.[0-9]+$"
+)
+
+
+def _validate_proposed_name(recommendation: str, name: str) -> None:
+    if recommendation in {"improve_existing", "new_component"} and not _JASON_COMPONENT_NAME_RE.fullmatch(name.strip()):
+        raise ValueError("new/improved Jason component name must follow JASON naming convention")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,4 +93,9 @@ class ComponentEngineeringDesigner:
             raise ValueError("use_existing requires an explicitly sufficient existing component")
         if rec == "prefer_native_capability" and not any(item.get("satisfies_request") is True for item in native_capabilities):
             raise ValueError("prefer_native_capability requires an explicitly sufficient native capability")
-        return ComponentDesignReview(rec,str(raw["rationale"]).strip(),str(raw["proposed_name"]).strip(),str(raw["purpose"]).strip(),tuple(map(str,raw["inputs"])),tuple(map(str,raw["result_fields"])),safety,tuple(map(str,raw["implementation_requirements"])),tuple(map(str,raw["test_plan"])),tuple(map(str,raw["acceptance_criteria"])),approval)
+        proposed_name=str(raw["proposed_name"]).strip()
+        proposed_description=str(raw["proposed_description"]).strip()
+        _validate_proposed_name(rec, proposed_name)
+        if rec in {"improve_existing", "new_component"} and not proposed_description:
+            raise ValueError("new/improved Jason component requires proposed description")
+        return ComponentDesignReview(rec,str(raw["rationale"]).strip(),proposed_name,proposed_description,str(raw["purpose"]).strip(),tuple(map(str,raw["inputs"])),tuple(map(str,raw["result_fields"])),safety,tuple(map(str,raw["implementation_requirements"])),tuple(map(str,raw["test_plan"])),tuple(map(str,raw["acceptance_criteria"])),approval)

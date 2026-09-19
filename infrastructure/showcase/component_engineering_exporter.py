@@ -56,6 +56,8 @@ def render_metrics(*, requests_path: Path | None=None) -> str:
           "lifecycle":str(row.get("lifecycle","unknown")),
           "risk":str(row.get("risk","unknown")),
           "existing_component":str(row.get("existing_component_name","")),
+          "proposed_component_name":str(row.get("proposed_component_name","")),
+          "proposed_component_description":str(row.get("proposed_component_description","")),
           "owner":str(row.get("owner","")),
         }
         text=",".join(f'{k}="{_escape(v)}"' for k,v in labels.items())
@@ -74,7 +76,7 @@ def render_metrics(*, requests_path: Path | None=None) -> str:
     lines += [
       "# HELP jason_component_engineering_exporter_build_info Jason Component Engineering exporter metadata.",
       "# TYPE jason_component_engineering_exporter_build_info gauge",
-      'jason_component_engineering_exporter_build_info{version="1"} 1',
+      'jason_component_engineering_exporter_build_info{version="2"} 1',
     ]
     return "\n".join(lines)+"\n"
 
