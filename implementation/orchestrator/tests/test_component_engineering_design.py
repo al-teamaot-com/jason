@@ -14,3 +14,13 @@ def test_design_is_bounded_and_reuses_supplied_context():
 def test_modifying_or_disruptive_must_require_promotion_approval():
  for safety in ('modifying','disruptive'):
   with pytest.raises(ValueError,match='require promotion approval'): ComponentEngineeringDesigner(Client(base(safety_class=safety,promotion_requires_human_approval=False))).design(request={"request_id":"CER-1"},existing_components=[],native_capabilities=[],evidence_summaries=[])
+
+
+def test_design_client_falls_back_when_primary_transport_fails():
+ from orchestrator.component_engineering_design import FallbackStructuredDesignClient
+ class Primary:
+  def complete(self,**kwargs): raise RuntimeError('429')
+ fallback=Client(base())
+ client=FallbackStructuredDesignClient(Primary(),fallback)
+ result=client.complete(system='s',user='u',schema={})
+ assert result['recommendation']=='improve_existing' and len(fallback.calls)==1
