@@ -38,3 +38,14 @@ def test_mapped_provider_does_not_claim_control_good_without_observation():
  assert by["ENDPOINT-AV"].state is PostureState.UNKNOWN
  assert by["DOCUMENTATION"].state is PostureState.UNKNOWN
  assert by["BACKUP-SUCCESS"].state is PostureState.EVIDENCE_UNAVAILABLE
+def test_lifecycle_unknown_does_not_become_os_good_or_gap():
+ rule=next(x for x in AOT_BASELINE if x.control_id=="ENDPOINT-OS")
+ o=lifecycle_observation(hostname="PC1",lifecycle_state="unknown",source="drmm",observed_at="2026-09-19T10:00:00Z",correlation_id="corr")
+ assert assess_control(rule,[o],coverage_complete=True).state is PostureState.UNKNOWN
+
+def test_one_unsupported_os_establishes_client_gap():
+ rule=next(x for x in AOT_BASELINE if x.control_id=="ENDPOINT-OS")
+ observations=[
+  lifecycle_observation(hostname="PC1",lifecycle_state="supported",source="drmm",observed_at="2026-09-19T10:00:00Z",correlation_id="c1"),
+  lifecycle_observation(hostname="PC2",lifecycle_state="unsupported",source="drmm",observed_at="2026-09-19T10:00:00Z",correlation_id="c2")]
+ assert assess_control(rule,observations,coverage_complete=True).state is PostureState.CONFIRMED_GAP

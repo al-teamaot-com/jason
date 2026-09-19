@@ -104,3 +104,11 @@ def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint
     if binding.it_glue_organization_id is None:
         unavailable.add("DOCUMENTATION")
     return tuple(sorted(unavailable))
+
+def lifecycle_observation(*, hostname: str, lifecycle_state: str, source: str, observed_at: str, correlation_id: str) -> EvidenceObservation:
+    """Normalize an endpoint lifecycle result without treating unknown as healthy."""
+    value = True if lifecycle_state in {"supported", "supported_by_exception", "accepted_exception"} else False if lifecycle_state == "unsupported" else None
+    facts = {"hostname": hostname, "lifecycle_state": lifecycle_state}
+    if value is not None:
+        facts["os_supported"] = value
+    return EvidenceObservation(source, observed_at, correlation_id, facts)
