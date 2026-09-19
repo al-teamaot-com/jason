@@ -966,6 +966,22 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-OPS-007 — Riggins myITprocess native-first strategy pilot
+
+- **Priority:** P1
+- **Status:** Planned — resume when Owner is at a trusted workstation
+- **Risk level:** Low
+- **Idea:** Use Riggins Company as the pilot for making better use of AOT's existing myITprocess / RapidFire Tools stack before building additional Jason posture-reporting functionality.
+- **Current mapping:** Riggins Company is already deterministically mapped as Autotask company `827` and Datto RMM site `17065ca1-dfdf-4c6b-95c7-8a8a5f5dc14a`; Jason can already read substantial operational inventory from Autotask and DRMM.
+- **Pilot scope:** In myITprocess, verify Riggins organization mappings and existing integrations with Autotask, IT Glue, Network Detective Pro, Compliance Manager GRC, VulScan, and other licensed RapidFire capabilities; review Standards/Alignment, Device Lifecycle, Recommendations/Strategic Roadmap, and Executive Summary outputs.
+- **Architecture rule:** Prefer native Kaseya/RapidFire assessment, strategy, lifecycle, and reporting capabilities. Jason should orchestrate, correlate, enrich with current governed Autotask/DRMM/IT Glue evidence, notify the Owner of meaningful findings, and execute only separately authorized operational work. Do not recreate a parallel posture engine when the native tool already supplies the required function.
+- **Connector rule:** Do not create a myITprocess API key or build a Jason connector until the existing tenant configuration and native integrations have been reviewed and a real capability gap is identified. If a connector is later justified, use the vendor-supported myITprocess REST API.
+- **Acceptance:** Prove one useful Riggins client-review workflow using the existing toolset; document what myITprocess/RapidFire handles natively, what Jason should consume/orchestrate, what remains unavailable, and whether the same pattern should be standardized for other AOT clients.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next trusted desk session with myITprocess access.
+
+---
+
 ## New-item template
 
 Copy this section when adding an idea:
