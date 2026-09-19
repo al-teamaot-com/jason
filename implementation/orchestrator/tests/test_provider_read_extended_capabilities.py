@@ -107,7 +107,7 @@ def test_microsoft_manifest_registers_provider_neutral_user_search_and_read():
         for resource in build_microsoft_graph_manifest().resources
         for operation in resource.operations
     }
-    assert operations == {IDENTITY_USER_SEARCH, IDENTITY_USER_READ}
+    assert {IDENTITY_USER_SEARCH, IDENTITY_USER_READ}.issubset(operations)
 
 
 def test_autotask_notification_history_requires_company_boundary() -> None:

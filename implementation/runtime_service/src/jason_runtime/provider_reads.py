@@ -13,6 +13,8 @@ from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
 from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirectoryConnector
+from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
+from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
 from kernel.capabilities import CapabilityRegistryService
 from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
@@ -44,6 +46,10 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_ORGANIZATION_READ,
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IDENTITY_USER_READ,
+    IDENTITY_AUTHENTICATION_METHODS_READ,
+    IDENTITY_CONDITIONAL_ACCESS_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     IDENTITY_USER_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
@@ -103,6 +109,10 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_NOTIFICATION_HISTORY_SEARCH): "autotask.notification_history.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_SEARCH): "microsoft_graph.user.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_READ): "microsoft_graph.user.get",
+    (MICROSOFT_GRAPH_PROVIDER, IDENTITY_AUTHENTICATION_METHODS_READ): "microsoft_graph.authentication_methods.list",
+    (MICROSOFT_GRAPH_PROVIDER, IDENTITY_CONDITIONAL_ACCESS_SEARCH): "microsoft_graph.conditional_access.list",
+    (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_SEARCH): "microsoft_graph.directory_roles.list",
+    (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH): "microsoft_graph.directory_role_members.list",
 }
 
 _DATTO_AUTOMATION_CAPABILITIES = frozenset(
@@ -314,11 +324,21 @@ def build_provider_read_invoker(
 
     if raw_microsoft_bindings is not None:
         microsoft_directory = runtime_microsoft_directory_from_env(transport=transport)
-        connectors[MICROSOFT_GRAPH_PROVIDER] = MicrosoftGraphDirectoryConnector(
-            directory=microsoft_directory.directory,
-            bindings=raw_microsoft_bindings,
-            audit=audit,
+        directory_connector = MicrosoftGraphDirectoryConnector(
+            directory=microsoft_directory.directory, bindings=raw_microsoft_bindings, audit=audit,
         )
+        posture_connector = MicrosoftGraphSecurityPostureConnector(
+            reader=MicrosoftGraphSecurityPostureReader(tokens=microsoft_directory.directory.tokens, transport=transport),
+            bindings=raw_microsoft_bindings, audit=audit,
+        )
+        class _MicrosoftCompositeConnector:
+            provider_name = MICROSOFT_GRAPH_PROVIDER
+            capabilities = directory_connector.capabilities | posture_connector.capabilities
+            def execute(self, request):
+                if request.context.capability in posture_connector.capabilities:
+                    return posture_connector.execute(request)
+                return directory_connector.execute(request)
+        connectors[MICROSOFT_GRAPH_PROVIDER] = _MicrosoftCompositeConnector()
 
     delegate = GovernedConnectorCapabilityInvoker(
         connectors=connectors,

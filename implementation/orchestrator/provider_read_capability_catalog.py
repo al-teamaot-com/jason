@@ -55,6 +55,10 @@ SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 
 IDENTITY_USER_SEARCH = "identity.user.search"
 IDENTITY_USER_READ = "identity.user.read"
+IDENTITY_AUTHENTICATION_METHODS_READ = "identity.authentication.methods.read"
+IDENTITY_CONDITIONAL_ACCESS_SEARCH = "identity.conditional.access.search"
+IDENTITY_DIRECTORY_ROLE_SEARCH = "identity.directory.role.search"
+IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH = "identity.directory.role.members.search"
 
 
 IT_GLUE_CAPABILITIES = frozenset(
@@ -93,6 +97,10 @@ MICROSOFT_GRAPH_CAPABILITIES = frozenset(
     {
         IDENTITY_USER_SEARCH,
         IDENTITY_USER_READ,
+        IDENTITY_AUTHENTICATION_METHODS_READ,
+        IDENTITY_CONDITIONAL_ACCESS_SEARCH,
+        IDENTITY_DIRECTORY_ROLE_SEARCH,
+        IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     }
 )
 
@@ -519,6 +527,32 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             authoritative_change_sources=ms,
             collection_fact="users",
             canonical_facts="id,display_name,email,user_principal_name,account_enabled",
+        ),
+        _read_capability(
+            now=now, capability_name=IDENTITY_AUTHENTICATION_METHODS_READ, display_name="Read Entra Authentication Methods",
+            business_purpose="Read registered authentication method types for one exact Entra user in the authenticated tenant.",
+            resource_types="identity_authentication_methods,identity_user,entra_user", operation="read", selector_keys="user_id",
+            fact_hints="MFA,authentication methods,registered methods,passwordless,FIDO2,Authenticator", authoritative_change_sources=ms,
+            canonical_facts="user_id,method_type,count",
+        ),
+        _read_capability(
+            now=now, capability_name=IDENTITY_CONDITIONAL_ACCESS_SEARCH, display_name="Search Entra Conditional Access Policies",
+            business_purpose="Read bounded Conditional Access policy configuration in the authenticated tenant.",
+            resource_types="identity_conditional_access,conditional_access,policy", operation="search", selector_keys="page_size",
+            fact_hints="Conditional Access,MFA policy,legacy authentication,grant controls,session controls", authoritative_change_sources=ms,
+            collection_fact="conditional access policies", canonical_facts="id,display_name,state,conditions,grant_controls,session_controls",
+        ),
+        _read_capability(
+            now=now, capability_name=IDENTITY_DIRECTORY_ROLE_SEARCH, display_name="Search Entra Directory Roles",
+            business_purpose="Read bounded activated directory roles in the authenticated tenant.", resource_types="identity_directory_role,directory_role,privileged_role",
+            operation="search", selector_keys="page_size", fact_hints="directory roles,privileged roles,Global Administrator,admin roles", authoritative_change_sources=ms,
+            collection_fact="directory roles", canonical_facts="id,display_name,role_template_id",
+        ),
+        _read_capability(
+            now=now, capability_name=IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH, display_name="Search Entra Directory Role Members",
+            business_purpose="Read bounded members of one exact activated Entra directory role.", resource_types="identity_directory_role_member,directory_role_member,privileged_identity",
+            operation="search", selector_keys="role_id,page_size", fact_hints="role members,privileged accounts,Global Administrator members,admin accounts", authoritative_change_sources=ms,
+            collection_fact="directory role members", canonical_facts="id,display_name,user_principal_name,account_enabled,object_type",
         ),
         _read_capability(
             now=now,

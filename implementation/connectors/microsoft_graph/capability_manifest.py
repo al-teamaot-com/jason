@@ -10,6 +10,10 @@ from orchestrator.integration_broker import (
 )
 from orchestrator.provider_read_capability_catalog import (
     IDENTITY_USER_READ,
+    IDENTITY_AUTHENTICATION_METHODS_READ,
+    IDENTITY_CONDITIONAL_ACCESS_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     IDENTITY_USER_SEARCH,
     MICROSOFT_GRAPH_PROVIDER,
 )
@@ -37,6 +41,21 @@ def build_microsoft_graph_manifest() -> IntegrationManifest:
         manifest_version="1.0",
         provider_id=MICROSOFT_GRAPH_PROVIDER,
         resources=(
+            ResourceDefinition(
+                resource_type="identity_authentication_methods", description="Registered authentication method types for one exact Entra user.", selectors=selectors,
+                operations=(IntegrationOperation(operation_id="identity.authentication.methods.read",kind=OperationKind.READ,capability_name=IDENTITY_AUTHENTICATION_METHODS_READ,description="Read authentication method types for one user.",read_only=True,selector_names=("resource_id",)),),
+                observations=(ResourceObservation("authentication_posture","Registered authentication method types; no secret method material."),), relationships=("authentication methods -> identity user",),
+            ),
+            ResourceDefinition(
+                resource_type="identity_conditional_access", description="Microsoft Entra Conditional Access policy posture.", selectors=selectors,
+                operations=(IntegrationOperation(operation_id="identity.conditional.access.search",kind=OperationKind.SEARCH,capability_name=IDENTITY_CONDITIONAL_ACCESS_SEARCH,description="Read bounded Conditional Access policies.",read_only=True,selector_names=("page_size",),collection_supported=True),),
+                observations=(ResourceObservation("security_posture","Policy state, conditions, grant controls, and session controls."),), relationships=(),
+            ),
+            ResourceDefinition(
+                resource_type="identity_directory_role", description="Activated Microsoft Entra directory roles and exact role membership.", selectors=selectors,
+                operations=(IntegrationOperation(operation_id="identity.directory.role.search",kind=OperationKind.SEARCH,capability_name=IDENTITY_DIRECTORY_ROLE_SEARCH,description="Read activated directory roles.",read_only=True,selector_names=("page_size",),collection_supported=True),),
+                observations=(ResourceObservation("privileged_access","Activated directory role identity."),), relationships=("directory role -> members",),
+            ),
             ResourceDefinition(
                 resource_type="identity_user",
                 description=(
