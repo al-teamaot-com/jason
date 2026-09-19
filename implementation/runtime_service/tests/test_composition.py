@@ -84,6 +84,9 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "replay.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "security.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
+    assert application.playbook_run_coordinator is not None
+    assert application.security_triage_evaluator is not None
+    assert application.playbook_run_coordinator.store.root == settings.playbook_runs_path
 
 
 def test_production_conversation_planning_is_resource_first_and_metadata_driven(tmp_path):
