@@ -940,3 +940,21 @@ def test_site_disambiguates_identical_exact_hostnames(monkeypatch) -> None:
             "site": "Customer B",
         }
     ]
+
+def test_site_only_device_search_enumerates_complete_account_before_filtering(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    responses = [
+        {"devices":[{"uid":"atomic-1","hostname":"A1","siteName":"Atomic","siteUid":"atomic-site"},{"uid":"other-1","hostname":"O1","siteName":"Other","siteUid":"other-site"}]},
+        {"devices":[{"uid":"atomic-2","hostname":"A2","siteName":"Atomic","siteUid":"atomic-site"}]},
+        {"devices":[]},
+    ]
+    transport=Transport(responses)
+    connector=DattoRmmConnector(secrets=Secrets(),transport=transport,audit=Audit())
+    result=connector.execute(connector_request(arguments={"site":"Atomic"}))
+    assert result.data["discovery_complete"] is True
+    assert [x["resource_id"] for x in result.data["resource_matches"]] == ["atomic-1","atomic-2"]
+    assert [c["params"]["page"] for c in transport.calls] == [0,1,2]
+    assert all(c["params"]["max"] == connector.fallback_discovery_page_size for c in transport.calls)

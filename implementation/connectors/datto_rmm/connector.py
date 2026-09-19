@@ -255,6 +255,27 @@ class DattoRmmConnector(ConnectorBase):
             )
             matches = discovery["resource_matches"]
 
+        elif self._site_reference(request.arguments) and not self._hostname_reference(request.arguments):
+            # A site-only provider search may return only the provider default page.
+            # Enumerate the authorized account collection to completion and filter
+            # locally so a client-wide review cannot mistake a partial site sample
+            # for complete inventory evidence.
+            discovery = self._execute_account_device_collection(
+                request=request,
+                credentials=credentials,
+                access_token=access_token,
+                token_type=token_type,
+            )
+            site_reference = self._site_reference(request.arguments)
+            matches = [
+                match for match in discovery["resource_matches"]
+                if self._site_reference_matches(
+                    reference=site_reference,
+                    site=str(match.get("site", "")),
+                )
+            ]
+            discovery = {**dict(discovery), "resource_matches": matches}
+
         else:
             search_request = self._prepare_provider_request(
                 capability="datto_rmm.device.search",
