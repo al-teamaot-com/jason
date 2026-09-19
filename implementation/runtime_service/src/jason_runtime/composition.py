@@ -832,7 +832,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         FileCommunicationTemplateRequestStore(settings.communication_template_requests_path),
     )
     communication_template_designer = CommunicationTemplateDesigner(
-        client=hosted_conversation_client or ollama_client
+        client=component_engineering_design_client
     )
 
     intent_resolver = None
