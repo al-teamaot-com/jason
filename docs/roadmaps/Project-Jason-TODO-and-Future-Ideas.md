@@ -985,7 +985,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-AI-004 — Per-prompt runtime invocation telemetry
 
 - **Priority:** P1
-- **Status:** Planned — prompt registry/dashboard foundation implemented 2026-09-19
+- **Status:** Planned — prompt registry/exporter/dashboard source complete; common runtime invocation instrumentation remains
 - **Risk level:** Moderate
 - **Idea:** Emit a provider-neutral `PromptInvocation` record at Jason's common model-call boundaries so the AI Prompt Registry can report real per-prompt call counts, latency, model/profile, result class, token usage when provider-supplied, and tool-use status.
 - **Why it matters:** The prompt registry can prove which durable prompts are defined and detect source drift, but operational governance also needs to prove which prompt/version actually ran and how it performed.
@@ -994,6 +994,20 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Acceptance:** Grafana shows real 24h/7d/30d invocation counts, latency, error/result classes, token/cost attribution where already available, and the exact prompt ID/version/model profile used, with regression proof that prompt/evidence content is not exported.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Next AI observability/backend workstream after prompt registry production deployment.
+
+---
+
+### TODO-OBS-002 — Deploy AI Prompt Registry observability to production
+
+- **Priority:** P1
+- **Status:** Planned — source complete; blocked only by trusted-terminal sudo activation
+- **Risk level:** Low
+- **Idea:** Activate the already-built Jason AI Prompt Registry exporter, Prometheus scrape target, and Grafana dashboard in production using the existing supported observability deployment process.
+- **Current state:** Source is committed at `bb221eb`; the registry contains 20 material runtime prompts; exporter tests pass; prompt hashes match current source; Prometheus configuration/rules validate; dashboard JSON validates. A non-interactive sudo precheck returned `SUDO_READY=NO`, so no production mutation was attempted.
+- **Required action:** At a trusted Jason-server terminal, authenticate sudo and deploy the observability changes through the existing supported install/deployment path. Do not bypass sudo or manually mutate unrelated runtime/provider services.
+- **Acceptance:** `jason-prompt-exporter.service` is active; `http://127.0.0.1:9471/metrics` is healthy; Prometheus target `jason-ai-prompts` is up; Grafana provisions dashboard UID `jason-ai-prompt-registry`; registry count is 20 or the then-current reviewed count; source drift is zero; full prompt text/secrets are absent from metrics; existing Jason runtime/MCP/OpenBao/provider-facing service identities are unchanged.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next trusted desk/server-terminal session with sudo authentication.
 
 ---
 
