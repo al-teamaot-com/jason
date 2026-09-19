@@ -1060,12 +1060,13 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-011 — Generic Playbook Completion Gap Routing
 
 - **Priority:** P1
-- **Status:** In progress — source/runtime foundation implemented; production observability service activation remains desk-dependent
+- **Status:** In progress — production runtime routing and first controlled real-gap acceptance are complete; persistent observability service activation remains desk-dependent
 - **Risk level:** Low
 - **Idea:** Give every PlaybookRun one de-duplicated way to classify why Jason could not complete work and route the blocker to the correct improvement path instead of creating bespoke playbook logic.
 - **Routes:** Component Engineering, Communication Template Engineering, provider capability backlog, Documentation Assurance, human decision/approval, or bounded recheck.
 - **Governance:** Routing is metadata/workflow only and grants no provider/action authority. Unknown reason classes fail closed. Temporary conditions require a concrete bounded recheck timestamp.
 - **Acceptance:** Deterministic reason mapping, de-duplication, PlaybookRun linkage, recurrence tracking, secret-safe exporter, Grafana `jason-completion-gaps`, and one controlled real blocker routed end-to-end.
+- **Production checkpoint (2026-09-19):** Runtime composition is live at deployment commit `a9ef2a1`; controlled acceptance tied to `T20260919.0012` routed `approved template missing` to durable gap `GAP-communication-disk-space-user-action-end-user`, linked existing request `CTR-disk-space-user-action-end-user`, placed the acceptance run in `blocked`, then cancelled the acceptance run so it would not masquerade as active ticket work. Exporter smoke test reports one active gap; Grafana dashboard and Prometheus file-discovery config are staged and valid. Systemd installation/start of `jason-completion-gap-exporter.service` remains for the next sudo-capable desk session.
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Next production playbook blocker or next trusted-terminal session for exporter service activation.
 
