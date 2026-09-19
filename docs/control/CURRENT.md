@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-18
-**Status:** Datto EDR/AV v1.2 governed read backend is production-deployed and accepted at source revision `b63798e048f4493d15b79565e997f43f8fd7edac`. All six `endpoint.security.*` read capabilities succeed through the authenticated Jason MCP path against AOT-50282 with exact DRMM UID -> EDR `deviceId` correlation. The playbook is in supervised pilot/read-ready state. Full threat-branch activation remains intentionally pending governed provider-native Datto AV scan execution and a complete remediation/scan/recurrence acceptance run.
+**Updated:** 2026-09-19
+**Status:** Operational Resolution Memory is production-deployed as an evidence-only troubleshooting integration. Same-client search/read is fail-closed without authenticated client scope and grounded current-incident evidence; confirmed-case ingestion is implemented and deployed. The production store currently contains zero cases, so first verified-case capture and later similar-case reuse proof remain pending. Datto EDR/AV threat-branch activation also remains independently pending its full remediation/scan/recurrence acceptance.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -16,6 +16,23 @@
 > **ChatGPT reasons. Jason governs and executes.**
 
 ChatGPT is the primary technician conversational surface. Jason remains authoritative for identity, scope, grants, approval policy, provider isolation, Central Orchestrator execution, evidence, and audit. A ChatGPT tool call is a governed request, not provider authority.
+
+## Operational Resolution Memory — current production state
+
+- roadmap milestone: `RESMEM-001`; status: `active`; phase: `Reasoning Quality`;
+- canonical TODO: `TODO-OPS-001`; status: **In progress**;
+- production MCP image: `jason-mcp:resmem-ingest-1a5f2b2`;
+- production source revision: `1a5f2b2`;
+- governed aggregate health capability: `operations.resolution.summary`;
+- latest post-deployment proof correlation: `corr_mcp_56b21063bfc545ccb1f054f0c167b050`;
+- raw historical search/read requires authenticated current client scope and grounded incident signature;
+- historical evidence explicitly grants no execution authority; normal approval/disruption/provider controls remain mandatory;
+- verified ingestion requires exact ticket provenance, matching company boundary, explicit root cause/final resolution, technician confirmation, and terminal verification;
+- production case count: `0`; first verified case and later materially-similar retrieval proof remain pending.
+
+Observability is live: `jason-resolution-memory` is an `up` Prometheus target, the aggregate exporter reports store availability `1` and zero cases/client scopes, and `jason_roadmap_item_info{milestone="RESMEM-001"}` reports `status="active"`. Grafana health is `database=ok` on version `12.2.1`; the repository-provisioned `Jason Command Center` roadmap table consumes this roadmap metric. Monitoring is observational only and grants no authority.
+
+Authoritative implementation/session record: `docs/sessions/Jason-Operational-Resolution-Memory-Integration-2026-09-18.md`.
 
 ## Current live MCP boundary
 
