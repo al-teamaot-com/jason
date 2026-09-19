@@ -42,6 +42,9 @@ from pydantic import AnyHttpUrl
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
+from jason_runtime.autotask_ticket_create import (
+    SERVICE_TICKET_CREATE,
+)
 from jason_runtime.autotask_internal_note import (
     SERVICE_TICKET_NOTE_CREATE,
     autotask_internal_note_mcp_surface_enabled,
@@ -1409,6 +1412,23 @@ def _project_action_result(
         "raw_provider_evidence_exposed": False,
     }
 
+    if capability_name == "service.ticket.create":
+        verification = data.get("jasonVerification")
+
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+
+        result["verification_available"] = True
+        result["readback_verified"] = bool(verification.get("readbackVerified"))
+        ticket_id = verification.get("ticketId")
+        if ticket_id is not None:
+            result["ticket_id"] = _safe(ticket_id)
+        fields = verification.get("verifiedFields")
+        if isinstance(fields, (list, tuple)):
+            result["verified_fields"] = [str(value) for value in fields[:20]]
+        return result
+
     if capability_name == "service.ticket.note.create":
         verification = data.get("jasonVerification")
 
@@ -1906,6 +1926,41 @@ def _canonicalize_governed_action_arguments(
     """
 
     raw = dict(arguments or {})
+
+    if capability_name == "service.ticket.create":
+        if "payload" in raw:
+            return raw
+        aliases = {
+            "company_id": "companyID",
+            "configuration_item_id": "configurationItemID",
+            "assigned_resource_id": "assignedResourceID",
+            "contact_id": "contactID",
+            "due_date_time": "dueDateTime",
+            "billing_code_id": "billingCodeID",
+            "issue_type": "issueType",
+            "sub_issue_type": "subIssueType",
+            "ticket_type": "ticketType",
+            "queue_id": "queueID",
+        }
+        allowed = {
+            "companyID", "company_id", "title", "description", "status",
+            "priority", "queueID", "queue_id", "assignedResourceID",
+            "assigned_resource_id", "dueDateTime", "due_date_time",
+            "configurationItemID", "configuration_item_id", "billingCodeID",
+            "billing_code_id", "issueType", "issue_type", "subIssueType",
+            "sub_issue_type", "ticketType", "ticket_type", "contactID",
+            "contact_id", "source",
+        }
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                "AUTOTASK_TICKET_CREATE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        payload = {}
+        for key, value in raw.items():
+            payload[aliases.get(key, key)] = value
+        return {"payload": payload}
 
     if capability_name == "service.ticket.update":
         if raw.get("begin_work") is True:
