@@ -781,9 +781,12 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** In progress — governed Entra posture read code deployed; production acceptance blocked by current Microsoft app consent/profile
 - **Risk level:** High
 - **Idea:** Add narrow governed read-only capabilities for MFA registration/enforcement, Conditional Access, privileged-account MFA, legacy-authentication restrictions, Exchange Online protection configuration, external-message tagging, quarantine, attachment/link protection, and related tenant security posture.
+- **Implemented checkpoint (2026-09-19):** Deployed governed `identity.authentication.methods.read`, `identity.conditional.access.search`, `identity.directory.role.search`, and `identity.directory.role.members.search`. Existing `identity.user.search` remains healthy through the same tenant-bound Microsoft path. Live authentication-method and Conditional Access probes reached Microsoft Graph and failed with HTTP 403 under the existing narrow `directory-read` application consent. Directory-role enumeration reached Graph but returned HTTP 400 and remains pending provider-contract/permission validation. No tenant consent or credential authority was broadened.
+- **Current blocker:** The production Microsoft boundary/application is still intentionally pinned to the narrow `directory-read` profile (`User.Read.All`). The source catalog's separate `identity-investigation-read` profile describes the additional read permissions needed for broader identity investigation, but activating/consenting those permissions is a provider administration change and must be performed as a controlled desk session.
+- **Review trigger:** Owner at a trusted workstation for Microsoft application-permission/admin-consent review; then re-run each production read independently and keep only vendor-supported/consented surfaces active.
 - **Why it matters:** Enables evidence-backed cyber-insurance and security-control reviews without manual tenant inspection.
 - **Origin:** Reclassified from `SUPPORT-CAP-007` on 2026-09-18 because this is a new capability/integration, not a break/fix defect.
 - **Prerequisites:** least-privilege Microsoft Graph/Exchange read scopes, tenant isolation, evidence normalization, and sanitized acceptance fixtures.

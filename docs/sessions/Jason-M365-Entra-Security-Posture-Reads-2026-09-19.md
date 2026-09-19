@@ -23,3 +23,6 @@ The existing source catalog already defines `identity-investigation-read` with A
 3. Production-prove each capability individually.
 4. Record missing Graph permissions/consent as explicit desk-dependent blockers rather than bypassing them.
 5. Preserve `direct_provider_access=false` and Central Orchestrator information-release controls.
+
+## Production checkpoint
+Source revision `124621a` is deployed. Existing tenant-bound `identity.user.search` remains healthy. The new authentication-method and Conditional Access reads reached Microsoft Graph but returned HTTP 403, confirming the current narrow application consent does not authorize those data sets. Directory-role enumeration returned HTTP 400 and is not claimed as accepted. No Microsoft application permissions, tenant consent, certificate credential, or client boundary were broadened during this work. Production acceptance is therefore **PARTIAL / DESK-DEPENDENT**.
