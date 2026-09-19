@@ -931,6 +931,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Next desk session.
 
+### TODO-OPS-005 — Client Security/Posture Review
+
+- **Priority:** P1
+- **Status:** In progress — deterministic evidence/classification foundation implemented 2026-09-19
+- **Risk level:** Moderate
+- **Idea:** Periodically or on demand evaluate one authorized client against AOT's managed-security baseline using only authoritative governed evidence, then produce a gap report and improvement proposals without automatically changing client systems.
+- **Classification:** Every control must be `confirmed_good`, `confirmed_gap`, `unknown`, `not_applicable`, or `evidence_unavailable`. Missing evidence never means healthy.
+- **Initial controls:** BitLocker, managed AV/EDR, supported OS, DRMM monitoring, VulScan, DNSFilter, backup coverage/recent success, Microsoft MFA/Conditional Access, and documentation completeness.
+- **Implemented checkpoint:** `implementation/orchestrator/client_security_posture.py` defines the deterministic baseline/evaluator. Tests prove missing evidence cannot become good, unavailable evidence remains distinct, mixed evidence fails to a gap, and confirmed gaps create proposals rather than automatic changes. Architecture contract: `docs/architecture/Jason-Client-Security-Posture-Review.md`.
+- **Remaining acceptance:** Bind reviews to exact Autotask company identity; normalize live DRMM/Autotask/IT Glue observations; production-prove one controlled client review; preserve unavailable status for Endpoint Backup and Microsoft controls until their desk-dependent integrations are completed; add report/Grafana evidence after live proof.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Continue immediately with client-bound evidence mapping.
+
 ---
 
 ## New-item template
