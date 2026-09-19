@@ -11,9 +11,11 @@ from usage_ledger.ledger import SQLiteUsageLedger
 
 from autonomous_remediation.playbook_coordinator import PlaybookRunCoordinator
 from autonomous_remediation.component_engineering import ComponentEngineeringService, FileComponentEngineeringStore
+from autonomous_remediation.communication_templates import CommunicationTemplateService, FileCommunicationTemplateCatalog, FileCommunicationTemplateRequestStore
 from autonomous_remediation.playbook_runtime import FilePlaybookRunStore
 from orchestrator.security_triage import SecurityTriageEvaluator
 from orchestrator.component_engineering_design import ComponentEngineeringDesigner, FallbackStructuredDesignClient
+from orchestrator.communication_template_design import CommunicationTemplateDesigner
 
 from decision_memory.resolution_service import ResolutionMemoryService
 from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
@@ -223,6 +225,8 @@ class RuntimeSettings:
     )
     playbook_runs_path: Path = Path("/var/lib/jason/playbooks/runs")
     component_engineering_path: Path = Path("/var/lib/jason/component-engineering/requests")
+    communication_template_catalog_path: Path = Path("/var/lib/jason/communications/approved-templates.json")
+    communication_template_requests_path: Path = Path("/var/lib/jason/communications/template-requests")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -323,6 +327,18 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_COMPONENT_ENGINEERING_PATH",
                     "/var/lib/jason/component-engineering/requests",
+                )
+            ),
+            communication_template_catalog_path=Path(
+                os.getenv(
+                    "JASON_COMMUNICATION_TEMPLATE_CATALOG",
+                    "/var/lib/jason/communications/approved-templates.json",
+                )
+            ),
+            communication_template_requests_path=Path(
+                os.getenv(
+                    "JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH",
+                    "/var/lib/jason/communications/template-requests",
                 )
             ),
             trusted_keys_registry=Path(
@@ -816,6 +832,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     component_engineering_designer = ComponentEngineeringDesigner(
         client=component_engineering_design_client
     )
+    communication_template_service = CommunicationTemplateService(
+        FileCommunicationTemplateCatalog(settings.communication_template_catalog_path),
+        FileCommunicationTemplateRequestStore(settings.communication_template_requests_path),
+    )
+    communication_template_designer = CommunicationTemplateDesigner(
+        client=hosted_conversation_client or ollama_client
+    )
 
     intent_resolver = None
     if not settings.dynamic_conversation_enabled:
@@ -1197,4 +1220,6 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         playbook_run_coordinator=playbook_run_coordinator,
         security_triage_evaluator=security_triage_evaluator,
         component_engineering_designer=component_engineering_designer,
+        communication_template_service=communication_template_service,
+        communication_template_designer=communication_template_designer,
     )

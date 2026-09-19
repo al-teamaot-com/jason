@@ -375,6 +375,23 @@
       "content_exposed_in_metrics": false,
       "invocation_telemetry": "not_instrumented",
       "owner": "Jason Architecture Authority"
+    },
+    {
+      "prompt_id": "PROMPT-COMM-001",
+      "name": "AOT Communication Template Proposal",
+      "version": "1.0.0",
+      "lifecycle": "pilot",
+      "surface": "communication_template_engineering",
+      "model_profile": "runtime-selected",
+      "risk": "high",
+      "structured_output": true,
+      "tool_access": false,
+      "source_path": "implementation/orchestrator/communication_template_design.py",
+      "source_symbol": "_SYSTEM_INSTRUCTIONS",
+      "content_sha256": "c2977866ec7bb33de37221579f9e7e1c1a7fedfab9ff952b19cdf347f587bd51",
+      "content_exposed_in_metrics": false,
+      "invocation_telemetry": "not_instrumented",
+      "owner": "AOT Service Management"
     }
   ]
 }

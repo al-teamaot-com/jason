@@ -59,3 +59,8 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-component-engineering.json
         refresh_interval: 30s
+  - job_name: jason-communication-templates
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-communication-templates.json
+        refresh_interval: 30s

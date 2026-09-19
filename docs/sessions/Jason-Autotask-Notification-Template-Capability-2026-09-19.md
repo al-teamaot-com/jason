@@ -22,3 +22,11 @@ Deploy the read capability and prove a same-company notification-history query i
 
 ## Production permission diagnosis
 Live provider preflight confirms `Resources` is queryable by the dedicated read identity (`userAccessForQuery=All`) while `NotificationHistory` is not (`userAccessForQuery=None`). The failure is therefore isolated to the read identity's Autotask security level. Jason has no governed Autotask security-level administration capability and will not use direct provider or private UI automation to broaden it. The required provider-side change is limited to enabling Notification History query access on the **Jason read-only API user's security level**. The separate `Jason API - Ticket Mutation` profile must remain unchanged.
+
+## Approved-response and template-request extension
+
+Jason now has a provider-neutral approved communication-template catalog plus a durable template-gap request workflow. This addresses the operational need for approved client responses without pretending that Autotask exposes Notification Template bodies through its documented REST API.
+
+When no approved catalog entry matches the required purpose/audience, Jason may autonomously create or strengthen a Communication Template Request. `PROMPT-COMM-001` drafts structured reusable content only; deterministic `render_aot_html()` applies the established AOT HTML shell. The proposed subject/body and required variables are stored for AOT review. Proposed templates are not approved and cannot be used as send authority until explicitly reviewed/published.
+
+The initial approved catalog is intentionally empty pending import/review of AOT's existing approved templates. This avoids fabricating approved wording from observed Notification History names alone.

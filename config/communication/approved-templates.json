@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "authority": "AOT Service Management",
+  "description": "Authoritative Jason catalog of AOT-approved reusable client communication templates. Only entries with approved=true may be used without a separate draft approval.",
+  "templates": []
+}
