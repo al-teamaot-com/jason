@@ -982,6 +982,21 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-AI-004 — Per-prompt runtime invocation telemetry
+
+- **Priority:** P1
+- **Status:** Planned — prompt registry/dashboard foundation implemented 2026-09-19
+- **Risk level:** Moderate
+- **Idea:** Emit a provider-neutral `PromptInvocation` record at Jason's common model-call boundaries so the AI Prompt Registry can report real per-prompt call counts, latency, model/profile, result class, token usage when provider-supplied, and tool-use status.
+- **Why it matters:** The prompt registry can prove which durable prompts are defined and detect source drift, but operational governance also needs to prove which prompt/version actually ran and how it performed.
+- **Safety:** Never export full prompt text, human messages, governed evidence payloads, ticket/device/user identifiers, secrets, or other high-cardinality sensitive values as Prometheus labels. Prompt ID/version and low-cardinality execution metadata only.
+- **Prerequisites:** Reuse the canonical prompt IDs in `implementation/orchestrator/prompt_registry.json`; identify common hosted/local model-call boundaries; preserve existing usage-attribution accounting rather than duplicating token/cost logic.
+- **Acceptance:** Grafana shows real 24h/7d/30d invocation counts, latency, error/result classes, token/cost attribution where already available, and the exact prompt ID/version/model profile used, with regression proof that prompt/evidence content is not exported.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Next AI observability/backend workstream after prompt registry production deployment.
+
+---
+
 ## New-item template
 
 Copy this section when adding an idea:
