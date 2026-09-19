@@ -75,3 +75,7 @@ On 2026-09-19, a temporary `hosts_file_drift` v0.1.0 run completed the generic p
 `implementation/autonomous_remediation/playbook_coordinator.py` adds a provider-neutral coordinator and `GovernedPlaybookExecutor`. The bridge accepts an already-constructed governed orchestration request, calls the existing Central Orchestrator exactly once, and persists the returned status, correlation reference, reason class, and provider-attempt count into the run. It does not construct provider requests, bypass approvals, or retry failed/denied actions. Approval-required, denied/human-required, and failed results place the run into a blocked state for explicit continuation.
 
 The public MCP governed-action contract is intentionally unchanged; playbook context remains server-side rather than becoming caller-controlled action metadata. The bridge pre-validates the requested post-success state before dispatch so an invalid state transition cannot occur after a provider mutation has already been attempted.
+
+## Production composition status — 2026-09-19
+
+The normal `build_runtime_application()` composition now constructs a `PlaybookRunCoordinator` backed by `RuntimeSettings.playbook_runs_path` (default `/var/lib/jason/playbooks/runs`) and attaches it to the internal `RuntimeHttpApplication` composition object. This is an internal service reference only; no new HTTP/MCP surface is exposed and no playbook is automatically activated by this wiring. Production filesystem ownership/deployment remains an onsite activation step.

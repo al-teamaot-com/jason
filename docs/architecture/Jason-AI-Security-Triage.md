@@ -57,3 +57,7 @@ Security-capable playbooks should collect deterministic evidence first, then cal
 ## Acceptance — 2026-09-19
 
 Tests prove that the evaluator passes only supplied evidence to the structured reasoning client, rejects invented evidence citations, requires human review for higher-risk/inconclusive classifications, requires affirmative benign evidence for a benign result, and fails closed on empty/duplicate evidence.
+
+## Production composition status — 2026-09-19
+
+`build_runtime_application()` now composes `SecurityTriageEvaluator` with the same already-governed structured reasoning client used by Jason conversation reasoning (`hosted_conversation_client` when enabled, otherwise the configured Ollama structured client). This reuses existing credentials, transports, schema adapters, and model governance rather than introducing a new AI provider path. The evaluator is attached only as an internal runtime service and is not automatically invoked by arbitrary tickets until a playbook explicitly calls it.

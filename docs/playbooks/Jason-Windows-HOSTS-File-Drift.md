@@ -67,7 +67,7 @@ Side states: `waiting`, `recheck_pending`, `blocked`, `escalated`, `cancelled`.
 
 **Evidence source:** DRMM endpoint/monitor plus governed read-only endpoint diagnostic.
 
-**Command/read/component:** Exact read-only HOSTS inspection capability/component to be selected and production-proven before activation.
+**Command/read/component:** Prefer existing AOT component `Get-Hosts File Contents AOT Ver 06042025-1` (UID `d913d23c-235e-431f-bcc3-c236bb35a08a`) for exact current contents. For richer drift/baseline/forensic context, use `Check HOSTS file Drift [WIN] AOT Ver 11262025-1` (UID `2117a11e-7bd7-40a9-9fd9-4441ab640f85`). Both remain subject to their current server-side component approval classification.
 
 **Expected result:** Current HOSTS contents/diff plus authoritative endpoint identity.
 
@@ -101,7 +101,7 @@ Before remediation require:
 
 ## 9. Remediation
 
-**Action:** Remove/restore only the exact unauthorized HOSTS drift identified by evidence.
+**Action:** Use existing `Update-Hosts file AOT Ver 06042025` (UID `841eaeb2-f1f1-4996-8b09-8d803fa98f62`) only after the exact unauthorized change is identified. Prefer `LineRemovalString` for narrowly targeted removal or `LineToAdd` for a specifically approved entry; `ResetHostsFile` is broader and requires stronger justification. The component creates `hosts.bak`, emits before/after contents, and flushes DNS.
 
 **Approval classification:** modifying; approval-required during pilot. Reboot remains disruptive and separately approval-required if ever needed.
 
@@ -152,16 +152,16 @@ Summarize original drift, classification/root cause, device/client state, diagno
 - Autotask ticket/company/configuration reads;
 - ticket work-start lifecycle and internal notes;
 - DRMM endpoint/alert reads;
-- exact read-only HOSTS diagnostic capability/component;
+- existing read-only HOSTS diagnostic components: `Get-Hosts File Contents AOT Ver 06042025-1` and `Check HOSTS file Drift [WIN] AOT Ver 11262025-1`;
 - IT Glue/same-client exception evidence when authorized;
 - Resolution Memory search;
 - registered AI threat/benign triage prompt `PROMPT-SEC-001` v1.0.0;
 - persisted generic PlaybookRun state;
 - governed scheduled recheck support;
-- modifying HOSTS remediation capability (pilot approval-required);
+- existing `Update-Hosts file AOT Ver 06042025` remediation component (pilot approval-required unless existing Component Control classification is separately changed by the Owner);
 - DRMM alert resolution and Autotask completion after verification.
 
-Missing exact HOSTS read/remediation capabilities remain implementation gates, not assumptions.
+The required HOSTS read/remediation components already exist in the live DRMM catalog. The remaining gate is their current governed execution classification/approval path plus controlled live acceptance; no new HOSTS component should be built.
 
 ## 21. Acceptance Test
 

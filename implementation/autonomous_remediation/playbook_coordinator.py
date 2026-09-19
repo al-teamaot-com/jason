@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from playbook_runtime import FilePlaybookRunStore, PlaybookRunRecord, RunState, TERMINAL_STATES
+try:
+    from .playbook_runtime import FilePlaybookRunStore, PlaybookRunRecord, RunState, TERMINAL_STATES
+except ImportError:  # direct script/test compatibility
+    from playbook_runtime import FilePlaybookRunStore, PlaybookRunRecord, RunState, TERMINAL_STATES
 
 
 @dataclass(frozen=True, slots=True)
