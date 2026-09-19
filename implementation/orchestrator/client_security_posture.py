@@ -112,3 +112,33 @@ def lifecycle_observation(*, hostname: str, lifecycle_state: str, source: str, o
     if value is not None:
         facts["os_supported"] = value
     return EvidenceObservation(source, observed_at, correlation_id, facts)
+
+def datto_security_observation(*, hostname: str, match_count: int, resolved: bool, matches: Sequence[Mapping[str, Any]], source: str, observed_at: str, correlation_id: str) -> EvidenceObservation:
+    """Normalize AOT's managed Datto EDR/AV requirement for one Windows endpoint.
+
+    Every managed Windows endpoint is expected to have Datto EDR and Datto AV unless
+    explicit exception evidence is supplied elsewhere. Missing/ambiguous provider
+    identity is a coverage gap. Offline/stale state does not prove installation is
+    absent, but it also cannot establish current healthy protection.
+    """
+    facts: dict[str, Any] = {"hostname": hostname, "datto_match_count": int(match_count), "datto_identity_resolved": bool(resolved)}
+    items = tuple(matches)
+    if match_count == 0:
+        facts.update({"managed_edr_present": False, "managed_av_present": False, "managed_edr_healthy": False, "managed_av_healthy": False, "security_posture_reason": "no_datto_edr_agent_match"})
+        return EvidenceObservation(source, observed_at, correlation_id, facts)
+    if match_count != 1 or not resolved or len(items) != 1:
+        facts.update({"managed_edr_healthy": False, "managed_av_healthy": False, "security_posture_reason": "ambiguous_datto_agent_identity"})
+        return EvidenceObservation(source, observed_at, correlation_id, facts)
+    item = items[0]
+    edr_present = bool(item.get("has_edr_license")) and bool(item.get("authorized"))
+    av_present = bool(item.get("has_av_license")) and bool(item.get("datto_av_enabled"))
+    facts.update({"managed_edr_present": edr_present, "managed_av_present": av_present, "datto_agent_status": item.get("status")})
+    if not edr_present or not av_present:
+        facts.update({"managed_edr_healthy": False, "managed_av_healthy": False, "security_posture_reason": "required_datto_license_or_av_enablement_missing"})
+    elif str(item.get("status") or "").casefold() == "online" and bool(item.get("active")):
+        facts.update({"managed_edr_healthy": True, "managed_av_healthy": True, "security_posture_reason": "current_datto_agent_online"})
+    else:
+        # Installed/authorized protection is evidenced, but current health cannot be
+        # established while the endpoint agent is Offline/Stale.
+        facts["security_posture_reason"] = "datto_agent_not_currently_online"
+    return EvidenceObservation(source, observed_at, correlation_id, facts)

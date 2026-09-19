@@ -49,3 +49,24 @@ def test_one_unsupported_os_establishes_client_gap():
   lifecycle_observation(hostname="PC1",lifecycle_state="supported",source="drmm",observed_at="2026-09-19T10:00:00Z",correlation_id="c1"),
   lifecycle_observation(hostname="PC2",lifecycle_state="unsupported",source="drmm",observed_at="2026-09-19T10:00:00Z",correlation_id="c2")]
  assert assess_control(rule,observations,coverage_complete=True).state is PostureState.CONFIRMED_GAP
+def test_all_windows_endpoints_require_datto_edr_av():
+ o=datto_security_observation(hostname="PC1",match_count=0,resolved=False,matches=(),source="datto_edr",observed_at="2026-09-19T11:00:00Z",correlation_id="c")
+ assert o.facts["managed_edr_healthy"] is False
+ assert o.facts["managed_av_healthy"] is False
+
+def test_duplicate_datto_agents_are_a_posture_gap_until_identity_is_resolved():
+ matches=({"has_edr_license":True,"has_av_license":True,"datto_av_enabled":True,"authorized":True,"status":"Online","active":True},{"has_edr_license":True,"has_av_license":True,"datto_av_enabled":True,"authorized":True,"status":"Stale","active":False})
+ o=datto_security_observation(hostname="PC1",match_count=2,resolved=False,matches=matches,source="datto_edr",observed_at="2026-09-19T11:00:00Z",correlation_id="c")
+ assert o.facts["managed_edr_healthy"] is False
+ assert o.facts["security_posture_reason"]=="ambiguous_datto_agent_identity"
+
+def test_offline_unique_datto_agent_proves_presence_but_not_current_health():
+ matches=({"has_edr_license":True,"has_av_license":True,"datto_av_enabled":True,"authorized":True,"status":"Offline","active":False},)
+ o=datto_security_observation(hostname="PC1",match_count=1,resolved=True,matches=matches,source="datto_edr",observed_at="2026-09-19T11:00:00Z",correlation_id="c")
+ assert o.facts["managed_edr_present"] is True and o.facts["managed_av_present"] is True
+ assert "managed_edr_healthy" not in o.facts
+
+def test_online_unique_datto_agent_can_establish_endpoint_health():
+ matches=({"has_edr_license":True,"has_av_license":True,"datto_av_enabled":True,"authorized":True,"status":"Online","active":True},)
+ o=datto_security_observation(hostname="PC1",match_count=1,resolved=True,matches=matches,source="datto_edr",observed_at="2026-09-19T11:00:00Z",correlation_id="c")
+ assert o.facts["managed_edr_healthy"] is True and o.facts["managed_av_healthy"] is True
