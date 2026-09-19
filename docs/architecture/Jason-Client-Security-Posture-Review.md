@@ -45,3 +45,12 @@ The evaluator therefore now requires explicit `coverage_complete` before any hea
 A provider issue was also observed: account-level `management.alert.search` with an Atomic site selector returned alerts belonging to multiple sites/clients. That response is excluded from client posture evidence. Client reviews must use provider results whose returned resource/site identity is independently verified against the bound client; exact endpoint-scoped alert reads are acceptable for the tested endpoint.
 
 IT Glue organization search for Atomic remains denied by the existing information-release gate, so `DOCUMENTATION` remains `evidence_unavailable`. No bypass was attempted.
+
+## Complete Atomic DRMM inventory proof
+Revision `abc4a9b` changed site-only DRMM device discovery so it enumerates the authorized account collection to provider completion and then filters locally by exact site identity. Production correlation `corr_mcp_1c093e1f87ab44dda140ca079806f645` examined four provider pages / 749 account resources and returned exactly 29 resources whose provider-returned site UID is Atomic's bound UID. `discovery_complete=true`. This replaces the earlier provider-default-page sample of 25 and is acceptable completeness evidence for the DRMM inventory itself.
+
+All 29 returned resources were then read individually through governed `endpoint.device.read`; every read succeeded and independently returned Atomic's exact site UID. Twenty-five are Windows managed endpoints (desktop/laptop/server) and four are network devices, which are excluded from Windows endpoint controls rather than treated as missing endpoint data.
+
+The complete 25-Windows-endpoint AV inventory establishes a **confirmed gap** for the managed-AV control: `APD-50213` reports Windows Defender Antivirus `NotRunning`, and `APD-HYPERV` reports Datto AV `RunningAndNotUpToDate`. `APD-50712` reports Windows Defender Antivirus `RunningAndUpToDate` rather than Datto AV; whether that is an approved exception requires policy/exception evidence, so it must not be silently counted as compliant with the managed-Datto-AV baseline. The remaining returned Windows endpoint AV records report running/up-to-date protection.
+
+The same inventory also establishes that unsupported-OS evaluation needs a version-support policy table rather than string heuristics. Multiple Windows 10 19045 endpoints, Hyper-V Server 2012, and Windows Server 2016 are present, but the posture engine will not label them supported/unsupported until the AOT baseline explicitly defines lifecycle criteria and exceptions.
