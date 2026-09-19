@@ -12,6 +12,7 @@ from usage_ledger.ledger import SQLiteUsageLedger
 from autonomous_remediation.playbook_coordinator import PlaybookRunCoordinator
 from autonomous_remediation.component_engineering import ComponentEngineeringService, FileComponentEngineeringStore
 from autonomous_remediation.communication_templates import CommunicationTemplateService, FileCommunicationTemplateCatalog, FileCommunicationTemplateRequestStore
+from autonomous_remediation.completion_gap_router import CompletionGapRouter, FileCompletionGapStore
 from autonomous_remediation.playbook_runtime import FilePlaybookRunStore
 from orchestrator.security_triage import SecurityTriageEvaluator
 from orchestrator.component_engineering_design import ComponentEngineeringDesigner, FallbackStructuredDesignClient
@@ -227,6 +228,7 @@ class RuntimeSettings:
     component_engineering_path: Path = Path("/var/lib/jason/component-engineering/requests")
     communication_template_catalog_path: Path = Path("/var/lib/jason/openclaw/communications/approved-templates.json")
     communication_template_requests_path: Path = Path("/var/lib/jason/openclaw/communications/template-requests")
+    completion_gaps_path: Path = Path("/var/lib/jason/openclaw/completion-gaps")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -339,6 +341,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH",
                     "/var/lib/jason/openclaw/communications/template-requests",
+                )
+            ),
+            completion_gaps_path=Path(
+                os.getenv(
+                    "JASON_COMPLETION_GAPS_PATH",
+                    "/var/lib/jason/openclaw/completion-gaps",
                 )
             ),
             trusted_keys_registry=Path(
@@ -817,9 +825,15 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     component_engineering_service = ComponentEngineeringService(
         FileComponentEngineeringStore(settings.component_engineering_path)
     )
+    playbook_run_store = FilePlaybookRunStore(settings.playbook_runs_path)
+    completion_gap_router = CompletionGapRouter(
+        FileCompletionGapStore(settings.completion_gaps_path),
+        playbook_run_store,
+    )
     playbook_run_coordinator = PlaybookRunCoordinator(
-        FilePlaybookRunStore(settings.playbook_runs_path),
+        playbook_run_store,
         component_engineering_service,
+        completion_gap_router,
     )
     security_triage_evaluator = SecurityTriageEvaluator(
         client=hosted_conversation_client or ollama_client

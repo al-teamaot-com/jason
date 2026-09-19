@@ -64,3 +64,8 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-communication-templates.json
         refresh_interval: 30s
+  - job_name: jason-completion-gaps
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-completion-gaps.json
+        refresh_interval: 30s

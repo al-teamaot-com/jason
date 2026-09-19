@@ -457,3 +457,5 @@ When the acceptance test succeeds:
 - mark the Section Goal complete
 
 Any unresolved capability gaps should become explicit follow-up TODO items rather than hidden exceptions.
+
+When a playbook cannot complete, route the blocker through the generic Completion Gap Router rather than inventing playbook-specific backlog behavior. Use the standardized reason classes so the blocker routes to Component Engineering, Communication Template Engineering, provider capability backlog, Documentation Assurance, human decision, or bounded recheck. Unknown blocker reasons must fail closed rather than be guessed. If a specialized durable request already exists, link its request ID to the completion gap instead of creating a parallel duplicate.

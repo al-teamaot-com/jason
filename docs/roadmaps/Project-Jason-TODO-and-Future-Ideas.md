@@ -1057,6 +1057,20 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-OPS-011 — Generic Playbook Completion Gap Routing
+
+- **Priority:** P1
+- **Status:** In progress — source/runtime foundation implemented; production observability service activation remains desk-dependent
+- **Risk level:** Low
+- **Idea:** Give every PlaybookRun one de-duplicated way to classify why Jason could not complete work and route the blocker to the correct improvement path instead of creating bespoke playbook logic.
+- **Routes:** Component Engineering, Communication Template Engineering, provider capability backlog, Documentation Assurance, human decision/approval, or bounded recheck.
+- **Governance:** Routing is metadata/workflow only and grants no provider/action authority. Unknown reason classes fail closed. Temporary conditions require a concrete bounded recheck timestamp.
+- **Acceptance:** Deterministic reason mapping, de-duplication, PlaybookRun linkage, recurrence tracking, secret-safe exporter, Grafana `jason-completion-gaps`, and one controlled real blocker routed end-to-end.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next production playbook blocker or next trusted-terminal session for exporter service activation.
+
+---
+
 ## New-item template
 
 Copy this section when adding an idea:
