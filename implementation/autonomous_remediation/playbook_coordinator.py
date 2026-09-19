@@ -145,6 +145,8 @@ class PlaybookRunCoordinator:
         existing_component_uid: str = "",
         existing_component_name: str = "",
         proposed_change: str = "",
+        proposed_component_name: str = "",
+        proposed_component_description: str = "",
         acceptance_criteria: Iterable[str] = (),
     ):
         if self.component_engineering is None:
@@ -163,6 +165,8 @@ class PlaybookRunCoordinator:
             existing_component_uid=existing_component_uid,
             existing_component_name=existing_component_name,
             proposed_change=proposed_change,
+            proposed_component_name=proposed_component_name,
+            proposed_component_description=proposed_component_description,
             acceptance_criteria=acceptance_criteria,
         )
         run.metadata["component_engineering_request_id"] = request.request_id
