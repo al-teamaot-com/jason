@@ -100,3 +100,10 @@ def test_ticket_create_rejects_unknown_fields():
         AutotaskTicketCreateConnector.validated_payload(
             request({"companyID": 100, "title": "x", "id": 9})
         )
+
+
+def test_ticket_create_accepts_internal_company_zero_id():
+    payload = AutotaskTicketCreateConnector.validated_payload(
+        request({"companyID": 0, "title": "AOT internal ticket"})
+    )
+    assert payload["companyID"] == 0

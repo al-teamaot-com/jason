@@ -212,7 +212,15 @@ class AutotaskTicketCreateConnector(AutotaskTicketUpdateConnector):
         unknown = set(payload) - SAFE_TICKET_CREATE_FIELDS
         if unknown:
             raise PermissionError("AUTOTASK_TICKET_CREATE_FIELD_NOT_ALLOWED")
-        company_id = _positive_int(payload.get("companyID"), field="companyID")
+        raw_company_id = payload.get("companyID")
+        if isinstance(raw_company_id, bool):
+            raise ValueError("companyID must be a non-negative integer")
+        try:
+            company_id = int(raw_company_id)
+        except (TypeError, ValueError) as error:
+            raise ValueError("companyID must be a non-negative integer") from error
+        if company_id < 0:
+            raise ValueError("companyID must be a non-negative integer")
         title = str(payload.get("title") or "").strip()
         if not title or len(title) > 512:
             raise ValueError("title must be a bounded non-empty string")
