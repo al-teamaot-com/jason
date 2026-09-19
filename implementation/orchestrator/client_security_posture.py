@@ -77,3 +77,28 @@ def build_review(*, client_id: str, evidence_by_control: Mapping[str,Sequence[Ev
     counts={state.value:sum(a.state is state for a in assessments) for state in PostureState}
     proposals=[{"control_id":a.control_id,"title":a.title,"rationale":a.rationale,"proposed_action":a.remediation_hint} for a in assessments if a.state is PostureState.CONFIRMED_GAP]
     return {"client_id":cid,"assessments":assessments,"counts":counts,"improvement_proposals":proposals,"automatic_changes_allowed":False}
+
+@dataclass(frozen=True, slots=True)
+class ClientEvidenceBinding:
+    """Provider identifiers proven to refer to the same client boundary."""
+    autotask_company_id: str
+    autotask_company_name: str
+    drmm_site_uid: str | None = None
+    it_glue_organization_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.autotask_company_id.strip() or not self.autotask_company_name.strip():
+            raise ValueError("an exact Autotask company id and name are required")
+
+
+def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint_backup_api_available: bool=False, microsoft_security_reads_available: bool=False) -> tuple[str,...]:
+    unavailable={"BACKUP-SUCCESS"}
+    if not endpoint_backup_api_available:
+        unavailable.add("BACKUP-COVERAGE")
+    if not microsoft_security_reads_available:
+        unavailable.update({"IDENTITY-MFA","IDENTITY-CA"})
+    if binding.drmm_site_uid is None:
+        unavailable.update({"ENDPOINT-ENCRYPTION","ENDPOINT-AV","ENDPOINT-EDR","ENDPOINT-OS","ENDPOINT-MONITORING","VULNERABILITY","DNS-PROTECTION"})
+    if binding.it_glue_organization_id is None:
+        unavailable.add("DOCUMENTATION")
+    return tuple(sorted(unavailable))

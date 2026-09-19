@@ -27,3 +27,10 @@ The review is read-only. A `confirmed_gap` creates an improvement proposal; it d
 3. Run the first review against a controlled AOT/XYZ test client.
 4. Verify unavailable sources remain visibly unavailable rather than guessed.
 5. Add a report surface and Grafana aggregate telemetry only after the evidence mapping is production-proven.
+
+## First production binding proof — XYZ Test Company
+On 2026-09-19, Jason resolved `XYZ Test Company` to exact Autotask company ID `1158` through governed `service.company.search` (correlation `corr_mcp_f5d001cb7c4c480aac62d17a30f6fff9`). Autotask configuration enumeration for company 1158 succeeded (correlation `corr_mcp_6eac32f8f6fc497bae4c42403e6758b9`).
+
+The corresponding governed DRMM site search by exact company name returned zero sites (correlation `corr_mcp_d33b93ca77ea4318974a5a7892a6eeec`). IT Glue organization search was denied by the existing information-release gate and requested approval rather than releasing evidence (correlation `corr_mcp_436c6fb9086b4cc68f42a3178464131e`). Neither result is treated as a security gap: the DRMM-backed controls and documentation control are `evidence_unavailable` until an authoritative provider mapping/evidence path exists.
+
+This proof establishes the desired fail-closed behavior for a controlled test client: exact Autotask company identity is mandatory; absent DRMM mapping does not permit cross-client/site searching; denied IT Glue evidence is not bypassed; and unavailable evidence cannot become `confirmed_good` or `confirmed_gap`.

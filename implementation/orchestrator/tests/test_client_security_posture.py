@@ -18,3 +18,18 @@ def test_all_observed_values_must_match_baseline():
  rule=next(x for x in AOT_BASELINE if x.control_id=="ENDPOINT-AV")
  a=assess_control(rule,[ev(managed_av_healthy=True),ev(managed_av_healthy=False)])
  assert a.state is PostureState.CONFIRMED_GAP
+def test_client_binding_requires_exact_autotask_identity():
+ import pytest
+ with pytest.raises(ValueError): ClientEvidenceBinding("", "XYZ")
+def test_unmapped_providers_fail_to_evidence_unavailable():
+ b=ClientEvidenceBinding("1158","XYZ Test Company")
+ unavailable=set(unavailable_controls_for_binding(b))
+ assert "ENDPOINT-AV" in unavailable and "DOCUMENTATION" in unavailable
+ assert "BACKUP-SUCCESS" in unavailable and "IDENTITY-MFA" in unavailable
+def test_mapped_provider_does_not_claim_control_good_without_observation():
+ b=ClientEvidenceBinding("1158","XYZ Test Company",drmm_site_uid="site-1",it_glue_organization_id="org-1")
+ r=build_review(client_id=b.autotask_company_id,evidence_by_control={},unavailable_controls=unavailable_controls_for_binding(b))
+ by={x.control_id:x for x in r["assessments"]}
+ assert by["ENDPOINT-AV"].state is PostureState.UNKNOWN
+ assert by["DOCUMENTATION"].state is PostureState.UNKNOWN
+ assert by["BACKUP-SUCCESS"].state is PostureState.EVIDENCE_UNAVAILABLE
