@@ -26,6 +26,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Contracts",
         "Resources",
         "Opportunities",
+        "NotificationHistory",
     }
 )
 
