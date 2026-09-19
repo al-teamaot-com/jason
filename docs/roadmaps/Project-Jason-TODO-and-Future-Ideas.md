@@ -888,6 +888,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before Jason becomes materially difficult to reconstruct by reissuing credentials, before multi-host/production expansion, or during the next formal disaster-recovery review.
 
+### TODO-SEC-005 — Activate secure Grafana credential management
+
+- **Priority:** P1
+- **Status:** Planned — resume week of 2026-09-21
+- **Risk level:** High
+- **Idea:** Complete production activation of the secure Jason Credential Management dashboard and dedicated OpenBao credential-control service implemented in commit `bdb758d`.
+- **Why it matters:** Provides a governed, secret-safe operator workflow for adding and rotating approved provider API credentials without placing secret values in chat, GitHub, Prometheus, dashboard JSON, or audit records.
+- **Current blocker:** One-time interactive OpenBao administrative bootstrap must be performed while the Owner is at a trusted workstation. Jason's existing provider identities correctly cannot create or broaden the required policy/AppRole.
+- **Remaining acceptance:** Run the OpenBao bootstrap interactively; deploy the credential-control service; create the Grafana secure datasource; verify secret-safe provider inventory; perform one controlled credential rotation/validation; prove the previous OpenBao KV version remains available for rollback; run secret-leak checks; complete documentation and Grafana evidence.
+- **Prerequisites:** Owner available at a trusted workstation with OpenBao administrative credentials. Do not request or transmit the OpenBao admin password through chat.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Week of 2026-09-21 when the Owner is back at a trusted workstation.
+
 ---
 
 ## New-item template
