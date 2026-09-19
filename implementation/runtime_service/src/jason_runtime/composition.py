@@ -13,7 +13,7 @@ from autonomous_remediation.playbook_coordinator import PlaybookRunCoordinator
 from autonomous_remediation.component_engineering import ComponentEngineeringService, FileComponentEngineeringStore
 from autonomous_remediation.playbook_runtime import FilePlaybookRunStore
 from orchestrator.security_triage import SecurityTriageEvaluator
-from orchestrator.component_engineering_design import ComponentEngineeringDesigner
+from orchestrator.component_engineering_design import ComponentEngineeringDesigner, FallbackStructuredDesignClient
 
 from decision_memory.resolution_service import ResolutionMemoryService
 from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
@@ -808,8 +808,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     security_triage_evaluator = SecurityTriageEvaluator(
         client=hosted_conversation_client or ollama_client
     )
+    component_engineering_design_client = (
+        FallbackStructuredDesignClient(hosted_conversation_client, ollama_client)
+        if hosted_conversation_client is not None
+        else ollama_client
+    )
     component_engineering_designer = ComponentEngineeringDesigner(
-        client=hosted_conversation_client or ollama_client
+        client=component_engineering_design_client
     )
 
     intent_resolver = None

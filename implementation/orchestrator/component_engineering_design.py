@@ -37,6 +37,18 @@ _SCHEMA: Mapping[str, Any] = {
 
 
 @dataclass(frozen=True, slots=True)
+class FallbackStructuredDesignClient:
+    primary: StructuredDesignClient
+    fallback: StructuredDesignClient
+
+    def complete(self, *, system: str, user: str, schema: Mapping[str, Any], max_output_tokens: int = 1600) -> Mapping[str, Any]:
+        try:
+            return self.primary.complete(system=system,user=user,schema=schema,max_output_tokens=max_output_tokens)
+        except Exception:
+            return self.fallback.complete(system=system,user=user,schema=schema,max_output_tokens=max_output_tokens)
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentDesignReview:
     recommendation: str
     rationale: str
