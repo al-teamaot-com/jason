@@ -4,8 +4,8 @@ import json,os
 from collections import Counter
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from pathlib import Path
-CATALOG=Path(os.environ.get('JASON_COMMUNICATION_TEMPLATE_CATALOG','/var/lib/jason/communications/approved-templates.json'))
-REQUESTS=Path(os.environ.get('JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH','/var/lib/jason/communications/template-requests'))
+CATALOG=Path(os.environ.get('JASON_COMMUNICATION_TEMPLATE_CATALOG','/var/lib/jason/openclaw/communications/approved-templates.json'))
+REQUESTS=Path(os.environ.get('JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH','/var/lib/jason/openclaw/communications/template-requests'))
 HOST=os.environ.get('JASON_COMMUNICATION_TEMPLATE_EXPORTER_HOST','0.0.0.0'); PORT=int(os.environ.get('JASON_COMMUNICATION_TEMPLATE_EXPORTER_PORT','9473'))
 def e(v): return str(v).replace('\\','\\\\').replace('"','\\"').replace('\n','\\n')
 def load_catalog():

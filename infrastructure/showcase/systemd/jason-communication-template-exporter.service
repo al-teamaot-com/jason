@@ -5,8 +5,8 @@ After=network-online.target
 Type=simple
 User=al
 Group=al
-Environment=JASON_COMMUNICATION_TEMPLATE_CATALOG=/var/lib/jason/communications/approved-templates.json
-Environment=JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH=/var/lib/jason/communications/template-requests
+Environment=JASON_COMMUNICATION_TEMPLATE_CATALOG=/var/lib/jason/openclaw/communications/approved-templates.json
+Environment=JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH=/var/lib/jason/openclaw/communications/template-requests
 Environment=JASON_COMMUNICATION_TEMPLATE_EXPORTER_HOST=0.0.0.0
 Environment=JASON_COMMUNICATION_TEMPLATE_EXPORTER_PORT=9473
 ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/communication_template_exporter.py

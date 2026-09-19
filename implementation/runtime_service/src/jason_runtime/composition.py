@@ -225,8 +225,8 @@ class RuntimeSettings:
     )
     playbook_runs_path: Path = Path("/var/lib/jason/playbooks/runs")
     component_engineering_path: Path = Path("/var/lib/jason/component-engineering/requests")
-    communication_template_catalog_path: Path = Path("/var/lib/jason/communications/approved-templates.json")
-    communication_template_requests_path: Path = Path("/var/lib/jason/communications/template-requests")
+    communication_template_catalog_path: Path = Path("/var/lib/jason/openclaw/communications/approved-templates.json")
+    communication_template_requests_path: Path = Path("/var/lib/jason/openclaw/communications/template-requests")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -332,13 +332,13 @@ class RuntimeSettings:
             communication_template_catalog_path=Path(
                 os.getenv(
                     "JASON_COMMUNICATION_TEMPLATE_CATALOG",
-                    "/var/lib/jason/communications/approved-templates.json",
+                    "/var/lib/jason/openclaw/communications/approved-templates.json",
                 )
             ),
             communication_template_requests_path=Path(
                 os.getenv(
                     "JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH",
-                    "/var/lib/jason/communications/template-requests",
+                    "/var/lib/jason/openclaw/communications/template-requests",
                 )
             ),
             trusted_keys_registry=Path(

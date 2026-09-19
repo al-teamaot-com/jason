@@ -14,7 +14,7 @@ Therefore the governed Jason Approved Communication Template Catalog is the auth
 
 Source/default: `config/communication/approved-templates.json`.
 
-Production path: `/var/lib/jason/communications/approved-templates.json`.
+Production path: `/var/lib/jason/openclaw/communications/approved-templates.json`.
 
 Only entries with `approved=true` may be treated as approved reusable wording. Each entry records template ID/name, purpose key, audience, subject, HTML body, source, review timestamp, owner, and notes.
 

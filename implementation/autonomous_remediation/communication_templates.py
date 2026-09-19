@@ -129,7 +129,7 @@ def _slug(text: str) -> str:
 
 class FileCommunicationTemplateCatalog:
     def __init__(self, path: Path|str|None=None) -> None:
-        self.path=Path(path or os.environ.get("JASON_COMMUNICATION_TEMPLATE_CATALOG","/var/lib/jason/communications/approved-templates.json"))
+        self.path=Path(path or os.environ.get("JASON_COMMUNICATION_TEMPLATE_CATALOG","/var/lib/jason/openclaw/communications/approved-templates.json"))
 
     def list(self) -> list[ApprovedCommunicationTemplate]:
         if not self.path.exists(): return []
@@ -143,7 +143,7 @@ class FileCommunicationTemplateCatalog:
 
 class FileCommunicationTemplateRequestStore:
     def __init__(self, root: Path|str|None=None) -> None:
-        self.root=Path(root or os.environ.get("JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH","/var/lib/jason/communications/template-requests"))
+        self.root=Path(root or os.environ.get("JASON_COMMUNICATION_TEMPLATE_REQUESTS_PATH","/var/lib/jason/openclaw/communications/template-requests"))
 
     def _path(self, request_id: str) -> Path:
         if not request_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in request_id): raise ValueError("invalid communication template request id")
