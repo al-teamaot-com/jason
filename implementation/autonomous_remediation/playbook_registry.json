@@ -9,6 +9,15 @@
       "enabled": false,
       "review_status": "threat_recurrence_gate_proven_scan_terminal_pending",
       "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py"
+    },
+    {
+      "id": "hosts_file_drift",
+      "name": "Jason - Windows HOSTS File Drift",
+      "version": "0.1.0",
+      "lifecycle": "draft",
+      "enabled": false,
+      "review_status": "generic_runtime_reference_ready_live_acceptance_pending",
+      "source": "docs/playbooks/Jason-Windows-HOSTS-File-Drift.md"
     }
   ]
 }

@@ -1011,6 +1011,22 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-OPS-008 — Activate generic PlaybookRun runtime and live-state telemetry
+
+- **Priority:** P1
+- **Status:** In progress — generic persisted runtime, aggregate exporter metrics, Grafana panels, and synthetic HOSTS-drift acceptance are source-complete; production orchestration wiring/deployment remains
+- **Risk level:** Moderate
+- **Idea:** Make the generic `PlaybookRunRecord` the standard persisted runtime object for recurring Jason playbooks so each real run survives restarts, approvals, rechecks, and handoffs without repeating completed work.
+- **Implemented source:** `implementation/autonomous_remediation/playbook_runtime.py` provides explicit fail-closed transitions, atomic JSON persistence, exact approval-ID binding, bounded attempt state, recheck state, terminal-state protection, and filename-safe run IDs. The existing playbook exporter now aggregates live run states without exporting run/ticket/company/device/approval identifiers. The Playbook Control Center source includes Active Runs, Awaiting Approval, Blocked Runs, Rechecks Pending, Live Playbook States, and blocker-class panels.
+- **Reference proof:** Synthetic `hosts_file_drift` v0.1.0 acceptance completed the state path through identification, diagnosis, decision, approval, remediation, verification, and completion with no provider call or production remediation. Combined tests passed on 2026-09-19.
+- **Remaining work:** Wire production playbook orchestration to create/load/save the generic record at meaningful state transitions; decide migration/adaptation of the existing Datto EDR/AV playbook-specific state object; activate writable `/var/lib/jason/playbooks/runs` ownership for the runtime writer; deploy exporter/dashboard changes through the supported observability path; then perform one controlled live playbook acceptance.
+- **Safety:** The generic runtime is state only and grants no execution authority. All provider operations remain governed by Central Orchestrator policy, client isolation, approvals, disruption rules, and `direct_provider_access=false`.
+- **Acceptance:** A real selected ticket creates one durable run, resumes after a process/session boundary without repeating completed steps, binds exact approvals, schedules/re-enters a recheck without duplicates when required, reaches verified terminal state or escalation, and appears in Grafana aggregate live-state metrics without leaking sensitive identifiers.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next playbook-runtime production integration session.
+
+---
+
 ## New-item template
 
 Copy this section when adding an idea:

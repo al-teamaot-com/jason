@@ -13,6 +13,7 @@ Environment=JASON_PLAYBOOK_EXPORTER_HOST=0.0.0.0
 Environment=JASON_PLAYBOOK_EXPORTER_PORT=9468
 Environment=JASON_PLAYBOOK_REGISTRY_PATH=/var/lib/jason/playbooks/registry.json
 Environment=JASON_PLAYBOOK_EVENTS_PATH=/var/lib/jason/playbooks/events.jsonl
+Environment=JASON_PLAYBOOK_RUNS_PATH=/var/lib/jason/playbooks/runs
 ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/playbook_exporter.py
 Restart=on-failure
 RestartSec=5
