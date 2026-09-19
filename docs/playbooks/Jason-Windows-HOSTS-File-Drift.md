@@ -77,7 +77,7 @@ Search same-client approved documentation, ticket history, and Resolution Memory
 
 ### Step 3: AI-assisted security classification
 
-Use a registered/versioned security-triage prompt once implemented. Required structured output: classification, confidence, threat evidence, benign evidence, missing evidence, recommended next evidence/action, and human-review requirement.
+Use registered prompt `PROMPT-SEC-001` version `1.0.0` through the bounded `SecurityTriageEvaluator`. Required structured output: classification, confidence, threat evidence, benign evidence, missing evidence, recommended next evidence/action, and human-review requirement.
 
 Permitted classifications: `benign`, `likely_benign`, `suspicious`, `likely_threat`, `confirmed_threat`, `inconclusive`.
 
@@ -155,7 +155,7 @@ Summarize original drift, classification/root cause, device/client state, diagno
 - exact read-only HOSTS diagnostic capability/component;
 - IT Glue/same-client exception evidence when authorized;
 - Resolution Memory search;
-- registered AI threat/benign triage prompt;
+- registered AI threat/benign triage prompt `PROMPT-SEC-001` v1.0.0;
 - persisted generic PlaybookRun state;
 - governed scheduled recheck support;
 - modifying HOSTS remediation capability (pilot approval-required);

@@ -102,6 +102,9 @@ class PlaybookRunRecord:
     def terminal(self) -> bool:
         return self.state in TERMINAL_STATES
 
+    def can_transition(self, target: RunState) -> bool:
+        return target == self.state or target in _ALLOWED_TRANSITIONS[self.state]
+
     def transition(self, target: RunState, *, reason_class: str = "") -> None:
         if target == self.state:
             return

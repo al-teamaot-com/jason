@@ -69,3 +69,9 @@ A synthetic HOSTS-file-drift run is the initial reference acceptance. It exercis
 ## Synthetic reference acceptance result
 
 On 2026-09-19, a temporary `hosts_file_drift` v0.1.0 run completed the generic path `triggered -> identifying -> diagnosing -> deciding -> awaiting_approval -> remediating -> verifying -> complete`. The test persisted and reloaded state, required the exact pending approval ID, recorded one bounded synthetic attempt, and ended `outcome=resolved`. No provider call, endpoint mutation, ticket mutation, alert mutation, or production run-state file was used. The live-run exporter correctly exposed the intermediate `awaiting_approval` aggregate and later returned zero active runs after completion while withholding the synthetic run, ticket, device, approval, and evidence identifiers.
+
+## Central Orchestrator bridge
+
+`implementation/autonomous_remediation/playbook_coordinator.py` adds a provider-neutral coordinator and `GovernedPlaybookExecutor`. The bridge accepts an already-constructed governed orchestration request, calls the existing Central Orchestrator exactly once, and persists the returned status, correlation reference, reason class, and provider-attempt count into the run. It does not construct provider requests, bypass approvals, or retry failed/denied actions. Approval-required, denied/human-required, and failed results place the run into a blocked state for explicit continuation.
+
+The public MCP governed-action contract is intentionally unchanged; playbook context remains server-side rather than becoming caller-controlled action metadata. The bridge pre-validates the requested post-success state before dispatch so an invalid state transition cannot occur after a provider mutation has already been attempted.

@@ -55,4 +55,4 @@ The next phase should introduce a provider-neutral `PromptInvocation` record at 
 
 ## Initial acceptance — 2026-09-19
 
-The initial source registry contains 20 material prompts spanning conversation interpretation/planning, semantic query planning, investigation routing/reasoning/answer generation, evidence reasoning, response quality, semantic mapping, and endpoint-operations reasoning. Exporter tests verify all registered prompt hashes against current source and verify that full prompt content is not exported in metrics.
+The initial source registry contained 20 material prompts spanning conversation interpretation/planning, semantic query planning, investigation routing/reasoning/answer generation, evidence reasoning, response quality, semantic mapping, and endpoint-operations reasoning. On 2026-09-19, `PROMPT-SEC-001` (Security Threat/Benign Triage) was added, bringing the reviewed registry to 21 prompts. Exporter tests verify all registered prompt hashes against current source and verify that full prompt content is not exported in metrics.
