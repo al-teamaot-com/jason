@@ -362,7 +362,7 @@
     {
       "prompt_id": "PROMPT-ENG-001",
       "name": "Component Engineering Design Review",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "lifecycle": "pilot",
       "surface": "component_engineering",
       "model_profile": "runtime-selected",
@@ -371,7 +371,7 @@
       "tool_access": false,
       "source_path": "implementation/orchestrator/component_engineering_design.py",
       "source_symbol": "_SYSTEM_INSTRUCTIONS",
-      "content_sha256": "20e80587de245bb8a4eb8aca68c41bd3d80a5f2b820024ab4117c4776e7271ec",
+      "content_sha256": "a73d959f5f6fd73a12e7980cd287be729af4d5901045c0bf70cd3d27474ae081",
       "content_exposed_in_metrics": false,
       "invocation_telemetry": "not_instrumented",
       "owner": "Jason Architecture Authority"
