@@ -62,7 +62,7 @@ Do not create an engineering request merely because an incident remains unresolv
 
 ## AI design review
 
-Prompt `PROMPT-ENG-001` v1.0.0 and `ComponentEngineeringDesigner` provide bounded AI design support.
+Prompt `PROMPT-ENG-001` v1.0.2 and `ComponentEngineeringDesigner` provide bounded AI design support.
 
 The designer receives only the durable request, supplied existing-component metadata, supplied native-capability metadata, and supplied evidence summaries. It has no provider tools. It returns exactly one recommendation:
 
@@ -140,3 +140,16 @@ Examples:
 - `JASON | HOSTS File | Remediate [WIN] v1.0`
 
 `JASON` indicates provenance only. Read-only, autonomous, safe, approved, disruptive, and similar authority/risk claims do not belong in the component name; those remain authoritative metadata in Component Control. Every new/improved design also stores a production-ready component description as a first-class engineering field. Existing AOT components retain their current names unless Jason creates a materially new replacement/version.
+
+## Production deployment acceptance — 2026-09-19
+
+Component Engineering is active in production. The Jason runtime composes `ComponentEngineeringService` at `/var/lib/jason/component-engineering/requests` and `ComponentEngineeringDesigner`; the runtime health endpoint remains `ok`. `jason-component-engineering-exporter.service` is enabled and active on TCP 9472 using exporter build version 2. Prometheus target `jason-component-engineering` is healthy, and Grafana dashboard UID `jason-component-engineering` is provisioned.
+
+The first real durable request is `CER-disk-space-diagnostic-free-space-component-writes-alert-state`, created automatically from PlaybookRun `disk-space-T20260919-0012`. The request captured that the existing `Get free hard drive (disk) space AOT Ver 09182025-1` diagnostic writes `HKLM:\SOFTWARE\AOT` / `DiskSpaceLastAlertUtc` while collecting evidence. Jason classified this as an `improve_existing`, `read_only` engineering item and generated a grounded design.
+
+The standardized proposed replacement is:
+
+- **Name:** `JASON | Disk Space | Diagnose [WIN] v1.0`
+- **Description:** Collects current Windows fixed-volume capacity, free space, used space, utilization percentage, and threshold state for technician troubleshooting and Jason playbooks. Produces deterministic `JASON_RESULT` output and technician-readable details. Does not perform cleanup or modify endpoint, monitoring, registry, or cooldown state.
+
+The request remains `designing`; no DRMM component definition was created or modified because governed component-definition write capability is not yet available. That remaining provider gap is tracked as `TODO-CONN-010`.

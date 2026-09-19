@@ -60,3 +60,9 @@ The initial source registry contained 20 material prompts spanning conversation 
 ## Production deployment acceptance — 2026-09-19
 
 Production observability activation is complete. `jason-prompt-exporter.service` is enabled and active on TCP 9471. Prometheus successfully loads the `jason-ai-prompts` file-discovery job and reports the target healthy. The live registry count is 21 and all registered prompt source hashes currently match (`source drift = 0`). `jason_ai_prompt_invocation_telemetry_available` correctly remains `0` pending TODO-AI-004 rather than fabricating usage data. Grafana provisioned dashboard UID `jason-ai-prompt-registry`. No prompt text or secret values are exported through Prometheus.
+
+## Current prompt-registry state — 2026-09-19
+
+The live reviewed registry now contains **22** material prompts. `PROMPT-ENG-001` (`Component Engineering Design Review`) is registered at **v1.0.2** with source-hash match `1`. The v1.0.2 prompt enforces the Jason component naming standard for new/improved designs and requires a production-ready component description while preserving the native-first/reuse-first and no-publication-authority rules.
+
+Live `jason-prompt-exporter.service` remains enabled/active, Prometheus target `jason-ai-prompts` is healthy, and source drift is zero. Per-prompt invocation telemetry remains intentionally unavailable until TODO-AI-004 is implemented.

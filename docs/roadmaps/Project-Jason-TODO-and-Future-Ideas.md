@@ -1044,10 +1044,11 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-010 — Governed Datto RMM component definition create/update capability
 
 - **Priority:** P1
-- **Status:** Planned — Component Engineering detection/design workflow implemented; provider definition-write capability not yet available
+- **Status:** Planned — Component Engineering detection/design workflow is deployed and production-verified; provider definition-write capability not yet available
 - **Risk level:** High
 - **Idea:** Add a documented, governed provider capability for Jason to create a new Datto RMM component definition or update a specific existing component version after design/test/promotion gates are satisfied.
 - **Why it matters:** Jason can now autonomously identify component gaps, de-duplicate requests, design improvements, and test existing components, but cannot publish the resulting component definition through the current governed provider surface.
+- **Production checkpoint (2026-09-19):** Component Engineering is live with runtime service composition, `PROMPT-ENG-001` v1.0.2, durable request storage, exporter v2, Prometheus target `jason-component-engineering`, and Grafana dashboard `jason-component-engineering`. First real request `CER-disk-space-diagnostic-free-space-component-writes-alert-state` proposed `JASON | Disk Space | Diagnose [WIN] v1.0` after a live disk-space playbook run proved that the existing diagnostic writes monitoring/cooldown state. Publication remains intentionally blocked at this TODO.
 - **Governance:** Prefer vendor-supported Datto RMM API/automation interfaces only. No private UI/web endpoints or direct-provider bypass. Require exact component identity/version, source fingerprint, risk class, promotion approval for modifying/disruptive components, audit evidence, post-write readback, and rollback/version preservation. Creating/updating a definition must not itself execute it.
 - **Acceptance:** In a controlled test scope, Jason publishes one reviewed read-only component definition, reads back the exact source/metadata/version, proves no component execution occurred as a side effect, then executes it separately through ordinary Component Control on an approved test endpoint and verifies stdout.
 - **Decision owner:** Jason Governance Authority / AOT Owner
