@@ -132,6 +132,11 @@ from orchestrator.teams_identity_binding_sqlite import (
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
+from .autotask_ticket_create import (
+    build_autotask_ticket_create_invoker,
+    register_autotask_ticket_create_invoker,
+    register_autotask_ticket_create_runtime_foundation,
+)
 from .autotask_internal_note import (
     SERVICE_TICKET_NOTE_CREATE,
     build_autotask_internal_note_invoker,
@@ -675,6 +680,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         integration_broker=integration_broker,
         now=now,
     )
+    register_autotask_ticket_create_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_internal_note_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -882,6 +892,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    ticket_create_invoker = build_autotask_ticket_create_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     internal_note_invoker = build_autotask_internal_note_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -965,6 +983,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_provider_read_invokers(
         invokers=invokers,
         invoker=provider_read_invoker,
+    )
+    register_autotask_ticket_create_invoker(
+        invokers=invokers,
+        invoker=ticket_create_invoker,
     )
     register_autotask_internal_note_invoker(
         invokers=invokers,
