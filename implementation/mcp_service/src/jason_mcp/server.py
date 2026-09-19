@@ -1759,7 +1759,7 @@ def _exact_configuration_for_ticket_device(
         company_id = int(ticket.get("companyID"))
     except (TypeError, ValueError):
         return None
-    if company_id < 0:
+    if company_id < 1:
         return None
 
     configuration = _governed_read(
@@ -1807,6 +1807,38 @@ def _exact_configuration_for_ticket_device(
     return unique[0]
 
 
+def _validate_existing_ticket_configuration(*, ticket: Mapping[str, Any], configuration_id: int) -> None:
+    try:
+        ticket_company_id = int(ticket.get("companyID"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED") from error
+    if ticket_company_id < 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED")
+
+    result = _governed_read(
+        capability_name="service.configuration.read",
+        arguments={"resource_id": configuration_id},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED")
+    evidence = result.get("evidence")
+    data = evidence.get("data") if isinstance(evidence, Mapping) else None
+    item = data.get("item") if isinstance(data, Mapping) else None
+    if not isinstance(item, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED")
+    try:
+        observed_id = int(item.get("id"))
+        observed_company_id = int(item.get("companyID"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED") from error
+    if observed_id != configuration_id:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_IDENTITY_MISMATCH")
+    if observed_company_id != ticket_company_id:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_COMPANY_MISMATCH")
+    if item.get("isActive") is not True:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_INACTIVE")
+
+
 def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {
         "ticket_id",
@@ -1849,7 +1881,11 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         current_configuration_id = 0
 
-    if current_configuration_id < 1:
+    if current_configuration_id >= 1:
+        _validate_existing_ticket_configuration(
+            ticket=ticket, configuration_id=current_configuration_id
+        )
+    else:
         requested_device = str(raw.get("device_name") or "").strip()
         candidate = requested_device or _ticket_context_device_name(ticket)
         if candidate:

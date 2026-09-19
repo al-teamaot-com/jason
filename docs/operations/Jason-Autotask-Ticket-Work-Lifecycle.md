@@ -34,6 +34,8 @@ Jason may associate a configuration item only when all of the following are true
 
 Hostname-only matching, first-match selection, inactive configurations, cross-company matches, and ambiguous candidates are not sufficient for an Autotask write. If deterministic correlation is unavailable, Jason leaves the configuration association unchanged and continues only when the playbook can safely proceed without inventing device identity.
 
+Existing ticket configuration associations are also treated as evidence rather than blindly trusted. Before the start-work transition preserves an existing `configurationItemID`, Jason re-reads that configuration through the governed Autotask read path and requires the configuration ID to match exactly, the configuration to remain active, and its company ID to equal the ticket company. A stale, inactive, unreadable, identity-mismatched, or cross-company existing association fails closed rather than being silently carried into autonomous work.
+
 ## Classification rule
 
 - Existing Ticket Type / Issue Type / Sub-Issue Type are preserved by default.
@@ -86,3 +88,7 @@ Production observability was refreshed on 2026-09-18 after the lifecycle accepta
 - the loaded panel includes both the Autotask ticket-work lifecycle acceptance and the open `SUPPORT-CONN-002` MCP transport warning.
 
 No per-run ticket-work counters were added because the production playbook-event writer is not yet active. This is intentional: dashboards must not imply event telemetry that Jason does not actually persist yet.
+
+## Correlation hardening checkpoint — 2026-09-19
+
+The ticket-work-start backend was hardened so an already-populated Autotask configuration association is no longer implicitly trusted. The MCP canonicalization path now re-reads the exact configuration and fails closed when the configuration is missing/unreadable, belongs to another company, is inactive, or does not match the requested configuration identity. Automatic new-device association also rejects missing/nonpositive ticket company IDs. Regression coverage was added for valid preservation, cross-company rejection, and inactive-configuration rejection. Source compilation and `git diff --check` passed in the Jason worktree. Full MCP pytest execution was not available from the host virtualenv because that environment lacks the MCP package/dependency composition; no package installation or production-container mutation was performed to bypass that boundary.

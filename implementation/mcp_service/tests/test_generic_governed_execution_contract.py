@@ -770,23 +770,38 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
 
 def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
     def governed_read(*, capability_name, arguments):
-        assert capability_name == "service.ticket.read"
-        return {
-            "status": "succeeded",
-            "evidence": {
-                "data": {
-                    "items": [
-                        {
-                            "id": 123,
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 123,
+                                "companyID": 99,
+                                "configurationItemID": 456,
+                                "issueType": 10,
+                                "title": "Alert for DEVICE-123",
+                            }
+                        ]
+                    }
+                },
+            }
+        if capability_name == "service.configuration.read":
+            assert arguments == {"resource_id": 456}
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": 456,
                             "companyID": 99,
-                            "configurationItemID": 456,
-                            "issueType": 10,
-                            "title": "Alert for DEVICE-123",
+                            "isActive": True,
                         }
-                    ]
-                }
-            },
-        }
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
 
     monkeypatch.setattr(server, "_governed_read", governed_read)
     result = server._canonicalize_governed_action_arguments(
@@ -802,27 +817,113 @@ def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
     }
 
 
-def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
-    monkeypatch.setattr(
-        server,
-        "_governed_read",
-        lambda **kwargs: {
-            "status": "succeeded",
-            "evidence": {
-                "data": {
-                    "items": [
-                        {
+
+def test_ticket_work_start_rejects_existing_cross_company_configuration(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [{
                             "id": 123,
                             "companyID": 99,
                             "configurationItemID": 456,
-                            "issueType": 10,
-                            "title": "Generic ticket",
-                        }
-                    ]
-                }
-            },
-        },
-    )
+                            "title": "Alert for DEVICE-123",
+                        }]
+                    }
+                },
+            }
+        if capability_name == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {"id": 456, "companyID": 100, "isActive": True}
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    try:
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update", {"ticket_id": 123, "begin_work": True}
+        )
+    except ValueError as exc:
+        assert str(exc) == "AUTOTASK_TICKET_WORK_START_CONFIGURATION_COMPANY_MISMATCH"
+    else:
+        raise AssertionError("cross-company existing configuration must fail closed")
+
+
+def test_ticket_work_start_rejects_existing_inactive_configuration(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [{
+                            "id": 123,
+                            "companyID": 99,
+                            "configurationItemID": 456,
+                            "title": "Alert for DEVICE-123",
+                        }]
+                    }
+                },
+            }
+        if capability_name == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {"id": 456, "companyID": 99, "isActive": False}
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    try:
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update", {"ticket_id": 123, "begin_work": True}
+        )
+    except ValueError as exc:
+        assert str(exc) == "AUTOTASK_TICKET_WORK_START_CONFIGURATION_INACTIVE"
+    else:
+        raise AssertionError("inactive existing configuration must fail closed")
+
+def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 123,
+                                "companyID": 99,
+                                "configurationItemID": 456,
+                                "issueType": 10,
+                                "title": "Generic ticket",
+                            }
+                        ]
+                    }
+                },
+            }
+        if capability_name == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {"id": 456, "companyID": 99, "isActive": True}
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
 
     result = server._canonicalize_governed_action_arguments(
         "service.ticket.update",
