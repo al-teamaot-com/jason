@@ -901,6 +901,18 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Week of 2026-09-21 when the Owner is back at a trusted workstation.
 
+### TODO-COMM-005 — Autotask notification-template communication capability
+
+- **Priority:** P1
+- **Status:** In progress — governed NotificationHistory read deployed; production read blocked by `SUPPORT-CAP-016`; direct named-template dispatch is not exposed by the documented Autotask API
+- **Risk level:** High
+- **Idea:** Let Jason discover AOT-approved Autotask notification templates and use them for governed end-user ticket communications with exact ticket/company/contact audience validation, preview, approval policy, send evidence, and post-send verification.
+- **Provider constraint:** Autotask documents `NotificationHistory` as query-only and exposes `templateName`, but does not document Notification Templates as a queryable/executable REST resource or a named-template send operation. Jason must not scrape/private-call the Autotask UI.
+- **Implemented checkpoint (2026-09-19):** Active `service.notification.history.search` is deployed through Central Orchestrator and requires explicit company scope. `service.entity.describe` proved the production API identity currently has `userAccessForQuery=None` on NotificationHistory; bounded live query failed closed and is tracked as `SUPPORT-CAP-016`.
+- **Remaining acceptance:** Restore minimum supported NotificationHistory read permission; inventory observed AOT template names; establish an authoritative AOT template catalog including intended audience/purpose and approved content/source; implement preview + audience validation; dispatch only through a supported governed provider surface; verify NotificationHistory or equivalent post-send evidence; preserve normal approval rules and `direct_provider_access=false`.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After `SUPPORT-CAP-016` is resolved or a vendor-supported named-template invocation surface is identified.
+
 ---
 
 ## New-item template
