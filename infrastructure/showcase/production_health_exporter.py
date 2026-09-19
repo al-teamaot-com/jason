@@ -115,6 +115,86 @@ def _run(args: list[str], timeout: float = 3.0) -> subprocess.CompletedProcess[s
         return None
 
 
+
+def _systemctl_show(unit: str, properties: tuple[str, ...]) -> dict[str, str]:
+    args = ["systemctl", "show", unit]
+    for prop in properties:
+        args.extend(["-p", prop])
+    completed = _run(args, timeout=5)
+    if completed is None or completed.returncode != 0:
+        return {}
+    result: dict[str, str] = {}
+    for line in completed.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key] = value
+    return result
+
+
+def _systemd_jason_timers() -> list[dict[str, str | int | float]]:
+    completed = _run(["systemctl", "list-unit-files", "jason-*.timer", "--no-legend", "--plain"], timeout=5)
+    if completed is None or completed.returncode != 0:
+        return []
+    timers: list[dict[str, str | int | float]] = []
+    for line in completed.stdout.splitlines():
+        fields = line.split()
+        if not fields or not fields[0].endswith(".timer"):
+            continue
+        unit = fields[0]
+        timer = _systemctl_show(unit, ("Description", "ActiveState", "UnitFileState", "NextElapseUSecRealtime", "NextElapseUSecMonotonic", "LastTriggerUSec", "Triggers"))
+        service_unit = str(timer.get("Triggers") or "").split()[0] if timer.get("Triggers") else unit[:-6] + ".service"
+        service = _systemctl_show(service_unit, ("Result", "ExecMainStatus"))
+        next_epoch = _systemd_timestamp_epoch(str(timer.get("NextElapseUSecRealtime") or ""))
+        if next_epoch == 0.0:
+            next_epoch = _systemd_monotonic_to_epoch(str(timer.get("NextElapseUSecMonotonic") or ""))
+        last_epoch = _systemd_timestamp_epoch(str(timer.get("LastTriggerUSec") or ""))
+        timers.append({
+            "unit": unit,
+            "description": str(timer.get("Description") or unit),
+            "service": service_unit,
+            "active": 1 if timer.get("ActiveState") == "active" else 0,
+            "enabled": 1 if timer.get("UnitFileState") in {"enabled", "static"} else 0,
+            "next_epoch": next_epoch,
+            "last_epoch": last_epoch,
+            "last_success": 1 if service.get("Result") == "success" and str(service.get("ExecMainStatus") or "0") == "0" else 0,
+            "result": str(service.get("Result") or "unknown"),
+        })
+    return timers
+
+def _systemd_monotonic_to_epoch(value: str) -> float:
+    if not value:
+        return 0.0
+    completed = _run(["systemd-analyze", "timespan", value], timeout=2)
+    if completed is None or completed.returncode != 0:
+        return 0.0
+    microseconds = None
+    for line in completed.stdout.splitlines():
+        if line.strip().startswith("μs:"):
+            try:
+                microseconds = float(line.split(":", 1)[1].strip())
+            except ValueError:
+                return 0.0
+    if microseconds is None:
+        return 0.0
+    try:
+        with open("/proc/uptime", encoding="utf-8") as handle:
+            uptime = float(handle.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+    return time.time() + (microseconds / 1_000_000.0) - uptime
+
+def _systemd_timestamp_epoch(value: str) -> float:
+    if not value or value in {"n/a", "-"}:
+        return 0.0
+    completed = _run(["date", "-d", value, "+%s"], timeout=2)
+    if completed is None or completed.returncode != 0:
+        return 0.0
+    try:
+        return float(completed.stdout.strip())
+    except ValueError:
+        return 0.0
+
 def _docker_inspect(container: str) -> dict:
     completed = _run(["docker", "inspect", container])
     if completed is None or completed.returncode != 0:
@@ -393,7 +473,31 @@ def render_metrics() -> str:
         ),
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="4"} 1',
+        'jason_production_health_exporter_build_info{version="5"} 1',
+    ])
+
+    timers = _systemd_jason_timers()
+    lines.extend([
+        "# HELP jason_scheduled_task_info Secret-safe Jason systemd scheduled-task metadata.",
+        "# TYPE jason_scheduled_task_info gauge",
+    ])
+    for timer in timers:
+        labels = ",".join(
+            f'{key}="{_metric_escape(str(value))}"'
+            for key, value in (("unit", timer["unit"]), ("description", timer["description"]), ("service", timer["service"]), ("last_result", timer["result"]))
+        )
+        lines.append(f"jason_scheduled_task_info{{{labels}}} 1")
+        for metric, key in (("enabled", "enabled"), ("active", "active"), ("last_success", "last_success"), ("next_run_timestamp_seconds", "next_epoch"), ("last_run_timestamp_seconds", "last_epoch")):
+            lines.append(f'jason_scheduled_task_{metric}{{unit="{_metric_escape(str(timer["unit"]))}"}} {timer[key]}')
+
+    lines.extend([
+        "# HELP jason_system_configuration_info Curated secret-safe operator configuration metadata.",
+        "# TYPE jason_system_configuration_info gauge",
+        'jason_system_configuration_info{setting="direct_provider_access",value="false"} 1',
+        f'jason_system_configuration_info{{setting="provider_profile",value="{_metric_escape(EXPECTED_PROVIDER_PROFILE)}"}} 1',
+        f'jason_system_configuration_info{{setting="autotask_requester_mode",value="{_metric_escape(EXPECTED_AUTOTASK_MODE)}"}} 1',
+        f'jason_system_configuration_info{{setting="datto_execution_profile",value="{_metric_escape(EXPECTED_DATTO_EXECUTION_PROFILE)}"}} 1',
+        f'jason_system_configuration_info{{setting="source_revision",value="{_metric_escape(EXPECTED_SOURCE_REVISION)}"}} 1',
     ])
 
     return "\n".join(lines) + "\n"

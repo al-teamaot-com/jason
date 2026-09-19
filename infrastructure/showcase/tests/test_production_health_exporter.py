@@ -90,7 +90,7 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     assert "jason_host_kernel_error_count 0" in metrics
     assert "jason_root_filesystem_writable 1" in metrics
     assert "jason_mcp_rollback_available 1" in metrics
-    assert 'jason_production_health_exporter_build_info{version="4"} 1' in metrics
+    assert 'jason_production_health_exporter_build_info{version="5"} 1' in metrics
 
     for forbidden in ("password", "secret_id=", "role_id=", "access_token", "refresh_token"):
         assert forbidden not in metrics.casefold()
@@ -235,3 +235,20 @@ def test_missing_components_fail_closed(monkeypatch):
     assert "jason_datto_governed_execution_contract 0" in metrics
     assert "jason_root_filesystem_writable -1" in metrics
     assert "jason_mcp_rollback_available 0" in metrics
+
+
+def test_scheduled_task_metrics_are_curated_and_secret_safe(monkeypatch):
+    module = load_exporter()
+    monkeypatch.setattr(module, "_docker_inspect", lambda name: {"State": {"Running": True, "Health": {"Status": "healthy"}}, "Config": {"Env": []}, "HostConfig": {}, "Mounts": []})
+    monkeypatch.setattr(module, "_openbao_health", lambda: {"initialized": True, "sealed": False})
+    monkeypatch.setattr(module, "_kernel_error_count", lambda: 0)
+    monkeypatch.setattr(module, "_failed_systemd_units", lambda: 0)
+    monkeypatch.setattr(module, "_root_writable", lambda: 1)
+    monkeypatch.setattr(module, "_docker_names", lambda: ())
+    monkeypatch.setattr(module, "_systemd_jason_timers", lambda: [{"unit":"jason-example.timer","description":"Example safe task","service":"jason-example.service","active":1,"enabled":1,"next_epoch":123.0,"last_epoch":100.0,"last_success":1,"result":"success"}])
+    metrics = module.render_metrics()
+    assert 'jason_scheduled_task_info{unit="jason-example.timer",description="Example safe task",service="jason-example.service",last_result="success"} 1' in metrics
+    assert 'jason_scheduled_task_next_run_timestamp_seconds{unit="jason-example.timer"} 123.0' in metrics
+    assert 'jason_scheduled_task_last_success{unit="jason-example.timer"} 1' in metrics
+    assert 'jason_system_configuration_info{setting="direct_provider_access",value="false"} 1' in metrics
+    assert 'jason_production_health_exporter_build_info{version="5"} 1' in metrics
