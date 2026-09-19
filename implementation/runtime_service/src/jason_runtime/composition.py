@@ -10,8 +10,10 @@ from typing import Any, Mapping
 from usage_ledger.ledger import SQLiteUsageLedger
 
 from autonomous_remediation.playbook_coordinator import PlaybookRunCoordinator
+from autonomous_remediation.component_engineering import ComponentEngineeringService, FileComponentEngineeringStore
 from autonomous_remediation.playbook_runtime import FilePlaybookRunStore
 from orchestrator.security_triage import SecurityTriageEvaluator
+from orchestrator.component_engineering_design import ComponentEngineeringDesigner
 
 from decision_memory.resolution_service import ResolutionMemoryService
 from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
@@ -215,6 +217,7 @@ class RuntimeSettings:
     )
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     playbook_runs_path: Path = Path("/var/lib/jason/playbooks/runs")
+    component_engineering_path: Path = Path("/var/lib/jason/component-engineering/requests")
     resolution_memory_db: Path = Path(
         "/var/lib/jason/openclaw/resolution-memory.sqlite3"
     )
@@ -306,6 +309,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_PLAYBOOK_RUNS_PATH",
                     "/var/lib/jason/playbooks/runs",
+                )
+            ),
+            component_engineering_path=Path(
+                os.getenv(
+                    "JASON_COMPONENT_ENGINEERING_PATH",
+                    "/var/lib/jason/component-engineering/requests",
                 )
             ),
             resolution_memory_db=Path(
@@ -784,10 +793,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             result_adapter=openai_structured_output_restore_optional_values,
         )
 
+    component_engineering_service = ComponentEngineeringService(
+        FileComponentEngineeringStore(settings.component_engineering_path)
+    )
     playbook_run_coordinator = PlaybookRunCoordinator(
-        FilePlaybookRunStore(settings.playbook_runs_path)
+        FilePlaybookRunStore(settings.playbook_runs_path),
+        component_engineering_service,
     )
     security_triage_evaluator = SecurityTriageEvaluator(
+        client=hosted_conversation_client or ollama_client
+    )
+    component_engineering_designer = ComponentEngineeringDesigner(
         client=hosted_conversation_client or ollama_client
     )
 
@@ -1169,4 +1185,5 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         microsoft_identity_bindings=bindings,
         playbook_run_coordinator=playbook_run_coordinator,
         security_triage_evaluator=security_triage_evaluator,
+        component_engineering_designer=component_engineering_designer,
     )

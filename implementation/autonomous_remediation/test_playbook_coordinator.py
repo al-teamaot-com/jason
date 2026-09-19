@@ -88,3 +88,19 @@ def test_governed_executor_rejects_invalid_success_transition_before_dispatch(tm
     with pytest.raises(ValueError,match="invalid playbook success transition"):
         GovernedPlaybookExecutor(o,c).execute(run,step="bad",request="request",success_state=RunState.COMPLETE)
     assert o.calls == 0
+
+
+def test_playbook_can_create_and_strengthen_component_gap(tmp_path: Path):
+    from component_engineering import ComponentEngineeringService, EngineeringRequestKind, EngineeringRisk, FileComponentEngineeringStore
+    from playbook_coordinator import PlaybookRunCoordinator
+    run_store=FilePlaybookRunStore(tmp_path/'runs')
+    eng=ComponentEngineeringService(FileComponentEngineeringStore(tmp_path/'engineering'))
+    c=PlaybookRunCoordinator(run_store,eng)
+    run=c.ensure_run(identity=PlaybookIdentity('disk_space_alert','0.1.0'),run_id='run-1',ticket_id='T1',company_id='C1',device_id='D1')
+    req,created=c.report_component_gap(run,problem_key='disk-space:machine-readable-largest-files',title='Improve disk evidence output',kind=EngineeringRequestKind.IMPROVE_EXISTING,risk=EngineeringRisk.READ_ONLY,desired_capability='Return bounded largest files/folders summary',gap_summary='Current playbook cannot safely identify cleanup candidates.',evidence_refs=('ev-1',),existing_component_name='DattoSize')
+    assert created is True and req.source_run_ids==['run-1'] and req.source_ticket_ids==['T1']
+    restored=c.store.load('run-1')
+    assert restored.metadata['component_engineering_request_id']==req.request_id
+    assert restored.completed_steps[-1].status=='created'
+    req2,created=c.report_component_gap(restored,problem_key='disk-space:machine-readable-largest-files',title='Same gap',kind=EngineeringRequestKind.IMPROVE_EXISTING,risk=EngineeringRisk.READ_ONLY,desired_capability='same',gap_summary='Repeated same gap.',evidence_refs=('ev-2',))
+    assert created is False and req2.occurrence_count==2
