@@ -69,7 +69,7 @@ class ComponentEngineeringDesigner:
 
     def design(self, *, request: Mapping[str, Any], existing_components: Sequence[Mapping[str, Any]], native_capabilities: Sequence[Mapping[str, Any]], evidence_summaries: Sequence[Mapping[str, Any]]) -> ComponentDesignReview:
         if not str(request.get("request_id","")).strip(): raise ValueError("component engineering request_id is required")
-        raw=self.client.complete(system=_SYSTEM_INSTRUCTIONS,user=json.dumps({"request":dict(request),"existing_components":[dict(x) for x in existing_components],"native_capabilities":[dict(x) for x in native_capabilities],"evidence_summaries":[dict(x) for x in evidence_summaries]},ensure_ascii=False,separators=(",",":")),schema=_SCHEMA,max_output_tokens=2200)
+        raw=self.client.complete(system=_SYSTEM_INSTRUCTIONS,user=json.dumps({"request":dict(request),"existing_components":[dict(x) for x in existing_components],"native_capabilities":[dict(x) for x in native_capabilities],"evidence_summaries":[dict(x) for x in evidence_summaries]},ensure_ascii=False,separators=(",",":")),schema=_SCHEMA,max_output_tokens=1024)
         if not isinstance(raw,Mapping) or set(raw)!=set(_SCHEMA["required"]): raise ValueError("component design result shape is invalid")
         rec=str(raw["recommendation"]); safety=str(raw["safety_class"]); approval=raw["promotion_requires_human_approval"]
         if rec not in {"use_existing","improve_existing","new_component","prefer_native_capability"}: raise ValueError("invalid component design recommendation")
