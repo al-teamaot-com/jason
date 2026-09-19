@@ -104,3 +104,14 @@ def test_playbook_can_create_and_strengthen_component_gap(tmp_path: Path):
     assert restored.completed_steps[-1].status=='created'
     req2,created=c.report_component_gap(restored,problem_key='disk-space:machine-readable-largest-files',title='Same gap',kind=EngineeringRequestKind.IMPROVE_EXISTING,risk=EngineeringRisk.READ_ONLY,desired_capability='same',gap_summary='Repeated same gap.',evidence_refs=('ev-2',))
     assert created is False and req2.occurrence_count==2
+
+def test_coordinator_routes_generic_completion_gap(tmp_path: Path):
+    from completion_gap_router import CompletionGapRouter, FileCompletionGapStore, GapClass
+    run_store=FilePlaybookRunStore(tmp_path/'runs')
+    router=CompletionGapRouter(FileCompletionGapStore(tmp_path/'gaps'),run_store)
+    c=PlaybookRunCoordinator(run_store,None,router)
+    run=c.ensure_run(identity=PlaybookIdentity('p','1'),run_id='r',ticket_id='T',company_id='C')
+    c.transition(run,RunState.IDENTIFYING)
+    gap,created=c.route_completion_gap(run,problem_key='docs:missing-dns-owner',gap_class=GapClass.DOCUMENTATION,title='Missing DNS ownership',summary='Authoritative registrar/owner documentation unavailable')
+    assert created and gap.route_target=='documentation_assurance'
+    assert c.store.load('r').metadata['completion_gap_id']==gap.gap_id

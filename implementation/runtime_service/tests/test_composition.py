@@ -93,6 +93,7 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert application.communication_template_service.requests.root == settings.communication_template_requests_path
     assert application.playbook_run_coordinator.store.root == settings.playbook_runs_path
     assert application.playbook_run_coordinator.component_engineering.store.root == settings.component_engineering_path
+    assert application.playbook_run_coordinator.completion_gap_router.gaps.root == settings.completion_gaps_path
 
 
 def test_production_conversation_planning_is_resource_first_and_metadata_driven(tmp_path):

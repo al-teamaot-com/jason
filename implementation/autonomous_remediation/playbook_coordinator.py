@@ -22,6 +22,10 @@ except ImportError:  # direct script/test compatibility
     from component_engineering import (
         ComponentEngineeringService, EngineeringRequestKind, EngineeringRisk
     )
+try:
+    from .completion_gap_router import CompletionGapRouter, GapClass
+except ImportError:  # direct script/test compatibility
+    from completion_gap_router import CompletionGapRouter, GapClass
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +38,7 @@ class PlaybookIdentity:
 class PlaybookRunCoordinator:
     store: FilePlaybookRunStore
     component_engineering: ComponentEngineeringService | None = None
+    completion_gap_router: CompletionGapRouter | None = None
 
     def ensure_run(
         self,
@@ -130,6 +135,31 @@ class PlaybookRunCoordinator:
         run.schedule_recheck(when)
         self.store.save(run)
         return run
+
+    def route_completion_gap(
+        self,
+        run: PlaybookRunRecord,
+        *,
+        problem_key: str,
+        gap_class: GapClass,
+        title: str,
+        summary: str,
+        evidence_refs: Iterable[str] = (),
+        linked_request_id: str = "",
+        recheck_at: str = "",
+    ):
+        if self.completion_gap_router is None:
+            raise ValueError("completion gap router is not configured")
+        return self.completion_gap_router.route(
+            run,
+            problem_key=problem_key,
+            gap_class=gap_class,
+            title=title,
+            summary=summary,
+            evidence_refs=evidence_refs,
+            linked_request_id=linked_request_id,
+            recheck_at=recheck_at,
+        )
 
     def report_component_gap(
         self,
