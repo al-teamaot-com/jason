@@ -913,6 +913,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** After `SUPPORT-CAP-016` is resolved or a vendor-supported named-template invocation surface is identified.
 
+### TODO-COMM-006 — Enable Autotask Notification History read permission
+
+- **Priority:** P1
+- **Status:** Planned — resume when Owner is at a trusted workstation
+- **Risk level:** Moderate
+- **Idea:** Enable the minimum Autotask security-level permission required for Jason's dedicated read-only API identity to query `NotificationHistory`, then complete live acceptance of `service.notification.history.search`.
+- **Current evidence:** Live `service.entity.describe` shows `Resources` query access = `All` while `NotificationHistory` query access = `None`. This isolates the blocker to the read identity's Autotask security level, not Jason's governed read implementation.
+- **Required provider change:** In Autotask, edit only the security level assigned to the dedicated Jason read-only API user and enable Notification History query/access under the applicable Application-wide / Shared Features administrative permission. Do **not** change the separate `Jason API - Ticket Mutation` security level or unrelated permissions.
+- **Remaining acceptance:** Re-run a company-bounded `service.notification.history.search`; require successful readback of recent notification metadata including template name, recipient, sent time, and company/ticket association; inventory observed AOT notification-template names; continue `TODO-COMM-005`; preserve `direct_provider_access=false`.
+- **Prerequisites:** Owner at a trusted workstation with Autotask administrative access.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next desk session.
+
 ---
 
 ## New-item template
