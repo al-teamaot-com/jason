@@ -56,3 +56,7 @@ The next phase should introduce a provider-neutral `PromptInvocation` record at 
 ## Initial acceptance — 2026-09-19
 
 The initial source registry contained 20 material prompts spanning conversation interpretation/planning, semantic query planning, investigation routing/reasoning/answer generation, evidence reasoning, response quality, semantic mapping, and endpoint-operations reasoning. On 2026-09-19, `PROMPT-SEC-001` (Security Threat/Benign Triage) was added, bringing the reviewed registry to 21 prompts. Exporter tests verify all registered prompt hashes against current source and verify that full prompt content is not exported in metrics.
+
+## Production deployment acceptance — 2026-09-19
+
+Production observability activation is complete. `jason-prompt-exporter.service` is enabled and active on TCP 9471. Prometheus successfully loads the `jason-ai-prompts` file-discovery job and reports the target healthy. The live registry count is 21 and all registered prompt source hashes currently match (`source drift = 0`). `jason_ai_prompt_invocation_telemetry_available` correctly remains `0` pending TODO-AI-004 rather than fabricating usage data. Grafana provisioned dashboard UID `jason-ai-prompt-registry`. No prompt text or secret values are exported through Prometheus.

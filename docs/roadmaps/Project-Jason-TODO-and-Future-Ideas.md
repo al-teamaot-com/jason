@@ -1000,26 +1000,26 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OBS-002 — Deploy AI Prompt Registry observability to production
 
 - **Priority:** P1
-- **Status:** Planned — source complete; blocked only by trusted-terminal sudo activation
+- **Status:** Resolved — production deployed and verified 2026-09-19
 - **Risk level:** Low
 - **Idea:** Activate the already-built Jason AI Prompt Registry exporter, Prometheus scrape target, and Grafana dashboard in production using the existing supported observability deployment process.
-- **Current state:** Source is committed at `bb221eb`; the registry contains 20 material runtime prompts; exporter tests pass; prompt hashes match current source; Prometheus configuration/rules validate; dashboard JSON validates. A non-interactive sudo precheck returned `SUDO_READY=NO`, so no production mutation was attempted.
-- **Required action:** At a trusted Jason-server terminal, authenticate sudo and deploy the observability changes through the existing supported install/deployment path. Do not bypass sudo or manually mutate unrelated runtime/provider services.
+- **Current state:** Production deployment completed 2026-09-19. `jason-prompt-exporter.service` is enabled/active on port 9471; Prometheus target `jason-ai-prompts` is up; Grafana provisioned dashboard UID `jason-ai-prompt-registry`; the reviewed registry contains 21 prompts and source drift is zero. The exporter intentionally reports invocation telemetry unavailable until TODO-AI-004 is completed.
+- **Production evidence:** Prometheus successfully reloaded the merged configuration while preserving existing playbook and Resolution Memory jobs. Container-to-exporter connectivity succeeded. Grafana provisioned both `jason-ai-prompt-registry` and the updated `jason-playbook-control-center`. An obsolete pre-systemd playbook exporter process from an older worktree was found occupying port 9468 and was stopped; the enabled `jason-playbook-exporter.service` now owns port 9468 and reports exporter build version 2.
 - **Acceptance:** `jason-prompt-exporter.service` is active; `http://127.0.0.1:9471/metrics` is healthy; Prometheus target `jason-ai-prompts` is up; Grafana provisions dashboard UID `jason-ai-prompt-registry`; registry count is 20 or the then-current reviewed count; source drift is zero; full prompt text/secrets are absent from metrics; existing Jason runtime/MCP/OpenBao/provider-facing service identities are unchanged.
 - **Decision owner:** Jason Governance Authority / AOT Owner
-- **Review trigger:** Next trusted desk/server-terminal session with sudo authentication.
+- **Review trigger:** Prompt-registry source/version change, exporter/dashboard drift, or TODO-AI-004 invocation-telemetry activation.
 
 ---
 
 ### TODO-OPS-008 — Activate generic PlaybookRun runtime and live-state telemetry
 
 - **Priority:** P1
-- **Status:** In progress — generic persisted runtime, Central-Orchestrator result bridge, production runtime composition, aggregate exporter metrics, Grafana panels, and synthetic HOSTS-drift acceptance are source-complete; filesystem/deployment/live acceptance remain
+- **Status:** In progress — generic persisted runtime, Central-Orchestrator result bridge, production runtime composition source, run-store filesystem, exporter v2, Grafana live-state panels, and synthetic HOSTS-drift acceptance are complete; production runtime activation and controlled live acceptance remain
 - **Risk level:** Moderate
 - **Idea:** Make the generic `PlaybookRunRecord` the standard persisted runtime object for recurring Jason playbooks so each real run survives restarts, approvals, rechecks, and handoffs without repeating completed work.
 - **Implemented source:** `implementation/autonomous_remediation/playbook_runtime.py` provides explicit fail-closed transitions, atomic JSON persistence, exact approval-ID binding, bounded attempt state, recheck state, terminal-state protection, and filename-safe run IDs. The existing playbook exporter now aggregates live run states without exporting run/ticket/company/device/approval identifiers. The Playbook Control Center source includes Active Runs, Awaiting Approval, Blocked Runs, Rechecks Pending, Live Playbook States, and blocker-class panels.
 - **Reference proof:** Synthetic `hosts_file_drift` v0.1.0 acceptance completed the state path through identification, diagnosis, decision, approval, remediation, verification, and completion with no provider call or production remediation. Combined tests passed on 2026-09-19.
-- **Remaining work:** Activate writable `/var/lib/jason/playbooks/runs` ownership for the runtime writer; deploy exporter/dashboard changes through the supported observability path; connect a selected recurring workflow to call the already-composed coordinator/bridge; decide migration/adaptation of the existing Datto EDR/AV playbook-specific state object; then perform one controlled live playbook acceptance.
+- **Remaining work:** Deploy/activate the already-composed PlaybookRun coordinator inside the production runtime without overwriting unrelated dirty runtime changes; connect one selected recurring workflow to call the coordinator/bridge; decide migration/adaptation of the existing Datto EDR/AV playbook-specific state object; then perform one controlled live playbook acceptance.
 - **Safety:** The generic runtime is state only and grants no execution authority. All provider operations remain governed by Central Orchestrator policy, client isolation, approvals, disruption rules, and `direct_provider_access=false`.
 - **Acceptance:** A real selected ticket creates one durable run, resumes after a process/session boundary without repeating completed steps, binds exact approvals, schedules/re-enters a recheck without duplicates when required, reaches verified terminal state or escalation, and appears in Grafana aggregate live-state metrics without leaking sensitive identifiers.
 - **Decision owner:** Jason Governance Authority / AOT Owner

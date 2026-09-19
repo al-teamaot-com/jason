@@ -79,3 +79,7 @@ The public MCP governed-action contract is intentionally unchanged; playbook con
 ## Production composition status — 2026-09-19
 
 The normal `build_runtime_application()` composition now constructs a `PlaybookRunCoordinator` backed by `RuntimeSettings.playbook_runs_path` (default `/var/lib/jason/playbooks/runs`) and attaches it to the internal `RuntimeHttpApplication` composition object. This is an internal service reference only; no new HTTP/MCP surface is exposed and no playbook is automatically activated by this wiring. Production filesystem ownership/deployment remains an onsite activation step.
+
+## Production observability activation — 2026-09-19
+
+`/var/lib/jason/playbooks/runs` is present and writable by the Jason runtime account (`al`), and the live playbook registry is installed at `/var/lib/jason/playbooks/registry.json`. `jason-playbook-exporter.service` is enabled and active on TCP 9468 using exporter build version 2. Prometheus target `jason-playbooks` is healthy, and Grafana has provisioned the updated `jason-playbook-control-center` with live-run, approval, blocker, and recheck panels. Current active-run count is zero, as expected before a controlled live playbook acceptance. Production runtime activation of the coordinator itself remains separate because the active runtime checkout contains unrelated uncommitted changes that were deliberately not overwritten during observability deployment.
