@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:9472"],
+    "labels": {"job": "jason-component-engineering"}
+  }
+]

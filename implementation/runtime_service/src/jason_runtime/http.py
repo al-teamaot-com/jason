@@ -48,6 +48,7 @@ class RuntimeHttpApplication:
     # not exposed through the HTTP contract. They do not grant provider authority.
     playbook_run_coordinator: Any | None = None
     security_triage_evaluator: Any | None = None
+    component_engineering_designer: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"

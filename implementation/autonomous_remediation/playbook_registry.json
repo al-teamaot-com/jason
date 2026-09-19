@@ -18,6 +18,15 @@
       "enabled": false,
       "review_status": "generic_runtime_reference_ready_live_acceptance_pending",
       "source": "docs/playbooks/Jason-Windows-HOSTS-File-Drift.md"
+    },
+    {
+      "id": "disk_space_alert",
+      "name": "Jason - Windows Disk Space Alert",
+      "version": "0.1.0",
+      "lifecycle": "pilot",
+      "enabled": false,
+      "review_status": "first_live_playbookrun_acceptance",
+      "source": "docs/playbooks/Jason-Windows-Disk-Space-Alert.md"
     }
   ]
 }

@@ -1,0 +1,17 @@
+[Unit]
+Description=Jason Component Engineering Metrics Exporter
+After=network-online.target
+
+[Service]
+Type=simple
+User=al
+Group=al
+Environment=JASON_COMPONENT_ENGINEERING_PATH=/var/lib/jason/component-engineering/requests
+Environment=JASON_COMPONENT_ENGINEERING_EXPORTER_HOST=0.0.0.0
+Environment=JASON_COMPONENT_ENGINEERING_EXPORTER_PORT=9472
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/component_engineering_exporter.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

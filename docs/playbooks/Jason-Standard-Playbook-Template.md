@@ -321,6 +321,8 @@ Examples:
 
 Do not silently skip failed steps.
 
+If a failed/blocked step is caused by a demonstrated tooling gap (missing fact, inadequate component output, repeated component failure, unsafe side effect, duplicate tooling, or missing provider capability), create or strengthen the matching Component Engineering request through the generic engineering workflow. Do not require a technician to request the script improvement, and do not duplicate an already-open problem key.
+
 ---
 
 ## 16. Escalation Criteria

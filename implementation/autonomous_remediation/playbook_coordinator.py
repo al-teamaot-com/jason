@@ -14,6 +14,14 @@ try:
     from .playbook_runtime import FilePlaybookRunStore, PlaybookRunRecord, RunState, TERMINAL_STATES
 except ImportError:  # direct script/test compatibility
     from playbook_runtime import FilePlaybookRunStore, PlaybookRunRecord, RunState, TERMINAL_STATES
+try:
+    from .component_engineering import (
+        ComponentEngineeringService, EngineeringRequestKind, EngineeringRisk
+    )
+except ImportError:  # direct script/test compatibility
+    from component_engineering import (
+        ComponentEngineeringService, EngineeringRequestKind, EngineeringRisk
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +33,7 @@ class PlaybookIdentity:
 @dataclass(frozen=True, slots=True)
 class PlaybookRunCoordinator:
     store: FilePlaybookRunStore
+    component_engineering: ComponentEngineeringService | None = None
 
     def ensure_run(
         self,
@@ -121,6 +130,50 @@ class PlaybookRunCoordinator:
         run.schedule_recheck(when)
         self.store.save(run)
         return run
+
+    def report_component_gap(
+        self,
+        run: PlaybookRunRecord,
+        *,
+        problem_key: str,
+        title: str,
+        kind: EngineeringRequestKind,
+        risk: EngineeringRisk,
+        desired_capability: str,
+        gap_summary: str,
+        evidence_refs: Iterable[str] = (),
+        existing_component_uid: str = "",
+        existing_component_name: str = "",
+        proposed_change: str = "",
+        acceptance_criteria: Iterable[str] = (),
+    ):
+        if self.component_engineering is None:
+            raise ValueError("component engineering service is not configured")
+        request, created = self.component_engineering.report_gap(
+            problem_key=problem_key,
+            title=title,
+            kind=kind,
+            risk=risk,
+            desired_capability=desired_capability,
+            gap_summary=gap_summary,
+            playbook_id=run.playbook_id,
+            run_id=run.run_id,
+            ticket_id=run.ticket_id,
+            evidence_refs=evidence_refs,
+            existing_component_uid=existing_component_uid,
+            existing_component_name=existing_component_name,
+            proposed_change=proposed_change,
+            acceptance_criteria=acceptance_criteria,
+        )
+        run.metadata["component_engineering_request_id"] = request.request_id
+        run.record_step(
+            "component_engineering_gap",
+            "created" if created else "strengthened",
+            evidence_refs=tuple(evidence_refs),
+            summary=f"{request.request_id}: {request.title}",
+        )
+        self.store.save(run)
+        return request, created
 
     def _matching_active(
         self,

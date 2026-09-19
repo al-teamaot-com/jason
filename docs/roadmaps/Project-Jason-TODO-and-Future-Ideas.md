@@ -1041,6 +1041,20 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-CONN-010 — Governed Datto RMM component definition create/update capability
+
+- **Priority:** P1
+- **Status:** Planned — Component Engineering detection/design workflow implemented; provider definition-write capability not yet available
+- **Risk level:** High
+- **Idea:** Add a documented, governed provider capability for Jason to create a new Datto RMM component definition or update a specific existing component version after design/test/promotion gates are satisfied.
+- **Why it matters:** Jason can now autonomously identify component gaps, de-duplicate requests, design improvements, and test existing components, but cannot publish the resulting component definition through the current governed provider surface.
+- **Governance:** Prefer vendor-supported Datto RMM API/automation interfaces only. No private UI/web endpoints or direct-provider bypass. Require exact component identity/version, source fingerprint, risk class, promotion approval for modifying/disruptive components, audit evidence, post-write readback, and rollback/version preservation. Creating/updating a definition must not itself execute it.
+- **Acceptance:** In a controlled test scope, Jason publishes one reviewed read-only component definition, reads back the exact source/metadata/version, proves no component execution occurred as a side effect, then executes it separately through ordinary Component Control on an approved test endpoint and verifies stdout.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Next Datto provider-capability development session after Component Engineering production activation.
+
+---
+
 ## New-item template
 
 Copy this section when adding an idea:
