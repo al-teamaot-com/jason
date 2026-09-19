@@ -19,3 +19,6 @@ Deploy the read capability and prove a same-company notification-history query i
 
 ## Section Goal closure
 **PARTIAL / READ FOUNDATION READY FOR PRODUCTION PROOF.** Template-use evidence is supported; direct named-template dispatch is not claimed because the vendor API does not document such an operation.
+
+## Production permission diagnosis
+Live provider preflight confirms `Resources` is queryable by the dedicated read identity (`userAccessForQuery=All`) while `NotificationHistory` is not (`userAccessForQuery=None`). The failure is therefore isolated to the read identity's Autotask security level. Jason has no governed Autotask security-level administration capability and will not use direct provider or private UI automation to broaden it. The required provider-side change is limited to enabling Notification History query access on the **Jason read-only API user's security level**. The separate `Jason API - Ticket Mutation` profile must remain unchanged.
