@@ -36,6 +36,7 @@ class AutotaskConnector(ConnectorBase):
             "autotask.ticket.search",
             "autotask.ticket.count",
             "autotask.ticket.notes.list",
+            "autotask.notification_history.search",
             "autotask.company.get",
             "autotask.company.search",
             "autotask.contact.get",
