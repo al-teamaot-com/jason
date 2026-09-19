@@ -76,4 +76,8 @@ class ComponentEngineeringDesigner:
         if safety not in {"read_only","non_destructive","modifying","disruptive"}: raise ValueError("invalid component design safety class")
         if not isinstance(approval,bool): raise ValueError("promotion approval field must be boolean")
         if safety in {"modifying","disruptive"} and approval is not True: raise ValueError("modifying/disruptive design must require promotion approval")
+        if rec == "use_existing" and not any(item.get("satisfies_request") is True for item in existing_components):
+            raise ValueError("use_existing requires an explicitly sufficient existing component")
+        if rec == "prefer_native_capability" and not any(item.get("satisfies_request") is True for item in native_capabilities):
+            raise ValueError("prefer_native_capability requires an explicitly sufficient native capability")
         return ComponentDesignReview(rec,str(raw["rationale"]).strip(),str(raw["proposed_name"]).strip(),str(raw["purpose"]).strip(),tuple(map(str,raw["inputs"])),tuple(map(str,raw["result_fields"])),safety,tuple(map(str,raw["implementation_requirements"])),tuple(map(str,raw["test_plan"])),tuple(map(str,raw["acceptance_criteria"])),approval)
