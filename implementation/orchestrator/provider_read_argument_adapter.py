@@ -31,6 +31,7 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -109,6 +110,12 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "company_id": "companyID",
         "name": "referenceTitle",
+    },
+    SERVICE_NOTIFICATION_HISTORY_SEARCH: {
+        "resource_id": "id",
+        "company_id": "companyID",
+        "ticket_id": "ticketID",
+        "template_name": "templateName",
     },
 }
 
@@ -405,6 +412,11 @@ def adapt_autotask_arguments(
         return {
             "ticket_id": arguments.get("ticket_id") or _resource_id(arguments)
         }
+    if capability_name == SERVICE_NOTIFICATION_HISTORY_SEARCH:
+        company_id = arguments.get("company_id")
+        if company_id is None or not str(company_id).strip():
+            raise ValueError("company_id is required for notification-history search")
+        return {"search": _autotask_search(capability_name, arguments)}
     if capability_name == SERVICE_ENTITY_DESCRIBE:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():

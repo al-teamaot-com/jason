@@ -108,3 +108,19 @@ def test_microsoft_manifest_registers_provider_neutral_user_search_and_read():
         for operation in resource.operations
     }
     assert operations == {IDENTITY_USER_SEARCH, IDENTITY_USER_READ}
+
+
+def test_autotask_notification_history_requires_company_boundary() -> None:
+    from orchestrator.provider_read_argument_adapter import adapt_autotask_arguments
+    from orchestrator.provider_read_capability_catalog import SERVICE_NOTIFICATION_HISTORY_SEARCH
+    import json
+    try:
+        adapt_autotask_arguments(SERVICE_NOTIFICATION_HISTORY_SEARCH, {"template_name": "Ticket Created"})
+    except ValueError as error:
+        assert "company_id is required" in str(error)
+    else:
+        raise AssertionError("unbounded notification history must fail closed")
+    out = adapt_autotask_arguments(SERVICE_NOTIFICATION_HISTORY_SEARCH, {"company_id": 311, "ticket_id": 140654, "template_name": "Ticket Created", "page_size": 25})
+    query=json.loads(out["search"]); fields={x["field"]:x["value"] for x in query["filter"]}
+    assert fields == {"companyID":311,"ticketID":140654,"templateName":"Ticket Created"}
+    assert query["MaxRecords"] == 25

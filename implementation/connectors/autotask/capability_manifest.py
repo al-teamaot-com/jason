@@ -17,6 +17,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -56,6 +57,7 @@ def build_autotask_manifest() -> IntegrationManifest:
         SelectorDefinition("last_name", "Contact last-name discovery selector."),
         SelectorDefinition("email", "Contact email discovery selector."),
         SelectorDefinition("status", "Ticket status discovery selector; human labels are resolved against the live Autotask picklist."),
+        SelectorDefinition("template_name", "Exact Autotask notification template name observed in notification history."),
         SelectorDefinition("filters", "Bounded schema-driven equality filters."),
         SelectorDefinition(
             "page_size",
@@ -182,6 +184,16 @@ def build_autotask_manifest() -> IntegrationManifest:
                     ResourceObservation("notes", "Ticket note evidence."),
                 ),
                 relationships=("ticket -> company", "ticket -> contact", "ticket -> configuration"),
+            ),
+            ResourceDefinition(
+                resource_type="service_notification",
+                description="Autotask notification history, bounded to an authorized company or ticket.",
+                selectors=selectors,
+                operations=(
+                    _search("service.notification.history.search", SERVICE_NOTIFICATION_HISTORY_SEARCH, ("company_id", "ticket_id", "template_name", "page_size", "after_resource_id")),
+                ),
+                observations=(ResourceObservation("communication", "Template name, recipient, sent time, and related ticket/company."),),
+                relationships=("notification -> company", "notification -> ticket"),
             ),
             ResourceDefinition(
                 resource_type="service_configuration",

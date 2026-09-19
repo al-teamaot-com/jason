@@ -51,6 +51,7 @@ SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
+SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 
 IDENTITY_USER_SEARCH = "identity.user.search"
 IDENTITY_USER_READ = "identity.user.read"
@@ -84,6 +85,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_SEARCH,
         SERVICE_CONFIGURATION_READ,
         SERVICE_ENTITY_DESCRIBE,
+        SERVICE_NOTIFICATION_HISTORY_SEARCH,
     }
 )
 
@@ -441,6 +443,18 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="ticket note,ticket notes,note,notes,update,work note,description",
             authoritative_change_sources=at,
             collection_fact="ticket notes",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_NOTIFICATION_HISTORY_SEARCH,
+            display_name="Search Service Notification History",
+            business_purpose="Search bounded Autotask notification history for one authorized company or ticket.",
+            resource_types="service_notification,notification_history,notification_template",
+            operation="search",
+            selector_keys="company_id,ticket_id,template_name,page_size,after_resource_id",
+            fact_hints="notification,notification history,notification template,template,email sent,recipient",
+            authoritative_change_sources=at,
+            collection_fact="notification history",
         ),
         _read_capability(
             now=now,

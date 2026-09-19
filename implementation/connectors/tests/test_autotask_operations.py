@@ -88,6 +88,7 @@ def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None
         "autotask.ticket.search",
         "autotask.ticket.count",
         "autotask.ticket.notes.list",
+        "autotask.notification_history.search",
         "autotask.ticket.create",
         "autotask.ticket.update",
         "autotask.ticket.note.create",

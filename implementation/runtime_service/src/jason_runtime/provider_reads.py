@@ -56,6 +56,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -99,6 +100,7 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_CONFIGURATION_SEARCH): "autotask.configuration.search",
     (AUTOTASK_PROVIDER, SERVICE_CONFIGURATION_READ): "autotask.configuration.get",
     (AUTOTASK_PROVIDER, SERVICE_ENTITY_DESCRIBE): "autotask.entity.describe",
+    (AUTOTASK_PROVIDER, SERVICE_NOTIFICATION_HISTORY_SEARCH): "autotask.notification_history.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_SEARCH): "microsoft_graph.user.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_READ): "microsoft_graph.user.get",
 }

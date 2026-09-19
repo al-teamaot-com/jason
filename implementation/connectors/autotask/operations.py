@@ -67,6 +67,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Tickets/{ticket_id}/Notes",
         path_arguments=("ticket_id",),
     ),
+    "autotask.notification_history.search": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/NotificationHistory/query",
+        query_argument="search",
+    ),
     "autotask.ticket.create": OperationDefinition(
         method="POST",
         path_template="/V1.0/Tickets",
