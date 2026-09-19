@@ -684,28 +684,28 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Review trigger:** Begin during the next Teams/OpenClaw security-hardening window; complete before the dedicated gateway client secret reaches its first planned rotation/expiry boundary.
 
 
-### TODO-CONN-005 — Governed Autotask ticket creation
+### TODO-CONN-005 — Governed Autotask ticket CRUD
 
 - **Priority:** P1
 - **Status:** Planned
 - **Risk level:** High
-- **Idea:** Add a narrowly scoped governed Autotask `service.ticket.create` capability so Jason can create the correct service/dependency/remediation ticket when a workflow requires one and no suitable ticket already exists.
-- **Why it matters:** Jason can currently search, read, update, and add notes to Autotask tickets, but the SET-01 Security Log remediation workflow proved that Jason cannot create a new ticket when work begins without an existing ticket. This breaks end-to-end governed handling and leaves remediation work without the required PSA record.
-- **Why not now:** The capability is not currently active/exposed in the live Jason capability registry and must be implemented with exact authority, client isolation, duplicate suppression, required-field validation, and post-create readback verification.
-- **Prerequisites:** governed Autotask company/contact/queue/status/priority lookup as needed; exact create schema; requester and client-scope enforcement; duplicate-ticket search before create; approved default queue/status behavior; configuration-item/device association when available; internal-note follow-up; idempotency; audit evidence; post-mutation readback verification.
+- **Idea:** Provide full governed Autotask ticket CRUD capability: create, read, update, and delete, with each operation exposed as a provider-neutral Jason capability and enforced through the Central Orchestrator.
+- **Why it matters:** Jason must be able to manage the complete ticket lifecycle without manual PSA intervention. The SET-01 Security Log remediation workflow proved that Jason cannot currently create a ticket when work begins without one. Jason already has governed ticket read/update paths, but full operational ownership also requires narrowly scoped create and delete capabilities.
+- **Why not now:** Create and delete are not currently active/exposed in the live Jason capability registry. Delete is especially high risk and must be tightly governed to prevent accidental loss of operational history.
+- **Prerequisites:** governed Autotask company/contact/queue/status/priority lookup as needed; exact create/update/delete schemas; requester and client-scope enforcement; duplicate-ticket search before create; approved default queue/status behavior; configuration-item/device association when available; internal-note support; idempotency; audit evidence; and post-mutation readback verification.
 - **Required behavior:**
-  1. Search for an existing appropriate open ticket before creating a new one.
-  2. Create only within the exact client/device/workflow scope Jason is handling.
-  3. Associate the ticket to the endpoint/configuration item when confidently available.
-  4. Use the Jason queue and appropriate status when Jason is actively working the ticket, consistent with AOT operating rules.
-  5. Preserve the originating alert/device/workflow correlation in the ticket.
-  6. Add an initial internal note documenting why the ticket was created and the evidence that triggered it.
-  7. Prevent duplicate creates through idempotency and duplicate suppression.
-  8. Require governed authority and post-create readback; no direct provider/API bypass.
-- **Acceptance test:** Re-run the SET-01 Windows Security Log remediation scenario with no pre-existing Autotask ticket. Jason must detect that no appropriate ticket exists, create one through the governed path, associate SET-01 when available, document the diagnostic/SOC-SIEM warning/remediation/verification, and then continue the workflow without manual PSA intervention.
-- **Relationship to existing work:** Also satisfies the missing Autotask ticket-create prerequisite already identified by TODO-OPS-002 BackupIQ.
+  1. **Create:** Search for an existing appropriate open ticket before creating a new one; prevent duplicate creation; associate the ticket to the correct client/device/configuration item when confidently available.
+  2. **Read:** Read ticket fields, notes, status, priority, queue, assignment, company, contact, configuration item, and relevant lifecycle metadata through the governed provider-neutral read path.
+  3. **Update:** Modify approved reversible fields, notes, assignment, queue, status, priority, configuration-item association, and other explicitly allowed fields with post-write readback verification.
+  4. **Delete:** Support ticket deletion only as a high-risk governed action requiring explicit per-instance approval, exact ticket identity, pre-delete readback, audit evidence, and post-delete verification. Jason must never bulk-delete tickets or infer deletion authority from prior approval.
+  5. Use the Jason queue and appropriate status when Jason is actively working a ticket, consistent with AOT operating rules.
+  6. Preserve originating alert/device/workflow correlation in the ticket.
+  7. Add an initial internal note documenting why a ticket was created and the evidence that triggered it.
+  8. Preserve direct_provider_access=false and never bypass the governed capability layer.
+- **Acceptance test:** Re-run the SET-01 Windows Security Log remediation scenario with no pre-existing Autotask ticket. Jason must detect that no appropriate ticket exists, create one through the governed path, associate SET-01 when available, document the diagnostic/SOC-SIEM warning/remediation/verification, update the ticket through the lifecycle, and verify the final state. Separately, validate delete against a controlled test ticket with explicit owner approval and full pre/post verification.
+- **Relationship to existing work:** Supersedes the prior ticket-create-only requirement and also satisfies the missing Autotask ticket-create prerequisite already identified by TODO-OPS-002 BackupIQ.
 - **Decision owner:** Jason Governance Authority / Jason Architecture Authority
-- **Review trigger:** Implement before production playbooks are expected to originate remediation work without a pre-existing Autotask ticket.
+- **Review trigger:** Implement before production playbooks are expected to originate or fully manage Autotask ticket lifecycles without manual PSA intervention.
 
 ---
 
