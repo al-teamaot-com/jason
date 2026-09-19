@@ -21,6 +21,10 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_ORGANIZATION_READ,
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IDENTITY_USER_READ,
+    IDENTITY_AUTHENTICATION_METHODS_READ,
+    IDENTITY_CONDITIONAL_ACCESS_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_SEARCH,
+    IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     IDENTITY_USER_SEARCH,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_PROVIDER,
@@ -435,6 +439,25 @@ def adapt_microsoft_graph_arguments(
 ) -> dict[str, Any]:
     if capability_name == IDENTITY_USER_READ:
         return {"resource_id": _resource_id(arguments)}
+    if capability_name == IDENTITY_AUTHENTICATION_METHODS_READ:
+        user_id = arguments.get("user_id") or arguments.get("resource_id")
+        if user_id is None or not str(user_id).strip():
+            raise ValueError("user_id is required for authentication method read")
+        return {"user_id": str(user_id).strip()}
+    if capability_name in {IDENTITY_CONDITIONAL_ACCESS_SEARCH, IDENTITY_DIRECTORY_ROLE_SEARCH}:
+        page_size = arguments.get("page_size", 100)
+        if isinstance(page_size, bool): raise ValueError("page_size must be between 1 and 100")
+        page_size = int(page_size)
+        if not 1 <= page_size <= 100: raise ValueError("page_size must be between 1 and 100")
+        return {"page_size": page_size}
+    if capability_name == IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH:
+        role_id = arguments.get("role_id") or arguments.get("resource_id")
+        if role_id is None or not str(role_id).strip(): raise ValueError("role_id is required for directory role member search")
+        page_size = arguments.get("page_size", 100)
+        if isinstance(page_size, bool): raise ValueError("page_size must be between 1 and 100")
+        page_size = int(page_size)
+        if not 1 <= page_size <= 100: raise ValueError("page_size must be between 1 and 100")
+        return {"role_id": str(role_id).strip(), "page_size": page_size}
     if capability_name != IDENTITY_USER_SEARCH:
         raise ValueError(
             f"Unsupported Microsoft Graph canonical capability: {capability_name}"
