@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-18",
+  "updated": "2026-09-20",
   "milestones": [
     {
       "id": "FOUNDATION",
@@ -192,6 +192,24 @@
       "title": "Governed Teams approval and information-request workflow",
       "status": "blocked",
       "phase": "Technician Experience"
+    },
+    {
+      "id": "PROCURE-001",
+      "title": "Governed procurement and PO lifecycle",
+      "status": "active",
+      "phase": "Operations"
+    },
+    {
+      "id": "MAIL-READ-001",
+      "title": "Scoped Microsoft mailbox evidence for procurement",
+      "status": "blocked",
+      "phase": "Capabilities"
+    },
+    {
+      "id": "MAILBOX-HELPER-001",
+      "title": "Approved mailbox onboarding helper",
+      "status": "planned",
+      "phase": "Operations"
     }
   ]
 }

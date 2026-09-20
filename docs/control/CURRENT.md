@@ -202,7 +202,26 @@ Governed proactive Teams text sending is production-proven through `communicatio
 
 Authoritative session record: `docs/sessions/Jason-Governed-Teams-Proactive-Send-Proof-2026-09-18.md`.
 
-## Current Section Goal — ACTIVE / PILOT CLOSEOUT
+## Current Section Goal — ACTIVE / PROCUREMENT PILOT
+
+**Goal:** complete the governed procurement / PO lifecycle so Jason can correlate purchasing evidence, allocate ordered quantity explicitly between customer/ticket and AOT inventory, add only the approved billable quantity to the correct Autotask ticket, monitor approved vendor/requester mailbox evidence, and preserve exact approval/readback/audit linkage.
+
+Current checkpoint:
+
+- governed product/service/PO/PO-item/receiving actions are live;
+- governed TicketCharges search/read/create/update is live and approval-gated;
+- ticket candidates must be presented as `ticket number — title`;
+- ordered quantity must reconcile exactly across explicit destinations;
+- canonical acceptance case remains `2 ordered = 1 customer/ticket + 1 AOT inventory`, with billable quantity `1`;
+- mailbox read source is implemented but intentionally dormant under v5;
+- `MAIL-READ-001` is blocked pending the separate Entra application, Exchange Application RBAC `Application Mail.Read` scope, OpenBao `microsoft_graph.mail_read` identity, approved mailbox allowlist, and controlled positive/negative acceptance;
+- tenant-wide Entra Graph `Mail.Read` must not be granted for this scoped design;
+- `TODO-CONN-014` tracks the future `Add-Jason-Mailbox.ps1` helper;
+- `direct_provider_access=false` remains required.
+
+Authoritative checkpoint: `docs/sessions/Jason-Procurement-Mail-Read-Checkpoint-2026-09-20.md`.
+
+## Concurrent open Section Goal — EDR/AV PILOT CLOSEOUT
 
 **Goal:** finish the Datto EDR/AV Diagnose & Repair playbook as a governed, measurable MSP workflow without conflating product health, provider detections, contained artifacts, or confirmed compromise.
 
