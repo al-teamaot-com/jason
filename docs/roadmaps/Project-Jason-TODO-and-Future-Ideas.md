@@ -651,7 +651,7 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
-### TODO-OPS-003 — Complete Datto EDR/AV threat-branch activation
+### TODO-OPS-006 — Complete Datto EDR/AV threat-branch activation
 
 - **Priority:** P1
 - **Status:** In progress — threat closure gate proven fail-closed; production activation pending
@@ -840,6 +840,82 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** BullPhish/API access, client/user correlation, least-privilege credentials, and normalized campaign/training evidence.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** When security-awareness integration becomes an approved implementation priority.
+
+### TODO-CONN-010 — Governed Datto RMM site-variable reads
+
+- **Priority:** P1
+- **Status:** Planned — high priority
+- **Risk level:** High
+- **Idea:** Add a governed Datto RMM capability that can determine which site variables exist for an exact authorized site and whether a required variable is present and usable, without disclosing secret values unless an explicitly approved workflow requires the value.
+- **Why it matters:** AOT components such as Duo deployment and Datto Endpoint Backup depend on site variables. Jason must be able to distinguish a missing site configuration dependency from an endpoint/component failure.
+- **Current evidence (2026-09-20):** Live capability discovery exposes managed-site reads and component metadata but no dedicated site-variable/account-variable read capability. Existing endpoint UDF reads are not a substitute for Datto RMM site variables.
+- **Required behavior:** Resolve the exact company/site first; enumerate variable names/metadata safely; report presence/absence and usability; redact sensitive values from chat, logs, tickets, and telemetry; allow approved playbooks to consume required values by reference; preserve `direct_provider_access=false`.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Treat as near-term work because multiple operational playbooks depend on site-variable presence validation.
+
+### TODO-OPS-007 — Invoice-to-catalog and purchase-order workflow
+
+- **Priority:** P1 — implement before Duo Security API integration
+- **Status:** Planned — near-term
+- **Risk level:** High
+- **Idea:** Give Jason a governed procurement workflow that can read vendor invoices from an approved mailbox, reconcile invoice line items against Autotask products, services, and other catalog/inventory records, propose any required catalog additions or updates, propose purchase-order additions, and create the approved Autotask records with authoritative readback.
+- **Why it matters:** Vendor invoices routinely contain products, services, licensing, hardware, freight, and other billable or inventory-related items that must be represented consistently in Autotask before purchasing and billing workflows can be completed. Automating the comparison and proposal work can reduce repetitive finance/operations effort while preserving human approval for financial commitments and master-data changes.
+- **Required capabilities:**
+  - governed search/read of an approved invoice mailbox and attachments;
+  - reliable invoice extraction for vendor, invoice number/date, PO reference, quantities, SKU/part number, description, unit cost, extended cost, tax/freight, and totals;
+  - governed Autotask product/catalog search and read;
+  - governed Autotask service/service-bundle and other applicable inventory/catalog-item search and read;
+  - governed creation/update of products, services, and other approved catalog/inventory item types;
+  - governed purchase-order search/read/create/update;
+  - company/vendor and item identity resolution;
+  - duplicate detection for invoices, products, services, SKUs, and POs;
+  - proposal generation that clearly separates existing matches, ambiguous matches, proposed new catalog items, proposed PO lines, and exceptions;
+  - explicit approval for financial commitments and master-data creation unless a future narrowly scoped standing policy is approved;
+  - post-write readback, totals verification, and audit evidence.
+- **Expected workflow:**
+  1. Search the designated mailbox for a new or requested vendor invoice.
+  2. Parse and normalize the invoice without exposing unnecessary sensitive content.
+  3. Resolve the vendor and any referenced PO/customer/project context.
+  4. Compare each invoice line to existing Autotask products, services, and other supported catalog/inventory records.
+  5. Reuse an existing exact/approved match where appropriate.
+  6. If no safe match exists, propose a new product/service/inventory record with normalized name, vendor/SKU, description, cost, and other required fields.
+  7. Compare the invoice against existing PO lines and propose additions/adjustments where necessary.
+  8. Present the proposed catalog changes and PO changes for approval with invoice evidence and totals.
+  9. After approval, create only the approved records through Central Orchestrator.
+  10. Read back every created/updated item and PO line and verify invoice quantity/cost/total reconciliation.
+  11. Preserve the invoice-to-Autotask correlation for audit and future duplicate detection.
+- **Safeguards:**
+  - never create a financial commitment solely because an invoice exists;
+  - never silently create duplicate products/services when an equivalent approved catalog item already exists;
+  - fail closed on ambiguous vendor, SKU, unit-of-measure, tax/freight allocation, or PO matching;
+  - do not infer customer billability, markup, GL treatment, or accounting classification without approved policy/evidence;
+  - preserve `direct_provider_access=false`, least privilege, approval, idempotency, and post-mutation verification.
+- **Implementation order:** This item is intentionally ahead of `TODO-CONN-011 — Duo Security API integration`. The Duo integration requires a new API credential; the invoice/catalog/PO work should be advanced first using the existing governed Autotask and approved mailbox architecture where possible.
+- **Decision owner:** Jason Governance Authority / Finance/Operations Owner
+- **Review trigger:** Begin immediately after the current support-list blockers being actively worked are stabilized enough for safe implementation.
+
+### TODO-CONN-011 — Duo Security API integration
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add a governed Duo Security integration so Jason can read Duo tenant posture and support Duo-related troubleshooting, deployment, enrollment, and verification workflows using authoritative Duo evidence.
+- **Why it matters:** Endpoint installation alone does not prove a user/device is correctly enrolled, protected, or successfully authenticating.
+- **Current evidence (2026-09-20):** Live Jason capability discovery exposes Entra MFA/authentication reads but no Duo provider capability.
+- **Initial scope:** Read-only tenant/integration health, users, enrollment/device state, bypass/disabled state, and relevant authentication evidence. Future security-changing Duo actions require separate governance.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Begin after the read-only credential and tenant-binding design is approved.
+
+### TODO-CONN-012 — Autotask contact visibility
+
+- **Priority:** P1
+- **Status:** Implemented — live verified 2026-09-20
+- **Risk level:** Moderate
+- **Idea:** Allow Jason to search and read Autotask contacts for an exact company so ticket workflows can resolve the correct user/contact and communication audience.
+- **Implemented result:** Live capabilities `service.contact.search` and `service.contact.read` are active through governance. A bounded production search succeeded on 2026-09-20 with correlation `corr_mcp_8034be3c72224717bf09da49e6e3648a`.
+- **Safeguards:** Company/client scoping, least-privilege reads, no cross-client inference, and normal audience/communication policy before outbound use.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Revisit only if contact writes or broader directory synchronization are proposed.
 
 ---
 
