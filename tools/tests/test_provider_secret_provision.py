@@ -79,6 +79,24 @@ def test_it_glue_contract_reuses_existing_production_identity() -> None:
     )
 
 
+def test_microsoft_mail_contract_is_separate_from_directory_read() -> None:
+    directory = PROVIDERS["microsoft_graph"]
+    mail = PROVIDERS["microsoft_graph_mail"]
+    assert mail["logical_name"] == "microsoft_graph.mail_read"
+    assert mail["secret_path"] == (
+        "secret/data/connectors/microsoft-graph/production/mail-read"
+    )
+    assert mail["fields"] == directory["fields"]
+    assert mail["policy_name"] == "jason-microsoft-graph-mail-read"
+    assert mail["role_name"] == "jason-microsoft-graph-mail-read"
+    assert mail["connector_identity"] == "microsoft-graph-mail-read"
+    assert Path(mail["credential_dir"]) == Path(
+        "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
+    )
+    assert mail["secret_path"] != directory["secret_path"]
+    assert mail["role_name"] != directory["role_name"]
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)

@@ -75,6 +75,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "microsoft_graph.directory_read": (
         "secret/data/connectors/microsoft-graph/production/directory-read"
     ),
+    "microsoft_graph.mail_read": (
+        "secret/data/connectors/microsoft-graph/production/mail-read"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -88,6 +91,14 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "datto_edr.execution": frozenset({"api_url", "api_token"}),
     "aws_ses.sendmail": frozenset({"access_key_id", "secret_access_key"}),
     "microsoft_graph.directory_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
+    "microsoft_graph.mail_read": frozenset(
         {
             "private_key_pem",
             "certificate_pem",

@@ -100,6 +100,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-directory-read-approle"
         ),
     },
+    "microsoft_graph_mail": {
+        "logical_name": "microsoft_graph.mail_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/mail-read",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-mail-read",
+        "role_name": "jason-microsoft-graph-mail-read",
+        "connector_identity": "microsoft-graph-mail-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
+        ),
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
@@ -204,7 +220,7 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 
 
 def collect_values(provider: str) -> dict[str, str]:
-    if provider == "microsoft_graph":
+    if provider in {"microsoft_graph", "microsoft_graph_mail"}:
         return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]

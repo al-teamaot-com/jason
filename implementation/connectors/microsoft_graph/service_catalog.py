@@ -119,9 +119,13 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
     ),
     "mail-read": MicrosoftPermissionProfile(
         name="mail-read",
-        description="Read-only Exchange Online mailbox and message discovery.",
+        description=(
+            "Read-only Exchange Online mailbox and message discovery using resource-scoped "
+            "Exchange Online Application RBAC. Do not pair this profile with an unscoped "
+            "Microsoft Entra Mail.Read application grant."
+        ),
         services=frozenset({MicrosoftService.EXCHANGE}),
-        application_permissions=("Mail.Read",),
+        application_permissions=("Exchange Application RBAC: Application Mail.Read",),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
     "mail-send": MicrosoftPermissionProfile(
