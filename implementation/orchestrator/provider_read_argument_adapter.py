@@ -38,6 +38,7 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
@@ -492,7 +493,7 @@ def adapt_autotask_arguments(
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}
-    if capability_name == SERVICE_ENTITY_DESCRIBE:
+    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE}:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")

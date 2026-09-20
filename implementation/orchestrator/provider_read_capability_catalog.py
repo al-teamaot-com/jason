@@ -51,6 +51,7 @@ SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
+SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
@@ -104,6 +105,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_SEARCH,
         SERVICE_CONFIGURATION_READ,
         SERVICE_ENTITY_DESCRIBE,
+        SERVICE_ENTITY_FIELDS_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
         SERVICE_PRODUCT_SEARCH,
         SERVICE_PRODUCT_READ,
@@ -684,7 +686,21 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             resource_types="service_schema",
             operation="describe",
             selector_keys="entity",
-            fact_hints="schema,fields,field names,entity metadata,entity information",
+            fact_hints="schema,entity metadata,entity information,permissions",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_FIELDS_DESCRIBE,
+            display_name="Describe Service Entity Fields",
+            business_purpose=(
+                "Read provider field metadata and tenant-specific picklist values for an "
+                "approved service-management entity."
+            ),
+            resource_types="service_schema,service_field_schema",
+            operation="describe_fields",
+            selector_keys="entity",
+            fact_hints="fields,field names,picklist,picklist values,field metadata,schema",
             authoritative_change_sources=at,
         ),
         _read_capability(

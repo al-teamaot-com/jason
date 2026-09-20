@@ -17,8 +17,21 @@ Autotask's documented REST API does not expose Notification Templates as a query
 ## Next acceptance
 Deploy the read capability and prove a same-company notification-history query in production. Then use the observed template names to build an AOT-approved communication-template catalog. Actual dispatch must use a supported provider surface. If Autotask cannot invoke a named template through a supported API, dispatch should be implemented through a governed AOT communication capability while preserving the approved template's audience/purpose rather than scraping/private-calling the Autotask UI.
 
+## 2026-09-20 continuation — ticket-note communication bridge
+
+Autotask documents `TicketNotes` as a creatable/updatable REST entity. Its `publish` and `noteType` fields are picklists, and Autotask explicitly directs integrations to `/entityInformation/fields` to obtain tenant-specific picklist values. Numeric values must therefore not be assumed from another tenant or hard-coded from examples.
+
+Implementation started on branch `feature/autotask-customer-communication-20260920`:
+- add `TicketNotes` to the bounded approved schema-discovery entity set;
+- add provider operation `autotask.entity.fields.describe` for `/V1.0/{entity}/entityInformation/fields`;
+- add provider-neutral read capability `service.entity.fields.describe` and route it through the existing governed Autotask read path;
+- add source tests for the TicketNotes field-schema route and canonical argument adapter;
+- preserve all existing mutation/action surfaces unchanged until live picklist semantics are proven.
+
+Next proof is intentionally read-only: deploy the schema read, retrieve `TicketNotes` field metadata, and identify the exact active `publish` values corresponding to internal-only and customer-visible behavior plus the intended `noteType`. Only after that proof should a distinct customer-visible note capability be implemented. The existing internal-note action must remain separate so an outward communication path cannot silently broaden an internal note.
+
 ## Section Goal closure
-**PARTIAL / READ FOUNDATION READY FOR PRODUCTION PROOF.** Template-use evidence is supported; direct named-template dispatch is not claimed because the vendor API does not document such an operation.
+**PARTIAL / IMPLEMENTATION IN PROGRESS.** Template-use evidence is supported; direct named-template dispatch is not claimed because the vendor API does not document such an operation. A supported ticket-note communication bridge is now being developed without assuming tenant picklist IDs.
 
 ## Production permission diagnosis
 Live provider preflight confirms `Resources` is queryable by the dedicated read identity (`userAccessForQuery=All`) while `NotificationHistory` is not (`userAccessForQuery=None`). The failure is therefore isolated to the read identity's Autotask security level. Jason has no governed Autotask security-level administration capability and will not use direct provider or private UI automation to broaden it. The required provider-side change is limited to enabling Notification History query access on the **Jason read-only API user's security level**. The separate `Jason API - Ticket Mutation` profile must remain unchanged.

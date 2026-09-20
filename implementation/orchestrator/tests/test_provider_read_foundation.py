@@ -30,6 +30,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
@@ -250,6 +251,10 @@ def test_autotask_adapter_preserves_exact_reads_notes_and_schema_description() -
         SERVICE_ENTITY_DESCRIBE,
         {"entity": "ConfigurationItems"},
     ) == {"entity": "ConfigurationItems"}
+    assert adapt_autotask_arguments(
+        SERVICE_ENTITY_FIELDS_DESCRIBE,
+        {"entity": "TicketNotes"},
+    ) == {"entity": "TicketNotes"}
 
 
 def test_autotask_procurement_read_adapter_maps_catalog_and_po_entities() -> None:

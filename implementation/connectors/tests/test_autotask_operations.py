@@ -82,6 +82,7 @@ def test_resolves_registered_operation(
 def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None:
     assert set(AUTOTASK_OPERATIONS) == {
         "autotask.entity.describe",
+        "autotask.entity.fields.describe",
         "autotask.entity.get",
         "autotask.entity.query",
         "autotask.ticket.get",
@@ -186,6 +187,12 @@ def test_rejects_invalid_search_expression(
             "autotask.entity.describe",
             {"entity": "Invoices"},
             "/V1.0/Invoices/entityInformation",
+            None,
+        ),
+        (
+            "autotask.entity.describe",
+            {"entity": "TicketNotes"},
+            "/V1.0/TicketNotes/entityInformation",
             None,
         ),
         (

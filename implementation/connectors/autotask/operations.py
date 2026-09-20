@@ -33,6 +33,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Resources",
         "Opportunities",
         "NotificationHistory",
+        "TicketNotes",
         "TicketCharges",
     }
 )
@@ -42,6 +43,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     "autotask.entity.describe": OperationDefinition(
         method="GET",
         path_template="/V1.0/{entity}/entityInformation",
+        path_arguments=("entity",),
+    ),
+    "autotask.entity.fields.describe": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/entityInformation/fields",
         path_arguments=("entity",),
     ),
     "autotask.entity.get": OperationDefinition(
