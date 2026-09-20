@@ -935,6 +935,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement as the next procurement dependency after the PO lifecycle foundation.
 
+### TODO-CONN-014 — Add approved mailbox helper workflow
+
+- **Priority:** P2
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Create a small idempotent PowerShell helper such as `Add-Jason-Mailbox.ps1 -Mailbox user@teamaot.com` for adding future approved requester/purchasing mailboxes after the initial `Jason Mail Read` application is activated.
+- **Why it matters:** AOT should not have to rerun the full Entra application/certificate/Exchange RBAC setup for every technician or requester mailbox.
+- **Required behavior:** Validate the mailbox exists; add it to the existing Exchange Application RBAC resource scope without replacing or broadening unrelated scope; add it to Jason's exact approved-mailbox allowlist; preserve the existing app/certificate/service-principal identity; verify the new mailbox is in scope; verify a known unapproved mailbox remains denied; make no tenant-wide Graph permission changes.
+- **Safeguards:** Fail closed on ambiguous/missing mailbox, unexpected existing RBAC configuration, scope drift, or inability to prove the deny test. Do not add Microsoft Graph `Mail.Read` under Entra API permissions.
+- **Acceptance test:** Starting from the proven single-mailbox pilot, add one second controlled AOT mailbox with the helper, prove both approved mailboxes are readable through the scoped authority, prove an unapproved mailbox remains inaccessible, and verify `direct_provider_access=false`.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement after the initial Jason Mail Read pilot is activated and validated.
+
 ### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
 
 - **Priority:** P1
