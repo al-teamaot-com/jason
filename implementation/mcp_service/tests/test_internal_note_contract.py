@@ -21,6 +21,17 @@ def test_internal_note_payload_fixes_internal_visibility():
     }
 
 
+def test_internal_note_payload_supplies_default_title_when_omitted():
+    arguments = server._internal_note_arguments(
+        ticket_id=12345,
+        note="Technician-only validation note",
+    )
+
+    assert arguments["payload"]["title"] == "Jason Internal Note"
+    assert arguments["payload"]["noteType"] == 3
+    assert arguments["payload"]["publish"] == 1
+
+
 @pytest.mark.parametrize(
     ("ticket_id", "note"),
     [

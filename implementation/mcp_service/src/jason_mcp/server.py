@@ -761,10 +761,10 @@ def _internal_note_arguments(
             "internal note text exceeds the bounded MCP limit"
         )
 
-    normalized_title = str(title or "").strip()
-    if len(normalized_title) > 255:
+    normalized_title = str(title or "").strip() or "Jason Internal Note"
+    if len(normalized_title) > 250:
         raise ValueError(
-            "internal note title exceeds the bounded MCP limit"
+            "internal note title exceeds the Autotask 250-character limit"
         )
 
     payload: dict[str, Any] = {
@@ -774,8 +774,7 @@ def _internal_note_arguments(
         "publish": 1,
     }
 
-    if normalized_title:
-        payload["title"] = normalized_title
+    payload["title"] = normalized_title
 
     return {
         "payload": payload,
