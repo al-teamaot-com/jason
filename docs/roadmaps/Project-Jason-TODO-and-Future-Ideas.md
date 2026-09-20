@@ -856,7 +856,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-007 — Invoice-to-catalog and purchase-order workflow
 
 - **Priority:** P1 — implement before Duo Security API integration
-- **Status:** Planned — near-term
+- **Status:** In progress — governed PO mutations live; lifecycle orchestration foundation implemented
 - **Risk level:** High
 - **Idea:** Give Jason a governed procurement workflow that can read vendor invoices from an approved mailbox, reconcile invoice line items against Autotask products, services, and other catalog/inventory records, propose any required catalog additions or updates, propose purchase-order additions, and create the approved Autotask records with authoritative readback.
 - **Why it matters:** Vendor invoices routinely contain products, services, licensing, hardware, freight, and other billable or inventory-related items that must be represented consistently in Autotask before purchasing and billing workflows can be completed. Automating the comparison and proposal work can reduce repetitive finance/operations effort while preserving human approval for financial commitments and master-data changes.
@@ -893,6 +893,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Implementation order:** This item is intentionally ahead of `TODO-CONN-011 — Duo Security API integration`. The Duo integration requires a new API credential; the invoice/catalog/PO work should be advanced first using the existing governed Autotask and approved mailbox architecture where possible.
 - **Implementation checkpoint (2026-09-20):** Governed source support and a separate explicit `itglue-autotask-entra-procurement-catalog-v5` read profile now exist for Products, ProductVendors, Services, ServiceBundles, PurchaseOrders, and PurchaseOrderItems without broadening the production v4 profile. Live shadow acceptance through Jason identity/authority and Central Orchestrator proved Product, ProductVendor, ServiceBundle, PurchaseOrder, and PurchaseOrderItem reads. The dedicated read identity reports `userAccessForQuery=All` for those entities. `Services/entityInformation`, however, returns `canQuery=true` with `userAccessForQuery=None`, and three governed Services query variants all fail at Autotask with HTTP 500. Autotask's current Services REST documentation states that query has no restrictions, and the assigned custom API security level already has the available read permissions enabled. The Services blocker is therefore tracked as provider/API inconsistency `SUPPORT-CAP-017`, not as a known missing security-level checkbox. All tested procurement entities currently report create/update access `None` for the read identity. No production profile, Autotask permission, or provider mutation was changed. Financial/catalog writes must use a separate least-privilege write identity/profile and remain inactive until controlled acceptance.
 - **Production activation checkpoint (2026-09-20):** Governed product, product-vendor, service, service-bundle, purchase-order, purchase-order-item, and purchase-order-receive actions are live in production through `execute_governed_capability`. All 13 procurement actions are exact-grant, owner-scoped, `approval_required=true`, single-attempt, provider-preflighted, and post-write readback verified. Production image `jason-mcp:procurement-write-25a92b8`; source commit `25a92b80cac8239a12fd48641f2a015a1037d340`. Purchase-order completion follows the provider-native lifecycle: create PO -> create items -> submit PO -> receive each item through `PurchaseOrderItemReceiving`; Autotask derives Received Partial/Full rather than allowing Jason to patch directly to Received Full.
+- **Lifecycle orchestration checkpoint (2026-09-20):** Added canonical playbook `docs/playbooks/Jason-Procurement-PO-Lifecycle.md` and deterministic allocation/ticket-presentation foundation. The workflow requires ticket candidates to be shown as `ticket number — title`, treats ticket association separately from customer billing, and requires every ordered unit to have an explicit destination. Example acceptance invariant: `2 ordered = 1 customer/ticket + 1 AOT inventory`, with billable quantity `1`. Vendor email/ETA/shipping events are designed to flow through Teams approval before material PO changes. Missing mailbox-content reads and dedicated ticket-billing/charge capability are explicit dependencies rather than hidden assumptions.
 - **Decision owner:** Jason Governance Authority / Finance/Operations Owner
 - **Review trigger:** Begin immediately after the current support-list blockers being actively worked are stabilized enough for safe implementation.
 
@@ -918,6 +919,32 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Safeguards:** Company/client scoping, least-privilege reads, no cross-client inference, and normal audience/communication policy before outbound use.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Revisit only if contact writes or broader directory synchronization are proposed.
+
+### TODO-CONN-013 — Governed requester/vendor mailbox content reads
+
+- **Priority:** P1
+- **Status:** Planned — dependency for procurement lifecycle monitoring
+- **Risk level:** High
+- **Idea:** Give Jason a governed Microsoft 365 mailbox/message search and read capability for explicitly approved AOT mailboxes so procurement workflows can correlate vendor order confirmations, ETA changes, backorders, shipment notices, tracking updates, delivery notices, cancellations, invoices, NDRs, and other operational evidence.
+- **Why it matters:** Procurement updates frequently arrive only by email to the person who requested the purchase. Without governed mailbox-content evidence, Jason cannot reliably maintain PO lifecycle state or generate timely approval proposals.
+- **Required behavior:** Resolve the exact approved mailbox; search bounded time windows/participants/subjects/identifiers; read only necessary message content and attachment metadata; preserve message IDs/timestamps/digests for audit; correlate using PO/vendor order/invoice/SKU/customer/ticket evidence; redact unnecessary sensitive content; never treat email alone as physical receiving evidence.
+- **Governance:** Mailbox scope must be explicit; no tenant-wide arbitrary mailbox reading; normal identity/authority/client boundaries apply; `direct_provider_access=false`.
+- **Acceptance test:** In a controlled AOT mailbox, ingest one vendor ETA/shipping update tied to a test PO and prove exact message correlation without exposing unrelated mail.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement as the next procurement dependency after the PO lifecycle foundation.
+
+### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
+
+- **Priority:** P1
+- **Status:** Planned — dependency for procurement customer billing
+- **Risk level:** High
+- **Idea:** Add an explicit governed capability to add and verify the correct billable product/charge to an exact Autotask ticket after a procurement allocation is approved.
+- **Why it matters:** AOT may order multiple units while only some are customer-billable. PO quantity must never be copied blindly to ticket billing.
+- **Required behavior:** Resolve exact ticket and display `ticket number — title`; resolve approved product/service and selling price; check existing ticket charges for duplicates; accept an explicit billable quantity that may be lower than PO quantity; create the charge only after approval; read back quantity/price/product/ticket association; document the procurement linkage.
+- **Safeguard:** Ticket association is not billing approval. AOT inventory allocations must never be customer billed. Unknown markup/selling price or ambiguous billing policy fails closed.
+- **Acceptance test:** Controlled test with quantity 2 ordered, quantity 1 allocated/billed to a test customer ticket, quantity 1 retained as AOT inventory; verify only one customer charge exists.
+- **Decision owner:** Jason Governance Authority / Finance/Operations Owner
+- **Review trigger:** Implement before declaring TODO-OPS-007 end-to-end complete.
 
 ---
 
