@@ -30,6 +30,9 @@ from orchestrator.provider_read_capability_catalog import (
 )
 from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ACTIVATION_ENV,
+    PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES,
+    PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_CAPABILITIES,
+    PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -76,6 +79,10 @@ def _registries():
 
 def _all_provider_read_capabilities() -> frozenset[str]:
     return IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+
+
+def _legacy_provider_read_capabilities() -> frozenset[str]:
+    return _all_provider_read_capabilities() - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
 
 
 def test_unset_profile_remains_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,7 +221,7 @@ def test_governed_catalog_profile_derives_all_reads_from_trusted_provider_catalo
         profile=PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
     )
 
-    expected = _all_provider_read_capabilities()
+    expected = _legacy_provider_read_capabilities()
     assert PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES == expected
     assert state.enabled is True
     assert state.profile == PROVIDER_READ_GOVERNED_CATALOG_PROFILE
@@ -257,7 +264,7 @@ def test_governed_catalog_profile_is_restart_persistable_environment_contract(
 
     assert state.enabled is True
     assert state.profile == PROVIDER_READ_GOVERNED_CATALOG_PROFILE
-    assert set(state.capability_names) == _all_provider_read_capabilities()
+    assert set(state.capability_names) == _legacy_provider_read_capabilities()
 
 
 def test_document_profile_is_restart_persistable_environment_contract(
@@ -327,6 +334,30 @@ def test_catalog_drift_fails_closed_before_provider_availability() -> None:
         assert provider.health_status is ProviderHealth.UNKNOWN
         assert provider.approval_status is ProviderApproval.PILOT
 
+
+
+
+def test_procurement_v5_explicitly_activates_new_autotask_reads_without_broadening_v4() -> None:
+    capabilities, providers = _registries()
+
+    state = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
+    )
+
+    assert state.enabled is True
+    assert state.profile == PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE
+    assert PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    assert PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES.isdisjoint(
+        PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES
+    )
+    assert PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES.issubset(
+        PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_CAPABILITIES
+    )
+    assert PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES.issubset(
+        set(state.capability_names)
+    )
 
 def test_profile_name_is_restart_persistable_environment_contract(
     monkeypatch: pytest.MonkeyPatch,

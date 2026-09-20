@@ -36,6 +36,16 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
+    SERVICE_PRODUCT_SEARCH,
+    SERVICE_PRODUCT_READ,
+    SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_SERVICE_SEARCH,
+    SERVICE_SERVICE_READ,
+    SERVICE_SERVICE_BUNDLE_SEARCH,
+    SERVICE_SERVICE_BUNDLE_READ,
+    SERVICE_PURCHASE_ORDER_SEARCH,
+    SERVICE_PURCHASE_ORDER_READ,
+    SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -120,6 +130,35 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "company_id": "companyID",
         "ticket_id": "ticketID",
         "template_name": "templateName",
+    },
+    SERVICE_PRODUCT_SEARCH: {
+        "resource_id": "id",
+        "name": "name",
+        "sku": "sku",
+    },
+    SERVICE_PRODUCT_VENDOR_SEARCH: {
+        "resource_id": "id",
+        "product_id": "productID",
+        "vendor_id": "vendorID",
+    },
+    SERVICE_SERVICE_SEARCH: {
+        "resource_id": "id",
+        "name": "name",
+    },
+    SERVICE_SERVICE_BUNDLE_SEARCH: {
+        "resource_id": "id",
+        "name": "name",
+    },
+    SERVICE_PURCHASE_ORDER_SEARCH: {
+        "resource_id": "id",
+        "purchase_order_number": "purchaseOrderNumber",
+        "vendor_id": "vendorID",
+        "vendor_invoice_number": "vendorInvoiceNumber",
+    },
+    SERVICE_PURCHASE_ORDER_ITEM_SEARCH: {
+        "resource_id": "id",
+        "purchase_order_id": "orderID",
+        "product_id": "productID",
     },
 }
 
@@ -421,6 +460,24 @@ def adapt_autotask_arguments(
         if company_id is None or not str(company_id).strip():
             raise ValueError("company_id is required for notification-history search")
         return {"search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_PRODUCT_READ:
+        return {"entity": "Products", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_SERVICE_READ:
+        return {"entity": "Services", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_SERVICE_BUNDLE_READ:
+        return {"entity": "ServiceBundles", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_PURCHASE_ORDER_READ:
+        return {"entity": "PurchaseOrders", "entity_id": _resource_id(arguments)}
+    entity_searches = {
+        SERVICE_PRODUCT_SEARCH: "Products",
+        SERVICE_PRODUCT_VENDOR_SEARCH: "ProductVendors",
+        SERVICE_SERVICE_SEARCH: "Services",
+        SERVICE_SERVICE_BUNDLE_SEARCH: "ServiceBundles",
+        SERVICE_PURCHASE_ORDER_SEARCH: "PurchaseOrders",
+        SERVICE_PURCHASE_ORDER_ITEM_SEARCH: "PurchaseOrderItems",
+    }
+    if capability_name in entity_searches:
+        return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}
     if capability_name == SERVICE_ENTITY_DESCRIBE:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():

@@ -52,6 +52,16 @@ SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
+SERVICE_PRODUCT_SEARCH = "service.product.search"
+SERVICE_PRODUCT_READ = "service.product.read"
+SERVICE_PRODUCT_VENDOR_SEARCH = "service.product.vendor.search"
+SERVICE_SERVICE_SEARCH = "service.service.search"
+SERVICE_SERVICE_READ = "service.service.read"
+SERVICE_SERVICE_BUNDLE_SEARCH = "service.service.bundle.search"
+SERVICE_SERVICE_BUNDLE_READ = "service.service.bundle.read"
+SERVICE_PURCHASE_ORDER_SEARCH = "service.purchase.order.search"
+SERVICE_PURCHASE_ORDER_READ = "service.purchase.order.read"
+SERVICE_PURCHASE_ORDER_ITEM_SEARCH = "service.purchase.order.item.search"
 
 IDENTITY_USER_SEARCH = "identity.user.search"
 IDENTITY_USER_READ = "identity.user.read"
@@ -90,6 +100,16 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
+        SERVICE_PRODUCT_SEARCH,
+        SERVICE_PRODUCT_READ,
+        SERVICE_PRODUCT_VENDOR_SEARCH,
+        SERVICE_SERVICE_SEARCH,
+        SERVICE_SERVICE_READ,
+        SERVICE_SERVICE_BUNDLE_SEARCH,
+        SERVICE_SERVICE_BUNDLE_READ,
+        SERVICE_PURCHASE_ORDER_SEARCH,
+        SERVICE_PURCHASE_ORDER_READ,
+        SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
     }
 )
 
@@ -494,6 +514,122 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
                 "product,company,status"
             ),
             authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_SEARCH,
+            display_name="Search Service Products",
+            business_purpose="Search authorized Autotask product catalog records.",
+            resource_types="service_product,product,catalog_item",
+            operation="search",
+            selector_keys="name,sku,resource_id,filters,page_size,after_resource_id",
+            fact_hints="product,products,catalog,item,sku,part number,unit cost,unit price,inventory",
+            authoritative_change_sources=at,
+            collection_fact="products",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_READ,
+            display_name="Read Service Product",
+            business_purpose="Read one authorized Autotask product catalog record.",
+            resource_types="service_product,product,catalog_item",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="product,catalog item,sku,part number,unit cost,unit price,inventory",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_VENDOR_SEARCH,
+            display_name="Search Product Vendors",
+            business_purpose="Search vendor associations for one authorized Autotask product.",
+            resource_types="service_product_vendor,product_vendor,vendor",
+            operation="search",
+            selector_keys="product_id,vendor_id,filters,page_size,after_resource_id",
+            fact_hints="product vendor,vendor association,supplier,product supplier",
+            authoritative_change_sources=at,
+            collection_fact="product vendors",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_SEARCH,
+            display_name="Search Service Catalog Services",
+            business_purpose="Search authorized Autotask recurring service catalog records.",
+            resource_types="service_catalog_service,service,catalog_item",
+            operation="search",
+            selector_keys="name,resource_id,filters,page_size,after_resource_id",
+            fact_hints="service,services,recurring service,catalog,billing service",
+            authoritative_change_sources=at,
+            collection_fact="services",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_READ,
+            display_name="Read Service Catalog Service",
+            business_purpose="Read one authorized Autotask recurring service catalog record.",
+            resource_types="service_catalog_service,service,catalog_item",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="service,recurring service,catalog,billing service",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_BUNDLE_SEARCH,
+            display_name="Search Service Bundles",
+            business_purpose="Search authorized Autotask service bundle catalog records.",
+            resource_types="service_bundle,catalog_item",
+            operation="search",
+            selector_keys="name,resource_id,filters,page_size,after_resource_id",
+            fact_hints="service bundle,bundle,recurring service bundle,catalog",
+            authoritative_change_sources=at,
+            collection_fact="service bundles",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_BUNDLE_READ,
+            display_name="Read Service Bundle",
+            business_purpose="Read one authorized Autotask service bundle catalog record.",
+            resource_types="service_bundle,catalog_item",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="service bundle,bundle,recurring service bundle,catalog",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_SEARCH,
+            display_name="Search Purchase Orders",
+            business_purpose="Search authorized Autotask purchase orders.",
+            resource_types="service_purchase_order,purchase_order,procurement",
+            operation="search",
+            selector_keys="purchase_order_number,vendor_id,vendor_invoice_number,resource_id,filters,page_size,after_resource_id",
+            fact_hints="purchase order,po,vendor invoice,procurement,vendor,supplier",
+            authoritative_change_sources=at,
+            collection_fact="purchase orders",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_READ,
+            display_name="Read Purchase Order",
+            business_purpose="Read one authorized Autotask purchase order.",
+            resource_types="service_purchase_order,purchase_order,procurement",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="purchase order,po,vendor invoice,procurement,vendor,supplier",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+            display_name="Search Purchase Order Items",
+            business_purpose="Search line items associated with one authorized Autotask purchase order.",
+            resource_types="service_purchase_order_item,purchase_order_item,procurement",
+            operation="search",
+            selector_keys="purchase_order_id,product_id,resource_id,filters,page_size,after_resource_id",
+            fact_hints="purchase order item,po line,line item,ordered product,quantity,unit cost",
+            authoritative_change_sources=at,
+            collection_fact="purchase order items",
         ),
         _read_capability(
             now=now,

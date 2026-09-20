@@ -23,6 +23,16 @@ from orchestrator.provider_read_capability_catalog import (
     MICROSOFT_GRAPH_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_TICKET_SEARCH,
+    SERVICE_PRODUCT_SEARCH,
+    SERVICE_PRODUCT_READ,
+    SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_SERVICE_SEARCH,
+    SERVICE_SERVICE_READ,
+    SERVICE_SERVICE_BUNDLE_SEARCH,
+    SERVICE_SERVICE_BUNDLE_READ,
+    SERVICE_PURCHASE_ORDER_SEARCH,
+    SERVICE_PURCHASE_ORDER_READ,
+    SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
 )
 
 
@@ -38,6 +48,9 @@ PROVIDER_READ_GOVERNED_CATALOG_PROFILE = "itglue-autotask-governed-catalog-v3"
 # therefore do not gain Microsoft access merely because the source contains the provider.
 PROVIDER_READ_ENTRA_GOVERNED_CATALOG_PROFILE = (
     "itglue-autotask-entra-governed-catalog-v4"
+)
+PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE = (
+    "itglue-autotask-entra-procurement-catalog-v5"
 )
 
 PROVIDER_READ_PRODUCTION_CAPABILITIES = frozenset(
@@ -56,13 +69,34 @@ PROVIDER_READ_DOCUMENT_CAPABILITIES = frozenset(
     }
 )
 
+PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES = frozenset({
+    SERVICE_PRODUCT_SEARCH,
+    SERVICE_PRODUCT_READ,
+    SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_SERVICE_SEARCH,
+    SERVICE_SERVICE_READ,
+    SERVICE_SERVICE_BUNDLE_SEARCH,
+    SERVICE_SERVICE_BUNDLE_READ,
+    SERVICE_PURCHASE_ORDER_SEARCH,
+    SERVICE_PURCHASE_ORDER_READ,
+    SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+})
+
+_LEGACY_AUTOTASK_CAPABILITIES = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+
 _V3_EXPECTED_PROVIDER_CATALOGS = {
     IT_GLUE_PROVIDER: IT_GLUE_CAPABILITIES,
-    AUTOTASK_PROVIDER: AUTOTASK_CAPABILITIES,
+    AUTOTASK_PROVIDER: _LEGACY_AUTOTASK_CAPABILITIES,
 }
 
 _V4_EXPECTED_PROVIDER_CATALOGS = {
     **_V3_EXPECTED_PROVIDER_CATALOGS,
+    MICROSOFT_GRAPH_PROVIDER: MICROSOFT_GRAPH_CAPABILITIES,
+}
+
+_V5_EXPECTED_PROVIDER_CATALOGS = {
+    IT_GLUE_PROVIDER: IT_GLUE_CAPABILITIES,
+    AUTOTASK_PROVIDER: AUTOTASK_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER: MICROSOFT_GRAPH_CAPABILITIES,
 }
 
@@ -81,6 +115,13 @@ PROVIDER_READ_ENTRA_GOVERNED_CATALOG_CAPABILITIES = frozenset().union(
     *(
         _V4_EXPECTED_PROVIDER_CATALOGS[provider_id]
         for provider_id in sorted(_V4_EXPECTED_PROVIDER_CATALOGS)
+    )
+)
+
+PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_CAPABILITIES = frozenset().union(
+    *(
+        _V5_EXPECTED_PROVIDER_CATALOGS[provider_id]
+        for provider_id in sorted(_V5_EXPECTED_PROVIDER_CATALOGS)
     )
 )
 
@@ -196,10 +237,23 @@ def _validate_exact_provider_read_contract(
             raise ProviderReadActivationError(
                 f"provider {provider_id!r} exposes a non-deterministic execution mode"
             )
-        if provider.capabilities != expected_catalog:
+        if not expected_catalog.issubset(provider.capabilities):
             raise ProviderReadActivationError(
-                f"provider {provider_id!r} capability catalog drifted from source"
+                f"provider {provider_id!r} is missing required profile capabilities"
             )
+
+        dormant_capabilities = provider.capabilities - expected_catalog
+        for dormant_name in sorted(dormant_capabilities):
+            dormant = capabilities.get(capability_name=dormant_name, version="1.0")
+            if dormant.lifecycle_status is not CapabilityLifecycle.PILOT:
+                raise ProviderReadActivationError(
+                    f"dormant capability {dormant_name!r} is not pilot before profile activation"
+                )
+            dormant_metadata = dormant.metadata
+            if dormant_metadata.get("read_only", "").strip().casefold() != "true":
+                raise ProviderReadActivationError(
+                    f"dormant capability {dormant_name!r} is not explicitly read-only"
+                )
         if provider.pricing_profile_id != "zero-cost-foundation":
             raise ProviderReadActivationError(
                 f"provider {provider_id!r} no longer has the zero-cost profile"
@@ -258,6 +312,11 @@ def apply_provider_read_activation_profile(
         )
     elif normalized == PROVIDER_READ_ENTRA_GOVERNED_CATALOG_PROFILE:
         expected_catalogs = _V4_EXPECTED_PROVIDER_CATALOGS
+        approved_capabilities, provider_capabilities = _governed_catalog_contract(
+            expected_catalogs
+        )
+    elif normalized == PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE:
+        expected_catalogs = _V5_EXPECTED_PROVIDER_CATALOGS
         approved_capabilities, provider_capabilities = _governed_catalog_contract(
             expected_catalogs
         )
