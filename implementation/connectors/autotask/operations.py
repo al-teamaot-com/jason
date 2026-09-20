@@ -33,6 +33,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Resources",
         "Opportunities",
         "NotificationHistory",
+        "TicketCharges",
     }
 )
 
@@ -99,6 +100,19 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     "autotask.ticket.note.update": OperationDefinition(
         method="PATCH",
         path_template="/V1.0/Tickets/{ticketID}/Notes",
+        path_arguments=("ticketID",),
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.ticket.charge.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Tickets/{ticketID}/Charges",
+        path_arguments=("ticketID",),
+        json_argument="payload",
+    ),
+    "autotask.ticket.charge.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/Tickets/{ticketID}/Charges",
         path_arguments=("ticketID",),
         json_argument="payload",
         require_positive_body_id=True,

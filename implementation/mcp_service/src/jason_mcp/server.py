@@ -1496,6 +1496,8 @@ def _project_action_result(
         "service.purchase.order.item.create",
         "service.purchase.order.item.update",
         "service.purchase.order.receive",
+        "service.ticket.charge.create",
+        "service.ticket.charge.update",
     }:
         verification = data.get("jasonVerification")
         if not isinstance(verification, Mapping):

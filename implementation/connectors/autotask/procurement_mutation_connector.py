@@ -26,6 +26,8 @@ AUTOTASK_PROCUREMENT_MUTATION_OPERATIONS = frozenset(
         "autotask.purchase.order.item.create",
         "autotask.purchase.order.item.update",
         "autotask.purchase.order.item.receiving.create",
+        "autotask.ticket.charge.create",
+        "autotask.ticket.charge.update",
     }
 )
 PROCUREMENT_OPERATION_PREFLIGHT = {
@@ -51,6 +53,8 @@ PROCUREMENT_OPERATION_PREFLIGHT = {
         "PurchaseOrderItemReceiving",
         "userAccessForCreate",
     ),
+    "autotask.ticket.charge.create": ("TicketCharges", "userAccessForCreate"),
+    "autotask.ticket.charge.update": ("TicketCharges", "userAccessForUpdate"),
 }
 
 
@@ -118,6 +122,18 @@ SAFE_FIELDS = {
         "purchaseOrderItemID", "quantityNowReceiving", "serialNumber",
         "vendorInvoiceNumber",
     }),
+    "autotask.ticket.charge.create": frozenset({
+        "ticketID", "productID", "billingCodeID", "costType", "chargeType",
+        "datePurchased", "name", "unitQuantity", "unitCost", "unitPrice",
+        "isBillableToCompany", "description", "notes",
+        "internalPurchaseOrderNumber", "purchaseOrderNumber",
+    }),
+    "autotask.ticket.charge.update": frozenset({
+        "id", "productID", "billingCodeID", "costType", "chargeType",
+        "datePurchased", "name", "unitQuantity", "unitCost", "unitPrice",
+        "isBillableToCompany", "description", "notes",
+        "internalPurchaseOrderNumber", "purchaseOrderNumber",
+    }),
 }
 
 
@@ -136,6 +152,9 @@ REQUIRED_CREATE_FIELDS = {
     ),
     "autotask.purchase.order.item.receiving.create": frozenset(
         {"purchaseOrderItemID", "quantityNowReceiving"}
+    ),
+    "autotask.ticket.charge.create": frozenset(
+        {"ticketID", "costType", "datePurchased", "name", "unitQuantity"}
     ),
 }
 class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
@@ -169,6 +188,9 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
             if int(raw_id) < 1:
                 raise ValueError("procurement update requires a positive durable id")
             normalized["id"] = int(raw_id)
+        if operation == "autotask.ticket.charge.create":
+            if not normalized.get("productID") and not normalized.get("billingCodeID"):
+                raise ValueError("ticket charge requires productID or billingCodeID")
         required = REQUIRED_CREATE_FIELDS.get(operation, frozenset())
         missing = sorted(
             field
@@ -191,8 +213,14 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
             request.context.capability,
             request.arguments.get("payload"),
         )
+        arguments = {**dict(request.arguments), "payload": payload}
+        if request.context.capability == "autotask.ticket.charge.update":
+            raw_ticket_id = request.arguments.get("ticketID") or request.arguments.get("ticket_id")
+            if isinstance(raw_ticket_id, bool) or not str(raw_ticket_id or "").isdigit() or int(raw_ticket_id) < 1:
+                raise ValueError("ticket charge update requires positive ticketID route selector")
+            arguments["ticketID"] = int(raw_ticket_id)
         normalized = ConnectorRequest(
             context=request.context,
-            arguments={**dict(request.arguments), "payload": payload},
+            arguments=arguments,
         )
         return super().execute(normalized)

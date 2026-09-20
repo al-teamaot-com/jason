@@ -63,3 +63,40 @@ def test_procurement_create_requires_minimum_fields_and_update_requires_id() -> 
         {"id": "42", "vendorInvoiceNumber": "INV-1"},
     )
     assert payload["id"] == 42
+
+def test_ticket_charge_create_requires_catalog_reference_and_bounded_fields() -> None:
+    with pytest.raises(ValueError, match="productID or billingCodeID"):
+        AutotaskProcurementMutationConnector._validated_payload(
+            "autotask.ticket.charge.create",
+            {
+                "ticketID": 123,
+                "costType": 1,
+                "datePurchased": "2026-09-20T12:00:00Z",
+                "name": "Dock",
+                "unitQuantity": 1,
+            },
+        )
+
+    payload = AutotaskProcurementMutationConnector._validated_payload(
+        "autotask.ticket.charge.create",
+        {
+            "ticketID": 123,
+            "productID": 45,
+            "costType": 1,
+            "datePurchased": "2026-09-20T12:00:00Z",
+            "name": "Dock",
+            "unitQuantity": 1,
+            "unitCost": 100,
+            "unitPrice": 150,
+            "isBillableToCompany": True,
+        },
+    )
+    assert payload["ticketID"] == 123
+    assert payload["productID"] == 45
+    assert payload["unitQuantity"] == 1
+
+    with pytest.raises(PermissionError, match="AUTOTASK_PROCUREMENT_FIELD_NOT_ALLOWED"):
+        AutotaskProcurementMutationConnector._validated_payload(
+            "autotask.ticket.charge.update",
+            {"id": 456, "ticketID": 999, "unitQuantity": 1},
+        )

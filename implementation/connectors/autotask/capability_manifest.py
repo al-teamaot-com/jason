@@ -28,6 +28,8 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_PURCHASE_ORDER_SEARCH,
     SERVICE_PURCHASE_ORDER_READ,
     SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+    SERVICE_TICKET_CHARGE_SEARCH,
+    SERVICE_TICKET_CHARGE_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -74,6 +76,7 @@ def build_autotask_manifest() -> IntegrationManifest:
         SelectorDefinition("purchase_order_id", "Durable Autotask purchase order identifier."),
         SelectorDefinition("purchase_order_number", "Human-visible Autotask purchase order number."),
         SelectorDefinition("vendor_invoice_number", "Vendor invoice number recorded on an Autotask purchase order."),
+        SelectorDefinition("is_billed", "Whether an Autotask ticket charge has already been approved and posted."),
         SelectorDefinition("filters", "Bounded schema-driven equality filters."),
         SelectorDefinition(
             "page_size",
@@ -288,6 +291,17 @@ def build_autotask_manifest() -> IntegrationManifest:
                 ),
                 observations=(ResourceObservation("procurement", "PO vendor, invoice, status, freight, totals context, and ordered line-item evidence."),),
                 relationships=("purchase order -> vendor company", "purchase order -> product"),
+            ),
+            ResourceDefinition(
+                resource_type="service_ticket_charge",
+                description="Autotask product/material billing charges associated with authorized tickets.",
+                selectors=selectors,
+                operations=(
+                    _search("service.ticket.charge.search", SERVICE_TICKET_CHARGE_SEARCH, ("ticket_id", "product_id", "is_billed", "filters", "page_size", "after_resource_id", "resource_id")),
+                    _read("service.ticket.charge.read", SERVICE_TICKET_CHARGE_READ),
+                ),
+                observations=(ResourceObservation("billing", "Ticket product/material charge, quantity, cost, price, billable state, and PO references."),),
+                relationships=("ticket charge -> ticket", "ticket charge -> product"),
             ),
             ResourceDefinition(
                 resource_type="service_schema",

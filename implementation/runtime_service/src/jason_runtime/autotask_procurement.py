@@ -33,6 +33,7 @@ from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_PURCHASE_ORDER_CREATE, SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE, SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
     SERVICE_PURCHASE_ORDER_RECEIVE,
+    SERVICE_TICKET_CHARGE_CREATE, SERVICE_TICKET_CHARGE_UPDATE,
     autotask_mutation_capability_definitions,
 )
 from orchestrator.service import CapabilityInvoker
@@ -49,6 +50,7 @@ PROCUREMENT_CAPABILITIES = frozenset({
     SERVICE_PURCHASE_ORDER_CREATE, SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE, SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
     SERVICE_PURCHASE_ORDER_RECEIVE,
+    SERVICE_TICKET_CHARGE_CREATE, SERVICE_TICKET_CHARGE_UPDATE,
 })
 
 PROVIDER_MAP = {
@@ -65,6 +67,8 @@ PROVIDER_MAP = {
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_ITEM_CREATE): "autotask.purchase.order.item.create",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_ITEM_UPDATE): "autotask.purchase.order.item.update",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_RECEIVE): "autotask.purchase.order.item.receiving.create",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_TICKET_CHARGE_CREATE): "autotask.ticket.charge.create",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_TICKET_CHARGE_UPDATE): "autotask.ticket.charge.update",
 }
 PROVIDER_ENTITY = {
     "autotask.product.create": "Products",
@@ -80,6 +84,8 @@ PROVIDER_ENTITY = {
     "autotask.purchase.order.item.create": "PurchaseOrderItems",
     "autotask.purchase.order.item.update": "PurchaseOrderItems",
     "autotask.purchase.order.item.receiving.create": "PurchaseOrderItemReceiving",
+    "autotask.ticket.charge.create": "TicketCharges",
+    "autotask.ticket.charge.update": "TicketCharges",
 }
 
 class ProcurementActivationError(RuntimeError):

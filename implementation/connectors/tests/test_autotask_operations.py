@@ -93,6 +93,8 @@ def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None
         "autotask.ticket.update",
         "autotask.ticket.note.create",
         "autotask.ticket.note.update",
+        "autotask.ticket.charge.create",
+        "autotask.ticket.charge.update",
         "autotask.product.create",
         "autotask.product.update",
         "autotask.product.vendor.create",
@@ -327,3 +329,34 @@ def test_update_requires_positive_durable_id() -> None:
 def test_ticket_and_ticketnote_delete_remain_unregistered() -> None:
     assert "autotask.ticket.delete" not in AUTOTASK_OPERATIONS
     assert "autotask.ticket.note.delete" not in AUTOTASK_OPERATIONS
+
+def test_ticket_charge_create_and_update_use_ticket_child_route() -> None:
+    method, path, params, body = resolve_operation_request(
+        "autotask.ticket.charge.create",
+        {
+            "payload": {
+                "ticketID": 123,
+                "productID": 45,
+                "costType": 1,
+                "datePurchased": "2026-09-20T12:00:00Z",
+                "name": "Dock",
+                "unitQuantity": 1,
+            }
+        },
+    )
+    assert method == "POST"
+    assert path == "/V1.0/Tickets/123/Charges"
+    assert params is None
+    assert body["ticketID"] == 123
+
+    method, path, params, body = resolve_operation_request(
+        "autotask.ticket.charge.update",
+        {
+            "ticketID": 123,
+            "payload": {"id": 456, "unitQuantity": 1},
+        },
+    )
+    assert method == "PATCH"
+    assert path == "/V1.0/Tickets/123/Charges"
+    assert params is None
+    assert body == {"id": 456, "unitQuantity": 1}

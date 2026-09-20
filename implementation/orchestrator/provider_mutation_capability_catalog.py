@@ -17,6 +17,8 @@ SERVICE_TICKET_CREATE = "service.ticket.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
 SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
+SERVICE_TICKET_CHARGE_CREATE = "service.ticket.charge.create"
+SERVICE_TICKET_CHARGE_UPDATE = "service.ticket.charge.update"
 SERVICE_PRODUCT_CREATE = "service.product.create"
 SERVICE_PRODUCT_UPDATE = "service.product.update"
 SERVICE_PRODUCT_VENDOR_CREATE = "service.product.vendor.create"
@@ -37,6 +39,8 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
+        SERVICE_TICKET_CHARGE_CREATE,
+        SERVICE_TICKET_CHARGE_UPDATE,
         SERVICE_PRODUCT_CREATE,
         SERVICE_PRODUCT_UPDATE,
         SERVICE_PRODUCT_VENDOR_CREATE,
@@ -200,6 +204,24 @@ def autotask_mutation_capability_definitions(
             display_name="Update Service Ticket Note",
             business_purpose="Apply a bounded partial update to one authorized ticket note.",
             resource_types="service_ticket_note,ticket_note",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_CHARGE_CREATE,
+            display_name="Create Service Ticket Charge",
+            business_purpose="Create one approved Autotask product/material charge on one verified ticket.",
+            resource_types="service_ticket_charge,ticket_charge,billing_item",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_CHARGE_UPDATE,
+            display_name="Update Service Ticket Charge",
+            business_purpose="Apply one approved update to an unbilled Autotask ticket charge.",
+            resource_types="service_ticket_charge,ticket_charge,billing_item",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
         ),

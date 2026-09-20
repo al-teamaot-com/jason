@@ -46,6 +46,8 @@ from .provider_read_capability_catalog import (
     SERVICE_PURCHASE_ORDER_SEARCH,
     SERVICE_PURCHASE_ORDER_READ,
     SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+    SERVICE_TICKET_CHARGE_SEARCH,
+    SERVICE_TICKET_CHARGE_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
@@ -159,6 +161,12 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "purchase_order_id": "orderID",
         "product_id": "productID",
+    },
+    SERVICE_TICKET_CHARGE_SEARCH: {
+        "resource_id": "id",
+        "ticket_id": "ticketID",
+        "product_id": "productID",
+        "is_billed": "isBilled",
     },
 }
 
@@ -468,6 +476,8 @@ def adapt_autotask_arguments(
         return {"entity": "ServiceBundles", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_PURCHASE_ORDER_READ:
         return {"entity": "PurchaseOrders", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_TICKET_CHARGE_READ:
+        return {"entity": "TicketCharges", "entity_id": _resource_id(arguments)}
     entity_searches = {
         SERVICE_PRODUCT_SEARCH: "Products",
         SERVICE_PRODUCT_VENDOR_SEARCH: "ProductVendors",
@@ -475,6 +485,7 @@ def adapt_autotask_arguments(
         SERVICE_SERVICE_BUNDLE_SEARCH: "ServiceBundles",
         SERVICE_PURCHASE_ORDER_SEARCH: "PurchaseOrders",
         SERVICE_PURCHASE_ORDER_ITEM_SEARCH: "PurchaseOrderItems",
+        SERVICE_TICKET_CHARGE_SEARCH: "TicketCharges",
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}

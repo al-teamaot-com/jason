@@ -62,6 +62,8 @@ SERVICE_SERVICE_BUNDLE_READ = "service.service.bundle.read"
 SERVICE_PURCHASE_ORDER_SEARCH = "service.purchase.order.search"
 SERVICE_PURCHASE_ORDER_READ = "service.purchase.order.read"
 SERVICE_PURCHASE_ORDER_ITEM_SEARCH = "service.purchase.order.item.search"
+SERVICE_TICKET_CHARGE_SEARCH = "service.ticket.charge.search"
+SERVICE_TICKET_CHARGE_READ = "service.ticket.charge.read"
 
 IDENTITY_USER_SEARCH = "identity.user.search"
 IDENTITY_USER_READ = "identity.user.read"
@@ -110,6 +112,8 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_PURCHASE_ORDER_SEARCH,
         SERVICE_PURCHASE_ORDER_READ,
         SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+        SERVICE_TICKET_CHARGE_SEARCH,
+        SERVICE_TICKET_CHARGE_READ,
     }
 )
 
@@ -630,6 +634,29 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="purchase order item,po line,line item,ordered product,quantity,unit cost",
             authoritative_change_sources=at,
             collection_fact="purchase order items",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_CHARGE_SEARCH,
+            display_name="Search Ticket Charges",
+            business_purpose="Search authorized Autotask product/material charges on service tickets.",
+            resource_types="service_ticket_charge,ticket_charge,billing_item",
+            operation="search",
+            selector_keys="ticket_id,product_id,resource_id,is_billed,filters,page_size,after_resource_id",
+            fact_hints="ticket charge,billable product,material cost,ticket billing,product charge,quantity,unit price",
+            authoritative_change_sources=at,
+            collection_fact="ticket charges",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_CHARGE_READ,
+            display_name="Read Ticket Charge",
+            business_purpose="Read one authorized Autotask product/material charge on a service ticket.",
+            resource_types="service_ticket_charge,ticket_charge,billing_item",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="ticket charge,billable product,material cost,ticket billing,product charge,quantity,unit price",
+            authoritative_change_sources=at,
         ),
         _read_capability(
             now=now,
