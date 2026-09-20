@@ -26,6 +26,9 @@ from .provider_read_capability_catalog import (
     IDENTITY_DIRECTORY_ROLE_SEARCH,
     IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     IDENTITY_USER_SEARCH,
+    COMMUNICATION_MAIL_MESSAGE_SEARCH,
+    COMMUNICATION_MAIL_MESSAGE_READ,
+    COMMUNICATION_MAIL_ATTACHMENT_SEARCH,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_PROVIDER,
     SERVICE_COMPANY_READ,
@@ -501,10 +504,36 @@ def adapt_autotask_arguments(
     raise ValueError(f"Unsupported Autotask canonical capability: {capability_name}")
 
 
+def _mailbox_address(arguments: Mapping[str, Any]) -> str:
+    mailbox = str(arguments.get("mailbox") or "").strip().casefold()
+    if not mailbox or "@" not in mailbox:
+        raise ValueError("mailbox must be an exact email address")
+    return mailbox
+
+
 def adapt_microsoft_graph_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if capability_name == COMMUNICATION_MAIL_MESSAGE_SEARCH:
+        result = {"mailbox": _mailbox_address(arguments)}
+        for key in ("sender", "received_after", "received_before", "page_size"):
+            if arguments.get(key) is not None:
+                result[key] = arguments[key]
+        return result
+    if capability_name == COMMUNICATION_MAIL_MESSAGE_READ:
+        message_id = str(arguments.get("message_id") or arguments.get("resource_id") or "").strip()
+        if not message_id:
+            raise ValueError("message_id is required")
+        return {"mailbox": _mailbox_address(arguments), "message_id": message_id}
+    if capability_name == COMMUNICATION_MAIL_ATTACHMENT_SEARCH:
+        message_id = str(arguments.get("message_id") or "").strip()
+        if not message_id:
+            raise ValueError("message_id is required")
+        result = {"mailbox": _mailbox_address(arguments), "message_id": message_id}
+        if arguments.get("page_size") is not None:
+            result["page_size"] = arguments["page_size"]
+        return result
     if capability_name == IDENTITY_USER_READ:
         return {"resource_id": _resource_id(arguments)}
     if capability_name == IDENTITY_AUTHENTICATION_METHODS_READ:

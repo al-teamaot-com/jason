@@ -13,6 +13,7 @@ from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
 from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirectoryConnector
+from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
 from kernel.capabilities import CapabilityRegistryService
@@ -51,6 +52,9 @@ from orchestrator.provider_read_capability_catalog import (
     IDENTITY_DIRECTORY_ROLE_SEARCH,
     IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     IDENTITY_USER_SEARCH,
+    COMMUNICATION_MAIL_MESSAGE_SEARCH,
+    COMMUNICATION_MAIL_MESSAGE_READ,
+    COMMUNICATION_MAIL_ATTACHMENT_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_CAPABILITIES,
@@ -133,6 +137,9 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_TICKET_CHARGE_READ): "autotask.entity.get",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_SEARCH): "microsoft_graph.user.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_USER_READ): "microsoft_graph.user.get",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_MESSAGE_SEARCH): "microsoft_graph.mail.message.search",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_MESSAGE_READ): "microsoft_graph.mail.message.read",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_ATTACHMENT_SEARCH): "microsoft_graph.mail.attachment.search",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_AUTHENTICATION_METHODS_READ): "microsoft_graph.authentication_methods.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_CONDITIONAL_ACCESS_SEARCH): "microsoft_graph.conditional_access.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_SEARCH): "microsoft_graph.directory_roles.list",
@@ -164,6 +171,9 @@ _RUNTIME_BINDINGS_ENV = "JASON_TEAMS_IDENTITY_BINDINGS_DB"
 _RUNTIME_MICROSOFT_BOUNDARY_ENV = "JASON_MICROSOFT_BOUNDARY_DB"
 _RUNTIME_MICROSOFT_ROLE_ENV = "JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH"
 _RUNTIME_MICROSOFT_SECRET_ENV = "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH"
+_RUNTIME_MICROSOFT_MAIL_ROLE_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH"
+_RUNTIME_MICROSOFT_MAIL_SECRET_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH"
+_RUNTIME_MICROSOFT_MAILBOXES_ENV = "JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES"
 
 
 def register_provider_read_runtime_foundation(
@@ -267,6 +277,46 @@ def runtime_microsoft_directory_from_env(*, transport: HttpTransport):
     )
 
 
+def runtime_microsoft_mail_from_env(*, transport: HttpTransport):
+    from .microsoft_mail import build_microsoft_mail_runtime
+
+    boundary_db = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_BOUNDARY_ENV,
+            "/var/lib/jason/authority/client-boundaries.sqlite3",
+        )
+    )
+    openbao_url = os.getenv("JASON_OPENBAO_URL", "http://openbao:8200").strip()
+    role_id_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_MAIL_ROLE_ENV,
+            "/run/jason-secrets/openbao/microsoft-mail/role_id",
+        )
+    )
+    secret_id_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_MAIL_SECRET_ENV,
+            "/run/jason-secrets/openbao/microsoft-mail/secret_id",
+        )
+    )
+    return build_microsoft_mail_runtime(
+        boundary_db=boundary_db,
+        openbao_url=openbao_url,
+        role_id_path=role_id_path,
+        secret_id_path=secret_id_path,
+        transport=transport,
+    )
+
+
+def runtime_approved_mailboxes_from_env() -> frozenset[str]:
+    raw = os.getenv(_RUNTIME_MICROSOFT_MAILBOXES_ENV, "")
+    return frozenset(
+        item.strip().casefold()
+        for item in raw.split(",")
+        if item.strip() and "@" in item
+    )
+
+
 def runtime_source_authorization_bindings_from_env(
     *,
     transport: HttpTransport,
@@ -355,10 +405,23 @@ def build_provider_read_invoker(
             reader=MicrosoftGraphSecurityPostureReader(tokens=microsoft_directory.directory.tokens, transport=transport),
             bindings=raw_microsoft_bindings, audit=audit,
         )
+        microsoft_mail = runtime_microsoft_mail_from_env(transport=transport)
+        mailbox_connector = MicrosoftGraphMailboxConnector(
+            reader=microsoft_mail.reader,
+            bindings=raw_microsoft_bindings,
+            approved_mailboxes=runtime_approved_mailboxes_from_env(),
+            audit=audit,
+        )
         class _MicrosoftCompositeConnector:
             provider_name = MICROSOFT_GRAPH_PROVIDER
-            capabilities = directory_connector.capabilities | posture_connector.capabilities
+            capabilities = (
+                directory_connector.capabilities
+                | posture_connector.capabilities
+                | mailbox_connector.capabilities
+            )
             def execute(self, request):
+                if request.context.capability in mailbox_connector.capabilities:
+                    return mailbox_connector.execute(request)
                 if request.context.capability in posture_connector.capabilities:
                     return posture_connector.execute(request)
                 return directory_connector.execute(request)

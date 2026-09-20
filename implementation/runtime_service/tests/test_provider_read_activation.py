@@ -24,6 +24,7 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
+    MICROSOFT_GRAPH_MAIL_CAPABILITIES,
     SERVICE_COMPANY_READ,
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
@@ -33,6 +34,8 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_CAPABILITIES,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -357,6 +360,38 @@ def test_procurement_v5_explicitly_activates_new_autotask_reads_without_broadeni
     )
     assert PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES.issubset(
         set(state.capability_names)
+    )
+
+
+def test_mail_reads_remain_dormant_in_v5_and_activate_only_in_v6() -> None:
+    capabilities, providers = _registries()
+
+    v5 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
+    )
+    assert MICROSOFT_GRAPH_MAIL_CAPABILITIES.isdisjoint(
+        set(v5.capability_names)
+    )
+    for name in MICROSOFT_GRAPH_MAIL_CAPABILITIES:
+        assert capabilities.get(
+            capability_name=name,
+            version="1.0",
+        ).lifecycle_status is CapabilityLifecycle.PILOT
+
+    capabilities, providers = _registries()
+    v6 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_PROFILE,
+    )
+    assert v6.enabled is True
+    assert MICROSOFT_GRAPH_MAIL_CAPABILITIES.issubset(
+        set(v6.capability_names)
+    )
+    assert set(v6.capability_names) == set(
+        PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_CAPABILITIES
     )
 
 def test_profile_name_is_restart_persistable_environment_contract(

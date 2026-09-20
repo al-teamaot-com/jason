@@ -71,6 +71,9 @@ IDENTITY_AUTHENTICATION_METHODS_READ = "identity.authentication.methods.read"
 IDENTITY_CONDITIONAL_ACCESS_SEARCH = "identity.conditional.access.search"
 IDENTITY_DIRECTORY_ROLE_SEARCH = "identity.directory.role.search"
 IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH = "identity.directory.role.members.search"
+COMMUNICATION_MAIL_MESSAGE_SEARCH = "communication.mail.message.search"
+COMMUNICATION_MAIL_MESSAGE_READ = "communication.mail.message.read"
+COMMUNICATION_MAIL_ATTACHMENT_SEARCH = "communication.mail.attachment.search"
 
 
 IT_GLUE_CAPABILITIES = frozenset(
@@ -117,7 +120,7 @@ AUTOTASK_CAPABILITIES = frozenset(
     }
 )
 
-MICROSOFT_GRAPH_CAPABILITIES = frozenset(
+MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES = frozenset(
     {
         IDENTITY_USER_SEARCH,
         IDENTITY_USER_READ,
@@ -126,6 +129,18 @@ MICROSOFT_GRAPH_CAPABILITIES = frozenset(
         IDENTITY_DIRECTORY_ROLE_SEARCH,
         IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH,
     }
+)
+
+MICROSOFT_GRAPH_MAIL_CAPABILITIES = frozenset(
+    {
+        COMMUNICATION_MAIL_MESSAGE_SEARCH,
+        COMMUNICATION_MAIL_MESSAGE_READ,
+        COMMUNICATION_MAIL_ATTACHMENT_SEARCH,
+    }
+)
+
+MICROSOFT_GRAPH_CAPABILITIES = (
+    MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES | MICROSOFT_GRAPH_MAIL_CAPABILITIES
 )
 
 
@@ -734,6 +749,44 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             ),
             authoritative_change_sources=ms,
             canonical_facts="id,display_name,email,user_principal_name,account_enabled",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_MESSAGE_SEARCH,
+            display_name="Search Approved Mailbox Messages",
+            business_purpose="Search bounded messages in one explicitly approved AOT mailbox for operational evidence.",
+            resource_types="communication_mail_message,email_message,mailbox_message",
+            operation="search",
+            selector_keys="mailbox,sender,received_after,received_before,page_size",
+            fact_hints="mailbox,email,message,vendor order,ETA,shipping,tracking,backorder,invoice,delivery",
+            authoritative_change_sources=ms,
+            collection_fact="mail messages",
+            canonical_facts="id,subject,sender,received_at,has_attachments,internet_message_id,conversation_id",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_MESSAGE_READ,
+            display_name="Read Approved Mailbox Message",
+            business_purpose="Read one exact message from one explicitly approved AOT mailbox.",
+            resource_types="communication_mail_message,email_message,mailbox_message",
+            operation="read",
+            selector_keys="mailbox,message_id",
+            fact_hints="email body,message body,vendor update,order confirmation,ETA,shipping,tracking,invoice",
+            authoritative_change_sources=ms,
+            canonical_facts="id,subject,sender,received_at,body_type,body,body_preview",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_ATTACHMENT_SEARCH,
+            display_name="Search Mail Attachment Metadata",
+            business_purpose="Read bounded attachment metadata for one exact approved mailbox message without exposing attachment content.",
+            resource_types="communication_mail_attachment,email_attachment",
+            operation="search",
+            selector_keys="mailbox,message_id,page_size",
+            fact_hints="attachment,invoice attachment,packing slip,shipping document",
+            authoritative_change_sources=ms,
+            collection_fact="mail attachment metadata",
+            canonical_facts="id,name,content_type,size,is_inline,modified_at",
         ),
     )
 

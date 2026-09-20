@@ -923,12 +923,13 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-013 — Governed requester/vendor mailbox content reads
 
 - **Priority:** P1
-- **Status:** Planned — dependency for procurement lifecycle monitoring
+- **Status:** Implemented source-ready — blocked on separate Microsoft mail-read app/consent and mailbox allowlist
 - **Risk level:** High
 - **Idea:** Give Jason a governed Microsoft 365 mailbox/message search and read capability for explicitly approved AOT mailboxes so procurement workflows can correlate vendor order confirmations, ETA changes, backorders, shipment notices, tracking updates, delivery notices, cancellations, invoices, NDRs, and other operational evidence.
 - **Why it matters:** Procurement updates frequently arrive only by email to the person who requested the purchase. Without governed mailbox-content evidence, Jason cannot reliably maintain PO lifecycle state or generate timely approval proposals.
 - **Required behavior:** Resolve the exact approved mailbox; search bounded time windows/participants/subjects/identifiers; read only necessary message content and attachment metadata; preserve message IDs/timestamps/digests for audit; correlate using PO/vendor order/invoice/SKU/customer/ticket evidence; redact unnecessary sensitive content; never treat email alone as physical receiving evidence.
 - **Governance:** Mailbox scope must be explicit; no tenant-wide arbitrary mailbox reading; normal identity/authority/client boundaries apply; `direct_provider_access=false`.
+- **Implementation checkpoint (2026-09-20):** Source now includes bounded `communication.mail.message.search`, `communication.mail.message.read`, and `communication.mail.attachment.search` foundations, an exact approved-mailbox allowlist, a separate `microsoft_graph_mail` client boundary, separate OpenBao AppRole/secret paths, logical secret `microsoft_graph.mail_read`, and explicit `mail-read` permission profile. Existing v4/v5 provider-read profiles remain mailbox-blind; only the new explicit v6 profile can activate mail reads. Focused regression proves v5 leaves all mail capabilities in PILOT and v6 activates them only after the separate authority is present. A live read-only probe with the current directory application returned HTTP 403 for `/messages`, confirming the current application does not have effective `Mail.Read`; Jason did not broaden that application.
 - **Acceptance test:** In a controlled AOT mailbox, ingest one vendor ETA/shipping update tied to a test PO and prove exact message correlation without exposing unrelated mail.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement as the next procurement dependency after the PO lifecycle foundation.
@@ -936,7 +937,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
 
 - **Priority:** P1
-- **Status:** Planned — dependency for procurement customer billing
+- **Status:** Implemented — live governed TicketCharges read/create/update; controlled split-allocation acceptance pending
 - **Risk level:** High
 - **Idea:** Add an explicit governed capability to add and verify the correct billable product/charge to an exact Autotask ticket after a procurement allocation is approved.
 - **Why it matters:** AOT may order multiple units while only some are customer-billable. PO quantity must never be copied blindly to ticket billing.

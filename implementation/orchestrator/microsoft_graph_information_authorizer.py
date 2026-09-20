@@ -15,6 +15,7 @@ from .information_authorization import (
 from .information_sensitivity import assess_sensitive_evidence
 from .provider_read_capability_catalog import (
     MICROSOFT_GRAPH_CAPABILITIES,
+    MICROSOFT_GRAPH_MAIL_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
 )
 from .service import CapabilityInvoker, InvocationResult
@@ -54,12 +55,17 @@ def _authorized_envelope(
         if sensitive
         else InformationHandlingClass.RELEASABLE
     )
+    authority_basis = (
+        "microsoft_graph_mail_read"
+        if capability_name in MICROSOFT_GRAPH_MAIL_CAPABILITIES
+        else "microsoft_graph_directory_read"
+    )
     basis = (
         "jkd001_authority_context",
         "trusted_microsoft_identity_binding",
         "validated_microsoft_tenant_boundary",
         "central_orchestrator_governed_read",
-        "microsoft_graph_directory_read",
+        authority_basis,
     )
     return InformationAuthorizationEnvelope(
         handling_class=handling,
