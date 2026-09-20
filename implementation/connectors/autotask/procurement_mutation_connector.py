@@ -25,6 +25,7 @@ AUTOTASK_PROCUREMENT_MUTATION_OPERATIONS = frozenset(
         "autotask.purchase.order.update",
         "autotask.purchase.order.item.create",
         "autotask.purchase.order.item.update",
+        "autotask.purchase.order.item.receiving.create",
     }
 )
 PROCUREMENT_OPERATION_PREFLIGHT = {
@@ -45,6 +46,10 @@ PROCUREMENT_OPERATION_PREFLIGHT = {
     "autotask.purchase.order.item.update": (
         "PurchaseOrderItems",
         "userAccessForUpdate",
+    ),
+    "autotask.purchase.order.item.receiving.create": (
+        "PurchaseOrderItemReceiving",
+        "userAccessForCreate",
     ),
 }
 
@@ -109,6 +114,10 @@ SAFE_FIELDS = {
         "id", "productID", "inventoryLocationID", "quantity",
         "unitCost", "estimatedArrivalDate", "memo",
     }),
+    "autotask.purchase.order.item.receiving.create": frozenset({
+        "purchaseOrderItemID", "quantityNowReceiving", "serialNumber",
+        "vendorInvoiceNumber",
+    }),
 }
 
 
@@ -124,6 +133,9 @@ REQUIRED_CREATE_FIELDS = {
     "autotask.purchase.order.create": frozenset({"vendorID"}),
     "autotask.purchase.order.item.create": frozenset(
         {"orderID", "inventoryLocationID", "quantity", "unitCost"}
+    ),
+    "autotask.purchase.order.item.receiving.create": frozenset(
+        {"purchaseOrderItemID", "quantityNowReceiving"}
     ),
 }
 class AutotaskProcurementMutationConnector(AutotaskMutationConnector):

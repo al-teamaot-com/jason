@@ -105,6 +105,7 @@ def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None
         "autotask.purchase.order.update",
         "autotask.purchase.order.item.create",
         "autotask.purchase.order.item.update",
+        "autotask.purchase.order.item.receiving.create",
         "autotask.company.get",
         "autotask.company.search",
         "autotask.contact.get",

@@ -148,6 +148,11 @@ from .autotask_ticket_update import (
     register_autotask_ticket_update_invoker,
     register_autotask_ticket_update_runtime_foundation,
 )
+from .autotask_procurement import (
+    build_autotask_procurement_invoker,
+    register_autotask_procurement_invoker,
+    register_autotask_procurement_runtime_foundation,
+)
 from .cap007 import Cap007EventAudit, Cap007OpenBaoSecretBroker
 from .conversation_experience_cutover import (
     ConversationExperienceCutoverSettings,
@@ -705,6 +710,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_autotask_procurement_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_datto_component_execution_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -929,6 +939,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
     )
+    procurement_invoker = build_autotask_procurement_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     datto_component_execution_invoker = (
         build_datto_component_execution_invoker(
             openbao_url=settings.openbao_url,
@@ -1008,6 +1026,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_autotask_ticket_update_invoker(
         invokers=invokers,
         invoker=ticket_update_invoker,
+    )
+    register_autotask_procurement_invoker(
+        invokers=invokers,
+        invoker=procurement_invoker,
     )
     register_datto_component_execution_invoker(
         invokers=invokers,

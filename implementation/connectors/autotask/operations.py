@@ -23,6 +23,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Invoices",
         "PurchaseOrders",
         "PurchaseOrderItems",
+        "PurchaseOrderItemReceiving",
         "Products",
         "ProductVendors",
         "Services",
@@ -167,6 +168,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/PurchaseOrderItems",
         json_argument="payload",
         require_positive_body_id=True,
+    ),
+    "autotask.purchase.order.item.receiving.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/PurchaseOrderItemReceiving",
+        json_argument="payload",
     ),
     "autotask.company.get": OperationDefinition(
         method="GET",

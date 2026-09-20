@@ -61,7 +61,7 @@ def test_create_operations_are_non_idempotent_and_updates_are_conditional() -> N
     definitions = {item.capability_name: item for item in _definitions()}
 
     for name, definition in definitions.items():
-        if name.endswith(".create"):
+        if name.endswith(".create") or name.endswith(".receive"):
             assert (
                 definition.idempotency_behavior
                 is IdempotencyBehavior.NON_IDEMPOTENT

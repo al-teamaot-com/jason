@@ -29,6 +29,7 @@ SERVICE_PURCHASE_ORDER_CREATE = "service.purchase.order.create"
 SERVICE_PURCHASE_ORDER_UPDATE = "service.purchase.order.update"
 SERVICE_PURCHASE_ORDER_ITEM_CREATE = "service.purchase.order.item.create"
 SERVICE_PURCHASE_ORDER_ITEM_UPDATE = "service.purchase.order.item.update"
+SERVICE_PURCHASE_ORDER_RECEIVE = "service.purchase.order.receive"
 
 AUTOTASK_MUTATION_CAPABILITIES = frozenset(
     {
@@ -48,6 +49,7 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_PURCHASE_ORDER_UPDATE,
         SERVICE_PURCHASE_ORDER_ITEM_CREATE,
         SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+        SERVICE_PURCHASE_ORDER_RECEIVE,
     }
 )
 
@@ -308,5 +310,14 @@ def autotask_mutation_capability_definitions(
             resource_types="service_purchase_order_item,purchase_order_item,procurement",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_RECEIVE,
+            display_name="Receive Purchase Order Item",
+            business_purpose="Receive an approved quantity for one verified Autotask purchase-order item.",
+            resource_types="service_purchase_order_receipt,purchase_order_item,procurement",
+            operation="receive",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
     )

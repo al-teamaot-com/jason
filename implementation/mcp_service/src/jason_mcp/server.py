@@ -1482,6 +1482,33 @@ def _project_action_result(
 
         return result
 
+    if capability_name in {
+        "service.product.create",
+        "service.product.update",
+        "service.product.vendor.create",
+        "service.product.vendor.update",
+        "service.service.create",
+        "service.service.update",
+        "service.service.bundle.create",
+        "service.service.bundle.update",
+        "service.purchase.order.create",
+        "service.purchase.order.update",
+        "service.purchase.order.item.create",
+        "service.purchase.order.item.update",
+        "service.purchase.order.receive",
+    }:
+        verification = data.get("jasonVerification")
+        if not isinstance(verification, Mapping):
+            result["verification_available"] = False
+            return result
+        result["verification_available"] = True
+        result["readback_verified"] = bool(verification.get("readbackVerified"))
+        if verification.get("resourceId") is not None:
+            result["resource_id"] = _safe(verification.get("resourceId"))
+        if verification.get("entity") is not None:
+            result["entity"] = _safe(verification.get("entity"))
+        return result
+
     if capability_name == "endpoint.alert.resolve":
         for source in (
             "status",
