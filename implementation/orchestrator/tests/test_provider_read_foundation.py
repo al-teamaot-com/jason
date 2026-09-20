@@ -30,6 +30,16 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
+    SERVICE_PRODUCT_SEARCH,
+    SERVICE_PRODUCT_READ,
+    SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_SERVICE_SEARCH,
+    SERVICE_SERVICE_READ,
+    SERVICE_SERVICE_BUNDLE_SEARCH,
+    SERVICE_SERVICE_BUNDLE_READ,
+    SERVICE_PURCHASE_ORDER_SEARCH,
+    SERVICE_PURCHASE_ORDER_READ,
+    SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
@@ -240,6 +250,81 @@ def test_autotask_adapter_preserves_exact_reads_notes_and_schema_description() -
         SERVICE_ENTITY_DESCRIBE,
         {"entity": "ConfigurationItems"},
     ) == {"entity": "ConfigurationItems"}
+
+
+def test_autotask_procurement_read_adapter_maps_catalog_and_po_entities() -> None:
+    product = adapt_autotask_arguments(
+        SERVICE_PRODUCT_SEARCH,
+        {"sku": "ABC-123", "page_size": 25},
+    )
+    assert product["entity"] == "Products"
+    assert json.loads(product["search"]) == {
+        "MaxRecords": 25,
+        "filter": [{"op": "eq", "field": "sku", "value": "ABC-123"}],
+    }
+    assert adapt_autotask_arguments(
+        SERVICE_PRODUCT_READ,
+        {"resource_id": 44},
+    ) == {"entity": "Products", "entity_id": 44}
+
+    vendor = adapt_autotask_arguments(
+        SERVICE_PRODUCT_VENDOR_SEARCH,
+        {"product_id": 44, "vendor_id": 77},
+    )
+    assert vendor["entity"] == "ProductVendors"
+    assert json.loads(vendor["search"])["filter"] == [
+        {"op": "eq", "field": "productID", "value": 44},
+        {"op": "eq", "field": "vendorID", "value": 77},
+    ]
+
+    service = adapt_autotask_arguments(
+        SERVICE_SERVICE_SEARCH,
+        {"name": "Managed Security"},
+    )
+    assert service["entity"] == "Services"
+    assert adapt_autotask_arguments(
+        SERVICE_SERVICE_READ,
+        {"resource_id": 55},
+    ) == {"entity": "Services", "entity_id": 55}
+
+    bundle = adapt_autotask_arguments(
+        SERVICE_SERVICE_BUNDLE_SEARCH,
+        {"name": "Security Bundle"},
+    )
+    assert bundle["entity"] == "ServiceBundles"
+    assert adapt_autotask_arguments(
+        SERVICE_SERVICE_BUNDLE_READ,
+        {"resource_id": 66},
+    ) == {"entity": "ServiceBundles", "entity_id": 66}
+
+    purchase_order = adapt_autotask_arguments(
+        SERVICE_PURCHASE_ORDER_SEARCH,
+        {
+            "purchase_order_number": "PO-1001",
+            "vendor_id": 77,
+            "vendor_invoice_number": "INV-9001",
+        },
+    )
+    assert purchase_order["entity"] == "PurchaseOrders"
+    assert json.loads(purchase_order["search"])["filter"] == [
+        {"op": "eq", "field": "purchaseOrderNumber", "value": "PO-1001"},
+        {"op": "eq", "field": "vendorID", "value": 77},
+        {"op": "eq", "field": "vendorInvoiceNumber", "value": "INV-9001"},
+    ]
+    assert adapt_autotask_arguments(
+        SERVICE_PURCHASE_ORDER_READ,
+        {"resource_id": 88},
+    ) == {"entity": "PurchaseOrders", "entity_id": 88}
+
+    po_item = adapt_autotask_arguments(
+        SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+        {"purchase_order_id": 88, "product_id": 44},
+    )
+    assert po_item["entity"] == "PurchaseOrderItems"
+    assert json.loads(po_item["search"])["filter"] == [
+        {"op": "eq", "field": "orderID", "value": 88},
+        {"op": "eq", "field": "productID", "value": 44},
+    ]
 
 
 def test_autotask_company_search_supports_bounded_schema_driven_filters() -> None:

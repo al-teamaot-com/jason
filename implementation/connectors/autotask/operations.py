@@ -102,6 +102,72 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         json_argument="payload",
         require_positive_body_id=True,
     ),
+    "autotask.product.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Products",
+        json_argument="payload",
+    ),
+    "autotask.product.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/Products",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.product.vendor.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/ProductVendors",
+        json_argument="payload",
+    ),
+    "autotask.product.vendor.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/ProductVendors",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.service.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Services",
+        json_argument="payload",
+    ),
+    "autotask.service.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/Services",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.service.bundle.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/ServiceBundles",
+        json_argument="payload",
+    ),
+    "autotask.service.bundle.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/ServiceBundles",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.purchase.order.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/PurchaseOrders",
+        json_argument="payload",
+    ),
+    "autotask.purchase.order.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/PurchaseOrders",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.purchase.order.item.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/PurchaseOrderItems",
+        json_argument="payload",
+    ),
+    "autotask.purchase.order.item.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/PurchaseOrderItems",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
     "autotask.company.get": OperationDefinition(
         method="GET",
         path_template="/V1.0/Companies/{company_id}",

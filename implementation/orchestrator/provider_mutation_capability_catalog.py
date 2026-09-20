@@ -17,6 +17,18 @@ SERVICE_TICKET_CREATE = "service.ticket.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
 SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
+SERVICE_PRODUCT_CREATE = "service.product.create"
+SERVICE_PRODUCT_UPDATE = "service.product.update"
+SERVICE_PRODUCT_VENDOR_CREATE = "service.product.vendor.create"
+SERVICE_PRODUCT_VENDOR_UPDATE = "service.product.vendor.update"
+SERVICE_SERVICE_CREATE = "service.service.create"
+SERVICE_SERVICE_UPDATE = "service.service.update"
+SERVICE_SERVICE_BUNDLE_CREATE = "service.service.bundle.create"
+SERVICE_SERVICE_BUNDLE_UPDATE = "service.service.bundle.update"
+SERVICE_PURCHASE_ORDER_CREATE = "service.purchase.order.create"
+SERVICE_PURCHASE_ORDER_UPDATE = "service.purchase.order.update"
+SERVICE_PURCHASE_ORDER_ITEM_CREATE = "service.purchase.order.item.create"
+SERVICE_PURCHASE_ORDER_ITEM_UPDATE = "service.purchase.order.item.update"
 
 AUTOTASK_MUTATION_CAPABILITIES = frozenset(
     {
@@ -24,6 +36,18 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
+        SERVICE_PRODUCT_CREATE,
+        SERVICE_PRODUCT_UPDATE,
+        SERVICE_PRODUCT_VENDOR_CREATE,
+        SERVICE_PRODUCT_VENDOR_UPDATE,
+        SERVICE_SERVICE_CREATE,
+        SERVICE_SERVICE_UPDATE,
+        SERVICE_SERVICE_BUNDLE_CREATE,
+        SERVICE_SERVICE_BUNDLE_UPDATE,
+        SERVICE_PURCHASE_ORDER_CREATE,
+        SERVICE_PURCHASE_ORDER_UPDATE,
+        SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+        SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
     }
 )
 
@@ -129,7 +153,7 @@ def _mutation_capability(
             "requester_provider_profile_is_maximum_authority": "true",
             "activation_state": "source_only_not_registered",
             "pilot_provider": "autotask",
-            "pilot_scope": "tickets_and_ticket_notes",
+            "pilot_scope": "explicitly_registered_autotask_mutations",
         },
     )
 
@@ -174,6 +198,114 @@ def autotask_mutation_capability_definitions(
             display_name="Update Service Ticket Note",
             business_purpose="Apply a bounded partial update to one authorized ticket note.",
             resource_types="service_ticket_note,ticket_note",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_CREATE,
+            display_name="Create Service Product",
+            business_purpose="Create one approved Autotask product catalog record.",
+            resource_types="service_product,product,catalog_item",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_UPDATE,
+            display_name="Update Service Product",
+            business_purpose="Apply a bounded approved update to one Autotask product catalog record.",
+            resource_types="service_product,product,catalog_item",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_VENDOR_CREATE,
+            display_name="Create Product Vendor Association",
+            business_purpose="Associate one approved Autotask product with one verified vendor.",
+            resource_types="service_product_vendor,product_vendor,vendor",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PRODUCT_VENDOR_UPDATE,
+            display_name="Update Product Vendor Association",
+            business_purpose="Apply a bounded approved update to one product-vendor association.",
+            resource_types="service_product_vendor,product_vendor,vendor",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_CREATE,
+            display_name="Create Catalog Service",
+            business_purpose="Create one approved Autotask recurring service catalog record.",
+            resource_types="service_catalog_service,service,catalog_item",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_UPDATE,
+            display_name="Update Catalog Service",
+            business_purpose="Apply a bounded approved update to one Autotask recurring service catalog record.",
+            resource_types="service_catalog_service,service,catalog_item",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_BUNDLE_CREATE,
+            display_name="Create Service Bundle",
+            business_purpose="Create one approved Autotask service bundle catalog record.",
+            resource_types="service_bundle,catalog_item",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_SERVICE_BUNDLE_UPDATE,
+            display_name="Update Service Bundle",
+            business_purpose="Apply a bounded approved update to one Autotask service bundle catalog record.",
+            resource_types="service_bundle,catalog_item",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_CREATE,
+            display_name="Create Purchase Order",
+            business_purpose="Create one approved Autotask purchase order for one verified vendor.",
+            resource_types="service_purchase_order,purchase_order,procurement",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_UPDATE,
+            display_name="Update Purchase Order",
+            business_purpose="Apply a bounded approved update to one Autotask purchase order.",
+            resource_types="service_purchase_order,purchase_order,procurement",
+            operation="update",
+            idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+            display_name="Create Purchase Order Item",
+            business_purpose="Create one approved product line on one verified Autotask purchase order.",
+            resource_types="service_purchase_order_item,purchase_order_item,procurement",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+            display_name="Update Purchase Order Item",
+            business_purpose="Apply a bounded approved update to one Autotask purchase-order line.",
+            resource_types="service_purchase_order_item,purchase_order_item,procurement",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
         ),

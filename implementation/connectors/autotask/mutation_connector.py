@@ -83,6 +83,7 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
 
     logical_secret = "autotask.write"
     capabilities = AUTOTASK_MUTATION_OPERATIONS
+    operation_preflight = _OPERATION_PREFLIGHT
 
     def _audit_mutation_event(
         self,
@@ -102,7 +103,7 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         """Execute one registered mutation through all local/provider gates."""
 
-        if request.context.capability not in AUTOTASK_MUTATION_OPERATIONS:
+        if request.context.capability not in self.capabilities:
             raise ConnectorAuthorizationError(
                 "Capability is not registered for the Autotask mutation connector: "
                 f"{request.context.capability}"
@@ -197,7 +198,7 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
         headers: Mapping[str, str],
         operation: str,
     ) -> None:
-        entity, access_field = _OPERATION_PREFLIGHT[operation]
+        entity, access_field = self.operation_preflight[operation]
         payload = self._transport.request(
             method="GET",
             url=f"{self._api_root(prepared)}/V1.0/{entity}/entityInformation",
@@ -218,7 +219,7 @@ class AutotaskMutationConnector(AutotaskImpersonatingConnector):
         credentials: Mapping[str, str],
     ) -> PreparedRequest:
         operation = request.context.capability
-        if operation not in AUTOTASK_MUTATION_OPERATIONS:
+        if operation not in self.capabilities:
             raise ConnectorAuthorizationError(
                 "Capability is not registered for the Autotask mutation connector: "
                 f"{operation}"
