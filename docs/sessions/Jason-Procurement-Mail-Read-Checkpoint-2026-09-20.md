@@ -56,19 +56,26 @@ Future helper tracked as `TODO-CONN-014`:
 
 ## Blocking item
 
-`SUPPORT-CONN-018` remains open.
+`SUPPORT-CONN-018` remains open only for final Microsoft RBAC propagation and production acceptance.
 
-Remaining external setup:
+Completed on 2026-09-21:
 
-1. provision the OpenBao `microsoft_graph.mail_metadata` certificate secret/AppRole;
-2. provision the OpenBao `microsoft_graph.mail_read` certificate secret/AppRole;
-3. persist validated metadata and full-content Microsoft client boundaries;
-4. configure the exact full-content approved-mailbox allowlist to mirror explicit opt-in scope;
-6. activate provider-read v6;
-7. prove approved mailbox search/read and attachment metadata;
-8. prove a non-approved mailbox is denied;
-9. verify `direct_provider_access=false`;
-10. then run the procurement email correlation acceptance test.
+1. provisioned both OpenBao mail certificate secrets/AppRoles at KV version 1;
+2. persisted validated metadata and full-content Microsoft client boundaries;
+3. proved tenant-wide metadata search with no message-body exposure;
+4. proved full-content HTTP 403 while the Exchange opt-in scope was empty;
+5. enrolled `al@teamaot.com` as the sole direct full-read member and confirmed `Test-ServicePrincipalAuthorization` reports `InScope=True`;
+6. built and started shadow image `jason-mcp:communications-evidence-e4d8b4f` with provider-read v6 active, no host port, and only `al@teamaot.com` in Jason's full-content allowlist;
+7. confirmed production still exposes zero mail capabilities.
+
+Remaining:
+
+1. allow Microsoft Exchange Application RBAC cache propagation without repeated Content-app calls;
+2. prove the enrolled mailbox succeeds through a fresh content-app request;
+3. prove a non-approved mailbox remains denied;
+4. verify `direct_provider_access=false`;
+5. stage production runtime AppRole files and perform controlled v6 activation;
+6. run the procurement email correlation acceptance test.
 
 ## Grafana / roadmap state
 
