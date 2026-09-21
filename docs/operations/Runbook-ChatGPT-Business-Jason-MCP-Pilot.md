@@ -280,3 +280,30 @@ Stop expansion or promotion if:
 ## Current acceptance conclusion
 
 The bounded ChatGPT → Jason MCP → Central Orchestrator → Datto workflow is operationally proven across chats for exact target/component resolution, historical fresh per-execution approval, one-attempt component execution, terminal readback, and actual component StdOut retrieval. The current production policy additionally supports server-classified `standing_safe` diagnostics without a separate per-run approval while preserving `per_run` approval for disruptive or state-changing execution. Future provider/action expansion is a new governed change, not a continuation of the completed proof.
+
+## AOT employee access and JIT identity enrollment
+
+ChatGPT Business workspace publication is the outer application-distribution boundary. Jason remains the authoritative identity and authorization boundary after the custom app is invoked.
+
+An authenticated Microsoft user may be automatically enrolled into Jason only when all of the following are true:
+
+1. the Entra access token validates for Jason's fixed AOT tenant and MCP resource/scope;
+2. Microsoft Graph resolves the exact authenticated Entra object ID;
+3. the directory account is enabled;
+4. the authoritative `userPrincipalName` belongs to `teamaot.com` or `teamaom.com`;
+5. no conflicting active Jason identity exists for the deterministic Entra-derived principal.
+
+Eligible first-time users receive a durable Microsoft-object-to-Jason identity binding and an active `human` Jason identity in organization `aot`. They receive **no individual authority grants during enrollment**.
+
+This intentionally maps first-time AOT employees to the existing **RO (Read Only)** baseline. JKD-001 already evaluates `organization:aot` grants in addition to principal-specific grants; the organization currently supplies the approved shared observe-only provider-read baseline. Tech, Admin, and Owner are explicit elevations through separately governed authority grants and must never be inferred from email domain, Microsoft group membership, ChatGPT workspace membership, title, or conversational request.
+
+The accepted role direction remains:
+
+- **Owner** — highest AOT Jason authority, still subject to high-risk controls and explicit approval policy;
+- **Admin** — operational administration without constitutional/governance-policy ownership or self-elevation;
+- **Tech** — scoped operational read/action authority for approved capabilities and resources;
+- **RO** — observe-only baseline; cannot execute, mutate, approve, or self-elevate.
+
+Fail closed for disabled accounts, missing/invalid UPNs, external/guest UPNs, non-AOT domains, Microsoft directory failure, identity conflicts, or inactive bindings.
+
+The MCP server does not independently receive a trustworthy ChatGPT Business workspace-membership claim in the Microsoft token. Workspace membership is therefore enforced by ChatGPT Business app publication/distribution, while Jason independently enforces the AOT Microsoft identity/domain and Jason role/authority boundary. Do not treat either layer as a substitute for the other.

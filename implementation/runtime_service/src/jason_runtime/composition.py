@@ -1199,4 +1199,5 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         identity_authority=identity_authority,
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,
+        microsoft_user_directory=microsoft_directory.directory,
     )

@@ -19,6 +19,7 @@ from kernel.identity_authority import (
     ApprovalRecord,
     AuthorityOutcome,
     AuthorityRequest,
+    IdentityRecord,
     PermissionMode,
 )
 import jwt
@@ -33,6 +34,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
+from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
     ThreatCorrelationError,
@@ -92,6 +94,15 @@ JASON_OAUTH_REQUEST_SCOPE = os.environ.get(
     "JASON_MCP_OAUTH_REQUEST_SCOPE",
     JASON_RESOURCE_URL.rstrip("/") + "/" + JASON_REQUIRED_SCOPE,
 ).strip()
+
+JASON_AUTOENROLL_DOMAINS = frozenset(
+    item.strip().casefold()
+    for item in os.environ.get(
+        "JASON_MCP_AUTOENROLL_DOMAINS",
+        "teamaot.com,teamaom.com",
+    ).split(",")
+    if item.strip()
+)
 
 # OAuth discovery facade used by MCP clients.  The actual authorization
 # and token endpoints remain Microsoft Entra.
@@ -285,6 +296,89 @@ def _runtime():
     return app
 
 
+def _auto_enroll_aot_member(
+    *,
+    app: Any,
+    bindings: Any,
+    tenant_id: str,
+    object_id: str,
+) -> MicrosoftIdentityBinding:
+    """Enroll one authenticated AOT employee as the default RO Jason role.
+
+    ChatGPT Business publication controls who can invoke the custom app. Jason then
+    independently verifies the Microsoft tenant/object against the AOT directory.
+    A newly enrolled identity receives no individual grants; JKD-001 therefore limits
+    it to the existing organization:aot observe grants until Tech/Admin/Owner authority
+    is explicitly added.
+    """
+
+    directory = getattr(app, "microsoft_user_directory", None)
+    if directory is None:
+        raise PermissionError("MCP_IDENTITY_AUTOENROLL_UNAVAILABLE")
+
+    try:
+        user = directory.read_user(
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=object_id,
+        )
+    except Exception as exc:
+        raise PermissionError("MCP_IDENTITY_AUTOENROLL_DIRECTORY_REJECTED") from exc
+
+    if user.get("accountEnabled") is False:
+        raise PermissionError("MCP_IDENTITY_AUTOENROLL_ACCOUNT_DISABLED")
+
+    upn = str(user.get("userPrincipalName") or "").strip().casefold()
+    if "@" not in upn:
+        raise PermissionError("MCP_IDENTITY_AUTOENROLL_UPN_REQUIRED")
+    upn_domain = upn.rsplit("@", 1)[1]
+    if upn_domain not in JASON_AUTOENROLL_DOMAINS:
+        raise PermissionError("MCP_IDENTITY_DOMAIN_NOT_ALLOWED")
+
+    mail = str(user.get("mail") or "").strip().casefold()
+    email_address = upn
+    if "@" in mail and mail.rsplit("@", 1)[1] in JASON_AUTOENROLL_DOMAINS:
+        email_address = mail
+
+    compact_oid = re.sub(r"[^a-f0-9]", "", object_id.casefold())
+    if len(compact_oid) < 12:
+        raise PermissionError("MCP_AUTHENTICATED_IDENTITY_INVALID")
+    principal_id = f"person-entra-{compact_oid}"
+
+    identities = app.identity_authority.identities
+    existing_identity = identities.get(principal_id)
+    if existing_identity is None:
+        identities.put(
+            IdentityRecord(
+                identity_id=principal_id,
+                identity_type="human",
+                organization_id="aot",
+                status="active",
+            )
+        )
+    elif (
+        existing_identity.status != "active"
+        or existing_identity.organization_id != "aot"
+        or existing_identity.identity_type != "human"
+    ):
+        raise PermissionError("MCP_JASON_IDENTITY_CONFLICT")
+
+    binding = MicrosoftIdentityBinding(
+        microsoft_tenant_id=tenant_id,
+        microsoft_object_id=object_id,
+        jason_identity_id=principal_id,
+        client_id=None,
+        email_address=email_address,
+        status="active",
+    )
+    bindings.put(binding)
+    logger.info(
+        "JIT enrolled authenticated AOT MCP member principal=%s domain=%s role=RO",
+        principal_id,
+        upn_domain,
+    )
+    return binding
+
+
 def _authenticated_identity() -> tuple[
     str,
     str,
@@ -334,10 +428,15 @@ def _authenticated_identity() -> tuple[
         microsoft_object_id=object_id,
     )
 
-    if (
-        binding is None
-        or binding.status != "active"
-    ):
+    if binding is None:
+        binding = _auto_enroll_aot_member(
+            app=app,
+            bindings=bindings,
+            tenant_id=tenant_id,
+            object_id=object_id,
+        )
+
+    if binding.status != "active":
         raise PermissionError(
             "MCP_IDENTITY_NOT_BOUND"
         )

@@ -43,6 +43,7 @@ class RuntimeHttpApplication:
     identity_authority: Any | None = None
     capabilities: Any | None = None
     microsoft_identity_bindings: Any | None = None
+    microsoft_user_directory: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
