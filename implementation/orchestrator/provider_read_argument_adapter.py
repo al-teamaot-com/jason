@@ -15,6 +15,9 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_CONTACT_READ,
     DOCUMENTATION_CONTACT_SEARCH,
     DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_ATTACHMENT_SEARCH,
+    DOCUMENTATION_ATTACHMENT_READ,
+    DOCUMENTATION_ATTACHMENT_CONTENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
@@ -290,6 +293,28 @@ def adapt_it_glue_arguments(
         return {"organization_id": _resource_id(arguments)}
     if capability_name == DOCUMENTATION_DOCUMENT_READ:
         return {"document_id": _resource_id(arguments)}
+    if capability_name == DOCUMENTATION_ATTACHMENT_SEARCH:
+        document_id = arguments.get("document_id")
+        if document_id is None or (isinstance(document_id, str) and not document_id.strip()):
+            raise ValueError("document_id is required for IT Glue document attachment search")
+        return {"document_id": document_id}
+    if capability_name in {DOCUMENTATION_ATTACHMENT_READ, DOCUMENTATION_ATTACHMENT_CONTENT_READ}:
+        document_id = arguments.get("document_id")
+        if document_id is None or (isinstance(document_id, str) and not document_id.strip()):
+            raise ValueError("document_id is required for IT Glue document attachment read")
+        result = {"document_id": document_id, "attachment_id": _resource_id(arguments)}
+        if capability_name == DOCUMENTATION_ATTACHMENT_CONTENT_READ:
+            max_bytes = arguments.get("max_bytes", 10 * 1024 * 1024)
+            if isinstance(max_bytes, bool):
+                raise ValueError("max_bytes must be an integer between 1 and 15728640")
+            try:
+                max_bytes = int(max_bytes)
+            except (TypeError, ValueError) as error:
+                raise ValueError("max_bytes must be an integer between 1 and 15728640") from error
+            if not 1 <= max_bytes <= 15 * 1024 * 1024:
+                raise ValueError("max_bytes must be between 1 and 15728640")
+            result["max_bytes"] = max_bytes
+        return result
 
     if capability_name == DOCUMENTATION_FLEXIBLE_ASSET_SEARCH:
         type_id = arguments.get("flexible_asset_type_id")

@@ -17,6 +17,9 @@ from .information_authorization import (
 from .information_sensitivity import assess_sensitive_evidence
 from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_ATTACHMENT_SEARCH,
+    DOCUMENTATION_ATTACHMENT_READ,
+    DOCUMENTATION_ATTACHMENT_CONTENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
@@ -396,6 +399,23 @@ def _sanitize_it_glue_document_read_output(output: Mapping[str, Any]) -> dict[st
     return result
 
 
+def _sanitize_it_glue_attachment_output(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove provider download URLs and internal parent authorization material."""
+    def walk(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {
+                str(key): walk(child)
+                for key, child in value.items()
+                if str(key) not in {"download-url", "parent_document"}
+            }
+        if isinstance(value, list):
+            return [walk(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(walk(item) for item in value)
+        return value
+    return walk(dict(output))
+
+
 def _sanitize_it_glue_document_search_output(output: Mapping[str, Any]) -> dict[str, Any]:
     """Defense in depth: document search never carries document body content."""
 
@@ -482,7 +502,37 @@ class ProviderReadInformationAuthorizingInvoker:
         invocation = self.delegate.invoke(request=request, resolution=resolution)
         provider_id = (resolution.selected_provider_id or "").strip()
 
-        if provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_READ:
+        if provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_ATTACHMENT_CONTENT_READ:
+            payload = invocation.output.get("data")
+            parent_document = payload.get("parent_document") if isinstance(payload, Mapping) else None
+            authorization = (
+                _it_glue_document_acl_envelope(
+                    request=request,
+                    payload=parent_document,
+                    bindings=self.bindings,
+                )
+                if isinstance(parent_document, Mapping)
+                else _service_only_envelope(
+                    provider_id=provider_id,
+                    resource_type="document-attachment",
+                    reason_code="IT_GLUE_DOCUMENT_AUTHORIZATION_PAYLOAD_INVALID",
+                )
+            )
+            output = _sanitize_it_glue_attachment_output(invocation.output)
+            release_decision = authorization.require_allowed(InformationAction.RELEASE)
+            if (
+                not release_decision.allowed
+                and release_decision.reason_code in _DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES
+                and _jason_managed_requester_authorization_proven(
+                    request=request,
+                    bindings=self.bindings,
+                )
+            ):
+                authorization = _jason_managed_it_glue_envelope(
+                    capability_name=resolution.capability_name,
+                    output=output,
+                )
+        elif provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_READ:
             payload = invocation.output.get("data")
             authorization = (
                 _it_glue_document_acl_envelope(
@@ -546,11 +596,14 @@ class ProviderReadInformationAuthorizingInvoker:
         ):
             output = dict(invocation.output)
             if resolution.capability_name in {
+                DOCUMENTATION_ATTACHMENT_SEARCH,
+                DOCUMENTATION_ATTACHMENT_READ,
+            }:
+                output = _sanitize_it_glue_attachment_output(output)
+            if resolution.capability_name in {
                 DOCUMENTATION_ORGANIZATION_SEARCH,
                 DOCUMENTATION_ORGANIZATION_READ,
                 DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
-    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
-    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
                 DOCUMENTATION_FLEXIBLE_ASSET_READ,
                 DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
                 DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,

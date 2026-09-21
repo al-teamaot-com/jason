@@ -14,6 +14,9 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_CONTACT_READ,
     DOCUMENTATION_CONTACT_SEARCH,
     DOCUMENTATION_DOCUMENT_READ,
+    DOCUMENTATION_ATTACHMENT_SEARCH,
+    DOCUMENTATION_ATTACHMENT_READ,
+    DOCUMENTATION_ATTACHMENT_CONTENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
@@ -80,6 +83,15 @@ def _selectors() -> tuple[SelectorDefinition, ...]:
         SelectorDefinition(
             name="page_size",
             description="Maximum records requested from one IT Glue page; bounded to 1-1000.",
+        ),
+        SelectorDefinition(
+            name="document_id",
+            description="Durable IT Glue parent document identifier.",
+            verified_identity_required=True,
+        ),
+        SelectorDefinition(
+            name="max_bytes",
+            description="Maximum attachment bytes permitted for bounded content retrieval.",
         ),
         SelectorDefinition(
             name="resource_id",
@@ -237,6 +249,41 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     ResourceObservation("schema", "Structured documentation type definition."),
                 ),
                 relationships=("flexible asset type -> flexible asset",),
+            ),
+            ResourceDefinition(
+                resource_type="documentation_attachment",
+                description="Uploaded files attached to authorized IT Glue documents.",
+                selectors=selectors,
+                operations=(
+                    _search_operation(
+                        "documentation.attachment.search",
+                        DOCUMENTATION_ATTACHMENT_SEARCH,
+                        ("document_id",),
+                    ),
+                    IntegrationOperation(
+                        operation_id="documentation.attachment.read",
+                        kind=OperationKind.READ,
+                        capability_name=DOCUMENTATION_ATTACHMENT_READ,
+                        description="Read one IT Glue document attachment metadata record.",
+                        read_only=True,
+                        selector_names=("document_id", "resource_id"),
+                        collection_supported=False,
+                    ),
+                    IntegrationOperation(
+                        operation_id="documentation.attachment.content.read",
+                        kind=OperationKind.READ,
+                        capability_name=DOCUMENTATION_ATTACHMENT_CONTENT_READ,
+                        description="Read bounded binary content for one IT Glue document attachment.",
+                        read_only=True,
+                        selector_names=("document_id", "resource_id", "max_bytes"),
+                        collection_supported=False,
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("identity", "Attachment identity and filename."),
+                    ResourceObservation("media", "MIME type, size, hash, and bounded file content."),
+                ),
+                relationships=("attachment -> document",),
             ),
             ResourceDefinition(
                 resource_type="documentation_document",

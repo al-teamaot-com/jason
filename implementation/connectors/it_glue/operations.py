@@ -72,6 +72,21 @@ IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/documents/{document_id}",
         path_arguments=("document_id",),
     ),
+    "it_glue.document.attachment.search": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments",
+        path_arguments=("document_id",),
+    ),
+    "it_glue.document.attachment.get": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments/{attachment_id}",
+        path_arguments=("document_id", "attachment_id"),
+    ),
+    "it_glue.document.attachment.content.get": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments/{attachment_id}",
+        path_arguments=("document_id", "attachment_id"),
+    ),
     "it_glue.relationships.list": OperationDefinition(
         method="GET",
         path_template="/relationships",

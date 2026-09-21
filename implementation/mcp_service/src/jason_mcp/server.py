@@ -26,6 +26,7 @@ import jwt
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWTError
 from mcp.server import MCPServer
+from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent, TextContent
 from mcp.server.transport_security import (
     TransportSecurityMiddleware,
     TransportSecuritySettings,
@@ -4123,6 +4124,144 @@ def execute_read_capability(
                 )
 
     return result
+
+
+@mcp.tool()
+def view_documentation_attachment(
+    document_id: int,
+    attachment_id: int,
+    max_bytes: int = 10 * 1024 * 1024,
+) -> list[TextContent | ImageContent | EmbeddedResource]:
+    """View one exact uploaded IT Glue document attachment through governance.
+
+    The parent IT Glue document must pass Jason's normal requester authorization.
+    Images are returned as MCP image content. PDFs and other bounded files are
+    returned as embedded binary resources so the MCP client can hand the actual
+    file to the model. Files are never executed.
+    """
+    capability_name = "documentation.attachment.content.read"
+    if not _dynamic_read_capability_allowed(capability_name):
+        return [TextContent(type="text", text="Attachment content read capability is not active.")]
+
+    if isinstance(document_id, bool) or isinstance(attachment_id, bool):
+        return [TextContent(type="text", text="document_id and attachment_id must be positive integers.")]
+    try:
+        document_id = int(document_id)
+        attachment_id = int(attachment_id)
+        max_bytes = int(max_bytes)
+    except (TypeError, ValueError):
+        return [TextContent(type="text", text="document_id, attachment_id, and max_bytes must be integers.")]
+    if document_id < 1 or attachment_id < 1 or not 1 <= max_bytes <= 15 * 1024 * 1024:
+        return [TextContent(type="text", text="Invalid attachment selector or max_bytes exceeds the 15 MiB bound.")]
+
+    app = _runtime()
+    principal, organization, assurance, client_id = _authenticated_identity()
+    execution_id = f"exec_mcp_attachment_{uuid4().hex}"
+    correlation_id = f"corr_mcp_attachment_{uuid4().hex}"
+    decision = app.identity_authority.evaluate(
+        AuthorityRequest(
+            request_id=execution_id,
+            correlation_id=correlation_id,
+            principal_id=principal,
+            organization_id=organization,
+            client_id=client_id,
+            capability=capability_name,
+            requested_mode=PermissionMode.OBSERVE,
+            authentication_assurance=assurance,
+        )
+    )
+    if decision.outcome is not AuthorityOutcome.ALLOWED or decision.execution_context is None:
+        return [TextContent(type="text", text="Jason authority denied attachment content access.")]
+
+    request = OrchestrationRequest(
+        execution_id=execution_id,
+        correlation_id=correlation_id,
+        principal_id=principal,
+        organization_id=organization,
+        client_id=client_id,
+        capability_name=capability_name,
+        capability_version=None,
+        requested_mode="deterministic",
+        orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True,
+        approval_present=decision.execution_context.approval_required,
+        risk="low",
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+            retention_allowed=False,
+        ),
+        budget=ExecutionBudget(
+            maximum_estimated_cost=Decimal("1.00"),
+            maximum_attempts=1,
+        ),
+        arguments={
+            "document_id": document_id,
+            "resource_id": attachment_id,
+            "max_bytes": max_bytes,
+        },
+        requester_kind="human",
+        permission_mode="observe",
+        policy_ids=("mcp-read-pilot-v1", "it-glue-attachment-view-v1"),
+        authority_context_id=decision.execution_context.context_id,
+    )
+    result = app.governed_orchestrator.execute(request)
+    if result.status.value != "succeeded":
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    "Attachment retrieval failed through Jason governance: "
+                    + (result.error_code or ",".join(result.reason_codes) or result.status.value)
+                ),
+            )
+        ]
+
+    output = result.output
+    data = output.get("data") if isinstance(output, Mapping) else None
+    if not isinstance(data, Mapping):
+        return [TextContent(type="text", text="Attachment retrieval returned no binary content.")]
+
+    attachment = data.get("attachment")
+    attrs = attachment.get("attributes") if isinstance(attachment, Mapping) else None
+    if not isinstance(attrs, Mapping):
+        attrs = {}
+    encoded = str(data.get("content_base64") or "")
+    if not encoded:
+        return [TextContent(type="text", text="Attachment retrieval returned empty content.")]
+
+    filename = str(
+        attrs.get("attachment-file-name")
+        or attrs.get("name")
+        or f"attachment-{attachment_id}"
+    ).strip()
+    mime_type = str(
+        attrs.get("attachment-content-type")
+        or "application/octet-stream"
+    ).strip()
+    sha256 = str(data.get("sha256") or "").strip()
+    size = data.get("content_bytes")
+    summary = (
+        f"IT Glue attachment: {filename}; MIME: {mime_type}; "
+        f"bytes: {size}; SHA-256: {sha256 or 'unavailable'}."
+    )
+    blocks: list[TextContent | ImageContent | EmbeddedResource] = [
+        TextContent(type="text", text=summary)
+    ]
+    if mime_type.casefold().startswith("image/"):
+        blocks.append(ImageContent(type="image", data=encoded, mimeType=mime_type))
+    else:
+        blocks.append(
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri=f"itglue://documents/{document_id}/attachments/{attachment_id}",
+                    mimeType=mime_type,
+                    blob=encoded,
+                ),
+            )
+        )
+    return blocks
 
 
 @mcp.tool()

@@ -39,6 +39,9 @@ DOCUMENTATION_CONFIGURATION_SEARCH = "documentation.configuration.search"
 DOCUMENTATION_CONFIGURATION_READ = "documentation.configuration.read"
 DOCUMENTATION_DOCUMENT_SEARCH = "documentation.document.search"
 DOCUMENTATION_DOCUMENT_READ = "documentation.document.read"
+DOCUMENTATION_ATTACHMENT_SEARCH = "documentation.attachment.search"
+DOCUMENTATION_ATTACHMENT_READ = "documentation.attachment.read"
+DOCUMENTATION_ATTACHMENT_CONTENT_READ = "documentation.attachment.content.read"
 DOCUMENTATION_FLEXIBLE_ASSET_SEARCH = "documentation.flexible.asset.search"
 DOCUMENTATION_FLEXIBLE_ASSET_READ = "documentation.flexible.asset.read"
 DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH = "documentation.flexible.asset.type.search"
@@ -93,6 +96,9 @@ IT_GLUE_CAPABILITIES = frozenset(
         DOCUMENTATION_CONFIGURATION_READ,
         DOCUMENTATION_DOCUMENT_SEARCH,
         DOCUMENTATION_DOCUMENT_READ,
+        DOCUMENTATION_ATTACHMENT_SEARCH,
+        DOCUMENTATION_ATTACHMENT_READ,
+        DOCUMENTATION_ATTACHMENT_CONTENT_READ,
         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
         DOCUMENTATION_FLEXIBLE_ASSET_READ,
         DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
@@ -386,6 +392,40 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints=(
                 "document,policy,procedure,sop,standard,guideline,documentation,content,title"
             ),
+            authoritative_change_sources=itg,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_ATTACHMENT_SEARCH,
+            display_name="Search Document Attachments",
+            business_purpose="List uploaded files attached to one authorized IT Glue document.",
+            resource_types="documentation_attachment,attachment,file",
+            operation="search",
+            selector_keys="document_id",
+            fact_hints="attachment,file,uploaded file,pdf,image,diagram,drawio,document upload",
+            authoritative_change_sources=itg,
+            collection_fact="document attachments",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_ATTACHMENT_READ,
+            display_name="Read Document Attachment Metadata",
+            business_purpose="Read metadata for one uploaded file attached to an authorized IT Glue document.",
+            resource_types="documentation_attachment,attachment,file",
+            operation="read",
+            selector_keys="document_id,resource_id",
+            fact_hints="attachment,file,filename,mime type,file size,pdf,image,diagram,drawio",
+            authoritative_change_sources=itg,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_ATTACHMENT_CONTENT_READ,
+            display_name="Read Document Attachment Content",
+            business_purpose="Retrieve bounded binary content for one uploaded file attached to an authorized IT Glue document.",
+            resource_types="documentation_attachment,attachment,file",
+            operation="content_read",
+            selector_keys="document_id,resource_id,max_bytes",
+            fact_hints="attachment content,file content,view file,open file,pdf,image,diagram,drawio",
             authoritative_change_sources=itg,
         ),
         _read_capability(

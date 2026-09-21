@@ -152,6 +152,17 @@ class HttpTransport(Protocol):
         timeout_seconds: float = 30.0,
     ) -> Any: ...
 
+    def request_bytes(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None = None,
+        timeout_seconds: float = 30.0,
+        max_bytes: int,
+    ) -> bytes: ...
+
 
 class Connector(Protocol):
     provider_name: str

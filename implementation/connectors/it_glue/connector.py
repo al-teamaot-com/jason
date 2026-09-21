@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from typing import Mapping
+import base64
+import hashlib
+from typing import Any, Mapping
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from connectors.it_glue.operations import resolve_operation
 from connectors.core.connector_base import (
     ConnectorBase,
     PreparedRequest,
 )
-from connectors.core.contracts import ConnectorRequest
+from connectors.core.contracts import ConnectorRequest, ConnectorResult, require_capability
 
 
 class ItGlueConnector(ConnectorBase):
@@ -24,9 +27,94 @@ class ItGlueConnector(ConnectorBase):
             "it_glue.flexible_asset.search",
             "it_glue.document.search",
             "it_glue.document.get",
+            "it_glue.document.attachment.search",
+            "it_glue.document.attachment.get",
+            "it_glue.document.attachment.content.get",
             "it_glue.relationships.list",
         }
     )
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        if request.context.capability != "it_glue.document.attachment.content.get":
+            return super().execute(request)
+
+        require_capability(request, self.capabilities)
+        credentials = self._secrets.resolve(self.logical_secret, request.context)
+        document_id = int(request.arguments["document_id"])
+        attachment_id = int(request.arguments["attachment_id"])
+        max_bytes = int(request.arguments.get("max_bytes", 10 * 1024 * 1024))
+
+        headers = {
+            "x-api-key": credentials["api_key"],
+            "Accept": "application/vnd.api+json",
+        }
+        self._audit.record(
+            "connector.requested",
+            request.context,
+            {"provider": self.provider_name, "operation": "document_attachment_content"},
+        )
+        parent_document = self._transport.request(
+            method="GET",
+            url=f"{self.base_url}/documents/{document_id}",
+            headers=headers,
+            params={"include": "authorized_users"},
+            timeout_seconds=30.0,
+        )
+        attachment_payload = self._transport.request(
+            method="GET",
+            url=f"{self.base_url}/documents/{document_id}/relationships/attachments/{attachment_id}",
+            headers=headers,
+            timeout_seconds=30.0,
+        )
+        resource = attachment_payload.get("data") if isinstance(attachment_payload, Mapping) else None
+        attributes = resource.get("attributes") if isinstance(resource, Mapping) else None
+        if not isinstance(attributes, Mapping):
+            raise ValueError("IT Glue attachment metadata is missing")
+        download_url = str(attributes.get("download-url") or "").strip()
+        if not download_url:
+            raise ValueError("IT Glue attachment download URL is missing")
+        if download_url.startswith("/"):
+            download_url = urljoin(self.base_url + "/", download_url.lstrip("/"))
+        parts = urlsplit(download_url)
+        host = (parts.hostname or "").casefold()
+        if parts.scheme not in {"http", "https"} or not (host == "itglue.com" or host.endswith(".itglue.com")):
+            raise ValueError("IT Glue attachment download URL is outside the approved provider domain")
+        if parts.scheme == "http":
+            download_url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
+
+        raw = self._transport.request_bytes(
+            method="GET",
+            url=download_url,
+            headers={},
+            timeout_seconds=30.0,
+            max_bytes=max_bytes,
+        )
+        safe_attributes = {
+            str(key): value
+            for key, value in attributes.items()
+            if str(key) != "download-url"
+        }
+        result = {
+            "parent_document": parent_document,
+            "attachment": {
+                "id": str(resource.get("id") or attachment_id),
+                "type": str(resource.get("type") or "attachments"),
+                "attributes": safe_attributes,
+            },
+            "content_base64": base64.b64encode(raw).decode("ascii"),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "content_bytes": len(raw),
+        }
+        self._audit.record(
+            "connector.completed",
+            request.context,
+            {"provider": self.provider_name, "operation": "document_attachment_content"},
+        )
+        return ConnectorResult(
+            capability=request.context.capability,
+            provider=self.provider_name,
+            data=result,
+        )
 
     def prepare_request(
         self,
