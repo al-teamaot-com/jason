@@ -269,6 +269,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 
 ### TODO-OPS-001 — Durable deferred-work recheck scheduler
 
+- **Related implementation:** `implementation/autonomous_remediation/availability.py` and `07-Operations/Endpoint-Availability-Verification-Playbook.md`
 - **Priority:** P1
 - **Status:** Planned
 - **Risk level:** Moderate
