@@ -186,6 +186,22 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 def collect_values(provider: str) -> dict[str, str]:
     if provider == "microsoft_graph":
         return _collect_microsoft_graph_values()
+    if provider == "kfs":
+        values = {
+            "request_from": input("kfs RequestFrom: ").strip(),
+            "request_to": input("kfs RequestTo: ").strip(),
+            "id": input("kfs dedicated Manager ID: ").strip(),
+            "password": getpass.getpass("kfs Manager password: ").strip(),
+            "authorization": getpass.getpass(
+                "kfs API Authorization value: "
+            ).strip(),
+        }
+        missing = [field for field, value in values.items() if not value]
+        if missing:
+            raise ProvisionError(
+                "Required provider field is empty: " + ", ".join(missing)
+            )
+        return values
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
     required_fields = set(spec.get("required_fields", spec["fields"]))
