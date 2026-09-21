@@ -38,6 +38,7 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
                 f"JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON={module.EXPECTED_DATTO_COMPONENTS_JSON}",
                 f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID={module.EXPECTED_DATTO_DEVICE_UID}",
                 f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS={module.EXPECTED_DATTO_DEVICE_CLASS}",
+                f"JASON_DATTO_SITE_VARIABLE_MCP_PROFILE={module.EXPECTED_DATTO_SITE_VARIABLE_PROFILE}",
             ],
         },
         "HostConfig": {
@@ -83,10 +84,12 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     assert 'jason_mcp_contract{check="provider_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="datto_execution_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="datto_execution_scope"} 1' in metrics
+    assert 'jason_mcp_contract{check="datto_site_variable_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="environment_unique"} 0' in metrics
     assert 'jason_mcp_env_duplicate_count{key="JASON_PROVIDER_READ_ACTIVATION_PROFILE"} 1' in metrics
     assert "jason_mcp_required_secret_mount_contract 1" in metrics
     assert "jason_datto_governed_execution_contract 1" in metrics
+    assert "jason_datto_site_variable_contract 1" in metrics
     assert "jason_host_kernel_error_count 0" in metrics
     assert "jason_root_filesystem_writable 1" in metrics
     assert "jason_mcp_rollback_available 1" in metrics
