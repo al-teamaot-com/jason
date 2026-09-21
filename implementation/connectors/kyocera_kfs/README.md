@@ -1,78 +1,47 @@
 # Kyocera Fleet Services connector
 
-This package implements Jason's governed, read-only Kyocera Fleet Services (KFS)
-connector foundation.
+This package implements Jason's governed Kyocera Fleet Services (KFS) provider
+using the KFS External Integration API User Guide v6.2.
 
-## Why the API contract is configuration-driven
+## Runtime behavior
 
-Kyocera publicly documents that KFS exposes an API for external ERP/SMS
-integration, and Kyocera's U.S. integration request provides the API host and
-dealer credential fields. The detailed dealer endpoint/header contract is not
-published publicly.
+KFS uses two distinct authentication layers:
 
-Jason therefore does **not** guess endpoint paths or authentication header names.
-The connector remains fail-closed until AOT receives the official Kyocera KFS API
-integration package.
+1. Dealer API gateway authorization in the HTTP `Authorization: Basic ...` header.
+2. A KFS Manager-or-higher username/password in the JSON body of `/KFS/Login`.
+
+Jason logs in at the start of a governed provider call, keeps the returned KFS
+cookie in memory only, uses it for the requested read operations, and discards
+the session with the short-lived connector instance.
+
+Canonical host: `https://api.kyods.com`
+API version: `6`
 
 ## Logical secret
 
 `kyocera_kfs.readonly`
 
-Required values:
+Runtime fields:
 
-- `access_id`
-- `access_password`
+- `api_url`
 - `request_from`
 - `request_to`
 - `authorization`
 - `kfs_username`
 - `kfs_password`
-- `headers_json`
-- `operations_json`
 
-Optional:
+The gateway Authorization value and KFS Manager login are separate credentials.
 
-- `api_url` (defaults to `https://api.kyods.com`; no other host is accepted)
+## Implemented provider operations
 
-`headers_json` is a JSON object whose values may reference the credential
-fields above, for example:
+- `/KFS/Login` - establish the KFS session
+- `/KFS/GroupList` - discover accessible group roots
+- `/KFS/DeviceList` - search devices across group trees
+- `/KFS/Device` - device identity, counters, and consumables
+- `/KFS/DeviceLogList` - group alert/event history
+- `/KFS/DeviceLog` - device alert/event history
 
-```json
-{
-  "X-Provider-Access": "{access_id}",
-  "Authorization": "{authorization}"
-}
-```
-
-The example header names above are illustrative only. Use the exact names from
-Kyocera's dealer API documentation.
-
-`operations_json` defines the provider contract without changing code:
-
-```json
-{
-  "device_search": {
-    "method": "GET",
-    "path": "/official/path/from/kyocera",
-    "params": {
-      "serial": "{serial_number}"
-    }
-  }
-}
-```
-
-Supported operation keys:
-
-- `device_search`
-- `device_get`
-- `meters_get`
-- `supplies_get`
-- `alerts_list`
-
-Only GET and POST are accepted by this read-only connector. Paths must stay
-local to `api.kyods.com`; external URLs and path traversal are rejected.
-
-## Provider capabilities
+Jason capabilities:
 
 - `kyocera_kfs.device.search`
 - `kyocera_kfs.device.get`
@@ -80,4 +49,25 @@ local to `api.kyods.com`; external URLs and path traversal are rejected.
 - `kyocera_kfs.supplies.get`
 - `kyocera_kfs.alerts.list`
 
-No KFS write or remote-management operation is enabled by this foundation.
+These map to the canonical `print.*` capabilities already registered by the
+Central Orchestrator.
+
+## Governance
+
+This activation remains read-only and fail-closed. The KFS write endpoint
+`/KFS/ChangeStatus` is deliberately not exposed by this connector.
+
+The runtime remains gated by `JASON_KFS_ENABLED`; production enablement should
+occur only after credential-safe live validation succeeds.
+
+## Current live blocker
+
+The Kyocera-issued gateway Authorization credential is accepted by the API
+gateway. The currently vaulted gateway ID/password pair is the same pair encoded
+inside that Authorization value, but KFS returns body status 401 when that pair
+is used as the `/KFS/Login` Manager login.
+
+KFS v6.2 documents that the login body requires a KFS Manager-or-higher user.
+A previously working AOT integration used a dedicated KFS Manager account named
+`apiuser`. Live activation therefore remains blocked on a valid KFS Manager
+login only; the Kyocera-issued API credentials must not be reset or changed.
