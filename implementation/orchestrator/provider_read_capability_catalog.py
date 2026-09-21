@@ -41,6 +41,8 @@ DOCUMENTATION_DOCUMENT_SEARCH = "documentation.document.search"
 DOCUMENTATION_DOCUMENT_READ = "documentation.document.read"
 DOCUMENTATION_FLEXIBLE_ASSET_SEARCH = "documentation.flexible.asset.search"
 DOCUMENTATION_FLEXIBLE_ASSET_READ = "documentation.flexible.asset.read"
+DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH = "documentation.flexible.asset.type.search"
+DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ = "documentation.flexible.asset.type.read"
 
 SERVICE_COMPANY_SEARCH = "service.company.search"
 SERVICE_COMPANY_READ = "service.company.read"
@@ -93,6 +95,8 @@ IT_GLUE_CAPABILITIES = frozenset(
         DOCUMENTATION_DOCUMENT_READ,
         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
         DOCUMENTATION_FLEXIBLE_ASSET_READ,
+        DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
+        DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
     }
 )
 
@@ -411,6 +415,32 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
                 "flexible asset,structured documentation,network,domain,backup,application,vendor,"
                 "internet,wan,documentation,organization"
             ),
+            authoritative_change_sources=itg,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
+            display_name="Search Flexible Asset Types",
+            business_purpose="Enumerate authorized IT Glue flexible asset types.",
+            resource_types="documentation_flexible_asset_type,flexible_asset_type,structured_documentation_schema",
+            operation="search",
+            selector_keys="name,resource_id,filters,page_number,page_size",
+            fact_hints=(
+                "flexible asset type,flexible asset types,structured documentation type,"
+                "documentation schema,asset type"
+            ),
+            authoritative_change_sources=itg,
+            collection_fact="flexible asset types",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+            display_name="Read Flexible Asset Type",
+            business_purpose="Read one authorized IT Glue flexible asset type.",
+            resource_types="documentation_flexible_asset_type,flexible_asset_type,structured_documentation_schema",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="flexible asset type,structured documentation type,documentation schema,asset type",
             authoritative_change_sources=itg,
         ),
         _read_capability(

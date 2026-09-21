@@ -17,6 +17,8 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
     DOCUMENTATION_LOCATION_READ,
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
@@ -62,6 +64,10 @@ def _selectors() -> tuple[SelectorDefinition, ...]:
         SelectorDefinition(
             name="organization_id",
             description="Authorized IT Glue organization scope selector.",
+        ),
+        SelectorDefinition(
+            name="flexible_asset_type_id",
+            description="IT Glue flexible asset type identifier required to query flexible asset records.",
         ),
         SelectorDefinition(
             name="filters",
@@ -198,7 +204,9 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     _search_operation(
                         "documentation.flexible.asset.search",
                         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
-                        ("organization_id", "name", "filters", "page_number", "page_size", "resource_id"),
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
+                        ("flexible_asset_type_id", "organization_id", "name", "page_number", "page_size", "resource_id"),
                     ),
                     _read_operation(
                         "documentation.flexible.asset.read",
@@ -210,6 +218,27 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     ResourceObservation("structured_documentation", "Authorized structured IT Glue fields with credential-like fields redacted."),
                 ),
                 relationships=("flexible asset -> organization", "flexible asset -> flexible asset type"),
+            ),
+            ResourceDefinition(
+                resource_type="documentation_flexible_asset_type",
+                description="IT Glue flexible asset type definitions used to structure client documentation.",
+                selectors=selectors,
+                operations=(
+                    _search_operation(
+                        "documentation.flexible.asset.type.search",
+                        DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
+                        ("name", "filters", "page_number", "page_size", "resource_id"),
+                    ),
+                    _read_operation(
+                        "documentation.flexible.asset.type.read",
+                        DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("identity", "Flexible asset type identity and name."),
+                    ResourceObservation("schema", "Structured documentation type definition."),
+                ),
+                relationships=("flexible asset type -> flexible asset",),
             ),
             ResourceDefinition(
                 resource_type="documentation_document",

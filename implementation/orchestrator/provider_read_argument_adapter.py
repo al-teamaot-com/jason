@@ -18,6 +18,8 @@ from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_SEARCH,
     DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
     DOCUMENTATION_LOCATION_READ,
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
@@ -73,6 +75,8 @@ _IT_GLUE_ENTITY = {
     DOCUMENTATION_DOCUMENT_READ: "Documents",
     DOCUMENTATION_FLEXIBLE_ASSET_SEARCH: "FlexibleAssets",
     DOCUMENTATION_FLEXIBLE_ASSET_READ: "FlexibleAssets",
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH: "FlexibleAssetTypes",
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ: "FlexibleAssetTypes",
 }
 
 _IT_GLUE_SEARCH_CAPABILITIES = frozenset(
@@ -83,6 +87,8 @@ _IT_GLUE_SEARCH_CAPABILITIES = frozenset(
         DOCUMENTATION_CONFIGURATION_SEARCH,
         DOCUMENTATION_DOCUMENT_SEARCH,
         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
     }
 )
 
@@ -285,6 +291,30 @@ def adapt_it_glue_arguments(
         return {"organization_id": _resource_id(arguments)}
     if capability_name == DOCUMENTATION_DOCUMENT_READ:
         return {"document_id": _resource_id(arguments)}
+
+    if capability_name == DOCUMENTATION_FLEXIBLE_ASSET_SEARCH:
+        type_id = arguments.get("flexible_asset_type_id")
+        if type_id is None or (isinstance(type_id, str) and not type_id.strip()):
+            raise ValueError("flexible_asset_type_id is required for IT Glue flexible asset search")
+        filters = {"flexible-asset-type-id": type_id}
+        organization_id = arguments.get("organization_id")
+        if organization_id is not None and not (
+            isinstance(organization_id, str) and not organization_id.strip()
+        ):
+            filters["organization-id"] = organization_id
+        name = arguments.get("name")
+        if name is not None and not (isinstance(name, str) and not name.strip()):
+            filters["name"] = name
+        if arguments.get("filters") not in (None, {}):
+            raise ValueError("filters are not accepted for flexible asset search; use declared selectors")
+        result = {
+            "entity": "FlexibleAssets",
+            "filters": filters,
+            "page_size": _it_glue_page_size(arguments),
+        }
+        if arguments.get("page_number") is not None:
+            result["page_number"] = arguments["page_number"]
+        return result
 
     if capability_name == DOCUMENTATION_DOCUMENT_SEARCH:
         organization_id = arguments.get("organization_id")

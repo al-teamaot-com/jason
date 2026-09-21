@@ -18,6 +18,7 @@ APPROVED_IT_GLUE_ENTITIES: Mapping[str, str] = {
     "Organizations": "organizations",
     "Configurations": "configurations",
     "FlexibleAssets": "flexible_assets",
+    "FlexibleAssetTypes": "flexible_asset_types",
     "Contacts": "contacts",
     "Locations": "locations",
 }
