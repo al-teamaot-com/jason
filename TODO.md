@@ -180,11 +180,11 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-004 — Kyocera device data integration
 
 - **Priority:** P1
-- **Status:** Proposed
+- **Status:** Blocked
 - **Risk level:** Moderate
 - **Idea:** Add a governed Kyocera integration so Jason can retrieve copier/MFP operational data such as total meter counts, black-and-white and color copy/print counts, model and serial number, device status, toner/supply levels, fault/error conditions, and other useful device telemetry exposed by Kyocera.
 - **Why it matters:** Gives Jason direct visibility into managed copier usage and health. This can support meter collection, billing validation, proactive service, supply management, device inventory reconciliation, and faster ticket troubleshooting without relying on manual meter reads.
-- **Why not now:** The exact Kyocera data source and supported integration path still need to be selected and validated. Possible sources may include Kyocera APIs, device web interfaces, SNMP, Kyocera management platforms, or an existing dealer/monitoring platform.
+- **Why not now:** The read-only KFS connector foundation is implemented, but live activation is blocked until AOT receives Kyocera's official dealer API header/operation contract and production credentials, provisions them through OpenBao, and completes a controlled read-only validation.
 - **Prerequisites:**
   - identify the authoritative Kyocera data source available to AOT;
   - document authentication and tenant/client isolation requirements;
@@ -208,6 +208,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 ---
 
 ## Governance and operational maturity
+- **Implementation status:** Read-only KFS provider foundation implemented on `feature/kfs-readonly-connector-20260921`; live provider selection is fail-closed behind `JASON_KFS_ENABLED` until the dealer contract and credentials are installed.
 
 ### TODO-GOV-001 — Technology Steward review automation
 
