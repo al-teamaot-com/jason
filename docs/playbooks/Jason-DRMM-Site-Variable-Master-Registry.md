@@ -47,7 +47,7 @@ In scope:
 - master registry generation;
 - human-governed variable classification;
 - comparison of a new site against the approved Standard subset;
-- planning/creation of missing Standard variable names with blank values when the governed create capability is active and authorized.
+- planning/creation of missing Standard variable names with the non-secret sentinel `__AOT_UNSET__` when the governed create capability is active and authorized.
 
 Out of scope:
 
@@ -102,7 +102,7 @@ No provider variable value is stored in the registry.
 
 **New Site**
 
-Every variable classified and approved as Standard exists exactly once by the approved name. Existing values remain untouched. Missing Standard variables are present with blank values until later population/validation.
+Every variable classified and approved as Standard exists exactly once by the approved name. Existing values remain untouched. Missing Standard variables are present with the non-secret sentinel `__AOT_UNSET__` until later population/validation.
 
 ## 6. State Model
 
@@ -180,7 +180,7 @@ For each approved Standard:
 
 - exact name exists -> satisfied;
 - case/whitespace variant exists -> conflict, do not duplicate;
-- absent -> plan create with blank value;
+- absent -> plan create with the non-secret sentinel `__AOT_UNSET__`;
 - registry collision exists -> conflict, stop that item.
 
 ## 8. Decision Gates
@@ -215,7 +215,7 @@ Target: exact onboarding site UID.
 Input:
 
 - approved Standard variable name;
-- blank value;
+- the non-secret sentinel `__AOT_UNSET__`;
 - approved masked setting;
 - reason identifying onboarding baseline creation.
 
@@ -406,7 +406,7 @@ Optional later capability:
 6. Select a controlled new/test DRMM site.
 7. Compare against a small approved Standard set.
 8. Verify existing names are preserved.
-9. Verify only missing names are planned with blank values.
+9. Verify only missing names are planned with the non-secret sentinel `__AOT_UNSET__`.
 10. If create capability is active, create one controlled missing variable and verify readback.
 11. If create capability is unavailable, prove deterministic `write_capability_blocked` behavior without provider bypass.
 12. Confirm no variable value is written to logs, ticket notes, registry artifacts, or user-visible output.
@@ -421,3 +421,12 @@ Close only after:
 - human Standard-review mechanism is documented;
 - one controlled new-site convergence acceptance test succeeds after governed create activation;
 - limitations and follow-up TODOs are recorded.
+
+
+### 2026-09-21 production acceptance note
+
+The live Datto RMM API rejected creation with an empty value (HTTP 400) even though the create endpoint and Sites > Sites: Manage permission were correct. The governed acceptance test therefore established `__AOT_UNSET__` as the standard non-secret placeholder for a variable that must exist before its real value is known.
+
+A controlled create of `AOT_OnboardingVariableBaseline` on the AOT-owned Managed site succeeded through `management.site.variable.create` using the existing `datto_rmm.execution` identity, and authoritative readback verified the variable exists exactly once with its value masked.
+
+The sentinel means **present but not populated**. It must never be treated as an operationally valid value, and any dependent component/playbook must defer or fail closed until the later population/validation workflow replaces it and verifies readback.
