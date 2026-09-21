@@ -32,6 +32,10 @@ EXPECTED_DATTO_EXECUTION_PROFILE = os.environ.get(
     "JASON_EXPECTED_DATTO_EXECUTION_PROFILE",
     "owner-diagnostic-v1",
 )
+EXPECTED_DATTO_SITE_VARIABLE_PROFILE = os.environ.get(
+    "JASON_EXPECTED_DATTO_SITE_VARIABLE_PROFILE",
+    "owner-site-variable-v1",
+)
 EXPECTED_DATTO_ALLOWLIST = os.environ.get(
     "JASON_EXPECTED_DATTO_EXECUTION_ALLOWLIST",
     "AOT governed diagnostic pilot",
@@ -70,6 +74,7 @@ WATCHED_ENV_KEYS = (
     "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
+    "JASON_DATTO_SITE_VARIABLE_MCP_PROFILE",
 )
 
 REQUIRED_SECRET_MOUNTS = frozenset(
@@ -272,6 +277,11 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         EXPECTED_DATTO_EXECUTION_PROFILE
         in env["JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE"]
     )
+    datto_site_variable_profile_ok = (
+        EXPECTED_DATTO_SITE_VARIABLE_PROFILE
+        in env["JASON_DATTO_SITE_VARIABLE_MCP_PROFILE"]
+    )
+
     datto_scope_ok = all(
         expected in env[key]
         for key, expected in (
@@ -290,6 +300,7 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         "autotask_requester_mode": 1 if EXPECTED_AUTOTASK_MODE in env["JASON_AUTOTASK_REQUESTER_AUTH_MODE"] else 0,
         "datto_execution_profile": 1 if datto_profile_ok else 0,
         "datto_execution_scope": 1 if datto_scope_ok else 0,
+        "datto_site_variable_profile": 1 if datto_site_variable_profile_ok else 0,
         "network": 1 if network_ok else 0,
         "port_binding": 1 if port_ok else 0,
         "restart_policy": 1 if restart_ok else 0,
@@ -332,6 +343,21 @@ def render_metrics() -> str:
         and mount_contract == 1
     ) else 0
 
+    datto_site_variable_contract = 1 if (
+        checks.get("running") == 1
+        and checks.get("datto_site_variable_profile") == 1
+        and "/run/jason-secrets/openbao/datto-rmm-execution/role_id" in {
+            str(item.get("Destination") or "")
+            for item in mcp.get("Mounts", [])
+            if isinstance(item, dict) and item.get("Type") == "bind"
+        }
+        and "/run/jason-secrets/openbao/datto-rmm-execution/secret_id" in {
+            str(item.get("Destination") or "")
+            for item in mcp.get("Mounts", [])
+            if isinstance(item, dict) and item.get("Type") == "bind"
+        }
+    ) else 0
+
     lines = [
         "# HELP jason_production_component_health Secret-safe production component health.",
         "# TYPE jason_production_component_health gauge",
@@ -368,6 +394,9 @@ def render_metrics() -> str:
         "# HELP jason_datto_governed_execution_contract Secret-safe readiness of the exact bounded Datto governed-execution pilot configuration. This is not provider execution authority or a provider canary.",
         "# TYPE jason_datto_governed_execution_contract gauge",
         f"jason_datto_governed_execution_contract {datto_contract}",
+        "# HELP jason_datto_site_variable_contract Secret-safe readiness of governed DRMM site-variable create/update using the existing Datto execution identity. This is not provider execution authority or a provider canary.",
+        "# TYPE jason_datto_site_variable_contract gauge",
+        f"jason_datto_site_variable_contract {datto_site_variable_contract}",
         "# HELP jason_host_kernel_error_count Current-boot kernel corruption/storage error signature count; -1 means unavailable.",
         "# TYPE jason_host_kernel_error_count gauge",
         f"jason_host_kernel_error_count {kernel_errors}",
