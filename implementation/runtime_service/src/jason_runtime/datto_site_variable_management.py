@@ -47,14 +47,14 @@ SITE_VARIABLE_UPDATE = "management.site.variable.update"
 DATTO_SITE_VARIABLE_PROVIDER = "datto_rmm_site_variable_management"
 DATTO_SITE_VARIABLE_CREATE = "datto_rmm.site.variable.create"
 DATTO_SITE_VARIABLE_UPDATE = "datto_rmm.site.variable.update"
-DATTO_SITE_VARIABLE_LOGICAL_SECRET = "datto_rmm.site_variables"
+DATTO_SITE_VARIABLE_LOGICAL_SECRET = "datto_rmm.execution"
 
 SITE_VARIABLE_PROFILE_ENV = "JASON_DATTO_SITE_VARIABLE_MCP_PROFILE"
 SITE_VARIABLE_PROFILE = "owner-site-variable-v1"
-SITE_VARIABLE_ROLE_ID_ENV = "JASON_DATTO_SITE_VARIABLE_OPENBAO_ROLE_ID_PATH"
-SITE_VARIABLE_SECRET_ID_ENV = "JASON_DATTO_SITE_VARIABLE_OPENBAO_SECRET_ID_PATH"
-DEFAULT_ROLE_ID_PATH = Path("/run/jason-secrets/openbao/datto-rmm-site-variables/role_id")
-DEFAULT_SECRET_ID_PATH = Path("/run/jason-secrets/openbao/datto-rmm-site-variables/secret_id")
+SITE_VARIABLE_ROLE_ID_ENV = "JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_PATH"
+SITE_VARIABLE_SECRET_ID_ENV = "JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_PATH"
+DEFAULT_ROLE_ID_PATH = Path("/run/jason-secrets/openbao/datto-rmm-execution/role_id")
+DEFAULT_SECRET_ID_PATH = Path("/run/jason-secrets/openbao/datto-rmm-execution/secret_id")
 
 _PROVIDER_CAPABILITY_MAP = {
     (DATTO_SITE_VARIABLE_PROVIDER, SITE_VARIABLE_CREATE): DATTO_SITE_VARIABLE_CREATE,
@@ -89,8 +89,8 @@ def _action_capability(
         display_name=display_name,
         lifecycle_status=CapabilityLifecycle.BUILDING,
         business_purpose=(
-            "Manage one Datto RMM site variable through a separate least-privilege "
-            "site-management identity without exposing the variable value."
+            "Manage one Datto RMM site variable through Jason's existing governed "
+            "Datto RMM execution identity without exposing the variable value."
         ),
         owner_service="Jason Governed Actions",
         architectural_capability_ids=frozenset({"JAC-005", "JAC-006", "JAC-013"}),
@@ -114,6 +114,7 @@ def _action_capability(
                 "at most one provider mutation request is issued",
                 "secret values are never returned or audited",
                 "post-mutation site-variable state matches the requested identity",
+                "provider authentication uses the existing governed Datto execution identity",
             ),
         ),
         dependencies=frozenset({"identity.authorization.resolve", "governance.action.evaluate"}),
@@ -136,7 +137,7 @@ def _action_capability(
             review_interval_days=30,
             retirement_criteria=(
                 "Datto RMM is no longer the site-variable authority.",
-                "Least-privilege site-management identity cannot be maintained.",
+                "The shared governed Datto execution identity can no longer be safely used for site-variable management.",
             ),
             authoritative_change_sources=("Datto RMM API documentation",),
             last_reviewed_at=now,
@@ -183,12 +184,17 @@ def _provider(*, now: datetime) -> ExecutionProvider:
         stewardship=ProviderStewardship(
             technology_steward="technology-steward",
             business_justification=(
-                "Use a Datto identity restricted to the site-management permission "
-                "required by the site-variable API."
+                "Reuse Jason's current governed Datto RMM execution identity because "
+                "Datto's API permission model does not justify a second operational "
+                "credential for site-variable management; Jason capability policy "
+                "continues to bound the allowed operation."
             ),
             review_interval_days=30,
             last_reviewed_at=now,
-            retirement_criteria=("Site-management identity exceeds approved authority.",),
+            retirement_criteria=(
+                "The governed Datto execution identity exceeds approved authority.",
+                "A safer provider-native permission boundary becomes available.",
+            ),
             vendor_change_sources=("Datto RMM API documentation",),
             operational_owner="AOT IT Operations",
             approval_owner="AOT Owner",
