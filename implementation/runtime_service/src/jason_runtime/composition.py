@@ -182,6 +182,11 @@ from .datto_edr_scan_execution import (
     register_datto_edr_scan_invoker,
     register_datto_edr_scan_runtime_foundation,
 )
+from .datto_site_variable_management import (
+    build_site_variable_invoker,
+    register_site_variable_invokers,
+    register_site_variable_runtime_foundation,
+)
 from .http import RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
 from .provider_reads import (
@@ -733,6 +738,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_site_variable_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
 
     identity_authority = IdentityAuthorityService(
         identities=SQLiteIdentityRepository(authority_store),
@@ -964,6 +974,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    site_variable_invoker = build_site_variable_invoker(
+        openbao_url=settings.openbao_url,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
         registry=load_production_system_registry()
     )
@@ -1043,6 +1058,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_datto_edr_scan_invoker(
         invokers=invokers,
         invoker=datto_edr_scan_invoker,
+    )
+    register_site_variable_invokers(
+        invokers=invokers,
+        invoker=site_variable_invoker,
     )
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)

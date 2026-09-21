@@ -335,3 +335,21 @@ def test_datto_edr_provider_exposes_only_governed_endpoint_security_reads():
     assert all(item.metadata["provider_neutral"] == "true" for item in definitions)
     assert all(item.metadata["read_only"] == "true" for item in definitions)
     assert all(item.approval.required is False for item in definitions)
+
+
+def test_datto_site_variable_read_is_registered_as_secret_governed_resource():
+    from orchestrator.resource_capability_catalog import (
+        DATTO_RMM_PROVIDER,
+        SITE_VARIABLE_LIST,
+    )
+
+    capabilities, providers = services()
+    definition = capabilities.get_current(capability_name=SITE_VARIABLE_LIST)
+    provider = providers.get(DATTO_RMM_PROVIDER)
+
+    assert definition.metadata["read_only"] == "true"
+    assert definition.metadata["value_disclosure_permission"] == "administer"
+    assert definition.metadata["non_admin_view"] == "presence_status_only"
+    assert "secret" in definition.data_classifications
+    assert SITE_VARIABLE_LIST in provider.capabilities
+    assert "secret" in provider.supported_classifications

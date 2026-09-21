@@ -36,6 +36,7 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
+from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
 from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
     ThreatCorrelationError,
@@ -1225,33 +1226,61 @@ def _governed_read_for_identity(
         "error_code": result.error_code,
         "correlation_id": result.correlation_id,
         "evidence": (
-            _project_endpoint_search(result.output)
-            if capability_name == "endpoint.device.search"
-            else (
-                _project_endpoint_read(result.output)
-                if capability_name == "endpoint.device.read"
-                else (
-                    _project_endpoint_audit(result.output)
-                    if capability_name == "endpoint.audit.read"
-                    else (
-                        _project_endpoint_collection(
-                            result.output,
-                            collection_kind="alerts",
+            sanitize_site_variables_for_principal(
+                result.output if isinstance(result.output, Mapping) else {},
+                permission_mode=(
+                    "administer"
+                    if app.identity_authority.evaluate(
+                        AuthorityRequest(
+                            request_id=f"{execution_id}-disclosure",
+                            correlation_id=correlation_id,
+                            principal_id=principal,
+                            organization_id=organization,
+                            client_id=client_id,
+                            capability=capability_name,
+                            requested_mode=PermissionMode.ADMINISTER,
+                            authentication_assurance=assurance,
                         )
-                        if capability_name == "endpoint.alert.search"
+                    ).outcome is AuthorityOutcome.ALLOWED
+                    else "observe"
+                ),
+                requested_name=str(
+                    arguments.get("variable_name")
+                    or arguments.get("name")
+                    or ""
+                ).strip()
+                or None,
+            )
+            if capability_name == "management.site.variable.list"
+            else (
+                _project_endpoint_search(result.output)
+                if capability_name == "endpoint.device.search"
+                else (
+                    _project_endpoint_read(result.output)
+                    if capability_name == "endpoint.device.read"
+                    else (
+                        _project_endpoint_audit(result.output)
+                        if capability_name == "endpoint.audit.read"
                         else (
                             _project_endpoint_collection(
                                 result.output,
-                                collection_kind="software",
+                                collection_kind="alerts",
                             )
-                            if capability_name == "endpoint.software.search"
+                            if capability_name == "endpoint.alert.search"
                             else (
-                                _project_dynamic_evidence(
-                                    capability_name,
+                                _project_endpoint_collection(
                                     result.output,
+                                    collection_kind="software",
                                 )
-                                if capability_name == "automation.component.search"
-                                else _safe(dict(result.output))
+                                if capability_name == "endpoint.software.search"
+                                else (
+                                    _project_dynamic_evidence(
+                                        capability_name,
+                                        result.output,
+                                    )
+                                    if capability_name == "automation.component.search"
+                                    else _safe(dict(result.output))
+                                )
                             )
                         )
                     )
