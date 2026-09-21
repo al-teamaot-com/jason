@@ -1,1 +1,1 @@
-[{"targets":["host.docker.internal:9479"],"labels":{"job":"jason-work-items"}}]
+[{"targets":["jason-work-item-exporter:9479"],"labels":{"job":"jason-work-items"}}]
