@@ -33,6 +33,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "microsoft_graph.directory_read": (
         "secret/data/connectors/microsoft-graph/production/directory-read"
     ),
+    "kfs.runtime": (
+        "secret/data/connectors/kfs/production/runtime"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -67,6 +70,15 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "certificate_pem",
             "certificate_thumbprint",
             "generation",
+        }
+    ),
+    "kfs.runtime": frozenset(
+        {
+            "request_from",
+            "request_to",
+            "id",
+            "password",
+            "authorization",
         }
     ),
 }
