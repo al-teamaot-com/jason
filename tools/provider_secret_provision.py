@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import hashlib
 import json
@@ -42,8 +43,8 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "fields": (
             "request_from",
             "request_to",
-            "id",
-            "password",
+            "manager_id",
+            "manager_password",
             "authorization",
         ),
         "policy_name": "jason-kfs-runtime-read",
@@ -187,14 +188,50 @@ def collect_values(provider: str) -> dict[str, str]:
     if provider == "microsoft_graph":
         return _collect_microsoft_graph_values()
     if provider == "kfs":
-        values = {
-            "request_from": input("kfs RequestFrom: ").strip(),
-            "request_to": input("kfs RequestTo: ").strip(),
-            "id": input("kfs dedicated Manager ID: ").strip(),
-            "password": getpass.getpass("kfs Manager password: ").strip(),
-            "authorization": getpass.getpass(
+        request_from = input("kfs RequestFrom: ").strip()
+        request_to = input("kfs RequestTo: ").strip()
+        auth_method = input(
+            "kfs API gateway auth method [1=ID+Password, 2=Authorization]: "
+        ).strip()
+        if auth_method == "1":
+            gateway_id = input("kfs API Access ID: ").strip()
+            gateway_password = getpass.getpass(
+                "kfs API Access Password: "
+            ).strip()
+            if not gateway_id or not gateway_password:
+                raise ProvisionError(
+                    "KFS API Access ID and Password are required for auth method 1."
+                )
+            token = base64.b64encode(
+                f"{gateway_id}:{gateway_password}".encode("utf-8")
+            ).decode("ascii")
+            authorization = f"Basic {token}"
+            gateway_password = ""
+        elif auth_method == "2":
+            authorization = getpass.getpass(
                 "kfs API Authorization value: "
-            ).strip(),
+            ).strip()
+            if not authorization:
+                raise ProvisionError(
+                    "KFS API Authorization value is required for auth method 2."
+                )
+        else:
+            raise ProvisionError(
+                "KFS API gateway auth method must be 1 or 2."
+            )
+
+        manager_id = input(
+            "kfs dedicated Manager login ID: "
+        ).strip()
+        manager_password = getpass.getpass(
+            "kfs Manager login password: "
+        ).strip()
+        values = {
+            "request_from": request_from,
+            "request_to": request_to,
+            "manager_id": manager_id,
+            "manager_password": manager_password,
+            "authorization": authorization,
         }
         missing = [field for field, value in values.items() if not value]
         if missing:
