@@ -8,6 +8,7 @@ from autonomous_remediation.drmm_site_variable_registry import (
     ApprovedStandardVariable,
     RegistryScanIncompleteError,
     SiteInventory,
+    STAGED_UNSET_VALUE,
     VariableDisposition,
     VariableObservation,
     build_master_registry,
@@ -63,7 +64,7 @@ def test_human_classification_sets_standard():
     assert approved.by_key()["backupkey"].disposition == VariableDisposition.STANDARD
 
 
-def test_convergence_creates_only_missing_approved_names_blank():
+def test_convergence_creates_only_missing_approved_names_staged_unset():
     snapshot = build_master_registry(
         [
             inventory("s1", "One", [("BackupKey", True), ("DuoKey", True)]),
@@ -87,7 +88,7 @@ def test_convergence_creates_only_missing_approved_names_blank():
     assert len(plan.create_actions) == 1
     action = plan.create_actions[0]
     assert action.name == "DuoKey"
-    assert action.value == ""
+    assert action.value == STAGED_UNSET_VALUE
     assert action.masked is True
     assert action.operation == "management.site.variable.create"
 
