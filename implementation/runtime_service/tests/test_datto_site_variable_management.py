@@ -131,3 +131,19 @@ def test_delete_capability_is_not_exposed():
         module.SITE_VARIABLE_UPDATE,
     }
     assert "datto_rmm.site.variable.delete" not in connector.capabilities
+
+
+def test_site_variable_management_reuses_existing_datto_execution_identity():
+    assert module.DATTO_SITE_VARIABLE_LOGICAL_SECRET == "datto_rmm.execution"
+    assert str(module.DEFAULT_ROLE_ID_PATH) == (
+        "/run/jason-secrets/openbao/datto-rmm-execution/role_id"
+    )
+    assert str(module.DEFAULT_SECRET_ID_PATH) == (
+        "/run/jason-secrets/openbao/datto-rmm-execution/secret_id"
+    )
+    assert module.SITE_VARIABLE_ROLE_ID_ENV == (
+        "JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_PATH"
+    )
+    assert module.SITE_VARIABLE_SECRET_ID_ENV == (
+        "JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_PATH"
+    )
