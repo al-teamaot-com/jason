@@ -9,6 +9,15 @@
       "enabled": false,
       "review_status": "threat_recurrence_gate_proven_scan_terminal_pending",
       "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py"
+    },
+    {
+      "id": "drmm_site_variable_master_registry",
+      "name": "Jason - DRMM Site Variable Master Registry",
+      "version": "1.0.0",
+      "lifecycle": "pilot",
+      "enabled": false,
+      "review_status": "read_only_registry_ready_write_capability_pending",
+      "source": "implementation/autonomous_remediation/drmm_site_variable_registry.py"
     }
   ]
 }
