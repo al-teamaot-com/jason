@@ -156,12 +156,39 @@ connectors:
       - first_regional_inventory_read
       - normalized_resource_adapter
       - orchestrated_live_read_validation
+  kyocera_kfs:
+    status: foundation_built
+    priority: 9
+    mode: read_only
+    secret: kyocera_kfs.readonly
+    api_host: https://api.kyods.com
+    capabilities:
+      - kyocera_kfs.device.search
+      - kyocera_kfs.device.get
+      - kyocera_kfs.meters.get
+      - kyocera_kfs.supplies.get
+      - kyocera_kfs.alerts.list
+    canonical_mappings:
+      print.device.search: kyocera_kfs.device.search
+      print.device.read: kyocera_kfs.device.get
+      print.meter.read: kyocera_kfs.meters.get
+      print.supplies.read: kyocera_kfs.supplies.get
+      print.alert.search: kyocera_kfs.alerts.list
+    live_enablement_gate:
+      - kyocera_issued_api_credentials
+      - kyocera_issued_header_contract
+      - kyocera_issued_operation_paths
+      - openbao_secret_provisioning
+      - controlled_read_only_validation
+    notes:
+      - Exact provider headers and paths are configuration-driven and fail closed until the official dealer API contract is supplied.
+      - No KFS remote-management, firmware, configuration, or other write capability is enabled.
   teams_approvals:
     status: planned
-    priority: 9
+    priority: 10
   opentelemetry:
     status: planned
-    priority: 10
+    priority: 11
   object_storage:
     status: planned
-    priority: 11
+    priority: 12
