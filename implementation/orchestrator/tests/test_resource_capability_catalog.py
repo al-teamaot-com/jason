@@ -12,6 +12,7 @@ from orchestrator.resource_capability_catalog import (
     DATTO_RMM_PROVIDER,
     ENDPOINT_DEVICE_READ,
     ENDPOINT_DEVICE_SEARCH,
+    SITE_VARIABLE_LIST,
     register_endpoint_resource_foundation,
 )
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner, ResourceInquiry
@@ -43,7 +44,10 @@ def test_bootstrap_registers_broad_provider_neutral_endpoint_reads():
     assert search.metadata["read_only"] == "true"
     assert search.permitted_execution_modes == frozenset({"deterministic"})
     assert read.metadata["operation"] == "read"
-    assert datto.capabilities == frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ})
+    site_variables = capabilities.get_current(capability_name=SITE_VARIABLE_LIST)
+    assert site_variables.metadata["value_disclosure_permission"] == "administer"
+    assert site_variables.metadata["non_admin_view"] == "presence_status_only"
+    assert datto.capabilities == frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ, SITE_VARIABLE_LIST})
     assert datto.execution_modes == frozenset({"deterministic"})
 
 
