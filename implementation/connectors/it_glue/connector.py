@@ -128,7 +128,7 @@ class ItGlueConnector(ConnectorBase):
             request.context,
             {"provider": self.provider_name, "content_bytes": len(raw)},
         )
-        prefix = raw[:512].lstrip().casefold()
+        prefix = raw[:512].lstrip().lower()
         if (
             prefix.startswith(b"<!doctype html")
             or prefix.startswith(b"<html")
