@@ -134,7 +134,48 @@ class ItGlueConnector(ConnectorBase):
             or prefix.startswith(b"<html")
             or b"<title>it glue</title>" in prefix
         ):
-            raise ItGlueAttachmentHtmlResponseError("IT Glue attachment download returned HTML instead of file bytes")
+            # IT Glue documents only a web-app download URL. Before concluding that
+            # binary download requires a browser session, make one bounded read-only
+            # probe against the API host using the exact provider-supplied path. This
+            # does not guess IDs or broaden scope, and remains under the same API key.
+            api_candidate = urlunsplit(
+                ("https", urlsplit(self.base_url).netloc, parts.path, parts.query, "")
+            )
+            self._audit.record(
+                "connector.attachment.api_path_probe_started",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "path": parts.path,
+                },
+            )
+            try:
+                candidate_raw = self._transport.request_bytes(
+                    method="GET",
+                    url=api_candidate,
+                    headers={"x-api-key": credentials["api_key"]},
+                    timeout_seconds=30.0,
+                    max_bytes=max_bytes,
+                )
+            except ConnectorTransportError:
+                raise ItGlueAttachmentHtmlResponseError(
+                    "IT Glue attachment web download requires non-API authentication"
+                )
+            candidate_prefix = candidate_raw[:512].lstrip().lower()
+            if (
+                candidate_prefix.startswith(b"<!doctype html")
+                or candidate_prefix.startswith(b"<html")
+                or b"<title>it glue</title>" in candidate_prefix
+            ):
+                raise ItGlueAttachmentHtmlResponseError(
+                    "IT Glue attachment web download requires non-API authentication"
+                )
+            raw = candidate_raw
+            self._audit.record(
+                "connector.attachment.api_path_probe_succeeded",
+                request.context,
+                {"provider": self.provider_name, "content_bytes": len(raw)},
+            )
 
         safe_attributes = {
             str(key): value
