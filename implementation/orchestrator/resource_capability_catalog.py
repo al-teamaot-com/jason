@@ -27,6 +27,7 @@ from kernel.execution_providers import (
 
 ENDPOINT_DEVICE_SEARCH = "endpoint.device.search"
 ENDPOINT_DEVICE_READ = "endpoint.device.read"
+SITE_VARIABLE_LIST = "management.site.variable.list"
 DATTO_RMM_PROVIDER = "datto_rmm"
 
 
@@ -160,6 +161,63 @@ def endpoint_device_read(now: datetime) -> CapabilityDefinition:
     )
 
 
+
+def site_variable_list(now: datetime) -> CapabilityDefinition:
+    return CapabilityDefinition(
+        capability_name=SITE_VARIABLE_LIST,
+        version="1.0",
+        display_name="Read Managed Site Variables",
+        lifecycle_status=CapabilityLifecycle.ACTIVE,
+        business_purpose=(
+            "Read Datto RMM site variables for governed automation while separating "
+            "internal use from value disclosure."
+        ),
+        owner_service="Jason Resource Intelligence",
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
+        risk_level=CapabilityRisk.MEDIUM,
+        data_classifications=frozenset({"internal", "secret"}),
+        permitted_execution_modes=frozenset({"deterministic"}),
+        input_schema_reference="schema://jason/site-variable-list/1.0",
+        output_schema_reference="schema://jason/site-variable-list-result/1.0",
+        invoking_roles=frozenset({"orchestrator"}),
+        approval=CapabilityApproval(required=False),
+        evidence=CapabilityEvidence(
+            required=True,
+            requirements=("provider result", "source provider identity"),
+            verification_requirements=("site remains in authorized scope",),
+        ),
+        dependencies=frozenset(),
+        idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
+        idempotency_key_required=False,
+        timeout_seconds=30,
+        maximum_attempts=2,
+        failure_behavior="Fail closed and never disclose values outside administer permission.",
+        tenant_isolation_required=True,
+        client_isolation_required=False,
+        stewardship=CapabilityStewardship(
+            steward="technology-steward",
+            business_justification=(
+                "Playbooks need site-scoped configuration values without exposing those "
+                "values to technicians who do not administer privileged configuration."
+            ),
+            review_interval_days=90,
+            retirement_criteria=("Datto RMM is no longer the site-variable authority.",),
+            authoritative_change_sources=("Datto RMM API documentation",),
+        ),
+        created_at=now,
+        metadata={
+            "provider_neutral": "true",
+            "read_only": "true",
+            "resource_types": "management_site_variable",
+            "operation": "list",
+            "selector_keys": "site_uid,resource_id",
+            "fact_hints": "site variable variables configured present value",
+            "value_disclosure_permission": "administer",
+            "non_admin_view": "presence_status_only",
+            "secret_logging": "forbidden",
+        },
+    )
+
 def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
         provider_id=DATTO_RMM_PROVIDER,
@@ -169,7 +227,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
         health_status=ProviderHealth.HEALTHY,
         approval_status=ProviderApproval.APPROVED,
         execution_modes=frozenset({"deterministic"}),
-        capabilities=frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ}),
+        capabilities=frozenset({ENDPOINT_DEVICE_SEARCH, ENDPOINT_DEVICE_READ, SITE_VARIABLE_LIST}),
         supported_classifications=frozenset({"internal"}),
         regions=frozenset(),
         limits=ProviderLimits(
@@ -213,4 +271,5 @@ def register_endpoint_resource_foundation(
 
     capabilities.register(endpoint_device_search(now))
     capabilities.register(endpoint_device_read(now))
+    capabilities.register(site_variable_list(now))
     providers.register(datto_rmm_endpoint_provider(now))
