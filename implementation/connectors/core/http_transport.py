@@ -5,7 +5,7 @@ from socket import timeout as SocketTimeout
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from .contracts import (
     ConnectorExecutionDeadlineExceeded,
@@ -227,15 +227,66 @@ class UrlLibJsonHttpTransport:
                 doseq=True,
             )
             target = f"{target}{'&' if '?' in target else '?'}{query}"
-        request = Request(
-            target,
-            headers={str(key): str(value) for key, value in headers.items()},
-            method=method.upper().strip(),
-        )
+
+        class _NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                return None
+
+        opener = build_opener(_NoRedirect)
+        original_host = (_http_service(target) or "").casefold()
+        current = target
+        current_headers = {str(key): str(value) for key, value in headers.items()}
         effective_timeout = bounded_transport_timeout(timeout_seconds)
         deadline_limited = effective_timeout < timeout_seconds
-        try:
-            with urlopen(request, timeout=effective_timeout) as response:
+
+        for _ in range(6):
+            request = Request(
+                current,
+                headers=current_headers,
+                method=method.upper().strip(),
+            )
+            try:
+                response = opener.open(request, timeout=effective_timeout)
+            except HTTPError as exc:
+                if int(exc.code) in {301, 302, 303, 307, 308}:
+                    location = exc.headers.get("Location") if exc.headers is not None else None
+                    if not location:
+                        raise ConnectorTransportError(
+                            "HTTP redirect omitted Location header",
+                            status_code=int(exc.code),
+                            service=_http_service(current),
+                        ) from exc
+                    from urllib.parse import urljoin, urlsplit
+                    next_url = urljoin(current, str(location))
+                    next_parts = urlsplit(next_url)
+                    if next_parts.scheme not in {"https", "http"} or not next_parts.hostname:
+                        raise ConnectorTransportError("HTTP redirect target is invalid") from exc
+                    next_host = next_parts.hostname.casefold()
+                    current_headers = (
+                        current_headers
+                        if next_host == original_host
+                        else {}
+                    )
+                    current = next_url
+                    continue
+                raise ConnectorTransportError(
+                    f"HTTP transport failed with status {exc.code}",
+                    status_code=int(exc.code),
+                    retry_after_seconds=_retry_after_seconds(exc.headers),
+                    service=_http_service(current),
+                ) from exc
+            except (TimeoutError, SocketTimeout) as exc:
+                if deadline_limited:
+                    raise ConnectorExecutionDeadlineExceeded(
+                        "governed provider execution deadline exceeded"
+                    ) from exc
+                raise ConnectorTransportError("HTTP transport failed") from exc
+            except URLError as exc:
+                raise ConnectorTransportError("HTTP transport failed") from exc
+            except OSError as exc:
+                raise ConnectorTransportError("HTTP transport failed") from exc
+
+            with response:
                 length = response.headers.get("Content-Length")
                 if length is not None:
                     try:
@@ -244,28 +295,11 @@ class UrlLibJsonHttpTransport:
                     except ValueError:
                         pass
                 raw = response.read(max_bytes + 1)
-        except ConnectorTransportError:
-            raise
-        except HTTPError as exc:
-            raise ConnectorTransportError(
-                f"HTTP transport failed with status {exc.code}",
-                status_code=int(exc.code),
-                retry_after_seconds=_retry_after_seconds(exc.headers),
-                service=_http_service(url),
-            ) from exc
-        except (TimeoutError, SocketTimeout) as exc:
-            if deadline_limited:
-                raise ConnectorExecutionDeadlineExceeded(
-                    "governed provider execution deadline exceeded"
-                ) from exc
-            raise ConnectorTransportError("HTTP transport failed") from exc
-        except URLError as exc:
-            raise ConnectorTransportError("HTTP transport failed") from exc
-        except OSError as exc:
-            raise ConnectorTransportError("HTTP transport failed") from exc
-        if len(raw) > max_bytes:
-            raise ConnectorTransportError("HTTP binary response exceeded bounded size")
-        return raw
+            if len(raw) > max_bytes:
+                raise ConnectorTransportError("HTTP binary response exceeded bounded size")
+            return raw
+
+        raise ConnectorTransportError("HTTP redirect limit exceeded")
 
 
 def _retry_after_seconds(headers: Any) -> float | None:

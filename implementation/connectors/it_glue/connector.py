@@ -85,10 +85,18 @@ class ItGlueConnector(ConnectorBase):
         raw = self._transport.request_bytes(
             method="GET",
             url=download_url,
-            headers={},
+            headers={"x-api-key": credentials["api_key"]},
             timeout_seconds=30.0,
             max_bytes=max_bytes,
         )
+        prefix = raw[:512].lstrip().casefold()
+        if (
+            prefix.startswith(b"<!doctype html")
+            or prefix.startswith(b"<html")
+            or b"<title>it glue</title>" in prefix
+        ):
+            raise ValueError("IT Glue attachment download returned HTML instead of file bytes")
+
         safe_attributes = {
             str(key): value
             for key, value in attributes.items()
