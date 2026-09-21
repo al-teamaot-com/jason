@@ -79,11 +79,21 @@ class ItGlueConnector(ConnectorBase):
             params={"include": "authorized_users"},
             timeout_seconds=30.0,
         )
+        self._audit.record(
+            "connector.attachment.parent_loaded",
+            request.context,
+            {"provider": self.provider_name, "document_id": document_id},
+        )
         attachment_payload = self._transport.request(
             method="GET",
             url=f"{self.base_url}/documents/{document_id}/relationships/attachments/{attachment_id}",
             headers=headers,
             timeout_seconds=30.0,
+        )
+        self._audit.record(
+            "connector.attachment.metadata_loaded",
+            request.context,
+            {"provider": self.provider_name, "attachment_id": attachment_id},
         )
         resource = attachment_payload.get("data") if isinstance(attachment_payload, Mapping) else None
         attributes = resource.get("attributes") if isinstance(resource, Mapping) else None
@@ -101,12 +111,22 @@ class ItGlueConnector(ConnectorBase):
         if parts.scheme == "http":
             download_url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
 
+        self._audit.record(
+            "connector.attachment.download_started",
+            request.context,
+            {"provider": self.provider_name, "provider_domain_validated": True},
+        )
         raw = self._transport.request_bytes(
             method="GET",
             url=download_url,
             headers={"x-api-key": credentials["api_key"]},
             timeout_seconds=30.0,
             max_bytes=max_bytes,
+        )
+        self._audit.record(
+            "connector.attachment.bytes_loaded",
+            request.context,
+            {"provider": self.provider_name, "content_bytes": len(raw)},
         )
         prefix = raw[:512].lstrip().casefold()
         if (
