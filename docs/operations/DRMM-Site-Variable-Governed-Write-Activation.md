@@ -120,3 +120,50 @@ If activation, provider authorization, or readback verification fails:
 - preserve audit evidence;
 - do not fall back to direct Datto API calls;
 - do not broaden the existing Datto execution credential automatically.
+
+
+## Production Acceptance Evidence — 2026-09-21
+
+Live capability state:
+
+- `management.site.variable.create`: ACTIVE and MCP action-enabled
+- `management.site.variable.update`: ACTIVE and MCP action-enabled
+- credential: existing `datto_rmm.execution` identity
+- activation profile: `owner-site-variable-v1`
+- delete capability: not exposed
+
+Controlled target:
+
+- Datto RMM site: `Managed`
+- site UID: `59417980-b9eb-4c83-9080-f931cc210081`
+- site had zero variables before the test
+
+Acceptance sequence:
+
+1. Pre-read completed successfully.
+2. Create with an empty value was attempted once and failed closed with Datto HTTP 400.
+3. Current Datto documentation confirms the create endpoint is `PUT /v2/site/{siteUid}/variable` and requires Sites > Sites: Manage; Datto's variable UX/import workflow treats variable value as required.
+4. The onboarding convention was therefore changed from an empty value to the non-secret sentinel `__AOT_UNSET__` when a variable definition must exist before its real value is known.
+5. `AOT_OnboardingVariableBaseline` was created with the sentinel through `execute_governed_capability` using one provider attempt.
+6. Post-read verified the variable exists exactly once.
+7. Jason returned the value masked and did not disclose it in the governed action result.
+
+Evidence correlations:
+
+- empty-value failed create: `corr_mcp_action_0c6433945a8e4092bf138184e0e8665a`
+- successful sentinel create: `corr_mcp_action_ef267135898d491d82f730a09d476c09`
+- post-read verification: `corr_mcp_3144aacabe974006bb5eed41f3598e3d`
+
+### Standard placeholder rule
+
+For onboarding-created Standard variables whose real value is not yet known:
+
+- create with `__AOT_UNSET__`;
+- default `masked=true` unless the approved registry explicitly requires otherwise;
+- classify the variable as **present but not populated**;
+- never treat the sentinel as a valid operational value;
+- dependent components/playbooks must fail closed or defer when the sentinel is present;
+- a later governed population/validation step must replace the sentinel with the approved value and verify readback;
+- no ticket note, Grafana panel, audit event, or user-visible response may expose the populated secret value.
+
+This replaces the earlier blank-value assumption because the live Datto API rejected an empty create request.
