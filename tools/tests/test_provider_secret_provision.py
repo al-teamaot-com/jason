@@ -105,15 +105,11 @@ def test_kyocera_kfs_contract_uses_canonical_connector_path_and_fields() -> None
     )
     assert spec["fields"] == (
         "api_url",
-        "access_id",
-        "access_password",
         "request_from",
         "request_to",
         "authorization",
         "kfs_username",
         "kfs_password",
-        "headers_json",
-        "operations_json",
     )
     assert spec["policy_name"] == "jason-kyocera-kfs-read"
     assert spec["role_name"] == "jason-kyocera-kfs-read"
