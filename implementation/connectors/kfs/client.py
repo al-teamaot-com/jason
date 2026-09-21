@@ -18,8 +18,8 @@ class KfsApiClient:
     REQUIRED_SECRET_FIELDS = (
         "request_from",
         "request_to",
-        "id",
-        "password",
+        "manager_id",
+        "manager_password",
         "authorization",
     )
 
@@ -76,8 +76,8 @@ class KfsApiClient:
                 "RequestFrom": self.credentials["request_from"],
                 "RequestTo": self.credentials["request_to"],
                 "BODID": "Global_KFS_Pull_Login",
-                "id": self.credentials["id"],
-                "password": self.credentials["password"],
+                "id": self.credentials["manager_id"],
+                "password": self.credentials["manager_password"],
                 "isPersistent": False,
                 "timeZone": "+0000",
             },
