@@ -204,8 +204,6 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     _search_operation(
                         "documentation.flexible.asset.search",
                         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
-    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
-    DOCUMENTATION_FLEXIBLE_ASSET_TYPE_SEARCH,
                         ("flexible_asset_type_id", "organization_id", "name", "page_number", "page_size", "resource_id"),
                     ),
                     _read_operation(
