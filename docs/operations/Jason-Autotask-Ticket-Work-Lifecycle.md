@@ -7,9 +7,21 @@ Source revision: `5854cf670e33df473a37890ad9c28b7069510b3e`
 
 When Jason begins substantive work on an existing Autotask ticket, ticket ownership and operational state must be made explicit before troubleshooting proceeds. This is a standing Owner-approved administrative lifecycle transition and is not a substitute for approval of disruptive or otherwise separately gated remediation.
 
+## Substantive-work boundary
+
+Jason does **not** claim a ticket merely because it read, triaged, categorized, associated, or evaluated the ticket.
+
+Substantive work begins immediately before the first ticket-specific technical action that consumes evidence for diagnosis, performs remediation, or verifies a technical result. Examples include running a diagnostic component, executing a ticket-specific read-only command, collecting device-specific logs/service/security state for troubleshooting, performing remediation, or carrying out verification against the affected service/device.
+
+The following are pre-work eligibility/triage and do **not** claim the ticket: queue scanning; reading the ticket; identifying the device; checking whether the endpoint is online; determining whether an applicable playbook/capability exists; associating a deterministically proven configuration item; classification; and proposing a troubleshooting plan.
+
+For an endpoint-related ticket, Jason must have affirmative current evidence that the target device is online before the claim transition. The MCP independently verifies this through the governed DRMM endpoint read path and does not trust a caller-supplied online flag as proof. If the endpoint is offline, suspended, deleted, unreadable, or ambiguous, Jason leaves the ticket in its current queue and may document/recheck the condition without claiming ownership.
+
+A failed capability/eligibility check before the first substantive diagnostic does not claim the ticket. Missing capabilities are routed through Support/TODO intake as appropriate.
+
 ## Default start-work transition
 
-For the exact resolved Autotask ticket, Jason must:
+For the exact resolved Autotask ticket, immediately before the first substantive diagnostic/remediation/verification action, Jason must:
 
 1. Move the ticket to queue **Jason**.
 2. Set status to **In Progress**.
@@ -19,6 +31,25 @@ For the exact resolved Autotask ticket, Jason must:
 6. Preserve existing Ticket Type / Issue Type / Sub-Issue Type unless triage or the playbook has sufficient evidence for an exact supported classification.
 7. When classification is supplied, resolve the exact live Autotask picklist labels before update; never hard-code tenant picklist IDs.
 8. Require post-mutation readback for every field changed.
+9. Persist the pre-claim queue and status as trusted lifecycle state before the claim is considered complete.
+
+## Handoff and return-to-queue rule
+
+If Jason can no longer complete the ticket autonomously and the next required step genuinely belongs to a human technician, physical intervention, client clarification, an unavailable capability, or a blocked provider path, Jason relinquishes operational ownership.
+
+The handoff transition:
+
+1. loads the trusted pre-claim lifecycle record captured by Jason;
+2. restores the exact original queue;
+3. restores the original status;
+4. does not accept a caller-supplied arbitrary destination queue/status;
+5. preserves normal provider readback verification;
+6. documents the work performed, evidence gathered, blocker, and recommended next action in the ticket;
+7. records a blocker fingerprint so Jason does not immediately reclaim the same ticket for the unchanged blocker.
+
+A ticket that is only waiting for a Jason-owned retry/recheck or an approval that would allow Jason to continue remains in the **Jason** queue. A ticket is handed back only when responsibility for the next meaningful action has transferred to a human/provider/client outside Jason's autonomous path.
+
+After a handoff, automatic reclaim is fail-closed until evidence demonstrates that the previously recorded blocker changed. This prevents queue ping-pong.
 
 ## Device association rule
 
