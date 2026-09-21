@@ -176,6 +176,53 @@ Runtime identity:
 
 IT Glue uses the same production AppRole lifecycle and no longer requires a provider-specific secret-management procedure.
 
+
+## Kyocera Fleet Services contract
+
+Logical secret: `kyocera_kfs.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/kyocera-kfs/production/read-only`
+
+Durable OpenBao fields:
+
+- `api_url`
+- `access_id`
+- `access_password`
+- `request_from`
+- `request_to`
+- `authorization`
+- `kfs_username`
+- `kfs_password`
+- `headers_json`
+- `operations_json`
+
+Runtime identity:
+
+- policy: `jason-kyocera-kfs-read`
+- AppRole: `jason-kyocera-kfs-read`
+- protected artifacts: `/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/`
+
+The production API host is restricted to `https://api.kyods.com`. Exact KFS
+header names, request paths, and operation shapes come from AOT's Kyocera-issued
+dealer API integration package and are stored as protected configuration in
+OpenBao. Jason must not infer or reverse-engineer missing endpoint/header
+contracts.
+
+KFS is read-only in this foundation. Live selection also requires
+`JASON_KFS_ENABLED=true`; leaving the flag false keeps the KFS provider
+blocked even if code is deployed.
+
+Canonical lifecycle examples:
+
+```bash
+python3 tools/provider_secret.py status kyocera_kfs --check-only
+sudo python3 tools/provider_secret.py create kyocera_kfs
+sudo python3 tools/provider_secret.py verify kyocera_kfs
+```
+
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
