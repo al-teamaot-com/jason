@@ -28,8 +28,8 @@ class MemorySecrets:
         return {
             "request_from": "AOT",
             "request_to": "KFS_US",
-            "id": "apiuser",
-            "password": "secret",
+            "manager_id": "apiuser",
+            "manager_password": "secret",
             "authorization": "base64-token",
         }
 
@@ -40,7 +40,7 @@ class FakeKfsClient:
     def __init__(self, credentials, *, base_url, api_version):
         assert base_url == "https://api.kyods.com"
         assert api_version == 6
-        assert credentials["id"] == "apiuser"
+        assert credentials["manager_id"] == "apiuser"
 
     def call(self, path, body, *, min_api_version=1):
         self.calls.append((path, body, min_api_version))
