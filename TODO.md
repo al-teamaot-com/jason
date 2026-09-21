@@ -176,6 +176,35 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Successful completion of the read-only shadow pilot and formal authorization to expand scope.
 
+
+### TODO-CONN-004 — Kyocera device data integration
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add a governed Kyocera integration so Jason can retrieve copier/MFP operational data such as total meter counts, black-and-white and color copy/print counts, model and serial number, device status, toner/supply levels, fault/error conditions, and other useful device telemetry exposed by Kyocera.
+- **Why it matters:** Gives Jason direct visibility into managed copier usage and health. This can support meter collection, billing validation, proactive service, supply management, device inventory reconciliation, and faster ticket troubleshooting without relying on manual meter reads.
+- **Why not now:** The exact Kyocera data source and supported integration path still need to be selected and validated. Possible sources may include Kyocera APIs, device web interfaces, SNMP, Kyocera management platforms, or an existing dealer/monitoring platform.
+- **Prerequisites:**
+  - identify the authoritative Kyocera data source available to AOT;
+  - document authentication and tenant/client isolation requirements;
+  - map devices to Autotask configuration items and client/site records;
+  - define canonical meter fields for mono, color, total impressions, scan/fax where available;
+  - determine polling cadence and stale-data rules;
+  - define read-only capability first, then any governed write/actions separately;
+  - test against multiple Kyocera models and firmware versions;
+  - establish audit logging and error handling.
+- **Expected initial capabilities:**
+  1. Search for a Kyocera device by serial number, hostname, IP, client, or Autotask configuration item.
+  2. Read current meter/copy/print counts.
+  3. Read model, serial, firmware, online state, and basic device identity.
+  4. Read toner/supply levels and active faults when available.
+  5. Compare current meter values with prior readings and flag abnormal changes or missing readings.
+  6. Make meter data available to billing/reconciliation workflows without automatically changing billing records until separately approved.
+  7. Use device health data as evidence in copier service tickets and proactive monitoring workflows.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Evaluate when defining Jason copier/MFP workflows or when AOT wants to automate monthly meter collection and copier billing validation.
+
 ---
 
 ## Governance and operational maturity
