@@ -21,6 +21,8 @@ class DattoRmmMutationConnector:
         "datto_rmm.device.reboot.schedule": MutationPolicy("datto_rmm.device.reboot.schedule", RiskLevel.HIGH),
         "datto_rmm.alert.resolve": MutationPolicy("datto_rmm.alert.resolve", RiskLevel.MEDIUM),
         "datto_rmm.device.udf.update": MutationPolicy("datto_rmm.device.udf.update", RiskLevel.MEDIUM),
+        "datto_rmm.site.variable.create": MutationPolicy("datto_rmm.site.variable.create", RiskLevel.MEDIUM),
+        "datto_rmm.site.variable.update": MutationPolicy("datto_rmm.site.variable.update", RiskLevel.MEDIUM),
     }
     capabilities = frozenset(policies)
 
@@ -54,10 +56,17 @@ class DattoRmmMutationConnector:
     def _build_plan(self, request: ConnectorRequest) -> MutationPlan:
         a = request.arguments
         capability = request.context.capability
-        device_uid = a.get("device_uid")
-        if not isinstance(device_uid, str) or not device_uid.strip():
-            raise ValueError("device_uid is required.")
-        target: dict[str, Any] = {"device_uid": device_uid.strip()}
+        target: dict[str, Any]
+        if capability.startswith("datto_rmm.site.variable."):
+            site_uid = a.get("site_uid")
+            if not isinstance(site_uid, str) or not site_uid.strip():
+                raise ValueError("site_uid is required.")
+            target = {"site_uid": site_uid.strip()}
+        else:
+            device_uid = a.get("device_uid")
+            if not isinstance(device_uid, str) or not device_uid.strip():
+                raise ValueError("device_uid is required.")
+            target = {"device_uid": device_uid.strip()}
 
         if capability == "datto_rmm.component.run":
             component_uid = a.get("component_uid")
@@ -87,6 +96,38 @@ class DattoRmmMutationConnector:
                 raise ValueError("udf_number must be positive.")
             changes = {"udf_number": udf_number, "value": a.get("value")}
             warnings = ()
+        elif capability == "datto_rmm.site.variable.create":
+            name = str(a.get("name") or "").strip()
+            if not name:
+                raise ValueError("name is required.")
+            if " " in name:
+                raise ValueError("Datto RMM site variable names cannot contain spaces.")
+            if "value" not in a:
+                raise ValueError("value is required.")
+            changes = {
+                "name": name,
+                "value": a.get("value"),
+                "masked": bool(a.get("masked", True)),
+            }
+            warnings = ("Site-variable values are privileged configuration data and must not be disclosed or logged.",)
+        elif capability == "datto_rmm.site.variable.update":
+            variable_id = str(a.get("variable_id") or "").strip()
+            if not variable_id:
+                raise ValueError("variable_id is required.")
+            target["variable_id"] = variable_id
+            changes = {}
+            if "name" in a:
+                name = str(a.get("name") or "").strip()
+                if not name:
+                    raise ValueError("name cannot be empty.")
+                if " " in name:
+                    raise ValueError("Datto RMM site variable names cannot contain spaces.")
+                changes["name"] = name
+            if "value" in a:
+                changes["value"] = a.get("value")
+            if not changes:
+                raise ValueError("At least one of name or value is required.")
+            warnings = ("Site-variable values are privileged configuration data and must not be disclosed or logged.",)
         else:
             raise ValueError(f"Unsupported capability: {capability}")
 
@@ -96,15 +137,34 @@ class DattoRmmMutationConnector:
             risk=self.policies[capability].risk,
             target=target,
             proposed_changes=changes,
-            preconditions=("principal_authorized", "client_scope_valid", "device_identity_reconfirmed", "action_allowlisted"),
+            preconditions=(
+                "principal_authorized",
+                "client_scope_valid",
+                "site_identity_reconfirmed" if capability.startswith("datto_rmm.site.variable.") else "device_identity_reconfirmed",
+                "action_allowlisted",
+            ),
             rollback_notes=("Capture pre-action state.", "Use a compensating action only when vendor-supported."),
             warnings=warnings,
         )
 
     @staticmethod
-    def _plan_data(plan: MutationPlan) -> Mapping[str, Any]:
-        return {"capability": plan.capability, "provider": plan.provider, "risk": plan.risk.value, "target": dict(plan.target), "proposed_changes": dict(plan.proposed_changes), "preconditions": list(plan.preconditions), "rollback_notes": list(plan.rollback_notes), "warnings": list(plan.warnings)}
+    def _plan_data(plan: MutationPlan, *, redact_secrets: bool = True) -> Mapping[str, Any]:
+        changes = dict(plan.proposed_changes)
+        if redact_secrets and plan.capability.startswith("datto_rmm.site.variable.") and "value" in changes:
+            changes["value"] = "<redacted>"
+        return {
+            "capability": plan.capability,
+            "provider": plan.provider,
+            "risk": plan.risk.value,
+            "target": dict(plan.target),
+            "proposed_changes": changes,
+            "preconditions": list(plan.preconditions),
+            "rollback_notes": list(plan.rollback_notes),
+            "warnings": list(plan.warnings),
+        }
 
     @classmethod
     def _digest(cls, plan: MutationPlan) -> str:
-        return hashlib.sha256(json.dumps(cls._plan_data(plan), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        # Bind approval to the real value without ever returning or logging it.
+        payload = cls._plan_data(plan, redact_secrets=False)
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
