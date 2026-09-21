@@ -96,6 +96,23 @@ See the [02-Canonical-Models](02-Canonical-Models/) directory for approved model
 
 The project uses concrete, governed vertical slices before extracting broad frameworks. Architecture remains authoritative but evolves when implementation evidence reveals a durable lesson.
 
+## Operational Playbooks and Deferred Work
+
+Jason now includes a reusable [Endpoint Availability Verification Playbook](07-Operations/Endpoint-Availability-Verification-Playbook.md) for workflows that encounter a DRMM-managed device reported offline.
+
+The common rule is evidence-first:
+
+- check DRMM state and Last Seen first;
+- if the endpoint has been offline for less than the configured threshold, persist a recheck rather than relying on technician memory;
+- after the threshold (default two hours), attempt read-only same-client/site peer verification when a suitable online peer exists;
+- ping failure is supporting evidence, not proof that the endpoint is powered off;
+- no available peer does not block or terminate the workflow;
+- deferred work must carry an explicit next recheck condition/time.
+
+The deterministic evaluator and tests are implemented in `implementation/autonomous_remediation/availability.py` and `test_availability.py`.
+
+Two production dependencies remain intentionally open: a governed same-site peer network-probe capability and a durable deferred-work scheduler. The scheduler is tracked as `TODO-OPS-001`. Until those dependencies are wired and acceptance-tested, the playbook is implemented at the decision/state level but not fully autonomous end to end.
+
 ## Documentation Site
 
 The repository includes a MkDocs Material configuration and generated documentation workspace. Build locally with the repository's documentation environment and strict validation:
