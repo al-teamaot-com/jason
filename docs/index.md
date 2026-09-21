@@ -73,7 +73,8 @@ The milestone baseline records:
 Jason operational playbooks use a standard 22-section structure covering trigger, scope, identification, expected state, persisted states, diagnostics, decision gates, remediation authority, retry/recheck behavior, aging, dependencies, documentation, failure/escalation, verification, completion, capabilities, acceptance testing, and Section Goal closure.
 
 - [Jason Standard Playbook Template](playbooks/Jason-Standard-Playbook-Template.md)
-- [Endpoint Availability Verification Playbook](../07-Operations/Endpoint-Availability-Verification-Playbook.md)
+- [DRMM Site Variable Master Registry](playbooks/Jason-DRMM-Site-Variable-Master-Registry.md)
+- [Endpoint Availability Verification Playbook](07-Operations/Endpoint-Availability-Verification-Playbook.md)
 
 The endpoint-availability playbook establishes a reusable rule for DRMM-offline devices: inspect Last Seen first, defer with persisted state until the configured threshold, then attempt same-site read-only peer verification when possible. No peer is a recoverable condition, and failed ping alone is never treated as conclusive proof of power-off.
 
