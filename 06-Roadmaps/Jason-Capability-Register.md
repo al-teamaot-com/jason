@@ -138,6 +138,18 @@ The order below is provisional and should be changed when implementation evidenc
 | CAP-006 | Knowledge Candidate Capture | Observe | Preserve reusable lessons from completed work |
 | CAP-007 | Governed Email Send | Execute with approval | Provide one reusable governed outbound-email primitive with AWS SES as a replaceable pilot provider |
 
+## Shared operational primitives
+
+The following provider-neutral operational primitives are now part of the documented design. They are listed separately from numbered business capabilities because they support multiple playbooks and do not yet represent a fully registered, production-active vertical slice.
+
+| Canonical name | Current state | Purpose | Authority / boundary |
+|---|---|---|---|
+| `endpoint.availability.assess` | Implemented deterministic helper; not yet a registered invokable production capability | Evaluate DRMM online/Last Seen evidence, offline age, peer-verification need, resume state, and next recheck | Read-only/deterministic; no provider action |
+| `endpoint.network.reachability.probe` | Planned | From an authorized online managed peer at the same client/site, resolve and test the target by hostname and last-known IP | Read-only/non-destructive; same-client/site only; failed ping is not conclusive offline proof |
+| `orchestration.recheck.schedule` | Planned (`TODO-OPS-001`) | Persist and resume deferred work at `next_recheck_at` without relying on technician memory | Must preserve original authority/scope, suppress duplicates, cancel on terminal state, and audit execution |
+
+These primitives must still pass the normal capability admission, registration, authorization, provider-binding, evidence, and acceptance requirements before they are exposed as production capabilities. The implemented evaluator does not authorize the planned probe or scheduler.
+
 ## Admission test
 
 A proposed capability should not enter the register unless:
