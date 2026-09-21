@@ -29,6 +29,7 @@ CANONICAL_DIRECTORIES = (
 PUBLISHING_DIRECTORIES = (
     "docs/architecture",
     "docs/governance",
+    "docs/playbooks",
 )
 
 
