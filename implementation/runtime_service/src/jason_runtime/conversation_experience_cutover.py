@@ -143,6 +143,7 @@ def select_conversation_experience_flow(
     structured_client=None,
     integration_broker=None,
     investigation_client=None,
+    work_item_tracker=None,
 ):
     """Return the existing flow or a fully composed model-independent Teams experience.
 
@@ -383,6 +384,7 @@ def select_conversation_experience_flow(
         orchestrator=orchestrator,
         text_quality=text_quality,
         transport=transport,
+        work_item_tracker=work_item_tracker,
     )
 
     investigation_enabled = os.getenv(

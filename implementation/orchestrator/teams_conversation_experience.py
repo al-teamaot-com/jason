@@ -9,11 +9,13 @@ reads, provider identities, and orchestration details are not transport semantic
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Protocol
 
+from .automatic_work_item_tracker import AutomaticWorkItemTracker
 from .conversation_experience import ConversationExperienceCoordinator
 from .conversation_text_quality import ConversationTextQualityGate
-from .contracts import OrchestrationRequest, OrchestrationResult
+from .contracts import OrchestrationRequest, OrchestrationResult, OrchestrationStatus
 from .dynamic_conversation_kernel import DynamicConversationContext
 from .progressive_conversation_read import ProgressiveConversationReadEngine
 from .teams_conversation_flow import (
@@ -107,12 +109,16 @@ class BoundTeamsConversationIntentExecutor:
         principal: BoundConversationPrincipal,
         identity: TeamsConversationPrincipalEvidence,
         correlation_id: str,
+        work_item_tracker: AutomaticWorkItemTracker | None = None,
+        human_text: str = "",
     ) -> None:
         self.request_factory = request_factory
         self.orchestrator = orchestrator
         self.principal = principal
         self.identity = identity
         self.correlation_id = correlation_id
+        self.work_item_tracker = work_item_tracker
+        self.human_text = human_text.strip()
         self.results: list[OrchestrationResult] = []
 
     def execute(self, intent: ConversationIntent) -> OrchestrationResult:
@@ -133,6 +139,13 @@ class BoundTeamsConversationIntentExecutor:
                 "Central Orchestrator result does not match the governed conversation intent"
             )
         self.results.append(result)
+        if result.status is OrchestrationStatus.FAILED and self.work_item_tracker is not None:
+            self.work_item_tracker.record_support(
+                title=f"{intent.capability_name} failed during user-requested governed execution",
+                summary=self.human_text or intent.capability_name,
+                evidence=f"Governed capability {intent.capability_name} returned failed for correlation {self.correlation_id}.",
+                acceptance=f"The same governed {intent.capability_name} request completes successfully and is verified through normal Jason evidence/readback.",
+            )
         return result
 
     def _validate(
@@ -171,6 +184,7 @@ class TeamsConversationExperienceFlow:
     orchestrator: ConversationOrchestrator
     text_quality: ConversationTextQualityGate
     transport: TeamsConversationTransport
+    work_item_tracker: AutomaticWorkItemTracker | None = None
 
     def handle(self, request: TeamsConversationRequest) -> TeamsConversationExperienceResult:
         principal = self.identity_binder.bind(request.identity)
@@ -198,6 +212,8 @@ class TeamsConversationExperienceFlow:
                 principal=principal,
                 identity=request.identity,
                 correlation_id=correlation_id,
+                work_item_tracker=self.work_item_tracker,
+                human_text=request.text,
             )
             read_result = self.progressive_reads.fulfill_result(
                 question=request.text.strip(),
@@ -219,12 +235,27 @@ class TeamsConversationExperienceFlow:
                 internal_identifiers=self._internal_capability_identifiers(),
             )
         else:
+            candidate = resolution.decision.conversational_response or ""
+            tracking_notice = ""
+            if (
+                self.work_item_tracker is not None
+                and _looks_like_capability_request(request.text)
+                and _looks_like_missing_capability_response(candidate)
+            ):
+                item = self.work_item_tracker.record_todo(
+                    title=_work_item_title(request.text),
+                    summary=request.text.strip(),
+                    why_it_matters="A user requested this capability during a Jason conversation.",
+                )
+                tracking_notice = item.user_notice
             response_text = self.text_quality.finalize(
                 human_text=request.text.strip(),
                 kind="conversation",
-                candidate=resolution.decision.conversational_response or "",
+                candidate=candidate,
                 internal_identifiers=self._internal_capability_identifiers(),
             )
+            if tracking_notice:
+                response_text = f"{response_text.rstrip()} {tracking_notice}"
 
         if not response_text:
             raise RuntimeError("Conversation Experience produced empty human-facing text")
@@ -285,3 +316,25 @@ class TeamsConversationExperienceFlow:
             item.capability_name
             for item in self.experience.catalog.list_available()
         )
+def _looks_like_capability_request(text: str) -> bool:
+    words = set(re.findall(r"[a-z0-9]+", text.casefold()))
+    request_words = {"can", "could", "please", "run", "check", "create", "add", "update", "send", "search", "find"}
+    return bool(words.intersection(request_words))
+
+
+def _looks_like_missing_capability_response(text: str) -> bool:
+    normalized = " ".join(str(text).casefold().split())
+    markers = (
+        "cannot currently",
+        "can't currently",
+        "does not currently",
+        "not currently available",
+        "not supported",
+        "no governed capability",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _work_item_title(text: str) -> str:
+    clean = " ".join(str(text).strip().split())
+    return clean if len(clean) <= 96 else clean[:93].rstrip() + "..."

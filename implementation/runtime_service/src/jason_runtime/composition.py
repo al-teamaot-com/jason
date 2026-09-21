@@ -50,6 +50,7 @@ from kernel.identity_authority import (
     SQLiteIdentityRepository,
 )
 from kernel.resolution import GovernedCapabilityResolutionEngine
+from orchestrator.automatic_work_item_tracker import AutomaticWorkItemTracker
 from orchestrator.authority import JKD001OrchestrationContextEnforcer
 from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
 from orchestrator.conversation_action_intent import (
@@ -229,6 +230,8 @@ class RuntimeSettings:
     communication_template_catalog_path: Path = Path("/var/lib/jason/openclaw/communications/approved-templates.json")
     communication_template_requests_path: Path = Path("/var/lib/jason/openclaw/communications/template-requests")
     completion_gaps_path: Path = Path("/var/lib/jason/openclaw/completion-gaps")
+    support_list_path: Path = Path("/var/lib/jason/openclaw/work-items/SUPPORT.md")
+    todo_list_path: Path = Path("/var/lib/jason/openclaw/work-items/TODO.md")
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -347,6 +350,18 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_COMPLETION_GAPS_PATH",
                     "/var/lib/jason/openclaw/completion-gaps",
+                )
+            ),
+            support_list_path=Path(
+                os.getenv(
+                    "JASON_SUPPORT_LIST_PATH",
+                    "/var/lib/jason/openclaw/work-items/SUPPORT.md",
+                )
+            ),
+            todo_list_path=Path(
+                os.getenv(
+                    "JASON_TODO_LIST_PATH",
+                    "/var/lib/jason/openclaw/work-items/TODO.md",
                 )
             ),
             trusted_keys_registry=Path(
@@ -825,6 +840,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     component_engineering_service = ComponentEngineeringService(
         FileComponentEngineeringStore(settings.component_engineering_path)
     )
+    work_item_tracker = AutomaticWorkItemTracker(
+        settings.support_list_path,
+        settings.todo_list_path,
+    )
     playbook_run_store = FilePlaybookRunStore(settings.playbook_runs_path)
     completion_gap_router = CompletionGapRouter(
         FileCompletionGapStore(settings.completion_gaps_path),
@@ -1133,6 +1152,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             response_renderer=response_renderer,
             transport=return_transport,
             continuation_store=continuation_store,
+            work_item_tracker=work_item_tracker,
         )
 
     flow = select_teams_conversation_flow(
@@ -1211,6 +1231,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         structured_client=hosted_conversation_client or ollama_client,
         integration_broker=integration_broker,
         investigation_client=hosted_conversation_client,
+        work_item_tracker=work_item_tracker,
     )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)

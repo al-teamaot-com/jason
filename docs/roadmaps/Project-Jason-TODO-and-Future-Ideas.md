@@ -19,6 +19,10 @@ Each item should include:
 
 Items in this document are not approved capabilities and must not be enabled merely because they appear here.
 
+## Automatic intake rule
+
+When a user asks Jason for a capability or workflow that is not currently implemented or exposed and the request is materially a new capability rather than a defect in an expected one, Jason should automatically search both the TODO backlog and Support list for an equivalent or substantially similar item. If one already exists, Jason must not create a duplicate; it should tell the user which item already tracks the idea and may append a useful new use case/evidence. If none exists, Jason should create a TODO item and tell the user the new ID. Creating a TODO record is documentation only and does not approve, authorize, or enable the capability.
+
 ---
 
 ## Priority legend

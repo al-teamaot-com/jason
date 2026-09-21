@@ -1,0 +1,18 @@
+[Unit]
+Description=Jason Support and TODO Work Item Metrics Exporter
+After=network-online.target
+
+[Service]
+Type=simple
+User=al
+Group=al
+Environment=JASON_SUPPORT_LIST_PATH=/var/lib/jason/openclaw/work-items/SUPPORT.md
+Environment=JASON_TODO_LIST_PATH=/var/lib/jason/openclaw/work-items/TODO.md
+Environment=JASON_WORK_ITEM_EXPORTER_HOST=0.0.0.0
+Environment=JASON_WORK_ITEM_EXPORTER_PORT=9479
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/work_item_exporter.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

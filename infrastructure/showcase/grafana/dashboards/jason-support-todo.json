@@ -1,0 +1,80 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Open Support Items",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jason_work_items_total{list=\"support\"}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "id": 2,
+      "title": "To Do Items",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "jason_work_items_total{list=\"todo\"}", "refId": "A"}],
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0}
+    },
+    {
+      "id": 3,
+      "title": "Support List",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "jason_work_item_info{list=\"support\"}",
+        "format": "table",
+        "instant": true,
+        "refId": "A"
+      }],
+      "transformations": [{
+        "id": "organize",
+        "options": {
+          "excludeByName": {"Time": true, "__name__": true, "job": true, "instance": true, "list": true, "Value": true},
+          "indexByName": {"item_id": 0, "priority": 1, "status": 2, "title": 3},
+          "renameByName": {"item_id": "ID", "priority": "Priority", "status": "Status", "title": "Item"}
+        }
+      }],
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 4}
+    },
+    {
+      "id": 4,
+      "title": "To Do List",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "jason_work_item_info{list=\"todo\"}",
+        "format": "table",
+        "instant": true,
+        "refId": "A"
+      }],
+      "transformations": [{
+        "id": "organize",
+        "options": {
+          "excludeByName": {"Time": true, "__name__": true, "job": true, "instance": true, "list": true, "Value": true},
+          "indexByName": {"item_id": 0, "priority": 1, "status": 2, "title": 3},
+          "renameByName": {"item_id": "ID", "priority": "Priority", "status": "Status", "title": "Item"}
+        }
+      }],
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 14}
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["Jason", "Support", "TODO"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason Support & To Do",
+  "uid": "jason-support-todo",
+  "version": 1,
+  "weekStart": ""
+}
