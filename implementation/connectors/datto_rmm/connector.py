@@ -18,6 +18,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.alerts.list",
             "datto_rmm.patch_status.get",
             "datto_rmm.component_results.list",
+            "datto_rmm.site.variables.list",
         }
     )
 
@@ -131,4 +132,9 @@ class DattoRmmConnector(ConnectorBase):
             return f"/api/v2/device/{arguments['device_uid']}/audit", None
         if capability == "datto_rmm.component_results.list":
             return f"/api/v2/device/{arguments['device_uid']}/jobs", None
+        if capability == "datto_rmm.site.variables.list":
+            site_uid = str(arguments.get("site_uid") or arguments.get("resource_id") or "").strip()
+            if not site_uid:
+                raise ValueError("site_uid or resource_id is required")
+            return f"/api/v2/site/{site_uid}/variables", None
         raise ValueError(f"Unsupported capability: {capability}")
