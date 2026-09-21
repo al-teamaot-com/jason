@@ -24,6 +24,7 @@ Examples include:
 - `INF-015-AWS-Provider-Deployment-Checklist.md`;
 - `IT-Glue-Datto-Resource-Convergence-Checklist.md`;
 - `Jason-Bootstrap-and-Secrets-Runbook.md`;
+- `Jason-Playbook-Autonomy-Runbook.md`;
 - `OpenClaw-Ed25519-Key-Rotation.md`;
 - `OpenClaw-JKD001-Operational-Hardening.md`;
 - `OpenClaw-JKD001-Production-Packaging.md`;
@@ -32,6 +33,8 @@ Examples include:
 - `System-Registry-Production-Verification-Runbook.md`;
 - `Teams-Approval-Deployment-and-Recovery.md`;
 - `Teams-Integration-Security-Cleanup-Checklist.md`.
+
+`Jason-Playbook-Autonomy-Runbook.md` is the operational procedure for granting, verifying, and revoking standing playbook autonomy under ADR-010. The runbook is procedural only: the live registry, exact version/hash approval record, Identity and Authority Service, and Central Orchestrator remain authoritative.
 
 `Runbook-Teams-Integration.md` is the current operational owner for Microsoft Teams ingress deployment/verification/rollback. As of the 2026-08-15 production cutover, ordinary inbound Teams is owned by the direct `jason-teams-gateway` under ADR-009; OpenClaw remains a separate deployed component and may still support approved outbound/proactive Teams behavior. Do not infer current ingress ownership from older OpenClaw runbooks or internal provider startup logs.
 

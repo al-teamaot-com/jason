@@ -10,6 +10,7 @@ def test_playbook_metrics_are_aggregated_without_ticket_or_device_labels(tmp_pat
     registry.write_text(
         json.dumps(
             {
+                "autonomy": {"global_enabled": True},
                 "playbooks": [
                     {
                         "id": "datto_edr_av",
@@ -18,6 +19,12 @@ def test_playbook_metrics_are_aggregated_without_ticket_or_device_labels(tmp_pat
                         "lifecycle": "pilot",
                         "enabled": True,
                         "review_status": "healthy",
+                        "autonomy": {
+                            "mode": "approved_autonomous",
+                            "approval_status": "approved",
+                            "approved_version": "1.2.0",
+                            "approved_source_sha256": "abc123",
+                        },
                     }
                 ]
             }
@@ -62,6 +69,8 @@ def test_playbook_metrics_are_aggregated_without_ticket_or_device_labels(tmp_pat
     metrics = render_metrics(registry_path=registry, events_path=events)
 
     assert 'jason_playbook_info{playbook_id="datto_edr_av"' in metrics
+    assert 'jason_playbook_global_autonomy_enabled 1' in metrics
+    assert 'jason_playbook_autonomy_approved{playbook_id="datto_edr_av"} 1' in metrics
     assert 'jason_playbook_runs_total{playbook_id="datto_edr_av",outcome="resolved"} 1' in metrics
     assert 'jason_playbook_runs_total{playbook_id="datto_edr_av",outcome="escalated"} 1' in metrics
     assert 'jason_playbook_evidence_source_total{playbook_id="datto_edr_av",source="datto_edr_api"} 2' in metrics

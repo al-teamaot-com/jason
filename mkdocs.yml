@@ -85,6 +85,7 @@ nav:
   - Operations:
       - Operations Authority Map: operations/README.md
       - Microsoft Teams Integration: operations/Runbook-Teams-Integration.md
+      - Playbook Autonomy Runbook: operations/Jason-Playbook-Autonomy-Runbook.md
       - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
@@ -115,6 +116,7 @@ nav:
       - ADR-007 Teams Proactive Messaging: decisions/ADR-007-Teams-Proactive-Messaging.md
       - ADR-008 Documentation Control Plane Consolidation: decisions/ADR-008-Documentation-Control-Plane-Consolidation.md
       - ADR-009 Direct Microsoft Teams Ingress: decisions/ADR-009-Direct-Microsoft-Teams-Ingress.md
+      - ADR-010 Playbook-Level Autonomy Gating: decisions/ADR-010-Playbook-Level-Autonomy-Gating.md
   - Roadmap:
       - Capability Register: roadmaps/Jason-Capability-Register.md
       - Governed TODO and Future Ideas: roadmaps/Project-Jason-TODO-and-Future-Ideas.md

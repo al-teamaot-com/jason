@@ -66,14 +66,15 @@
     },
     {
       "type": "stat",
-      "title": "Runs — 30d",
+      "title": "Active Runs",
+      "description": "Current non-terminal persisted PlaybookRun records across all registered playbooks.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
       "targets": [
         {
-          "expr": "sum(increase(jason_playbook_runs_total[30d]))",
+          "expr": "jason_playbook_active_runs",
           "refId": "A"
         }
       ],
@@ -107,14 +108,15 @@
     },
     {
       "type": "stat",
-      "title": "Resolved — 30d",
+      "title": "Awaiting Approval",
+      "description": "Current playbook runs paused at an approval gate.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
       "targets": [
         {
-          "expr": "sum(increase(jason_playbook_runs_total{outcome=\"resolved\"}[30d]))",
+          "expr": "sum(jason_playbook_active_approval{approval_status=\"pending\"})",
           "refId": "A"
         }
       ],
@@ -148,14 +150,15 @@
     },
     {
       "type": "stat",
-      "title": "Escalated — 30d",
+      "title": "Blocked Runs",
+      "description": "Current playbook runs that cannot safely proceed until a dependency, evidence, identity, capability, or authority issue is resolved.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
       "targets": [
         {
-          "expr": "sum(increase(jason_playbook_runs_total{outcome=\"escalated\"}[30d]))",
+          "expr": "sum(jason_playbook_blocked_runs)",
           "refId": "A"
         }
       ],
@@ -189,22 +192,22 @@
     },
     {
       "type": "stat",
-      "title": "Verification Pass — 30d",
+      "title": "Rechecks Pending",
+      "description": "Current playbook runs waiting for a bounded scheduled recheck.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
       "targets": [
         {
-          "expr": "100 * sum(increase(jason_playbook_verification_total{result=\"pass\"}[30d])) / clamp_min(sum(increase(jason_playbook_verification_total[30d])), 1)",
+          "expr": "sum(jason_playbook_recheck_pending)",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -230,8 +233,358 @@
       }
     },
     {
+      "type": "table",
+      "title": "Live Playbook States",
+      "description": "Current non-terminal runs grouped by playbook and state. Ticket/device/run identifiers stay in governed run storage and are intentionally absent from Prometheus.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_active_state",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "playbook_id": "Playbook",
+              "state": "State",
+              "Value": "Runs"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Blocked Reason Classes",
+      "description": "Low-cardinality blocker classes only; sensitive operational evidence remains in governed run storage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_blocked_runs",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "playbook_id": "Playbook",
+              "reason_class": "Reason Class",
+              "Value": "Runs"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 16,
+        "x": 0,
+        "y": 12
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
       "type": "stat",
-      "title": "Avg Attempts — 30d",
+      "title": "Global Autonomy",
+      "description": "Master autonomous-execution gate. ON alone authorizes nothing; the exact playbook version/hash must also be approved.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_global_autonomy_enabled",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OFF"
+                },
+                "1": {
+                  "text": "ON"
+                }
+              }
+            }
+          ],
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Autonomous Playbooks Approved",
+      "description": "Count of registered playbooks whose current exact version carries an autonomous approval record. Global autonomy must also be ON before execution can occur.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_playbook_autonomy_approved)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Runs \u2014 30d",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(jason_playbook_runs_total[30d]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 20
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Resolved \u2014 30d",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(jason_playbook_runs_total{outcome=\"resolved\"}[30d]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 20
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Escalated \u2014 30d",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(jason_playbook_runs_total{outcome=\"escalated\"}[30d]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 20
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Verification Pass \u2014 30d",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(increase(jason_playbook_verification_total{result=\"pass\"}[30d])) / clamp_min(sum(increase(jason_playbook_verification_total[30d])), 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 20
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Avg Attempts \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -253,7 +606,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 8
+        "y": 20
       },
       "options": {
         "reduceOptions": {
@@ -272,7 +625,7 @@
     },
     {
       "type": "stat",
-      "title": "Median Runtime — 30d",
+      "title": "Median Runtime \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -293,7 +646,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 8
+        "y": 20
       },
       "options": {
         "reduceOptions": {
@@ -312,7 +665,7 @@
     },
     {
       "type": "table",
-      "title": "Outcomes by Playbook — 30d",
+      "title": "Outcomes by Playbook \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -347,7 +700,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 24
       },
       "options": {
         "showHeader": true
@@ -355,7 +708,7 @@
     },
     {
       "type": "table",
-      "title": "Security Dispositions — 30d",
+      "title": "Security Dispositions \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -390,7 +743,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 24
       },
       "options": {
         "showHeader": true
@@ -398,7 +751,7 @@
     },
     {
       "type": "table",
-      "title": "Evidence Sources — 30d",
+      "title": "Evidence Sources \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -433,7 +786,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 21
+        "y": 33
       },
       "options": {
         "showHeader": true
@@ -441,7 +794,7 @@
     },
     {
       "type": "table",
-      "title": "Step Outcomes — 30d",
+      "title": "Step Outcomes \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -477,7 +830,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 21
+        "y": 33
       },
       "options": {
         "showHeader": true
@@ -485,7 +838,7 @@
     },
     {
       "type": "table",
-      "title": "Compromise Signals — 30d",
+      "title": "Compromise Signals \u2014 30d",
       "description": "These are explicit evidence classifications. Product health or an alert alone never generates a compromise signal.",
       "datasource": {
         "type": "prometheus",
@@ -521,7 +874,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 42
       },
       "options": {
         "showHeader": true
@@ -529,7 +882,7 @@
     },
     {
       "type": "table",
-      "title": "Reopened Cases — 30d",
+      "title": "Reopened Cases \u2014 30d",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -563,7 +916,50 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 42
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "table",
+      "title": "Playbook Autonomy Approval",
+      "description": "Standing autonomy is fail-closed. A value of 1 means the registry contains an approval for the current exact playbook version with a source hash; global policy and all higher-level safety controls still apply.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_autonomy_approved",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "playbook_id": "Playbook",
+              "Value": "Autonomy Approved"
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 50
       },
       "options": {
         "showHeader": true
@@ -589,5 +985,5 @@
   "timezone": "browser",
   "title": "Jason Playbook Control Center",
   "uid": "jason-playbook-control-center",
-  "version": 1
+  "version": 3
 }
