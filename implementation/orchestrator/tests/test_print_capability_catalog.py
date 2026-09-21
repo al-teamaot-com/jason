@@ -80,6 +80,9 @@ def test_register_print_foundation_registers_all_capabilities_and_provider() -> 
         PRINT_SUPPLIES_READ,
         PRINT_ALERT_SEARCH,
     ):
-        assert capabilities.get(name).capability_name == name
+        assert capabilities.get(
+            capability_name=name,
+            version="1.0",
+        ).capability_name == name
 
     assert providers.get(KYOCERA_KFS_PROVIDER).provider_id == KYOCERA_KFS_PROVIDER
