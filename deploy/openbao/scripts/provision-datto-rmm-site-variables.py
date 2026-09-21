@@ -292,20 +292,20 @@ def main() -> int:
             },
         )
 
-        execution_record = request_json(
+        site_variable_record = request_json(
             base_url=arguments.base_url,
             path=site_variable_path,
             method="GET",
             token=admin_token,
         )
-        site_variable_values = require_kv2_data(execution_record, "Datto RMM site-variable")
+        site_variable_values = require_kv2_data(site_variable_record, "Datto RMM site-variable")
         if site_variable_values.get("api_url") != api_url:
             raise ProvisioningError("Datto RMM site-variable API URL verification failed.")
         if site_variable_values.get("api_key") != api_key:
             raise ProvisioningError("Datto RMM site-variable API key verification failed.")
         if site_variable_values.get("api_secret") != api_secret:
             raise ProvisioningError("Datto RMM site-variable API secret verification failed.")
-        site_variable_version = kv2_version(execution_record, "Datto RMM site-variable")
+        site_variable_version = kv2_version(site_variable_record, "Datto RMM site-variable")
         if site_variable_version != 1:
             raise ProvisioningError(
                 "Datto RMM site-variable secret was not created as a new isolated record."
@@ -348,7 +348,7 @@ def main() -> int:
         try:
             test_auth = approle_login["auth"]
             test_token = require_string(
-                test_auth, "client_token", "an execution AppRole test token"
+                test_auth, "client_token", "a site-variable AppRole test token"
             )
         except (KeyError, TypeError) as error:
             raise ProvisioningError(
@@ -413,7 +413,7 @@ def main() -> int:
             "role_name": role_name,
             "connector_identity": "datto-rmm-site-variables",
             "environment": "production",
-            "logical_secret": "datto_rmm.execution",
+            "logical_secret": "datto_rmm.site_variables",
             "rotation_required": True,
             "secret_id_accessor": secret_id_accessor,
             "secret_id_ttl_seconds": 7776000,
