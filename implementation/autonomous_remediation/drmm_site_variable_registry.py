@@ -9,7 +9,7 @@ Two phases are deliberately separate:
 1. Registry discovery: enumerate all authorized DRMM sites and reduce variable
    *names* plus configured/not-configured state into an AOT-wide master registry.
 2. New-site convergence: compare one new site with the human-approved Standard
-   subset and plan creation of missing variable names with blank values.
+   subset and plan creation of missing variable names using Datto's required staged UNSET value.
 
 Discovery never promotes a variable to Standard. Existing variables are never
 overwritten by this playbook.
@@ -25,7 +25,8 @@ from typing import Iterable, Mapping, Sequence
 
 PLAYBOOK_ID = "drmm_site_variable_master_registry"
 PLAYBOOK_NAME = "Jason - DRMM Site Variable Master Registry"
-PLAYBOOK_VERSION = "1.0.0"
+PLAYBOOK_VERSION = "1.1.0"
+STAGED_UNSET_VALUE = "__JASON_UNSET__"
 
 
 class VariableDisposition(str, Enum):
@@ -82,8 +83,10 @@ class RegistrySnapshot:
 class ApprovedStandardVariable:
     """Human-approved onboarding baseline item.
 
-    Values are intentionally absent. The onboarding phase creates the name with a
-    blank value; a later playbook may populate or validate it.
+    Datto requires a value when a variable is created. The onboarding phase creates
+    the name with Jason's reserved non-secret STAGED_UNSET_VALUE; a later playbook
+    must replace that sentinel with the real value before any dependent component or
+    policy is allowed to consume the variable.
     """
 
     name: str
@@ -96,7 +99,7 @@ class ApprovedStandardVariable:
 class ConvergenceAction:
     operation: str
     name: str
-    value: str = ""
+    value: str = STAGED_UNSET_VALUE
     masked: bool = True
     reason: str = ""
 
@@ -332,11 +335,12 @@ def plan_new_site_convergence(
             ConvergenceAction(
                 operation="management.site.variable.create",
                 name=exact_name,
-                value="",
+                value=STAGED_UNSET_VALUE,
                 masked=standard.masked,
                 reason=(
                     "Create approved AOT Standard DRMM site-variable name during client onboarding. "
-                    "Value intentionally left blank for later population/validation."
+                    "Datto requires a value at creation, so Jason uses its reserved UNSET staging "
+                    "sentinel until the later population/validation playbook replaces it."
                 ),
             )
         )
