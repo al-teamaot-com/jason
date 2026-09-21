@@ -10,6 +10,7 @@ from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_rmm.connector import DattoRmmConnector
+from connectors.kyocera_kfs.connector import KyoceraKfsConnector
 from jason_cap_007.kernel_registration import register_email_send
 from jason_cap_007.service import CAPABILITY_NAME as EMAIL_CAPABILITY_NAME
 from jason_cap_007.service import EmailSendPolicy, GovernedEmailSendInvoker
@@ -63,6 +64,15 @@ from orchestrator.resource_evidence import (
     GovernedResourceEvidenceInterpreter,
     GovernedTeamsResourceResponseRenderer,
 )
+from orchestrator.print_capability_catalog import (
+    KYOCERA_KFS_PROVIDER,
+    PRINT_ALERT_SEARCH,
+    PRINT_DEVICE_READ,
+    PRINT_DEVICE_SEARCH,
+    PRINT_METER_READ,
+    PRINT_SUPPLIES_READ,
+    register_print_resource_foundation,
+)
 from orchestrator.resource_inquiry import GovernedResourceInquiryPlanner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.teams_conversation_flow import TeamsConversationFlow
@@ -94,6 +104,13 @@ class RuntimeSettings:
     ollama_model: str
     allowed_machine_identities: frozenset[str]
     microsoft_boundary_db: Path | None = None
+    kfs_enabled: bool = False
+    kfs_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/kyocera-kfs/role_id"
+    )
+    kfs_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/kyocera-kfs/secret_id"
+    )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
     )
@@ -158,6 +175,20 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_MICROSOFT_BOUNDARY_DB",
                     "/var/lib/jason/authority/client-boundaries.sqlite3",
+                )
+            ),
+            kfs_enabled=os.getenv("JASON_KFS_ENABLED", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
+            kfs_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_KFS_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/kyocera-kfs/role_id",
+                )
+            ),
+            kfs_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_KFS_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/kyocera-kfs/secret_id",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -284,6 +315,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=datetime.now(timezone.utc),
     )
+    register_print_resource_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime.now(timezone.utc),
+        enabled=settings.kfs_enabled,
+    )
     register_email_send(capabilities=capabilities, providers=providers)
 
     ollama_client = OllamaStructuredJsonClient(
@@ -327,6 +364,27 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         },
     )
 
+    kfs_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.kfs_openbao_role_id_path,
+        secret_id_path=settings.kfs_openbao_secret_id_path,
+    )
+    kfs = KyoceraKfsConnector(
+        secrets=kfs_openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
+    kfs_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={KYOCERA_KFS_PROVIDER: kfs},
+        provider_capability_map={
+            (KYOCERA_KFS_PROVIDER, PRINT_DEVICE_SEARCH): "kyocera_kfs.device.search",
+            (KYOCERA_KFS_PROVIDER, PRINT_DEVICE_READ): "kyocera_kfs.device.get",
+            (KYOCERA_KFS_PROVIDER, PRINT_METER_READ): "kyocera_kfs.meters.get",
+            (KYOCERA_KFS_PROVIDER, PRINT_SUPPLIES_READ): "kyocera_kfs.supplies.get",
+            (KYOCERA_KFS_PROVIDER, PRINT_ALERT_SEARCH): "kyocera_kfs.alerts.list",
+        },
+    )
+
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
         role_id_path=settings.ses_openbao_role_id_path,
@@ -347,6 +405,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers = CapabilityInvokerRegistry()
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
+    invokers.register(PRINT_DEVICE_SEARCH, kfs_invoker)
+    invokers.register(PRINT_DEVICE_READ, kfs_invoker)
+    invokers.register(PRINT_METER_READ, kfs_invoker)
+    invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
+    invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
