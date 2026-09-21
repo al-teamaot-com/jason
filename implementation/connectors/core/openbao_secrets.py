@@ -101,15 +101,11 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "kyocera_kfs.readonly": frozenset(
         {
             "api_url",
-            "access_id",
-            "access_password",
             "request_from",
             "request_to",
             "authorization",
             "kfs_username",
             "kfs_password",
-            "headers_json",
-            "operations_json",
         }
     ),
 }
