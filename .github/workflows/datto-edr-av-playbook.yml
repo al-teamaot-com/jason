@@ -125,7 +125,7 @@ jobs:
           implementation/connectors/datto_edr/connector.py
       - name: Run Datto EDR AV playbook and connector tests
         env:
-          PYTHONPATH: implementation
+          PYTHONPATH: implementation:implementation/autonomous_remediation
         run: >-
           python -m pytest -q
           implementation/autonomous_remediation/test_datto_edr_av_playbook.py
