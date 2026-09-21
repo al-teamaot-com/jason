@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "playbooks": [
     {
       "id": "datto_edr_av",
@@ -8,7 +8,24 @@
       "lifecycle": "pilot",
       "enabled": false,
       "review_status": "scan_execute_accepted_full_threat_branch_pending",
-      "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py"
+      "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
+      "autonomy": {
+        "mode": "recommend_only",
+        "approval_status": "not_approved",
+        "approved_version": null,
+        "approved_source_sha256": null,
+        "approved_by": null,
+        "approved_at": null,
+        "review_expires_at": null,
+        "allowed_capabilities": [],
+        "maximum_targets": 1
+      }
     }
-  ]
+  ],
+  "autonomy": {
+    "global_enabled": false,
+    "default": "deny",
+    "requires_exact_source_hash": true,
+    "policy_version": 1
+  }
 }

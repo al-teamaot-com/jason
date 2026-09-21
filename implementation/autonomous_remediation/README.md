@@ -83,6 +83,16 @@ The playbook exports a stable metrics payload and low-cardinality telemetry even
 
 No device execution is part of source implementation or unit testing. A live pilot must be started separately against an explicitly selected endpoint after source review and deployment.
 
+## Standing autonomous playbook approval
+
+Autonomous execution uses a two-key gate. Global autonomy must be enabled **and** the exact registered playbook version must be explicitly approved for autonomous use. A playbook approval is bound to the exact source SHA-256, named approver, approval time, allowed capabilities, and target-count limit.
+
+Any missing field, disabled playbook, version change, source change, capability outside the approved list, or target count above the approved maximum fails closed. Editing an approved playbook therefore invalidates standing autonomy until the new version/hash is reviewed and approved again.
+
+Playbook approval can never broaden authority beyond Jason's global policy and Central Orchestrator. Non-overridable safety rules, requester authority, client isolation, provider allowlists, blast-radius controls, and per-instance approval requirements for disruptive actions remain authoritative even when a playbook is approved for autonomous use.
+
+The source registry defaults to `global_enabled: false`, `default: deny`, and no playbook is approved autonomously. Enabling global autonomy alone therefore authorizes nothing.
+
 ## Initial pilot scenario
 
 A ticket reports a QuickBooks problem. Jason correlates the installed version from DRMM with authoritative vendor intelligence and prior AOT resolutions. It proposes an approved QuickBooks update capability. After technician approval, the orchestrator triggers the DRMM component, captures its job output, verifies the installed version and service health, updates the Autotask ticket, and asks the client to confirm the original symptom is resolved.

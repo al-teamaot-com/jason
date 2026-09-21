@@ -23,6 +23,9 @@ REGISTRY_PATH = Path(
 EVENTS_PATH = Path(
     os.environ.get("JASON_PLAYBOOK_EVENTS_PATH", "/var/lib/jason/playbooks/events.jsonl")
 )
+RUNS_PATH = Path(
+    os.environ.get("JASON_PLAYBOOK_RUNS_PATH", "/var/lib/jason/playbooks/runs")
+)
 HOST = os.environ.get("JASON_PLAYBOOK_EXPORTER_HOST", "0.0.0.0")
 PORT = int(os.environ.get("JASON_PLAYBOOK_EXPORTER_PORT", "9468"))
 DURATION_BUCKETS = (60, 300, 900, 1800, 3600, 7200, 14400, 28800, 86400)
@@ -69,6 +72,21 @@ def _load_events(path: Path | None = None) -> list[dict]:
     return events
 
 
+def _load_runs(path: Path | None = None) -> list[dict]:
+    selected = path or RUNS_PATH
+    if not selected.exists() or not selected.is_dir():
+        return []
+    runs: list[dict] = []
+    for candidate in sorted(selected.glob("*.json")):
+        try:
+            item = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(item, dict) and str(item.get("playbook_id", "")).strip() and str(item.get("state", "")).strip():
+            runs.append(item)
+    return runs
+
+
 def _timestamp(value: object) -> float | None:
     text = str(value or "").strip()
     if not text:
@@ -99,9 +117,11 @@ def render_metrics(
     *,
     registry_path: Path | None = None,
     events_path: Path | None = None,
+    runs_path: Path | None = None,
 ) -> str:
     registry = _load_registry(registry_path)
     events = _load_events(events_path)
+    runs = _load_runs(runs_path)
     playbooks = [
         item for item in registry.get("playbooks", []) if isinstance(item, dict)
     ]
@@ -111,7 +131,16 @@ def render_metrics(
         "# TYPE jason_playbook_info gauge",
         "# HELP jason_playbook_enabled Whether the registered playbook is enabled for runtime use.",
         "# TYPE jason_playbook_enabled gauge",
+        "# HELP jason_playbook_global_autonomy_enabled Whether global playbook autonomy is enabled.",
+        "# TYPE jason_playbook_global_autonomy_enabled gauge",
+        "# HELP jason_playbook_autonomy_approved Whether the exact playbook is approved for autonomous execution.",
+        "# TYPE jason_playbook_autonomy_approved gauge",
     ]
+    global_autonomy = registry.get("autonomy", {})
+    lines.append(
+        "jason_playbook_global_autonomy_enabled "
+        + ("1" if isinstance(global_autonomy, dict) and global_autonomy.get("global_enabled") is True else "0")
+    )
     for item in playbooks:
         playbook_id = str(item.get("id", "unknown"))
         labels = {
@@ -129,6 +158,66 @@ def render_metrics(
             f'jason_playbook_enabled{{playbook_id="{_escape(playbook_id)}"}} '
             f'{1 if item.get("enabled") is True else 0}'
         )
+        autonomy = item.get("autonomy", {})
+        autonomy_approved = (
+            isinstance(autonomy, dict)
+            and autonomy.get("mode") == "approved_autonomous"
+            and autonomy.get("approval_status") == "approved"
+            and autonomy.get("approved_version") == item.get("version")
+            and bool(autonomy.get("approved_source_sha256"))
+        )
+        lines.append(
+            f'jason_playbook_autonomy_approved{{playbook_id="{_escape(playbook_id)}"}} '
+            f'{1 if autonomy_approved else 0}'
+        )
+
+    active_states: Counter[tuple[str, ...]] = Counter()
+    approval_states: Counter[tuple[str, ...]] = Counter()
+    blocked_reasons: Counter[tuple[str, ...]] = Counter()
+    recheck_pending: Counter[tuple[str, ...]] = Counter()
+    active_total = 0
+    for run in runs:
+        pid = str(run.get("playbook_id", "")).strip()
+        state = str(run.get("state", "unknown")).strip() or "unknown"
+        if not pid or state in {"complete", "escalated", "cancelled"}:
+            continue
+        active_total += 1
+        active_states[(pid, state)] += 1
+        approval = str(run.get("approval_status", "not_required")).strip() or "not_required"
+        approval_states[(pid, approval)] += 1
+        reason = str(run.get("blocked_reason_class", "")).strip()
+        if state == "blocked":
+            blocked_reasons[(pid, reason or "unspecified")] += 1
+        if state == "recheck_pending":
+            recheck_pending[(pid,)] += 1
+
+    lines.extend([
+        "# HELP jason_playbook_active_runs Current non-terminal persisted playbook runs.",
+        "# TYPE jason_playbook_active_runs gauge",
+        f"jason_playbook_active_runs {active_total}",
+        "# HELP jason_playbook_active_state Current non-terminal playbook runs grouped by playbook and state.",
+        "# TYPE jason_playbook_active_state gauge",
+    ])
+    for labels, count in sorted(active_states.items()):
+        lines.append(f'jason_playbook_active_state{{playbook_id="{_escape(labels[0])}",state="{_escape(labels[1])}"}} {count}')
+    lines.extend([
+        "# HELP jason_playbook_active_approval Current non-terminal playbook runs grouped by approval state.",
+        "# TYPE jason_playbook_active_approval gauge",
+    ])
+    for labels, count in sorted(approval_states.items()):
+        lines.append(f'jason_playbook_active_approval{{playbook_id="{_escape(labels[0])}",approval_status="{_escape(labels[1])}"}} {count}')
+    lines.extend([
+        "# HELP jason_playbook_blocked_runs Current blocked playbook runs by low-cardinality reason class.",
+        "# TYPE jason_playbook_blocked_runs gauge",
+    ])
+    for labels, count in sorted(blocked_reasons.items()):
+        lines.append(f'jason_playbook_blocked_runs{{playbook_id="{_escape(labels[0])}",reason_class="{_escape(labels[1])}"}} {count}')
+    lines.extend([
+        "# HELP jason_playbook_recheck_pending Current playbook runs waiting for a scheduled recheck.",
+        "# TYPE jason_playbook_recheck_pending gauge",
+    ])
+    for labels, count in sorted(recheck_pending.items()):
+        lines.append(f'jason_playbook_recheck_pending{{playbook_id="{_escape(labels[0])}"}} {count}')
 
     outcomes: Counter[tuple[str, ...]] = Counter()
     classifications: Counter[tuple[str, ...]] = Counter()
@@ -292,7 +381,7 @@ def render_metrics(
     lines.extend([
         "# HELP jason_playbook_exporter_build_info Jason playbook exporter metadata.",
         "# TYPE jason_playbook_exporter_build_info gauge",
-        'jason_playbook_exporter_build_info{version="1"} 1',
+        'jason_playbook_exporter_build_info{version="2"} 1',
     ])
     return "\n".join(lines) + "\n"
 
