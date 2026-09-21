@@ -36,6 +36,23 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/datto-rmm-read-approle"
         ),
     },
+    "kfs": {
+        "logical_name": "kfs.runtime",
+        "secret_path": "secret/data/connectors/kfs/production/runtime",
+        "fields": (
+            "request_from",
+            "request_to",
+            "id",
+            "password",
+            "authorization",
+        ),
+        "policy_name": "jason-kfs-runtime-read",
+        "role_name": "jason-kfs-runtime-read",
+        "connector_identity": "kfs-runtime",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/kfs-runtime-approle"
+        ),
+    },
     "it_glue": {
         "logical_name": "it_glue.readonly",
         "secret_path": "secret/data/connectors/it-glue/production/read-only",
