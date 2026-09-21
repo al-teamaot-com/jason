@@ -61,9 +61,31 @@ connectors:
       - it_glue.flexible_asset.search
       - it_glue.document.get
       - it_glue.relationships.list
-  n8n:
+  kfs:
     status: foundation_built
     priority: 5
+    mode: governed_read_and_write
+    secret: kfs.runtime
+    endpoint: https://api.kyods.com
+    api_version: 6
+    capabilities:
+      - kfs.group.list
+      - kfs.device.list
+      - kfs.device.get
+      - kfs.device_log.list
+      - kfs.device_log.get
+      - kfs.device.management_status.change
+    governance:
+      reads: observe
+      management_status_change: governed_mutation
+      terminated_status: explicit_approval_required
+    notes:
+      - KFS exposes one API access level; Jason enforces read versus write authority.
+      - API Authorization is separate from the dedicated KFS Manager login used by /KFS/Login.
+      - Dedicated KFS integration Manager accounts are preferred over personal user accounts.
+  n8n:
+    status: foundation_built
+    priority: 6
     mode: approved_workflows_only
     secret: n8n.runtime
     capabilities:
@@ -72,10 +94,10 @@ connectors:
       - n8n.execution.get
   postgres:
     status: partial
-    priority: 6
+    priority: 7
   microsoft_graph:
     status: platform_foundation_built
-    priority: 7
+    priority: 9
     mode: governed_read_first
     service_families:
       - graph
@@ -133,10 +155,10 @@ connectors:
       - orchestrated_live_read_validation
   teams_approvals:
     status: planned
-    priority: 9
+    priority: 10
   opentelemetry:
     status: planned
-    priority: 10
+    priority: 12
   object_storage:
     status: planned
     priority: 11
