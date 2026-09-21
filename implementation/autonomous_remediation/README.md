@@ -86,3 +86,20 @@ Default behavior:
 
 Implementation: implementation/autonomous_remediation/availability.py
 Playbook: 07-Operations/Endpoint-Availability-Verification-Playbook.md
+
+
+### Documentation map
+
+The common availability/deferred-work behavior is documented consistently in:
+
+- `07-Operations/Endpoint-Availability-Verification-Playbook.md`
+- `docs/playbooks/Jason-Standard-Playbook-Template.md`
+- `07-Roadmap/Jason-Roadmap.md`
+- `06-Roadmaps/Jason-Capability-Register.md`
+- `docs/architecture/JASON_CAPABILITY_CATALOG.md`
+- `03-Components/Kernel/JKD-008-Central-Orchestrator.md`
+- `03-Components/Kernel/JKD-009-Durable-Orchestration-Event-Store.md`
+- `TODO.md` (`TODO-OPS-001`)
+- `08-Session-Records/CURRENT.md`
+
+The evaluator is executable logic; the peer probe and scheduler remain separate governed capabilities/dependencies.
