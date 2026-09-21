@@ -18,6 +18,10 @@ from .information_sensitivity import assess_sensitive_evidence
 from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+    DOCUMENTATION_ORGANIZATION_READ,
+    DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
 )
@@ -423,6 +427,30 @@ def _sanitize_it_glue_document_search_output(output: Mapping[str, Any]) -> dict[
     return result
 
 
+
+_IT_GLUE_REDACTED_KEY_TOKENS = (
+    "password", "passwd", "passphrase", "secret", "api_key", "apikey",
+    "access_token", "refresh_token", "private_key", "client_secret", "credential",
+)
+
+
+def _sanitize_it_glue_credential_key_fields(value: Any) -> Any:
+    """Redact credential-like fields before requester release."""
+    if isinstance(value, Mapping):
+        result = {}
+        for raw_key, child in value.items():
+            normalized = str(raw_key).strip().casefold().replace("-", "_").replace(" ", "_")
+            if any(token in normalized for token in _IT_GLUE_REDACTED_KEY_TOKENS):
+                continue
+            result[raw_key] = _sanitize_it_glue_credential_key_fields(child)
+        return result
+    if isinstance(value, list):
+        return [_sanitize_it_glue_credential_key_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_it_glue_credential_key_fields(item) for item in value)
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderReadInformationAuthorizingInvoker:
     """Attach source-aware information authorization to every provider read.
@@ -515,6 +543,13 @@ class ProviderReadInformationAuthorizingInvoker:
             )
         ):
             output = dict(invocation.output)
+            if resolution.capability_name in {
+                DOCUMENTATION_ORGANIZATION_SEARCH,
+                DOCUMENTATION_ORGANIZATION_READ,
+                DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+                DOCUMENTATION_FLEXIBLE_ASSET_READ,
+            }:
+                output = _sanitize_it_glue_credential_key_fields(output)
             authorization = _jason_managed_it_glue_envelope(
                 capability_name=resolution.capability_name,
                 output=output,

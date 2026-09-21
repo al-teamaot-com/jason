@@ -39,6 +39,8 @@ DOCUMENTATION_CONFIGURATION_SEARCH = "documentation.configuration.search"
 DOCUMENTATION_CONFIGURATION_READ = "documentation.configuration.read"
 DOCUMENTATION_DOCUMENT_SEARCH = "documentation.document.search"
 DOCUMENTATION_DOCUMENT_READ = "documentation.document.read"
+DOCUMENTATION_FLEXIBLE_ASSET_SEARCH = "documentation.flexible.asset.search"
+DOCUMENTATION_FLEXIBLE_ASSET_READ = "documentation.flexible.asset.read"
 
 SERVICE_COMPANY_SEARCH = "service.company.search"
 SERVICE_COMPANY_READ = "service.company.read"
@@ -89,6 +91,8 @@ IT_GLUE_CAPABILITIES = frozenset(
         DOCUMENTATION_CONFIGURATION_READ,
         DOCUMENTATION_DOCUMENT_SEARCH,
         DOCUMENTATION_DOCUMENT_READ,
+        DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+        DOCUMENTATION_FLEXIBLE_ASSET_READ,
     }
 )
 
@@ -377,6 +381,35 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             selector_keys="resource_id",
             fact_hints=(
                 "document,policy,procedure,sop,standard,guideline,documentation,content,title"
+            ),
+            authoritative_change_sources=itg,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+            display_name="Search Documented Flexible Assets",
+            business_purpose="Search authorized IT Glue flexible asset records.",
+            resource_types="documentation_flexible_asset,flexible_asset,structured_documentation",
+            operation="search",
+            selector_keys="organization_id,name,resource_id,filters,page_number,page_size",
+            fact_hints=(
+                "flexible asset,flexible assets,structured documentation,network,domain,backup,"
+                "application,vendor,internet,wan,documentation,organization"
+            ),
+            authoritative_change_sources=itg,
+            collection_fact="flexible assets",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=DOCUMENTATION_FLEXIBLE_ASSET_READ,
+            display_name="Read Documented Flexible Asset",
+            business_purpose="Read one authorized IT Glue flexible asset by durable identifier.",
+            resource_types="documentation_flexible_asset,flexible_asset,structured_documentation",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints=(
+                "flexible asset,structured documentation,network,domain,backup,application,vendor,"
+                "internet,wan,documentation,organization"
             ),
             authoritative_change_sources=itg,
         ),

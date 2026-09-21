@@ -15,6 +15,8 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_CONTACT_SEARCH,
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_READ,
+    DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
     DOCUMENTATION_LOCATION_READ,
     DOCUMENTATION_LOCATION_SEARCH,
     DOCUMENTATION_ORGANIZATION_READ,
@@ -187,6 +189,27 @@ def build_it_glue_manifest() -> IntegrationManifest:
                     ResourceObservation("inventory", "Documented asset/configuration attributes."),
                 ),
                 relationships=("configuration -> organization", "configuration -> related resource"),
+            ),
+            ResourceDefinition(
+                resource_type="documentation_flexible_asset",
+                description="Structured client documentation stored as IT Glue flexible assets.",
+                selectors=selectors,
+                operations=(
+                    _search_operation(
+                        "documentation.flexible.asset.search",
+                        DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+                        ("organization_id", "name", "filters", "page_number", "page_size", "resource_id"),
+                    ),
+                    _read_operation(
+                        "documentation.flexible.asset.read",
+                        DOCUMENTATION_FLEXIBLE_ASSET_READ,
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("identity", "Flexible asset identity, type, and organization context."),
+                    ResourceObservation("structured_documentation", "Authorized structured IT Glue fields with credential-like fields redacted."),
+                ),
+                relationships=("flexible asset -> organization", "flexible asset -> flexible asset type"),
             ),
             ResourceDefinition(
                 resource_type="documentation_document",

@@ -178,7 +178,28 @@ def test_it_glue_adapter_injects_only_approved_noncredential_entity_families() -
         "filters": {"organization_id": "208", "name": "AOT-50282"},
         "page_size": 100,
     }
-    assert "Passwords" not in {organization["entity"], contact["entity"], configuration["entity"]}
+    flexible_search = adapt_it_glue_arguments(
+        DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+        {"organization_id": "208", "page_size": 25},
+    )
+    flexible_read = adapt_it_glue_arguments(
+        DOCUMENTATION_FLEXIBLE_ASSET_READ,
+        {"resource_id": "9001"},
+    )
+
+    assert flexible_search == {
+        "entity": "FlexibleAssets",
+        "filters": {"organization_id": "208"},
+        "page_size": 25,
+    }
+    assert flexible_read == {"entity": "FlexibleAssets", "entity_id": "9001"}
+    assert "Passwords" not in {
+        organization["entity"],
+        contact["entity"],
+        configuration["entity"],
+        flexible_search["entity"],
+        flexible_read["entity"],
+    }
 
 
 def test_it_glue_collection_search_is_bounded_by_default() -> None:

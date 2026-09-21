@@ -12,6 +12,7 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_CONFIGURATION_READ,
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_DOCUMENT_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
     DOCUMENTATION_ORGANIZATION_SEARCH,
 )
 from orchestrator.provider_read_information_authorizer import (
@@ -257,3 +258,41 @@ def test_document_read_explicit_acl_denial_is_not_overridden_by_jason_managed_re
     assert "included" not in invocation.output["data"]
     relationships = invocation.output["data"]["data"].get("relationships", {})
     assert "authorized_users" not in relationships
+
+
+def test_flexible_asset_credential_fields_are_redacted_before_release() -> None:
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(
+            {
+                "provider": "it_glue",
+                "data": {
+                    "data": [
+                        {
+                            "id": "9001",
+                            "type": "flexible-assets",
+                            "attributes": {
+                                "name": "WAN Documentation",
+                                "password": "example-secret",
+                                "client-secret": "example-secret-2",
+                                "public-ip": "203.0.113.10",
+                            },
+                        }
+                    ]
+                },
+            }
+        ),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(DOCUMENTATION_FLEXIBLE_ASSET_SEARCH),
+        resolution=_resolution(DOCUMENTATION_FLEXIBLE_ASSET_SEARCH),
+    )
+
+    attributes = invocation.output["data"]["data"][0]["attributes"]
+    assert attributes == {
+        "name": "WAN Documentation",
+        "public-ip": "203.0.113.10",
+    }
+    envelope = invocation.information_authorization
+    assert envelope is not None
+    assert envelope.handling_class is InformationHandlingClass.RELEASABLE
+    assert envelope.require_allowed(InformationAction.RELEASE).allowed is True
