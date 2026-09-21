@@ -33,6 +33,7 @@ ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
+SITE_VARIABLE_LIST = "management.site.variable.list"
 AUTOMATION_COMPONENT_SEARCH = "automation.component.search"
 AUTOMATION_JOB_READ = "automation.job.read"
 AUTOMATION_JOB_OUTPUT_READ = "automation.job.output.read"
@@ -304,6 +305,68 @@ def _read_resource_capability(
             ),
             **({"collection_fact": collection_fact} if collection_fact else {}),
             "planning_guidance": planning_guidance,
+        },
+    )
+
+
+def site_variable_list(now: datetime) -> CapabilityDefinition:
+    return CapabilityDefinition(
+        capability_name=SITE_VARIABLE_LIST,
+        version="1.0",
+        display_name="Read Managed Site Variables",
+        lifecycle_status=CapabilityLifecycle.ACTIVE,
+        business_purpose=(
+            "Read Datto RMM site variables for governed automation while separating "
+            "internal secret use from requester disclosure."
+        ),
+        owner_service="Jason Resource Intelligence",
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
+        risk_level=CapabilityRisk.MEDIUM,
+        data_classifications=frozenset({"internal", "secret"}),
+        permitted_execution_modes=frozenset({"deterministic"}),
+        input_schema_reference="schema://jason/site-variable-list/1.0",
+        output_schema_reference="schema://jason/site-variable-list-result/1.0",
+        invoking_roles=frozenset({"orchestrator"}),
+        approval=CapabilityApproval(required=False),
+        evidence=CapabilityEvidence(
+            required=True,
+            requirements=("provider result", "source provider identity"),
+            verification_requirements=("site remains in authorized scope",),
+        ),
+        dependencies=frozenset(),
+        idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
+        idempotency_key_required=False,
+        timeout_seconds=30,
+        maximum_attempts=2,
+        failure_behavior=(
+            "Fail closed. Secret values may be consumed internally but may be "
+            "disclosed only when the authenticated principal has administer authority."
+        ),
+        tenant_isolation_required=True,
+        client_isolation_required=False,
+        stewardship=CapabilityStewardship(
+            steward="technology-steward",
+            business_justification=(
+                "Playbooks need site-scoped configuration values without exposing "
+                "those values to non-administrative requesters."
+            ),
+            review_interval_days=90,
+            retirement_criteria=("Datto RMM is no longer the site-variable authority.",),
+            authoritative_change_sources=("Datto RMM API documentation",),
+        ),
+        created_at=now,
+        metadata={
+            "provider_neutral": "true",
+            "read_only": "true",
+            "resource_types": "management_site_variable",
+            "operation": "list",
+            "selector_keys": "site_uid,resource_id",
+            "fact_hints": "site variable,site variables,configured,present,value",
+            "inquiry_hints": "site variable,site variables",
+            "collection_fact": "site variables",
+            "value_disclosure_permission": "administer",
+            "non_admin_view": "presence_status_only",
+            "secret_logging": "forbidden",
         },
     )
 
@@ -793,12 +856,13 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_SOFTWARE_SEARCH,
                 MANAGEMENT_ALERT_SEARCH,
                 MANAGEMENT_SITE_SEARCH,
+                SITE_VARIABLE_LIST,
                 AUTOMATION_COMPONENT_SEARCH,
                 AUTOMATION_JOB_READ,
                 AUTOMATION_JOB_OUTPUT_READ,
             }
         ),
-        supported_classifications=frozenset({"internal"}),
+        supported_classifications=frozenset({"internal", "secret"}),
         regions=frozenset(),
         limits=ProviderLimits(
             maximum_concurrent_executions=10,
@@ -847,6 +911,7 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_software_search(now))
     capabilities.register(management_alert_search(now))
     capabilities.register(management_site_search(now))
+    capabilities.register(site_variable_list(now))
     capabilities.register(automation_component_search(now))
     capabilities.register(automation_job_read(now))
     capabilities.register(automation_job_output_read(now))

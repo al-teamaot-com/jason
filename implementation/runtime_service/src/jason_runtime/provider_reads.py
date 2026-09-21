@@ -9,6 +9,7 @@ from connectors.autotask.impersonating_connector import AutotaskImpersonatingCon
 from connectors.core.contracts import AuditSink, HttpTransport, SecretResolver
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_rmm.automation_reads import DattoRmmAutomationReadConnector
+from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
@@ -98,6 +99,7 @@ from orchestrator.resource_capability_catalog import (
     AUTOMATION_JOB_READ,
     AUTOMATION_JOB_OUTPUT_READ,
     DATTO_RMM_PROVIDER,
+    SITE_VARIABLE_LIST,
 )
 from orchestrator.service import CapabilityInvoker
 from orchestrator.teams_identity_binding_sqlite import (
@@ -174,6 +176,9 @@ _DATTO_AUTOMATION_PROVIDER_CAPABILITY_MAP = {
     (DATTO_RMM_PROVIDER, AUTOMATION_COMPONENT_SEARCH): "datto_rmm.component.search",
     (DATTO_RMM_PROVIDER, AUTOMATION_JOB_READ): "datto_rmm.job.read",
     (DATTO_RMM_PROVIDER, AUTOMATION_JOB_OUTPUT_READ): "datto_rmm.job.output.read",
+}
+_DATTO_SITE_VARIABLE_PROVIDER_CAPABILITY_MAP = {
+    (DATTO_RMM_PROVIDER, SITE_VARIABLE_LIST): "datto_rmm.site.variables.list",
 }
 
 _RUNTIME_OPENBAO_ROOT = Path("/run/jason-secrets/openbao")
@@ -483,6 +488,17 @@ def build_provider_read_invoker(
         )
         for capability in _DATTO_AUTOMATION_CAPABILITIES:
             routes[capability] = datto_automation_invoker
+
+        datto_site_variables = DattoRmmConnector(
+            secrets=shared_secrets,
+            transport=transport,
+            audit=audit,
+        )
+        datto_site_variable_invoker = GovernedConnectorCapabilityInvoker(
+            connectors={DATTO_RMM_PROVIDER: datto_site_variables},
+            provider_capability_map=_DATTO_SITE_VARIABLE_PROVIDER_CAPABILITY_MAP,
+        )
+        routes[SITE_VARIABLE_LIST] = datto_site_variable_invoker
 
     return CanonicalCapabilityRoutingInvoker(routes=routes)
 

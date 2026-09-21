@@ -43,10 +43,27 @@ def test_non_admin_can_see_presence_but_not_value():
     payload = {"variables": [{"name": "BackupKey", "value": "super-secret"}]}
     governed = sanitize_site_variables_for_principal(payload, permission_mode="observe")
     assert governed == {
-        "variables": [{"name": "BackupKey", "configured": True}],
+        "name_disclosure": "blocked",
         "value_disclosure": "blocked",
+        "variable_count": 1,
     }
 
+
+
+
+def test_non_admin_exact_name_query_returns_presence_without_enumerating_secrets():
+    payload = {"variables": [{"name": "BackupKey", "value": "super-secret"}]}
+    governed = sanitize_site_variables_for_principal(
+        payload,
+        permission_mode="observe",
+        requested_name="BackupKey",
+    )
+    assert governed["requested_variable"] == {
+        "requested_name": "BackupKey",
+        "present": True,
+        "configured": True,
+    }
+    assert "variables" not in governed
 
 def test_admin_can_receive_value():
     payload = {"variables": [{"name": "BackupKey", "value": "super-secret"}]}
