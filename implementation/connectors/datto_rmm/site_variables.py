@@ -52,9 +52,18 @@ def sanitize_site_variables_for_principal(
 
     variables = _variable_collection(payload)
     disclose = permission_mode in ADMIN_PERMISSION_MODES
+    exact_name = str(requested_name or "").strip()
     if disclose:
+        selected = variables
+        if exact_name:
+            selected = [
+                raw
+                for raw in variables
+                if str(raw.get("name") or raw.get("variableName") or "").strip().casefold()
+                == exact_name.casefold()
+            ]
         result = []
-        for raw in variables:
+        for raw in selected:
             name = str(raw.get("name") or raw.get("variableName") or "").strip()
             result.append(
                 {
@@ -69,7 +78,6 @@ def sanitize_site_variables_for_principal(
             "value_disclosure": "allowed",
         }
 
-    exact_name = str(requested_name or "").strip()
     response: dict[str, Any] = {
         "name_disclosure": "blocked",
         "value_disclosure": "blocked",

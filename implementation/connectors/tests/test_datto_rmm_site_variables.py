@@ -114,3 +114,20 @@ def test_update_plan_redacts_value_from_returned_plan():
 
 def test_delete_capability_is_not_registered():
     assert "datto_rmm.site.variable.delete" not in DattoRmmMutationConnector.capabilities
+
+
+def test_admin_exact_name_query_returns_only_requested_variable():
+    payload = {
+        "variables": [
+            {"name": "BackupKey", "value": "value-a"},
+            {"name": "OtherKey", "value": "value-b"},
+        ]
+    }
+    governed = sanitize_site_variables_for_principal(
+        payload,
+        permission_mode="administer",
+        requested_name="BackupKey",
+    )
+    assert governed["variables"] == [
+        {"name": "BackupKey", "configured": True, "value": "value-a"}
+    ]
