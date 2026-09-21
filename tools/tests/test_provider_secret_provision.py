@@ -97,6 +97,31 @@ def test_microsoft_mail_contract_is_separate_from_directory_read() -> None:
     assert mail["role_name"] != directory["role_name"]
 
 
+def test_kyocera_kfs_contract_uses_canonical_connector_path_and_fields() -> None:
+    spec = PROVIDERS["kyocera_kfs"]
+    assert spec["logical_name"] == "kyocera_kfs.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/kyocera-kfs/production/read-only"
+    )
+    assert spec["fields"] == (
+        "api_url",
+        "access_id",
+        "access_password",
+        "request_from",
+        "request_to",
+        "authorization",
+        "kfs_username",
+        "kfs_password",
+        "headers_json",
+        "operations_json",
+    )
+    assert spec["policy_name"] == "jason-kyocera-kfs-read"
+    assert spec["role_name"] == "jason-kyocera-kfs-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle"
+    )
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
@@ -198,6 +223,7 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert '"datto_rmm.readonly"' in source
     assert '"datto_edr.readonly"' in source
     assert '"it_glue.readonly"' in source
+    assert '"kyocera_kfs.readonly"' in source
     assert '"aws_ses.sendmail"' in source
 
 

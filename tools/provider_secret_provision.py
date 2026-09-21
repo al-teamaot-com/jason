@@ -116,6 +116,28 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
         ),
     },
+    "kyocera_kfs": {
+        "logical_name": "kyocera_kfs.readonly",
+        "secret_path": "secret/data/connectors/kyocera-kfs/production/read-only",
+        "fields": (
+            "api_url",
+            "access_id",
+            "access_password",
+            "request_from",
+            "request_to",
+            "authorization",
+            "kfs_username",
+            "kfs_password",
+            "headers_json",
+            "operations_json",
+        ),
+        "policy_name": "jason-kyocera-kfs-read",
+        "role_name": "jason-kyocera-kfs-read",
+        "connector_identity": "kyocera-kfs-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle"
+        ),
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

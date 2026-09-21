@@ -78,6 +78,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "microsoft_graph.mail_read": (
         "secret/data/connectors/microsoft-graph/production/mail-read"
     ),
+    "kyocera_kfs.readonly": (
+        "secret/data/connectors/kyocera-kfs/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -104,6 +107,20 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "certificate_pem",
             "certificate_thumbprint",
             "generation",
+        }
+    ),
+    "kyocera_kfs.readonly": frozenset(
+        {
+            "api_url",
+            "access_id",
+            "access_password",
+            "request_from",
+            "request_to",
+            "authorization",
+            "kfs_username",
+            "kfs_password",
+            "headers_json",
+            "operations_json",
         }
     ),
 }

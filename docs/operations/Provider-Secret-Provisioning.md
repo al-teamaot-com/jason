@@ -237,6 +237,35 @@ This credential is intentionally separate from `autotask.readonly`. It is reserv
 
 Provisioning this secret does not activate Autotask writes. Connector source, Central Orchestrator authorization, runtime write enablement, requester impersonation acceptance, and explicit production activation remain separate gates.
 
+## Kyocera Fleet Services contract
+
+Logical secret: `kyocera_kfs.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/kyocera-kfs/production/read-only`
+
+Durable OpenBao fields:
+
+- `api_url`
+- `access_id`
+- `access_password`
+- `request_from`
+- `request_to`
+- `authorization`
+- `kfs_username`
+- `kfs_password`
+- `headers_json`
+- `operations_json`
+
+Runtime identity:
+
+- policy: `jason-kyocera-kfs-read`
+- AppRole: `jason-kyocera-kfs-read`
+- protected artifacts: `/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/`
+
+The production API host is restricted to `https://api.kyods.com`. KFS is read-only in this foundation and live selection also requires `JASON_KFS_ENABLED=true`.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
