@@ -76,8 +76,8 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
         {
             "request_from",
             "request_to",
-            "id",
-            "password",
+            "manager_id",
+            "manager_password",
             "authorization",
         }
     ),
