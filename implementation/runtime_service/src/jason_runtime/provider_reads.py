@@ -173,6 +173,8 @@ _RUNTIME_BINDINGS_ENV = "JASON_TEAMS_IDENTITY_BINDINGS_DB"
 _RUNTIME_MICROSOFT_BOUNDARY_ENV = "JASON_MICROSOFT_BOUNDARY_DB"
 _RUNTIME_MICROSOFT_ROLE_ENV = "JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH"
 _RUNTIME_MICROSOFT_SECRET_ENV = "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH"
+_RUNTIME_MICROSOFT_MAIL_METADATA_ROLE_ENV = "JASON_MICROSOFT_MAIL_METADATA_OPENBAO_ROLE_ID_PATH"
+_RUNTIME_MICROSOFT_MAIL_METADATA_SECRET_ENV = "JASON_MICROSOFT_MAIL_METADATA_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_ROLE_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_SECRET_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAILBOXES_ENV = "JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES"
@@ -289,24 +291,14 @@ def runtime_microsoft_mail_from_env(*, transport: HttpTransport):
         )
     )
     openbao_url = os.getenv("JASON_OPENBAO_URL", "http://openbao:8200").strip()
-    role_id_path = Path(
-        os.getenv(
-            _RUNTIME_MICROSOFT_MAIL_ROLE_ENV,
-            "/run/jason-secrets/openbao/microsoft-mail/role_id",
-        )
-    )
-    secret_id_path = Path(
-        os.getenv(
-            _RUNTIME_MICROSOFT_MAIL_SECRET_ENV,
-            "/run/jason-secrets/openbao/microsoft-mail/secret_id",
-        )
-    )
+    metadata_role_id_path = Path(os.getenv(_RUNTIME_MICROSOFT_MAIL_METADATA_ROLE_ENV, "/run/jason-secrets/openbao/microsoft-mail-metadata/role_id"))
+    metadata_secret_id_path = Path(os.getenv(_RUNTIME_MICROSOFT_MAIL_METADATA_SECRET_ENV, "/run/jason-secrets/openbao/microsoft-mail-metadata/secret_id"))
+    content_role_id_path = Path(os.getenv(_RUNTIME_MICROSOFT_MAIL_ROLE_ENV, "/run/jason-secrets/openbao/microsoft-mail/role_id"))
+    content_secret_id_path = Path(os.getenv(_RUNTIME_MICROSOFT_MAIL_SECRET_ENV, "/run/jason-secrets/openbao/microsoft-mail/secret_id"))
     return build_microsoft_mail_runtime(
-        boundary_db=boundary_db,
-        openbao_url=openbao_url,
-        role_id_path=role_id_path,
-        secret_id_path=secret_id_path,
-        transport=transport,
+        boundary_db=boundary_db, openbao_url=openbao_url,
+        metadata_role_id_path=metadata_role_id_path, metadata_secret_id_path=metadata_secret_id_path,
+        content_role_id_path=content_role_id_path, content_secret_id_path=content_secret_id_path, transport=transport,
     )
 
 
@@ -409,7 +401,8 @@ def build_provider_read_invoker(
         )
         microsoft_mail = runtime_microsoft_mail_from_env(transport=transport)
         mailbox_connector = MicrosoftGraphMailboxConnector(
-            reader=microsoft_mail.reader,
+            metadata_reader=microsoft_mail.metadata_reader,
+            content_reader=microsoft_mail.content_reader,
             bindings=raw_microsoft_bindings,
             approved_mailboxes=runtime_approved_mailboxes_from_env(),
             audit=audit,

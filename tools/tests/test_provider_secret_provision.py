@@ -79,6 +79,17 @@ def test_it_glue_contract_reuses_existing_production_identity() -> None:
     )
 
 
+def test_microsoft_mail_metadata_contract_is_separate_and_read_only() -> None:
+    directory = PROVIDERS["microsoft_graph"]
+    metadata = PROVIDERS["microsoft_graph_mail_metadata"]
+    assert metadata["logical_name"] == "microsoft_graph.mail_metadata"
+    assert metadata["secret_path"] == "secret/data/connectors/microsoft-graph/production/mail-metadata"
+    assert metadata["fields"] == directory["fields"]
+    assert metadata["policy_name"] == "jason-microsoft-graph-mail-metadata-read"
+    assert metadata["role_name"] == "jason-microsoft-graph-mail-metadata-read"
+    assert Path(metadata["credential_dir"]) == Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-metadata-read-approle")
+
+
 def test_microsoft_mail_contract_is_separate_from_directory_read() -> None:
     directory = PROVIDERS["microsoft_graph"]
     mail = PROVIDERS["microsoft_graph_mail"]

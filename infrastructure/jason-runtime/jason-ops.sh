@@ -74,6 +74,8 @@ required = {
     "JASON_SES_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/aws-ses/secret_id",
     "JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-graph/role_id",
     "JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-graph/secret_id",
+    "JASON_MICROSOFT_MAIL_METADATA_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-mail-metadata/role_id",
+    "JASON_MICROSOFT_MAIL_METADATA_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-mail-metadata/secret_id",
     "JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-mail/role_id",
     "JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_HOST_PATH": "/run/jason-secrets/openbao/microsoft-mail/secret_id",
     "JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH": "/run/jason-secrets/openbao/openai/role_id",
@@ -106,6 +108,8 @@ JASON_SES_OPENBAO_ROLE_ID_HOST_PATH
 JASON_SES_OPENBAO_SECRET_ID_HOST_PATH
 JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH
 JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH
+JASON_MICROSOFT_MAIL_METADATA_OPENBAO_ROLE_ID_HOST_PATH
+JASON_MICROSOFT_MAIL_METADATA_OPENBAO_SECRET_ID_HOST_PATH
 JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_HOST_PATH
 JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_HOST_PATH
 JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH

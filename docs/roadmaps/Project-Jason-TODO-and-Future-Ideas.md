@@ -923,14 +923,15 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-013 — Governed requester/vendor mailbox content reads
 
 - **Priority:** P1
-- **Status:** Implemented source-ready — blocked on separate Microsoft mail-read app, Exchange Application RBAC assignment, and mailbox allowlist
+- **Status:** Implemented source-ready — two-tier Microsoft authority provisioned; blocked on OpenBao/boundary/runtime activation
 - **Risk level:** High
 - **Idea:** Give Jason a governed Microsoft 365 mailbox/message search and read capability for explicitly approved AOT mailboxes so procurement workflows can correlate vendor order confirmations, ETA changes, backorders, shipment notices, tracking updates, delivery notices, cancellations, invoices, NDRs, and other operational evidence.
 - **Why it matters:** Procurement updates frequently arrive only by email to the person who requested the purchase. Without governed mailbox-content evidence, Jason cannot reliably maintain PO lifecycle state or generate timely approval proposals.
 - **Required behavior:** Resolve the exact approved mailbox; search bounded time windows/participants/subjects/identifiers; read only necessary message content and attachment metadata; preserve message IDs/timestamps/digests for audit; correlate using PO/vendor order/invoice/SKU/customer/ticket evidence; redact unnecessary sensitive content; never treat email alone as physical receiving evidence.
-- **Governance:** Mailbox scope must be explicit; no tenant-wide arbitrary mailbox reading; normal identity/authority/client boundaries apply; `direct_provider_access=false`.
+- **Governance:** Tenant-wide basic metadata access is approved for AOT operational analytics through the dedicated `Mail.ReadBasic.All` identity. Full message bodies and attachment metadata require the separate `Jason Mail Content` identity plus explicit full-read enrollment. Normal identity/authority/client boundaries apply; `direct_provider_access=false`.
 - **Implementation checkpoint (2026-09-20):** Source now includes bounded `communication.mail.message.search`, `communication.mail.message.read`, and `communication.mail.attachment.search` foundations, an exact approved-mailbox allowlist, a separate `microsoft_graph_mail` client boundary, separate OpenBao AppRole/secret paths, logical secret `microsoft_graph.mail_read`, and explicit `mail-read` permission profile. Existing v4/v5 provider-read profiles remain mailbox-blind; only the new explicit v6 profile can activate mail reads. Focused regression proves v5 leaves all mail capabilities in PILOT and v6 activates them only after the separate authority is present. A live read-only probe with the current directory application returned HTTP 403 for `/messages`, confirming the current application does not have effective mailbox-read authority; Jason did not broaden that application. Microsoft guidance was then revalidated: resource-scoped access must use Exchange Online Application RBAC role `Application Mail.Read` with a custom resource scope. Do not add an organization-wide Microsoft Entra Graph `Mail.Read` application grant, because Entra and Exchange RBAC grants are additive and an unscoped Entra grant would defeat the intended mailbox restriction.
 - **Production checkpoint (2026-09-20):** Source commit `e647e197e5056749b759f18bd67184dbaebba443` is live in image `jason-mcp:procurement-mail-foundation-e647e19` while production remains on `itglue-autotask-entra-procurement-catalog-v5`. Shadow and post-cutover checks confirm all three mail capabilities remain `PILOT`/unexposed, so production authority did not broaden. Rollback container: `jason-mcp-pilot-pre-mail-foundation-20260920T134141Z`.
+- **Architecture update (2026-09-21):** Adopted two application identities. `Jason Communications Metadata` has tenant-wide `Mail.ReadBasic.All` for organization-wide communications analytics without body/preview/attachment access. `Jason Mail Content` has no tenant-wide Graph mail grant and receives `Application Mail.Read` only through Exchange Application RBAC scoped to direct members of `Jason Mail Full Read Opt-In`. Source work now routes message search through the metadata identity and exact body/attachment operations through the scoped content identity.
 - **Acceptance test:** In a controlled AOT mailbox, ingest one vendor ETA/shipping update tied to a test PO and prove exact message correlation without exposing unrelated mail.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement as the next procurement dependency after the PO lifecycle foundation.
@@ -947,6 +948,18 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Acceptance test:** Starting from the proven single-mailbox pilot, add one second controlled AOT mailbox with the helper, prove both approved mailboxes are readable through the scoped authority, prove an unapproved mailbox remains inaccessible, and verify `direct_provider_access=false`.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement after the initial Jason Mail Read pilot is activated and validated.
+
+### TODO-CONN-015 — Provider-neutral Communication Analytics evidence layer
+
+- **Priority:** P1
+- **Status:** Planned — architecture accepted 2026-09-21
+- **Risk level:** Moderate / privacy-sensitive
+- **Idea:** Normalize Microsoft 365 email metadata into a Jason-native `CommunicationEvent` model so analytics remain useful outside Kaseya/Autotask and can later incorporate Teams, portal, VoIP/SMS, or other communication sources.
+- **Required behavior:** Preserve provider source IDs; normalize timestamp, sender, recipients, direction, internal/external state, client/domain correlation, conversation ID, attachment indicator, source system, related ticket/company/contact, and correlation confidence. Keep full message content outside the default analytics store.
+- **Analytics examples:** Client communication occurring outside Autotask, communication volume by client/domain, ticket correlation gaps, recurring vendor/client issues, NDR trends, communication spikes around incidents, and operational workload evidence that exists outside Kaseya.
+- **Safeguards:** Metadata remains sensitive; subject retention is minimized, employee analytics report observations rather than performance judgments, every query is auditable, and access authority is separate from retention policy.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Begin after the two-tier Microsoft mail identities are live and the first controlled metadata acceptance succeeds.
 
 ### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
 

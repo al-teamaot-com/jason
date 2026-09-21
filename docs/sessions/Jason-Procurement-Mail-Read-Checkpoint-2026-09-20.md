@@ -8,7 +8,7 @@ Build and operationally stage a governed procurement lifecycle that can distingu
 
 **ACTIVE / PARTIALLY PRODUCTION-PROVEN.**
 
-The procurement foundation is live. The mailbox-evidence path is source-ready but remains intentionally dormant until the separate Microsoft application and Exchange Application RBAC scope are provisioned and accepted.
+The procurement foundation is live. On 2026-09-21 the mailbox-evidence design expanded into a two-tier communications evidence model. Microsoft application identities and Exchange authorization are now provisioned, while production activation remains intentionally dormant pending OpenBao credentials, validated client boundaries, and controlled acceptance.
 
 ## Production-proven capabilities
 
@@ -29,7 +29,8 @@ Source includes:
 - `communication.mail.message.read`;
 - `communication.mail.attachment.search`;
 - exact approved-mailbox allowlisting;
-- separate logical secret `microsoft_graph.mail_read`;
+- separate logical secrets `microsoft_graph.mail_metadata` and `microsoft_graph.mail_read`;
+- separate Microsoft identities for tenant-wide basic metadata and scoped full-content access;
 - separate OpenBao AppRole/runtime mount contract;
 - separate `microsoft_graph_mail` boundary/profile `mail-read`;
 - explicit provider-read v6 profile;
@@ -43,7 +44,7 @@ Production currently remains on the v5 provider-read profile, so all three mail 
 
 The current directory-read Microsoft application returned HTTP 403 for Graph `/messages`, confirming that it does not possess mailbox-read authority.
 
-The dedicated mail-read application must use Exchange Online Application RBAC with a custom resource scope. Entra Graph `Mail.Read` must not be added because Entra and Exchange grants are additive and an unscoped Entra grant would defeat the intended mailbox restriction.
+The metadata application uses tenant-wide Graph `Mail.ReadBasic.All` and intentionally cannot read message bodies, previews, attachments, or extended properties. The separate content application uses Exchange Online Application RBAC `Application Mail.Read` with a custom resource scope. Tenant-wide Entra Graph `Mail.Read` must not be added to the content application because Entra and Exchange grants are additive and an unscoped grant would defeat the intended mailbox restriction.
 
 Prepared operator artifact:
 
@@ -59,11 +60,10 @@ Future helper tracked as `TODO-CONN-014`:
 
 Remaining external setup:
 
-1. run the prepared Microsoft setup script from an authenticated Microsoft administrator session;
-2. obtain the Application (client) ID and Service Principal Object ID;
-3. provision the separate OpenBao `microsoft_graph.mail_read` certificate secret/AppRole;
-4. persist the validated `microsoft_graph_mail` client boundary;
-5. configure the exact approved mailbox allowlist;
+1. provision the OpenBao `microsoft_graph.mail_metadata` certificate secret/AppRole;
+2. provision the OpenBao `microsoft_graph.mail_read` certificate secret/AppRole;
+3. persist validated metadata and full-content Microsoft client boundaries;
+4. configure the exact full-content approved-mailbox allowlist to mirror explicit opt-in scope;
 6. activate provider-read v6;
 7. prove approved mailbox search/read and attachment metadata;
 8. prove a non-approved mailbox is denied;

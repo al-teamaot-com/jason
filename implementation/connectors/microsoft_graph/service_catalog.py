@@ -117,6 +117,13 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
         ),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
+    "mail-metadata": MicrosoftPermissionProfile(
+        name="mail-metadata",
+        description="Tenant-wide basic mail metadata analytics using Microsoft Graph Mail.ReadBasic.All. Message bodies, previews, attachments, and extended properties are outside this profile.",
+        services=frozenset({MicrosoftService.GRAPH}),
+        application_permissions=("Mail.ReadBasic.All",),
+        maximum_mode=MicrosoftOperationMode.READ,
+    ),
     "mail-read": MicrosoftPermissionProfile(
         name="mail-read",
         description=(

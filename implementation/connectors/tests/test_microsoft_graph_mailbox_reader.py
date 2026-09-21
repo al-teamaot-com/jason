@@ -119,25 +119,25 @@ def test_attachment_search_exposes_metadata_not_content():
     assert result["items"][0]["name"] == "packing-slip.pdf"
 
 
-def test_connector_fails_closed_for_unapproved_mailbox():
+def test_connector_allows_metadata_search_for_any_tenant_mailbox():
     reader = MicrosoftGraphMailboxReader(tokens=Tokens(), transport=Transport({"value": []}))
-    connector = MicrosoftGraphMailboxConnector(
-        reader=reader,
-        bindings=Bindings(),
-        approved_mailboxes=frozenset({"buyer@teamaot.com"}),
-        audit=Audit(),
-    )
+    connector = MicrosoftGraphMailboxConnector(metadata_reader=reader, content_reader=reader, bindings=Bindings(), approved_mailboxes=frozenset(), audit=Audit())
+    result = connector.execute(ConnectorRequest(context=context("microsoft_graph.mail.message.search"), arguments={"mailbox": "other@teamaot.com"}))
+    assert result.data["mailbox"] == "other@teamaot.com"
+
+
+def test_connector_fails_closed_for_unapproved_full_content_mailbox():
+    reader = MicrosoftGraphMailboxReader(tokens=Tokens(), transport=Transport({"id": "msg-1"}))
+    connector = MicrosoftGraphMailboxConnector(metadata_reader=reader, content_reader=reader, bindings=Bindings(), approved_mailboxes=frozenset({"buyer@teamaot.com"}), audit=Audit())
     with pytest.raises(Exception, match="not approved"):
-        connector.execute(ConnectorRequest(
-            context=context("microsoft_graph.mail.message.search"),
-            arguments={"mailbox": "other@teamaot.com"},
-        ))
+        connector.execute(ConnectorRequest(context=context("microsoft_graph.mail.message.read"), arguments={"mailbox": "other@teamaot.com", "message_id": "msg-1"}))
 
 
 def test_connector_allows_exact_approved_mailbox():
     reader = MicrosoftGraphMailboxReader(tokens=Tokens(), transport=Transport({"value": []}))
     connector = MicrosoftGraphMailboxConnector(
-        reader=reader,
+        metadata_reader=reader,
+        content_reader=reader,
         bindings=Bindings(),
         approved_mailboxes=frozenset({"buyer@teamaot.com"}),
         audit=Audit(),

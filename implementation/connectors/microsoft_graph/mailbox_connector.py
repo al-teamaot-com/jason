@@ -17,7 +17,8 @@ from .mailbox_reader import MicrosoftGraphMailboxReader
 
 @dataclass(frozen=True, slots=True)
 class MicrosoftGraphMailboxConnector:
-    reader: MicrosoftGraphMailboxReader
+    metadata_reader: MicrosoftGraphMailboxReader
+    content_reader: MicrosoftGraphMailboxReader
     bindings: object
     approved_mailboxes: FrozenSet[str]
     audit: AuditSink
@@ -51,21 +52,26 @@ class MicrosoftGraphMailboxConnector:
             )
         return tenant
 
-    def _mailbox(self, request: ConnectorRequest) -> str:
+    def _mailbox(self, request: ConnectorRequest, *, require_full_read: bool) -> str:
         mailbox = str(request.arguments.get("mailbox") or "").strip().casefold()
         if not mailbox or "@" not in mailbox:
             raise ValueError("an exact mailbox address is required")
-        approved = {value.strip().casefold() for value in self.approved_mailboxes}
-        if mailbox not in approved:
-            raise ConnectorAuthorizationError(
-                "The requested mailbox is not approved for governed mail read."
-            )
+        if require_full_read:
+            approved = {value.strip().casefold() for value in self.approved_mailboxes}
+            if mailbox not in approved:
+                raise ConnectorAuthorizationError(
+                    "The requested mailbox is not approved for governed full-content mail read."
+                )
         return mailbox
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         require_capability(request, self.capabilities)
         tenant = self._tenant(request.context)
-        mailbox = self._mailbox(request)
+        capability = request.context.capability
+        mailbox = self._mailbox(
+            request,
+            require_full_read=(capability != "microsoft_graph.mail.message.search"),
+        )
 
         self.audit.record(
             "connector.requested",
@@ -77,9 +83,8 @@ class MicrosoftGraphMailboxConnector:
             },
         )
 
-        capability = request.context.capability
         if capability == "microsoft_graph.mail.message.search":
-            data = self.reader.search_messages(
+            data = self.metadata_reader.search_messages(
                 microsoft_tenant_id=tenant,
                 mailbox=mailbox,
                 maximum_records=int(request.arguments.get("page_size", 25)),
@@ -100,13 +105,13 @@ class MicrosoftGraphMailboxConnector:
                 ),
             )
         elif capability == "microsoft_graph.mail.message.read":
-            data = self.reader.read_message(
+            data = self.content_reader.read_message(
                 microsoft_tenant_id=tenant,
                 mailbox=mailbox,
                 message_id=str(request.arguments.get("message_id") or ""),
             )
         else:
-            data = self.reader.attachment_metadata(
+            data = self.content_reader.attachment_metadata(
                 microsoft_tenant_id=tenant,
                 mailbox=mailbox,
                 message_id=str(request.arguments.get("message_id") or ""),
