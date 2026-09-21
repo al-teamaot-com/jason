@@ -94,6 +94,21 @@ The store fails closed when:
 
 The store does not silently replace or merge existing events.
 
+## Deferred-work relationship
+
+The Endpoint Availability Verification playbook introduces persisted deferred-work facts such as state, observation time, offline age, and `next_recheck_at`. JKD-009 may record those lifecycle facts as immutable evidence, but recording a future due time does not cause execution.
+
+A separate governed scheduler is required to wake/resume deferred workflows. That dependency is tracked as `TODO-OPS-001 — Durable deferred-work recheck scheduler`.
+
+This separation is intentional:
+
+- JKD-009 records what happened and what the workflow requested next;
+- a future scheduler determines when a persisted workflow becomes due;
+- the Central Orchestrator revalidates authority/scope before any resumed capability execution;
+- terminal workflow state suppresses or cancels outstanding rechecks.
+
+The event store must not gain hidden timers, background execution, or provider invocation as a side effect of storing an event.
+
 ## Explicit exclusions
 
 ORCH-002 does not provide:
