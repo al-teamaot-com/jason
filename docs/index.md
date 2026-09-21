@@ -74,11 +74,24 @@ Jason operational playbooks use a standard 22-section structure covering trigger
 
 - [Jason Standard Playbook Template](docs/playbooks/Jason-Standard-Playbook-Template.md)
 - [DRMM Site Variable Master Registry](docs/playbooks/Jason-DRMM-Site-Variable-Master-Registry.md)
+- [Datto EDR/AV Diagnose & Repair](docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md)
 - [Endpoint Availability Verification Playbook](07-Operations/Endpoint-Availability-Verification-Playbook.md)
 
 The endpoint-availability playbook establishes a reusable rule for DRMM-offline devices: inspect Last Seen first, defer with persisted state until the configured threshold, then attempt same-site read-only peer verification when possible. No peer is a recoverable condition, and failed ping alone is never treated as conclusive proof of power-off.
 
 The deterministic availability evaluator is implemented and tested. Governed peer-probe execution and durable scheduled rechecks remain explicit production dependencies.
+
+## Playbook autonomy governance
+
+Standing autonomous authority uses a two-key model: the global autonomy gate must be enabled and the exact playbook version/hash must have an explicit standing autonomy approval. Global enablement alone grants no playbook authority, and playbook approval cannot override higher-order safety rules such as per-instance approval for disruptive actions.
+
+- [ADR-010 — Playbook-Level Autonomy Gating](05-ADR/ADR-010-Playbook-Level-Autonomy-Gating.md)
+- [Jason Playbook Autonomy Runbook](07-Operations/Jason-Playbook-Autonomy-Runbook.md)
+
+## Documentation continuity
+
+- [Datto EDR/AV Governed Read Acceptance — 2026-09-18](08-Session-Records/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md)
+- [Platform Integrity Governance Standard](docs/governance/PLATFORM_INTEGRITY.md)
 
 ## Governing boundary
 

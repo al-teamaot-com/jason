@@ -289,6 +289,19 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Implement before claiming end-to-end autonomous deferred ticket handling or closing the Endpoint Availability Verification playbook Section Goal.
 
+### TODO-DOC-001 — Continuous Documentation Assurance
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed Continuous Documentation Assurance service that detects missing, stale, contradictory, or newly durable operational knowledge after authoritative changes in Autotask, Datto RMM, IT Glue, playbooks, and the Jason System Registry.
+- **Why it matters:** Jason should not depend on technicians remembering to synchronize documentation after operational changes. Durable knowledge discovered while resolving work should be preserved, and conflicting documentation should be surfaced before it causes future support errors.
+- **Why not now:** The documentation control plane and governed write paths are still maturing. Automatic correction must not guess at unknown values or overwrite authoritative records without evidence.
+- **Prerequisites:** authoritative-source mapping by attribute; governed write/update capability for Autotask, Datto RMM, IT Glue, and Jason documentation; provenance/evidence recording; conflict detection; review/escalation workflow; secret-redaction controls; duplicate suppression; verification after write.
+- **Expected behavior:** detect a documentation gap, identify the authoritative source, update only verifiable facts, route unknown or conflicting facts for human review, record provenance and correlation IDs, verify the resulting state, and preserve unresolved discrepancies as explicit work rather than silently choosing a value.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Begin implementation once governed Autotask, Datto RMM, and IT Glue update paths are production-ready and their post-write verification contracts are stable.
+
 ---
 
 ## New-item template

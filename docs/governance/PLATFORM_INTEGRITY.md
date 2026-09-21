@@ -1,6 +1,8 @@
-# Article VII - Platform Integrity
+# Platform Integrity Governance Standard
 
-Status: Approved constitutional article
+Status: Approved governance standard
+
+Historical note: this record was formerly titled **Article VII - Platform Integrity**. It is not Article VII of the current Jason Constitution. The current Constitution defines Article VII as **Knowledge as an Asset**. This record remains authoritative as a governance standard so its platform-integrity requirements are preserved without creating a conflicting constitutional article number.
 
 ## 1. Purpose
 
