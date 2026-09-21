@@ -69,3 +69,9 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-completion-gaps.json
         refresh_interval: 30s
+
+  - job_name: jason-work-items
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-work-items.json
+        refresh_interval: 30s

@@ -16,7 +16,8 @@ from typing import Any, Mapping, Protocol
 from usage_ledger.contracts import UsageContext
 from usage_ledger.runtime_context import bind_usage_context
 
-from .contracts import OrchestrationRequest, OrchestrationResult
+from .automatic_work_item_tracker import AutomaticWorkItemTracker
+from .contracts import OrchestrationRequest, OrchestrationResult, OrchestrationStatus
 from .service import CentralOrchestrator
 from .teams_conversation_continuation import ConversationContinuationState
 
@@ -320,6 +321,7 @@ class TeamsConversationFlow:
     response_renderer: TeamsConversationResponseRenderer
     transport: TeamsConversationTransport
     continuation_store: ConversationContinuationStore | None = None
+    work_item_tracker: AutomaticWorkItemTracker | None = None
 
     def handle(self, request: TeamsConversationRequest) -> TeamsConversationFlowResult:
         principal = self.identity_binder.bind(request.identity)
@@ -368,6 +370,19 @@ class TeamsConversationFlow:
             raise
 
         if resolved is None:
+            if self.work_item_tracker is not None and _looks_like_capability_request(request.text):
+                item = self.work_item_tracker.record_todo(
+                    title=_work_item_title(request.text),
+                    summary=request.text.strip(),
+                    why_it_matters="A user requested this capability during a Jason conversation.",
+                )
+                raise ConversationGuidanceRequiredError(
+                    reason_code="governed_capability_not_available",
+                    guidance_text=(
+                        "Jason does not currently have a governed capability that safely satisfies that request. "
+                        + item.user_notice
+                    ),
+                )
             raise ConversationIntentUnresolvedError(
                 "no governed Jason capability intent could be resolved"
             )
@@ -419,7 +434,16 @@ class TeamsConversationFlow:
             decision = self._render_decision(result=result, intent=intent)
             results.append(result)
             executed_intents.append(intent)
-            rendered_parts.append(decision.text.strip())
+            rendered = decision.text.strip()
+            if result.status is OrchestrationStatus.FAILED and self.work_item_tracker is not None:
+                item = self.work_item_tracker.record_support(
+                    title=f"{intent.capability_name} failed during user-requested governed execution",
+                    summary=request.text.strip(),
+                    evidence=f"Governed capability {intent.capability_name} returned failed for correlation {correlation_id}.",
+                    acceptance=f"The same governed {intent.capability_name} request completes successfully and is verified through normal Jason evidence/readback.",
+                )
+                rendered = f"{rendered} {item.user_notice}"
+            rendered_parts.append(rendered)
             if progressive and decision.satisfies_request:
                 rendered_parts = [decision.text.strip()]
                 break
@@ -584,6 +608,19 @@ class TeamsConversationFlow:
 
 def _normalized_words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.casefold()))
+
+
+def _looks_like_capability_request(text: str) -> bool:
+    words = _normalized_words(text)
+    request_words = {"can", "could", "please", "run", "check", "create", "add", "update", "send", "search", "find"}
+    return bool(words.intersection(request_words))
+
+
+def _work_item_title(text: str) -> str:
+    clean = " ".join(str(text).strip().split())
+    if len(clean) <= 96:
+        return clean
+    return clean[:93].rstrip() + "..."
 
 
 def _is_reference_explanation(text: str) -> bool:
