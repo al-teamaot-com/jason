@@ -10,7 +10,26 @@ from connectors.core.connector_base import (
     ConnectorBase,
     PreparedRequest,
 )
-from connectors.core.contracts import ConnectorRequest, ConnectorResult, require_capability
+from connectors.core.contracts import (
+    ConnectorRequest,
+    ConnectorResult,
+    ConnectorTransportError,
+    require_capability,
+)
+
+
+
+
+class ItGlueAttachmentDownloadError(ConnectorTransportError):
+    error_code = "IT_GLUE_ATTACHMENT_DOWNLOAD_FAILED"
+
+
+class ItGlueAttachmentHtmlResponseError(ItGlueAttachmentDownloadError):
+    error_code = "IT_GLUE_ATTACHMENT_HTML_RESPONSE"
+
+
+class ItGlueAttachmentDownloadUrlError(ItGlueAttachmentDownloadError):
+    error_code = "IT_GLUE_ATTACHMENT_DOWNLOAD_URL_INVALID"
 
 
 class ItGlueConnector(ConnectorBase):
@@ -72,13 +91,13 @@ class ItGlueConnector(ConnectorBase):
             raise ValueError("IT Glue attachment metadata is missing")
         download_url = str(attributes.get("download-url") or "").strip()
         if not download_url:
-            raise ValueError("IT Glue attachment download URL is missing")
+            raise ItGlueAttachmentDownloadUrlError("IT Glue attachment download URL is missing")
         if download_url.startswith("/"):
             download_url = urljoin(self.base_url + "/", download_url.lstrip("/"))
         parts = urlsplit(download_url)
         host = (parts.hostname or "").casefold()
         if parts.scheme not in {"http", "https"} or not (host == "itglue.com" or host.endswith(".itglue.com")):
-            raise ValueError("IT Glue attachment download URL is outside the approved provider domain")
+            raise ItGlueAttachmentDownloadUrlError("IT Glue attachment download URL is outside the approved provider domain")
         if parts.scheme == "http":
             download_url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
 
@@ -95,7 +114,7 @@ class ItGlueConnector(ConnectorBase):
             or prefix.startswith(b"<html")
             or b"<title>it glue</title>" in prefix
         ):
-            raise ValueError("IT Glue attachment download returned HTML instead of file bytes")
+            raise ItGlueAttachmentHtmlResponseError("IT Glue attachment download returned HTML instead of file bytes")
 
         safe_attributes = {
             str(key): value
