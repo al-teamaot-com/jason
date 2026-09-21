@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from jason_mcp import server
 
 
@@ -699,7 +701,9 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
                         "items": [
                             {
                                 "id": 140629,
-                                "companyID": 0,
+                                "queueID": 8,
+                                "status": 1,
+                                "companyID": 99,
                                 "configurationItemID": None,
                                 "issueType": None,
                                 "title": "Security alert for AOT-50282",
@@ -720,6 +724,19 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
                     ]
                 },
             }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-1",
+                        "hostname": "AOT-50282",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
         if capability_name == "service.configuration.search":
             return {
                 "status": "succeeded",
@@ -728,7 +745,7 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
                         "items": [
                             {
                                 "id": 1120,
-                                "companyID": 0,
+                                "companyID": 99,
                                 "isActive": True,
                                 "referenceTitle": "AOT-50282",
                                 "referenceNumber": "device-uid-1",
@@ -746,6 +763,8 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
         {
             "ticket_id": 140629,
             "begin_work": True,
+            "work_kind": "diagnostic",
+            "device_online": True,
             "issue_type": "Endpoint Security",
             "sub_issue_type": "Antivirus",
         },
@@ -762,10 +781,16 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
             "subIssueType": "Antivirus",
         },
         "jason_policy_class": "ticket_work_start",
+        "jason_original_queue_id": 8,
+        "jason_original_status_id": 1,
+        "jason_blocker_fingerprint": "",
+        "jason_work_kind": "diagnostic",
     }
     assert calls[0][0] == "service.ticket.read"
     assert calls[1][0] == "endpoint.device.search"
-    assert calls[2][0] == "service.configuration.search"
+    assert calls[2][0] == "endpoint.device.read"
+    assert calls[3][0] == "endpoint.device.search"
+    assert calls[4][0] == "service.configuration.search"
 
 
 def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
@@ -778,6 +803,8 @@ def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
                         "items": [
                             {
                                 "id": 123,
+                                "queueID": 8,
+                                "status": 1,
                                 "companyID": 99,
                                 "configurationItemID": 456,
                                 "issueType": 10,
@@ -797,7 +824,22 @@ def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
                             "id": 456,
                             "companyID": 99,
                             "isActive": True,
+                            "referenceNumber": "device-uid-existing",
                         }
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            assert arguments == {"resource_id": "device-uid-existing"}
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-existing",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
                     }
                 },
             }
@@ -806,7 +848,7 @@ def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
     monkeypatch.setattr(server, "_governed_read", governed_read)
     result = server._canonicalize_governed_action_arguments(
         "service.ticket.update",
-        {"ticket_id": 123, "begin_work": True},
+        {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic", "device_online": True},
     )
 
     assert result["payload"] == {
@@ -827,6 +869,8 @@ def test_ticket_work_start_rejects_existing_cross_company_configuration(monkeypa
                     "data": {
                         "items": [{
                             "id": 123,
+                            "queueID": 8,
+                            "status": 1,
                             "companyID": 99,
                             "configurationItemID": 456,
                             "title": "Alert for DEVICE-123",
@@ -848,7 +892,7 @@ def test_ticket_work_start_rejects_existing_cross_company_configuration(monkeypa
     monkeypatch.setattr(server, "_governed_read", governed_read)
     try:
         server._canonicalize_governed_action_arguments(
-            "service.ticket.update", {"ticket_id": 123, "begin_work": True}
+            "service.ticket.update", {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic", "device_online": True}
         )
     except ValueError as exc:
         assert str(exc) == "AUTOTASK_TICKET_WORK_START_CONFIGURATION_COMPANY_MISMATCH"
@@ -865,6 +909,8 @@ def test_ticket_work_start_rejects_existing_inactive_configuration(monkeypatch):
                     "data": {
                         "items": [{
                             "id": 123,
+                            "queueID": 8,
+                            "status": 1,
                             "companyID": 99,
                             "configurationItemID": 456,
                             "title": "Alert for DEVICE-123",
@@ -886,7 +932,7 @@ def test_ticket_work_start_rejects_existing_inactive_configuration(monkeypatch):
     monkeypatch.setattr(server, "_governed_read", governed_read)
     try:
         server._canonicalize_governed_action_arguments(
-            "service.ticket.update", {"ticket_id": 123, "begin_work": True}
+            "service.ticket.update", {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic", "device_online": True}
         )
     except ValueError as exc:
         assert str(exc) == "AUTOTASK_TICKET_WORK_START_CONFIGURATION_INACTIVE"
@@ -903,6 +949,8 @@ def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
                         "items": [
                             {
                                 "id": 123,
+                                "queueID": 8,
+                                "status": 1,
                                 "companyID": 99,
                                 "configurationItemID": 456,
                                 "issueType": 10,
@@ -917,7 +965,25 @@ def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
                 "status": "succeeded",
                 "evidence": {
                     "data": {
-                        "item": {"id": 456, "companyID": 99, "isActive": True}
+                        "item": {
+                            "id": 456,
+                            "companyID": 99,
+                            "isActive": True,
+                            "referenceNumber": "device-uid-existing",
+                        }
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-existing",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
                     }
                 },
             }
@@ -930,12 +996,131 @@ def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
         {
             "ticket_id": 123,
             "begin_work": True,
+            "work_kind": "diagnostic",
+            "device_online": True,
             "sub_issue_type": "Workstation",
         },
     )
 
     assert result["payload"]["issueType"] == 10
     assert result["payload"]["subIssueType"] == "Workstation"
+
+
+
+def test_ticket_work_start_rejects_offline_endpoint_from_governed_read(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [{
+                            "id": 321,
+                            "queueID": 8,
+                            "status": 1,
+                            "companyID": 99,
+                            "configurationItemID": None,
+                            "title": "Alert for DEVICE-321",
+                        }]
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [{
+                        "resource_id": "device-uid-321",
+                        "hostname": "DEVICE-321",
+                    }]
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-321",
+                        "hostname": "DEVICE-321",
+                        "online": False,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    with pytest.raises(ValueError, match="DEVICE_OFFLINE"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 321,
+                "begin_work": True,
+                "work_kind": "diagnostic",
+            },
+        )
+
+
+def test_ticket_work_start_rejects_non_substantive_claim(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        assert capability_name == "service.ticket.read"
+        return {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "items": [{
+                        "id": 322,
+                        "queueID": 8,
+                        "status": 1,
+                        "companyID": 99,
+                        "configurationItemID": None,
+                        "title": "Generic ticket",
+                    }]
+                }
+            },
+        }
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    with pytest.raises(ValueError, match="SUBSTANTIVE_ACTION_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 322,
+                "begin_work": True,
+                "work_kind": "triage",
+            },
+        )
+
+def test_ticket_work_handoff_restores_trusted_preclaim_state(monkeypatch):
+    claim = SimpleNamespace(
+        state="claimed",
+        original_queue_id=29682833,
+        original_status_id=1,
+    )
+    store = SimpleNamespace(get=lambda ticket_id: claim)
+    monkeypatch.setattr(server, "_ticket_work_claim_store", lambda: store)
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "return_work": True,
+            "handoff_reason_class": "human_intervention_required",
+            "blocker_fingerprint": "needs-onsite-access",
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "id": 123,
+            "queueID": 29682833,
+            "status": 1,
+        },
+        "jason_policy_class": "ticket_work_handoff",
+        "jason_handoff_reason_class": "human_intervention_required",
+        "jason_blocker_fingerprint": "needs-onsite-access",
+    }
 
 
 def test_non_datto_action_arguments_are_unchanged():
