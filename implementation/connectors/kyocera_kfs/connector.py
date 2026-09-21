@@ -220,3 +220,8 @@ class KyoceraKfsConnector(ConnectorBase):
             timeout_seconds=float(raw_operation.get("timeout_seconds", 30.0)),
             audit_operation=operation_name,
         )
+
+
+# Runtime-compatible alias: the documented KFS API requires a login cookie.
+from connectors.kyocera_kfs.session_connector import KyoceraKfsSessionConnector
+KyoceraKfsConnector = KyoceraKfsSessionConnector
