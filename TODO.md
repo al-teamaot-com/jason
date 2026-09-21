@@ -216,6 +216,27 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before any production write or external communication capability is enabled.
 
+
+### TODO-GOV-004 — Move Jason-owned tickets to the Jason queue
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** When Jason begins actively troubleshooting or remediating an Autotask ticket, automatically move that ticket to the dedicated **Jason** queue for the duration of Jason ownership. When Jason completes the work, hands it back to a technician, or stops work pending external input, update the queue/status appropriately so human technicians have a clear ownership signal.
+- **Why it matters:** Prevents duplicate work, conflicting changes, wasted technician time, and situations where a technician unknowingly works the same ticket while Jason is actively making changes.
+- **Why not now:** The operating convention is already being used manually, but it is not yet enforced as a deterministic ownership rule in the ticket workflow.
+- **Prerequisites:** Reliable Autotask ticket read/update capability; canonical Jason queue ID; clear ownership lifecycle states; rules for handoff, waiting, escalation, and completion; audit logging for every queue transition.
+- **Expected behavior:**
+  1. Before Jason begins active work, confirm the ticket is open and not already owned by another active technician workflow.
+  2. Move the ticket to the **Jason** queue and set an appropriate working status.
+  3. Record an internal note that Jason has taken ownership.
+  4. Keep the ticket in the Jason queue while Jason is actively investigating, remediating, waiting on a scheduled Jason follow-up, or verifying results.
+  5. On completion, set the ticket to Complete when verified.
+  6. On human handoff or escalation, move the ticket to the appropriate human queue/resource and document the handoff.
+  7. Do not silently leave tickets in the Jason queue after Jason has relinquished ownership.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before expanding autonomous multi-ticket troubleshooting so queue ownership is reliable across technicians and Jason.
+
 ---
 
 ## New-item template
