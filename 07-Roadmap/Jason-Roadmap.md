@@ -42,6 +42,26 @@ Preferred implementation sequence:
 
 This slice should remain read-only until its identity, tenant, evidence, relationship, event, audit, and policy boundaries are proven.
 
+## Operational Continuity and Deferred Work
+
+A reusable **Endpoint Availability Verification** playbook has been added as common operational infrastructure for any workflow that encounters a DRMM endpoint reported offline.
+
+Current implemented behavior:
+
+1. read DRMM online state and Last Seen;
+2. persist a recheck when the offline age is below the configured threshold (default two hours);
+3. once the threshold is exceeded, request best-effort same-client/site peer verification;
+4. distinguish `reachable_outside_drmm`, `offline_likely`, `peer_unavailable`, `inconclusive`, and related states rather than collapsing everything to "offline";
+5. preserve `next_recheck_at` and other resume evidence so deferred work does not depend on technician memory;
+6. treat peer ping failure as non-conclusive evidence.
+
+Remaining production dependencies:
+
+- governed same-site peer discovery/probe execution by hostname and last-known IP;
+- durable scheduled recheck execution with deduplication, cancellation, authority/context rehydration, and restart recovery.
+
+The deferred-work scheduler is tracked as **TODO-OPS-001**. The current JKD-009 durable event store remains append-only evidence storage and does not silently expand into a scheduler.
+
 ## Queued Follow-ons
 
 After the first IT Glue + Datto RMM convergence slice:
