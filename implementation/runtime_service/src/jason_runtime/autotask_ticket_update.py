@@ -171,6 +171,18 @@ def _ticket_update_definition(*, now: datetime):
             "ticket_work_start_queue": "Jason",
             "ticket_work_start_status": "In Progress",
             "ticket_work_start_work_type": "Remote Support",
+            "ticket_work_start_trigger": (
+                "first_ticket_specific_diagnostic_remediation_or_verification"
+            ),
+            "ticket_work_start_online_policy": (
+                "endpoint_ticket_requires_device_online_evidence"
+            ),
+            "ticket_work_handoff_policy": (
+                "restore_trusted_preclaim_queue_and_status_when_human_handoff_required"
+            ),
+            "ticket_work_reclaim_policy": (
+                "block_reclaim_until_blocker_fingerprint_changes"
+            ),
             "ticket_work_start_device_policy": (
                 "preserve_existing_or_exact_drmm_uid_to_active_autotask_configuration"
             ),

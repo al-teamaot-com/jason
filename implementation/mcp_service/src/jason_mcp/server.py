@@ -58,6 +58,7 @@ from jason_runtime.datto_component_scope import (
     effective_datto_component_approval_mode,
     resolve_datto_component,
 )
+from jason_mcp.ticket_work_claim_store import TicketWorkClaimStore
 from jason_runtime.datto_component_approval_registry import (
     approval_owner_identities,
     approve_component as persist_component_approval,
@@ -1855,6 +1856,95 @@ def _exact_configuration_for_ticket_device(
     return unique[0]
 
 
+def _validate_existing_ticket_configuration(*, ticket: Mapping[str, Any], configuration_id: int) -> Mapping[str, Any]:
+    try:
+        ticket_company_id = int(ticket.get("companyID"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED") from error
+    if ticket_company_id < 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED")
+
+    result = _governed_read(
+        capability_name="service.configuration.read",
+        arguments={"resource_id": configuration_id},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED")
+    evidence = result.get("evidence")
+    data = evidence.get("data") if isinstance(evidence, Mapping) else None
+    item = data.get("item") if isinstance(data, Mapping) else None
+    if not isinstance(item, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED")
+    try:
+        observed_id = int(item.get("id"))
+        observed_company_id = int(item.get("companyID"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_READ_FAILED") from error
+    if observed_id != configuration_id:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_IDENTITY_MISMATCH")
+    if observed_company_id != ticket_company_id:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_COMPANY_MISMATCH")
+    if item.get("isActive") is not True:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_CONFIGURATION_INACTIVE")
+    return item
+
+
+def _verified_online_endpoint_by_uid(device_uid: str) -> Mapping[str, Any]:
+    uid = str(device_uid or "").strip()
+    if not uid:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_REQUIRED")
+    result = _governed_read(
+        capability_name="endpoint.device.read",
+        arguments={"resource_id": uid},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_READ_FAILED")
+    evidence = result.get("evidence")
+    record = evidence.get("record") if isinstance(evidence, Mapping) else None
+    if not isinstance(record, Mapping):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_READ_FAILED")
+    if str(record.get("resource_id") or "").strip() != uid:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_MISMATCH")
+    if record.get("online") is not True:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_OFFLINE")
+    if record.get("suspended") is True or record.get("deleted") is True:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_NOT_MANAGED")
+    return record
+
+
+def _verified_online_endpoint_by_name(device_name: str) -> Mapping[str, Any]:
+    name = str(device_name or "").strip()
+    if not name:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_REQUIRED")
+    result = _governed_read(
+        capability_name="endpoint.device.search",
+        arguments={"name": name},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_SEARCH_FAILED")
+    evidence = result.get("evidence")
+    matches = evidence.get("resource_matches") if isinstance(evidence, Mapping) else None
+    if not isinstance(matches, list):
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_SEARCH_FAILED")
+    exact = [
+        item
+        for item in matches
+        if isinstance(item, Mapping)
+        and str(item.get("hostname") or "").strip().casefold() == name.casefold()
+        and str(item.get("resource_id") or "").strip()
+    ]
+    if len(exact) != 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_NOT_UNIQUE")
+    return _verified_online_endpoint_by_uid(
+        str(exact[0].get("resource_id") or "").strip()
+    )
+
+
+@lru_cache(maxsize=1)
+def _ticket_work_claim_store() -> TicketWorkClaimStore:
+    return TicketWorkClaimStore()
+
+
 def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {
         "ticket_id",
@@ -1865,6 +1955,9 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
         "issue_type",
         "sub_issue_type",
         "ticket_type",
+        "work_kind",
+        "device_online",
+        "blocker_fingerprint",
     }
     unknown = set(raw) - allowed
     if unknown:
@@ -1883,13 +1976,11 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     if ticket_id < 1:
         raise ValueError("AUTOTASK_TICKET_WORK_START_TICKET_ID_REQUIRED")
 
+    work_kind = str(raw.get("work_kind") or "").strip().casefold()
+    if work_kind not in {"diagnostic", "remediation", "verification"}:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_SUBSTANTIVE_ACTION_REQUIRED")
+
     ticket = _exact_ticket_record_for_work_start(ticket_id)
-    payload: dict[str, Any] = {
-        "id": ticket_id,
-        "queueID": "Jason",
-        "status": "In Progress",
-        "billingCodeID": "Remote Support",
-    }
 
     current_configuration = ticket.get("configurationItemID")
     try:
@@ -1897,16 +1988,70 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         current_configuration_id = 0
 
-    if current_configuration_id < 1:
-        requested_device = str(raw.get("device_name") or "").strip()
-        candidate = requested_device or _ticket_context_device_name(ticket)
-        if candidate:
-            configuration_id = _exact_configuration_for_ticket_device(
-                ticket=ticket,
-                device_name=candidate,
+    requested_device = str(raw.get("device_name") or "").strip()
+    candidate = requested_device or _ticket_context_device_name(ticket)
+    if raw.get("device_online") is False:
+        raise ValueError("AUTOTASK_TICKET_WORK_START_DEVICE_OFFLINE")
+
+    blocker_fingerprint = str(raw.get("blocker_fingerprint") or "").strip()
+    existing_claim = _ticket_work_claim_store().get(ticket_id)
+    if existing_claim is not None and existing_claim.state == "returned":
+        if (
+            not blocker_fingerprint
+            or blocker_fingerprint == existing_claim.blocker_fingerprint
+        ):
+            raise ValueError("AUTOTASK_TICKET_WORK_BLOCKER_UNCHANGED")
+
+    if existing_claim is not None and existing_claim.state == "claimed":
+        original_queue_id = existing_claim.original_queue_id
+        original_status_id = existing_claim.original_status_id
+    else:
+        try:
+            original_queue_id = int(ticket.get("queueID"))
+            original_status_id = int(ticket.get("status"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_ORIGINAL_STATE_INCOMPLETE"
+            ) from error
+        if original_queue_id < 1 or original_status_id < 1:
+            raise ValueError("AUTOTASK_TICKET_WORK_ORIGINAL_STATE_INCOMPLETE")
+
+    payload: dict[str, Any] = {
+        "id": ticket_id,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+
+    if current_configuration_id >= 1:
+        configuration = _validate_existing_ticket_configuration(
+            ticket=ticket, configuration_id=current_configuration_id
+        )
+        device_uid = str(configuration.get("referenceNumber") or "").strip()
+        if device_uid:
+            endpoint = _verified_online_endpoint_by_uid(device_uid)
+            if (
+                candidate
+                and str(endpoint.get("hostname") or "").strip().casefold()
+                != candidate.casefold()
+            ):
+                raise ValueError(
+                    "AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_MISMATCH"
+                )
+        elif candidate:
+            _verified_online_endpoint_by_name(candidate)
+        else:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_REQUIRED"
             )
-            if configuration_id is not None:
-                payload["configurationItemID"] = configuration_id
+    elif candidate:
+        _verified_online_endpoint_by_name(candidate)
+        configuration_id = _exact_configuration_for_ticket_device(
+            ticket=ticket,
+            device_name=candidate,
+        )
+        if configuration_id is not None:
+            payload["configurationItemID"] = configuration_id
 
     issue_type = str(raw.get("issue_type") or "").strip()
     sub_issue_type = str(raw.get("sub_issue_type") or "").strip()
@@ -1933,8 +2078,68 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "payload": payload,
         "jason_policy_class": "ticket_work_start",
+        "jason_original_queue_id": original_queue_id,
+        "jason_original_status_id": original_status_id,
+        "jason_blocker_fingerprint": blocker_fingerprint,
+        "jason_work_kind": work_kind,
     }
 
+
+def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "ticket_id",
+        "ticketID",
+        "resource_id",
+        "return_work",
+        "handoff_reason_class",
+        "blocker_fingerprint",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_HANDOFF_UNSUPPORTED_ARGUMENTS:"
+            + ",".join(sorted(unknown))
+        )
+
+    value = raw.get("ticket_id", raw.get("ticketID", raw.get("resource_id")))
+    if isinstance(value, bool):
+        raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_TICKET_ID_REQUIRED")
+    try:
+        ticket_id = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_TICKET_ID_REQUIRED") from error
+    if ticket_id < 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_TICKET_ID_REQUIRED")
+
+    reason_class = str(raw.get("handoff_reason_class") or "").strip().casefold()
+    allowed_reasons = {
+        "human_intervention_required",
+        "physical_intervention_required",
+        "client_clarification_required",
+        "capability_unavailable",
+        "provider_blocked",
+    }
+    if reason_class not in allowed_reasons:
+        raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_REASON_REQUIRED")
+
+    blocker_fingerprint = str(raw.get("blocker_fingerprint") or "").strip()
+    if not blocker_fingerprint:
+        raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_BLOCKER_FINGERPRINT_REQUIRED")
+
+    claim = _ticket_work_claim_store().get(ticket_id)
+    if claim is None or claim.state != "claimed":
+        raise ValueError("AUTOTASK_TICKET_WORK_NOT_CLAIMED")
+
+    return {
+        "payload": {
+            "id": ticket_id,
+            "queueID": claim.original_queue_id,
+            "status": claim.original_status_id,
+        },
+        "jason_policy_class": "ticket_work_handoff",
+        "jason_handoff_reason_class": reason_class,
+        "jason_blocker_fingerprint": blocker_fingerprint,
+    }
 
 def _canonicalize_governed_action_arguments(
     capability_name: str,
@@ -1993,6 +2198,8 @@ def _canonicalize_governed_action_arguments(
     if capability_name == "service.ticket.update":
         if raw.get("begin_work") is True:
             return _ticket_work_start_arguments(raw)
+        if raw.get("return_work") is True:
+            return _ticket_work_handoff_arguments(raw)
         return raw
 
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
@@ -2364,14 +2571,19 @@ def _governed_execute(
         elif (
             capability_name == "service.ticket.update"
             and canonical_arguments.get("jason_policy_class")
-            == "ticket_work_start"
+            in {"ticket_work_start", "ticket_work_handoff"}
         ):
             # Owner-approved standing administrative lifecycle transition:
             # claiming a ticket that Jason has begun working is not a second
             # approval gate. The server, not the caller, fixes queue/status/
             # work-type defaults and all provider labels are resolved live.
             imperative_approval = True
-            approval_decided_by = "policy:ticket-work-start"
+            approval_decided_by = (
+                "policy:ticket-work-handoff"
+                if canonical_arguments.get("jason_policy_class")
+                == "ticket_work_handoff"
+                else "policy:ticket-work-start"
+            )
         else:
             imperative_approval = (
                 str(
@@ -2511,6 +2723,34 @@ def _governed_execute(
     )
 
     result = app.governed_orchestrator.execute(request)
+
+    if (
+        capability_name == "service.ticket.update"
+        and result.status.value == "succeeded"
+    ):
+        policy_class = str(
+            canonical_arguments.get("jason_policy_class") or ""
+        ).strip()
+        if policy_class == "ticket_work_start":
+            ticket_id = int(canonical_arguments["payload"]["id"])
+            _ticket_work_claim_store().stage(
+                {
+                    "id": ticket_id,
+                    "queueID": canonical_arguments["jason_original_queue_id"],
+                    "status": canonical_arguments["jason_original_status_id"],
+                },
+                blocker_fingerprint=str(
+                    canonical_arguments.get("jason_blocker_fingerprint", "")
+                ),
+            )
+            _ticket_work_claim_store().mark_claimed(ticket_id)
+        elif policy_class == "ticket_work_handoff":
+            ticket_id = int(canonical_arguments["payload"]["id"])
+            _ticket_work_claim_store().mark_returned(
+                ticket_id,
+                reason_class=str(canonical_arguments["jason_handoff_reason_class"]),
+                blocker_fingerprint=str(canonical_arguments["jason_blocker_fingerprint"]),
+            )
 
     response = {
         "status": result.status.value,
