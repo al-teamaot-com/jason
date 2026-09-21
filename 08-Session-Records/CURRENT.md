@@ -1,7 +1,45 @@
 # Project Jason — Current Session Checkpoint
 
-**Updated:** 2026-08-11  
+**Updated:** 2026-09-21  
 **Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py` and the applicable host-proof records.
+
+## 2026-09-21 Continuation — Endpoint Availability and Deferred Work
+
+The authoritative repository branch for the current work is `main`.
+
+A reusable Endpoint Availability Verification playbook and deterministic evaluator were added so workflows do not treat DRMM "offline" as conclusive device power state and do not rely on a technician remembering to "check later."
+
+Implemented behavior:
+
+- read DRMM online state and Last Seen;
+- default peer-verification threshold: two hours offline;
+- before threshold: persist `recently_offline` with the threshold-based next recheck;
+- after threshold: request best-effort same-client/site peer verification when an authorized online peer is available;
+- probe design covers hostname resolution, ping by hostname, and ping by last-known IP;
+- successful peer reachability while DRMM is offline produces `reachable_outside_drmm` and directs diagnosis toward the DRMM agent/service/path;
+- failed pings produce `offline_likely`, not "confirmed offline";
+- no peer produces `peer_unavailable` and another persisted recheck;
+- unknown Last Seen does not allow indefinite waiting;
+- persisted output includes `next_recheck_at` and evidence needed to resume.
+
+Implementation files:
+
+- `implementation/autonomous_remediation/availability.py`
+- `implementation/autonomous_remediation/test_availability.py`
+- `07-Operations/Endpoint-Availability-Verification-Playbook.md`
+
+Initial implementation commit:
+
+`ce4737c7d98b3caca606b8c30f4abffb9f16ad24` — `Add durable offline endpoint verification gate`
+
+Production dependencies remain open and explicit:
+
+1. a governed same-site read-only peer network probe;
+2. a durable deferred-work scheduler that actually resumes work at `next_recheck_at`.
+
+The scheduler is tracked as `TODO-OPS-001`. JKD-009 remains an append-only event store and does not provide scheduled retries.
+
+The older 2026-08-11 checkpoint sections below are retained as historical evidence for the earlier Teams/CAP-007 workstream; where they describe the then-active feature branch, they should not override the current authoritative `main` branch state.
 
 ## Resume Here
 
