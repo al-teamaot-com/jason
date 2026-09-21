@@ -1,15 +1,16 @@
-# INF-016 — Kyocera Fleet Services Provider Foundation
+# INF-016 - Kyocera Fleet Services Provider Foundation
 
-**Status:** Implemented foundation; live activation blocked pending AOT Kyocera API contract and credentials  
+**Status:** Implemented and validated in code; live activation blocked on KFS Manager login  
 **Mode:** Governed read-only  
 **Provider:** Kyocera Fleet Services (KFS)  
-**Canonical host:** `https://api.kyods.com`
+**Canonical host:** `https://api.kyods.com`  
+**API contract:** KFS External Integration API User Guide v6.2
 
 ## Purpose
 
-Provide Project Jason with a governed provider boundary for Kyocera Fleet Services
-so copier/MFP identity, meter, supply, and alert data can be queried through the
-Central Orchestrator without direct provider access from agents or conversations.
+Provide Project Jason with a governed provider boundary for Kyocera Fleet
+Services so copier/MFP identity, meter, supply, and alert data can be queried
+through the Central Orchestrator without direct provider access from agents.
 
 ## Canonical capabilities
 
@@ -19,55 +20,84 @@ Central Orchestrator without direct provider access from agents or conversations
 - `print.supplies.read` -> `kyocera_kfs.supplies.get`
 - `print.alert.search` -> `kyocera_kfs.alerts.list`
 
-All capabilities are read-only, client-scoped, deterministic, audited, and fail
-closed.
+All capabilities are read-only, client-scoped, deterministic, audited, and
+fail closed. Production selection remains gated by `JASON_KFS_ENABLED`.
 
-## Credential boundary
+## Authentication boundary
+
+KFS requires two separate authentication layers.
+
+1. The Kyocera-issued dealer API Authorization credential is sent in the HTTP
+   `Authorization: Basic ...` header.
+2. `/KFS/Login` requires a KFS Manager-or-higher username and password in the
+   request body.
+
+The login response supplies KFS cookie state. Jason keeps that cookie only in
+memory for the duration of the provider call and does not persist it.
 
 Logical secret: `kyocera_kfs.readonly`
 
 OpenBao path:
 `secret/data/connectors/kyocera-kfs/production/read-only`
 
-The provider uses its own least-privilege AppRole and the existing JKD-003
-short-lived runtime token pattern. KFS credentials and operation/header
-configuration are never stored in source.
+Runtime fields:
 
-## Private provider contract
+- `api_url`
+- `request_from`
+- `request_to`
+- `authorization`
+- `kfs_username`
+- `kfs_password`
 
-Kyocera publicly documents the KFS API integration capability and API host, but
-the detailed dealer operation/header contract is supplied to authorized dealers.
-Jason therefore does not guess provider paths or header names.
+## Implemented API operations
 
-`headers_json` and `operations_json` are stored with the KFS provider secret.
-Only provider-local paths on `api.kyods.com` are allowed, and only GET/POST
-operations are accepted by this read-only foundation.
+- `POST /KFS/Login`
+- `POST /KFS/GroupList`
+- `POST /KFS/DeviceList`
+- `POST /KFS/Device`
+- `POST /KFS/DeviceLogList`
+- `POST /KFS/DeviceLog`
 
-## Live enablement gate
+Fleet device search discovers KFS root groups through `GroupList` and calls
+`DeviceList` with group target scope 1, which includes the specified group and
+child groups. Results are deduplicated by KFS device ID.
 
-KFS remains blocked unless all of the following are true:
+Meters and consumables use the documented `Device` endpoint. Alerts use
+`DeviceLog` for a known device or `DeviceLogList` for a group tree.
 
-1. AOT receives the official Kyocera dealer API credential package.
-2. AOT receives the exact header and operation-path contract.
-3. The contract and credentials are provisioned through the governed OpenBao
-   provider-secret lifecycle.
-4. Credential-safe verification succeeds.
-5. A controlled read-only query validates response shape and client isolation.
-6. `JASON_KFS_ENABLED=true` is explicitly set in the runtime.
+## Explicit write exclusion
 
-Until then the provider is registered as planned/blocked/unavailable and cannot
-be selected by governed capability resolution.
+KFS documents `POST /KFS/ChangeStatus`, but it is not exposed by this
+read-only activation. Any future KFS write capability requires separate Jason
+governance, mutation authority, verification, and acceptance testing.
 
-## Explicit exclusions
+## Validation
 
-This foundation does not enable:
+The KFS provider-specific GitHub Actions validation and the full Jason validation
+suite both pass with the documented session implementation.
 
-- remote device configuration;
-- firmware updates;
-- remote service actions;
-- credential disclosure;
-- billing writes;
-- Autotask writes;
-- any KFS write or destructive capability.
+Credential-safe live testing also established:
 
-Those require separate governance and capability approval.
+- the Kyocera API gateway accepts the existing Authorization credential;
+- the vaulted gateway ID/password pair exactly matches the pair encoded in that
+  Authorization value;
+- using that gateway pair as the `/KFS/Login` body credentials returns KFS
+  status 401.
+
+The v6.2 guide requires a KFS Manager-or-higher user for the login body. A prior
+working AOT/OpenClaw integration used a dedicated KFS Manager account named
+`apiuser`.
+
+## Live activation gate
+
+Production KFS remains disabled until all of the following are true:
+
+1. A valid KFS Manager-or-higher integration login is available.
+2. The six-field runtime secret is present behind the dedicated KFS AppRole.
+3. Credential-safe `/KFS/Login` returns KFS status 200.
+4. Controlled `GroupList` and `DeviceList` reads validate response shape.
+5. A controlled meter, supplies, and alert read succeeds.
+6. `JASON_KFS_ENABLED=true` is deliberately enabled.
+
+The Kyocera-issued API gateway credential must not be reset or changed as part
+of resolving the KFS Manager-login blocker.
