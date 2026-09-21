@@ -383,6 +383,38 @@ Results must not expose provider credentials, authorization headers, unseal mate
 
 OpenClaw remains an operator interface. It is not the source of platform identity, policy, secrets, or evidence truth.
 
+### 6.9 Endpoint availability and deferred workflow continuity
+
+#### `endpoint.availability.assess`
+
+- Owner: Jason operational playbook layer / Central Orchestrator integration boundary
+- Purpose: Deterministically evaluate DRMM endpoint availability evidence, Last Seen age, peer-verification need, resume state, and next recheck time.
+- State: implemented as a provider-neutral helper; not yet registered as a production-invokable capability
+- Governance: read-only, same client/device scope, evidence before assertion
+- Evidence: DRMM online state, Last Seen, observation timestamp, target identity, peer-availability/probe evidence when present
+- Idempotency: deterministic for identical inputs and policy values
+- Failure behavior: return an explicit inconclusive/deferred state rather than inventing availability
+
+#### `endpoint.network.reachability.probe`
+
+- Owner: approved endpoint/network diagnostic provider behind the Central Orchestrator
+- Purpose: From a positively identified online peer at the same authorized client/site, resolve and test a target endpoint by hostname and last-known IP.
+- State: planned
+- Governance: read-only/non-destructive; same-client/site isolation; positive target/peer identity required
+- Evidence: peer identity, target identity, DNS result, hostname/IP probe results, timestamps, correlation ID
+- Failure behavior: report probe failure/inconclusive evidence; never equate failed ping with confirmed power-off
+
+#### `orchestration.recheck.schedule`
+
+- Owner: Jason Central Orchestrator / future deferred-work scheduler
+- Purpose: Resume a persisted workflow at or after a governed `next_recheck_at` time so deferred work is not dependent on technician memory.
+- State: planned; tracked as `TODO-OPS-001`
+- Governance: scheduling does not create authority; resumed work must rehydrate and revalidate the original principal, client, device, policy, and workflow context
+- Evidence: schedule request, idempotency/deduplication key, due time, execution/cancellation result, terminal-state cleanup
+- Failure behavior: fail closed, preserve pending state/evidence, and escalate according to the calling playbook's aging rules
+
+These entries do not weaken JKD-008 or JKD-009 boundaries. JKD-009 remains append-only orchestration evidence storage and explicitly does not become a scheduler.
+
 ## 7. Initial business capability placeholders
 
 These entries reserve stable business names while their connector specifications are developed.
