@@ -205,10 +205,11 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Evaluate when defining Jason copier/MFP workflows or when AOT wants to automate monthly meter collection and copier billing validation.
 
+- **Implementation status:** Read-only KFS provider foundation implemented on `feature/kfs-readonly-connector-20260921`; live provider selection is fail-closed behind `JASON_KFS_ENABLED` until the dealer contract and credentials are installed.
+
 ---
 
 ## Governance and operational maturity
-- **Implementation status:** Read-only KFS provider foundation implemented on `feature/kfs-readonly-connector-20260921`; live provider selection is fail-closed behind `JASON_KFS_ENABLED` until the dealer contract and credentials are installed.
 
 ### TODO-GOV-001 — Technology Steward review automation
 
