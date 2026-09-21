@@ -1,5 +1,12 @@
 # Jason Playbook - Endpoint Availability Verification
 
+**Status:** Decision/state implementation complete; production peer-probe and durable scheduler dependencies open  
+**Default offline threshold:** 2 hours  
+**Default post-threshold recheck:** 1 hour  
+**Implementation:** `implementation/autonomous_remediation/availability.py`  
+**Tests:** `implementation/autonomous_remediation/test_availability.py`  
+**Tracked dependency:** `TODO-OPS-001 — Durable deferred-work recheck scheduler`  
+
 ## 1. Section Goal
 
 Jason must not treat a DRMM offline flag as conclusive proof that an endpoint is powered off. If a device remains offline longer than the configured threshold, Jason should automatically attempt additional read-only verification from a suitable online managed endpoint at the same client/site when one is available. If no peer is available, the workflow remains pending with a persisted recheck instead of relying on technician memory.
@@ -98,3 +105,13 @@ Demonstrate: recent offline defers to threshold; threshold-exceeded requests pee
 ## 22. Section Goal Closure
 
 The deterministic assessment module and unit tests implement the state/evidence rules. Production closure additionally requires a governed same-site peer-probe capability and a durable scheduled-recheck service. The current JKD-009 event store explicitly persists/audits events but does not provide scheduled retries, so this Section Goal remains open until those dependencies are wired and the end-to-end acceptance test passes.
+
+
+## Documentation Links
+
+- Standard structure: `docs/playbooks/Jason-Standard-Playbook-Template.md`
+- Autonomous remediation framework: `implementation/autonomous_remediation/README.md`
+- Capability catalog: `docs/architecture/JASON_CAPABILITY_CATALOG.md`
+- Central Orchestrator boundary: `03-Components/Kernel/JKD-008-Central-Orchestrator.md`
+- Durable event-store boundary: `03-Components/Kernel/JKD-009-Durable-Orchestration-Event-Store.md`
+- Deferred scheduler backlog: `TODO.md#todo-ops-001--durable-deferred-work-recheck-scheduler`
