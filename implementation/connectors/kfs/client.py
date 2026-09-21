@@ -79,7 +79,7 @@ class KfsApiClient:
                 "id": self.credentials["manager_id"],
                 "password": self.credentials["manager_password"],
                 "isPersistent": False,
-                "timeZone": "+0000",
+                "timeZone": "-0400",
             },
         )
         self.require_success(payload, "KFS login")
