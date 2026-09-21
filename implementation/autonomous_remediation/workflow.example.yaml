@@ -18,6 +18,24 @@ stages:
     mode: read
     outputs: [ticket, client_scope, device_refs]
 
+  - id: availability_gate
+    capability: endpoint.availability.assess
+    mode: deterministic
+    requires: [device_refs]
+    policy:
+      peer_verify_after_hours: 2
+      retry_after_hours: 1
+      peer_probe: best_effort_same_site
+      failed_ping_is_conclusive_offline: false
+    outcomes:
+      - online
+      - recently_offline
+      - peer_verification_due
+      - peer_unavailable
+      - reachable_outside_drmm
+      - offline_likely
+      - inconclusive
+
   - id: triage
     capability: triage.ticket.assess
     mode: read

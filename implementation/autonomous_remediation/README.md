@@ -70,3 +70,19 @@ A ticket reports a QuickBooks problem. Jason correlates the installed version fr
 ## Promotion process
 
 A remediation workflow may be proposed for higher autonomy only after a defined observation period and minimum execution count. Promotion requires human approval and documented thresholds for success rate, rollback rate, technician intervention, client impact, evidence quality, and retirement criteria. Jason may recommend promotion but may never approve its own promotion.
+
+
+## Endpoint availability gate
+
+Offline state is evidence, not proof of power state. Playbooks should call the provider-neutral endpoint availability assessment before treating a stale DRMM endpoint as unavailable.
+
+Default behavior:
+- if Last Seen is less than 2 hours old, persist a recheck for the threshold;
+- after 2 hours, attempt read-only verification from a suitable online managed peer at the same client/site when available;
+- probe by hostname and last-known IP;
+- if no peer is available, persist another recheck rather than blocking the workflow;
+- a successful peer ping while DRMM is offline points toward DRMM agent/service/path diagnostics;
+- failed ping strengthens offline evidence but is not definitive proof the endpoint is powered off.
+
+Implementation: implementation/autonomous_remediation/availability.py
+Playbook: 07-Operations/Endpoint-Availability-Verification-Playbook.md

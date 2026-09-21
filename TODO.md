@@ -266,6 +266,26 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Implement before expanding autonomous multi-ticket troubleshooting so queue ownership is reliable across technicians and Jason.
 
+
+### TODO-OPS-001 — Durable deferred-work recheck scheduler
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed durable scheduler that can resume persisted Jason workflow states at a requested future time, suppress duplicate rechecks, and stop scheduled work when the parent workflow reaches a terminal state.
+- **Why it matters:** Offline endpoints, backup verification, patch confirmation, post-reboot checks, waiting-for-device workflows, and similar cases must not depend on a technician remembering to return later.
+- **Why not now:** JKD-009 intentionally provides durable append-only event history but explicitly excludes scheduled retries. The new endpoint-availability gate can calculate and persist next_recheck_at, but production execution of that future recheck needs a separate governed scheduler.
+- **Prerequisites:** canonical deferred-work contract; durable job store; deduplication/idempotency key; client and requester context binding; cancellation on terminal state; bounded retry/aging rules; audit events; recovery after service restart.
+- **Expected behavior:**
+  1. Accept a persisted workflow/correlation identity and next_recheck_at.
+  2. Execute no earlier than the requested time.
+  3. Rehydrate authorized client/device/workflow context rather than creating new authority.
+  4. Suppress duplicate scheduled rechecks for the same workflow generation.
+  5. Cancel automatically when the ticket/workflow completes, escalates, is retired, or otherwise reaches a terminal state.
+  6. Record schedule, execution, cancellation, and failure evidence.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before claiming end-to-end autonomous deferred ticket handling or closing the Endpoint Availability Verification playbook Section Goal.
+
 ---
 
 ## New-item template
