@@ -201,7 +201,10 @@ def bind_job_output_read(
 def bind_ticket_work_start(
     ticket_id: int,
     *,
+    device_online: bool,
     device_name: str | None = None,
+    work_kind: str = "diagnostic",
+    blocker_fingerprint: str | None = None,
     issue_type: str | None = None,
     sub_issue_type: str | None = None,
     ticket_type: str | None = None,
@@ -222,13 +225,26 @@ def bind_ticket_work_start(
     if durable_ticket_id <= 0:
         raise RuntimeBindingError("Autotask ticket id must be positive")
 
+    selected_work_kind = str(work_kind or "").strip().casefold()
+    if selected_work_kind not in {"diagnostic", "remediation", "verification"}:
+        raise RuntimeBindingError(
+            "ticket work start requires a substantive action class"
+        )
+    if device_online is not True:
+        raise RuntimeBindingError(
+            "device must be online before ticket work starts"
+        )
+
     arguments: dict[str, Any] = {
         "ticket_id": durable_ticket_id,
         "begin_work": True,
+        "device_online": True,
+        "work_kind": selected_work_kind,
     }
 
     optional = {
         "device_name": device_name,
+        "blocker_fingerprint": blocker_fingerprint,
         "issue_type": issue_type,
         "sub_issue_type": sub_issue_type,
         "ticket_type": ticket_type,
@@ -241,6 +257,49 @@ def bind_ticket_work_start(
     return CapabilityRequest(
         SERVICE_TICKET_UPDATE,
         arguments,
+    )
+
+
+def bind_ticket_work_handoff(
+    ticket_id: int,
+    *,
+    reason_class: str,
+    blocker_fingerprint: str,
+) -> CapabilityRequest:
+    """Return a Jason-owned ticket to its trusted pre-claim queue/status."""
+
+    try:
+        durable_ticket_id = int(ticket_id)
+    except (TypeError, ValueError) as error:
+        raise RuntimeBindingError(
+            "Autotask ticket id must be positive"
+        ) from error
+    if durable_ticket_id <= 0:
+        raise RuntimeBindingError("Autotask ticket id must be positive")
+
+    reason = str(reason_class or "").strip().casefold()
+    allowed_reasons = {
+        "human_intervention_required",
+        "physical_intervention_required",
+        "client_clarification_required",
+        "capability_unavailable",
+        "provider_blocked",
+    }
+    if reason not in allowed_reasons:
+        raise RuntimeBindingError("ticket handoff requires a supported reason class")
+
+    fingerprint = str(blocker_fingerprint or "").strip()
+    if not fingerprint:
+        raise RuntimeBindingError("ticket handoff requires a blocker fingerprint")
+
+    return CapabilityRequest(
+        SERVICE_TICKET_UPDATE,
+        {
+            "ticket_id": durable_ticket_id,
+            "return_work": True,
+            "handoff_reason_class": reason,
+            "blocker_fingerprint": fingerprint,
+        },
     )
 
 

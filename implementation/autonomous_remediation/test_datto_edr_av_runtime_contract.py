@@ -22,6 +22,7 @@ from datto_edr_av_runtime_contract import (
     bind_job_output_read,
     bind_job_read,
     bind_playbook_internal_note,
+    bind_ticket_work_handoff,
     bind_ticket_work_start,
 )
 
@@ -128,6 +129,7 @@ def test_playbook_state_generates_governed_internal_note_request():
 def test_ticket_work_start_uses_standing_lifecycle_binding():
     request = bind_ticket_work_start(
         140629,
+        device_online=True,
         device_name="AOT-50282",
         issue_type="Endpoint Security",
         sub_issue_type="Antivirus",
@@ -137,6 +139,8 @@ def test_ticket_work_start_uses_standing_lifecycle_binding():
     assert request.arguments == {
         "ticket_id": 140629,
         "begin_work": True,
+        "device_online": True,
+        "work_kind": "diagnostic",
         "device_name": "AOT-50282",
         "issue_type": "Endpoint Security",
         "sub_issue_type": "Antivirus",
@@ -144,12 +148,37 @@ def test_ticket_work_start_uses_standing_lifecycle_binding():
 
 
 def test_ticket_work_start_omits_blank_classification_hints():
-    request = bind_ticket_work_start(123, issue_type="  ")
+    request = bind_ticket_work_start(
+        123,
+        device_online=True,
+        issue_type="  ",
+    )
     assert request.arguments == {
         "ticket_id": 123,
         "begin_work": True,
+        "device_online": True,
+        "work_kind": "diagnostic",
     }
 
+
+def test_ticket_work_start_rejects_offline_device():
+    with pytest.raises(RuntimeBindingError, match="online"):
+        bind_ticket_work_start(123, device_online=False)
+
+
+def test_ticket_work_handoff_uses_reason_and_blocker_fingerprint():
+    request = bind_ticket_work_handoff(
+        123,
+        reason_class="human_intervention_required",
+        blocker_fingerprint="needs-onsite-usb",
+    )
+    assert request.capability == "service.ticket.update"
+    assert request.arguments == {
+        "ticket_id": 123,
+        "return_work": True,
+        "handoff_reason_class": "human_intervention_required",
+        "blocker_fingerprint": "needs-onsite-usb",
+    }
 
 def test_threat_branch_binds_live_scan_start_and_verification_reads():
     from datto_edr_av_runtime_contract import (
