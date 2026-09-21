@@ -13,7 +13,7 @@ Success requires proof that:
 - discovery never automatically promotes a variable to Standard;
 - new-site convergence creates only missing approved Standard names;
 - existing site variables are never overwritten by this playbook;
-- newly created variable values are blank unless a later separately approved playbook populates them;
+- Datto-required creation values use Jason's reserved non-secret `__JASON_UNSET__` staging sentinel until a later separately approved playbook populates them;
 - any naming conflict, incomplete scan, authority failure, or unavailable write capability blocks convergence and is documented.
 
 ## 2. Trigger
@@ -47,7 +47,7 @@ In scope:
 - master registry generation;
 - human-governed variable classification;
 - comparison of a new site against the approved Standard subset;
-- planning/creation of missing Standard variable names with blank values when the governed create capability is active and authorized.
+- planning/creation of missing Standard variable names with the reserved `__JASON_UNSET__` staging sentinel when the governed create capability is active and authorized.
 
 Out of scope:
 
@@ -102,7 +102,7 @@ No provider variable value is stored in the registry.
 
 **New Site**
 
-Every variable classified and approved as Standard exists exactly once by the approved name. Existing values remain untouched. Missing Standard variables are present with blank values until later population/validation.
+Every variable classified and approved as Standard exists exactly once by the approved name. Existing values remain untouched. Missing Standard variables are present with the reserved `__JASON_UNSET__` staging sentinel until later population/validation. The sentinel is not a valid populated value.
 
 ## 6. State Model
 
@@ -180,7 +180,7 @@ For each approved Standard:
 
 - exact name exists -> satisfied;
 - case/whitespace variant exists -> conflict, do not duplicate;
-- absent -> plan create with blank value;
+- absent -> plan create with the reserved `__JASON_UNSET__` staging sentinel;
 - registry collision exists -> conflict, stop that item.
 
 ## 8. Decision Gates
@@ -200,6 +200,8 @@ Before new-site mutation:
 - Standard classifications approved;
 - current target-site variables re-read immediately before mutation;
 - create capability is ACTIVE and action-enabled;
+- every variable still carrying the reserved UNSET sentinel is treated as awaiting population, not healthy/complete;
+- any dependent component, monitor, policy, or deployment remains gated until that variable is populated and validated;
 - requester/playbook authority permits the mutation;
 - no conflicting variant exists;
 - no existing variable will be overwritten.
@@ -215,7 +217,7 @@ Target: exact onboarding site UID.
 Input:
 
 - approved Standard variable name;
-- blank value;
+- reserved `__JASON_UNSET__` staging value because Datto requires a value at variable creation;
 - approved masked setting;
 - reason identifying onboarding baseline creation.
 
@@ -229,7 +231,7 @@ Rules:
 - never create a client-specific, legacy, deprecated, or unreviewed variable;
 - mutation must be idempotent against target site + normalized approved name + registry version.
 
-Current implementation limitation: live Jason currently exposes `management.site.variable.list` but does not expose an action-enabled `management.site.variable.create`. Until that capability is activated, convergence must stop at `write_capability_blocked` with the exact planned creates preserved.
+Production status (2026-09-21): `management.site.variable.create` and `management.site.variable.update` are active governed actions. The controlled AOT acceptance test proved that Datto rejects an empty creation value with HTTP 400, while the same governed create succeeds with the reserved `__JASON_UNSET__` staging sentinel and authoritative readback. The existing governed Datto RMM execution identity is reused; delete remains disabled.
 
 ## 10. Retry Policy
 
@@ -325,6 +327,7 @@ Fail closed for:
 - missing Standard approval;
 - unauthorized requester;
 - unavailable create capability;
+- Datto provider rejection of the reserved staging value;
 - mutation error;
 - contradictory readback.
 
@@ -352,7 +355,7 @@ Registry verification requires:
 - failed-sites list is empty;
 - registry contains no values/secrets.
 
-New-site verification requires authoritative target-site re-read proving every approved Standard variable name exists once. Do not require values to be populated; value population belongs to a later onboarding task.
+New-site verification requires authoritative target-site re-read proving every approved Standard variable name exists once. Do not require values to be populated for the structural-convergence phase; value population belongs to a later onboarding task. However, a variable carrying the reserved UNSET sentinel must never satisfy a downstream dependency that requires a real value.
 
 ## 18. Completion Criteria
 
@@ -384,17 +387,18 @@ Currently available:
 
 - `management.site.search`
 - `management.site.variable.list`
+- `management.site.variable.create`
+- `management.site.variable.update`
 
 Required for full convergence:
 
-- `management.site.variable.create` as an active governed, action-enabled capability
 - persisted registry/version storage
 - onboarding project/site association
 - audit/event persistence
 
 Optional later capability:
 
-- `management.site.variable.update` for the separate population/validation playbook, not this playbook.
+- a later population/validation playbook that uses `management.site.variable.update` and proves the sentinel has been replaced before dependent automation is enabled.
 
 ## 21. Acceptance Test
 
@@ -406,10 +410,11 @@ Optional later capability:
 6. Select a controlled new/test DRMM site.
 7. Compare against a small approved Standard set.
 8. Verify existing names are preserved.
-9. Verify only missing names are planned with blank values.
-10. If create capability is active, create one controlled missing variable and verify readback.
-11. If create capability is unavailable, prove deterministic `write_capability_blocked` behavior without provider bypass.
-12. Confirm no variable value is written to logs, ticket notes, registry artifacts, or user-visible output.
+9. Verify only missing names are planned with the reserved UNSET staging sentinel.
+10. Create one controlled missing variable and verify authoritative readback.
+11. Prove that an empty create is rejected by Datto and is not blindly retried.
+12. Prove that variables carrying the UNSET sentinel remain `awaiting_population` for dependency gating.
+13. Confirm no secret variable value is written to logs, ticket notes, registry artifacts, Grafana, or user-visible output.
 
 ## 22. Section Goal Closure
 
@@ -419,5 +424,7 @@ Close only after:
 - unit tests pass;
 - complete live read-only registry scan is demonstrated;
 - human Standard-review mechanism is documented;
-- one controlled new-site convergence acceptance test succeeds after governed create activation;
+- one controlled governed create acceptance test succeeds with authoritative readback;
+- Datto's mandatory-value limitation and the reserved UNSET staging rule are documented;
+- dependent automation is proven to remain blocked until staged variables are populated;
 - limitations and follow-up TODOs are recorded.
