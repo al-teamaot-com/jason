@@ -1,7 +1,27 @@
 # Project Jason — Current Session Checkpoint
 
-**Updated:** 2026-09-21  
+**Updated:** 2026-09-22
 **Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py` and the applicable host-proof records.
+
+## 2026-09-22 Documentation / Playbook / Observability Catch-Up
+
+The authoritative repository branch remains `main`; this maintenance pass was prepared from current `origin/main` in a clean worktree so it does not mix with unrelated in-progress feature work.
+
+Current operational-documentation additions:
+
+- `docs/playbooks/Jason-Server-Site-Offline-Localization.md` — version 1.0.0; implements the approved DRMM/Kaseya-first server/site outage localization workflow, including external public-IP reachability, corroboration of workstation/server online state, DRMM SNMP/network-device evidence, site-vs-endpoint localization, Autotask documentation, 10-minute rechecks while unresolved, completion when service is restored/healthy, and Help Desk I escalation when still offline or unresolved.
+- `docs/playbooks/Jason-Windows-Security-Log-Cleared-Attribution-and-Triage.md` — version 1.0.0; treats Event ID 1102 / Windows Security log clearing as security-significant until exact authorized AOT/DRMM execution evidence proves attribution. Process ancestry such as `cagservice.exe` is evidence of likely DRMM origin, not authorization by itself.
+- `implementation/autonomous_remediation/playbook_registry.json` — observational registry for currently documented playbooks with global autonomy default-deny and no newly granted autonomous authority.
+- `infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json` plus the playbook metrics exporter/systemd/scrape target — operational visibility for playbook registry state, lifecycle/review status, autonomy gates, active/blocked/recheck state, outcomes, verification, evidence-source use, and execution telemetry.
+
+Governance remains unchanged: documentation or dashboard visibility does not authorize execution. All newly registered playbooks remain disabled for autonomous runtime use unless separately approved through the exact playbook/version/hash autonomy process.
+
+Open dependencies remain visible rather than being hidden:
+
+1. durable deferred/scheduled work is still required for guaranteed cross-session 10-minute rechecks and other future checks;
+2. DRMM-first SNMP/network telemetry must be expanded for authoritative switch/uplink/firewall/WAN localization;
+3. exact DRMM automation execution-history search is required before Security Log Cleared events can be autonomously closed as known-good based on AOT work attribution;
+4. no disruptive remediation is authorized by either playbook.
 
 ## 2026-09-21 Continuation — Endpoint Availability and Deferred Work
 

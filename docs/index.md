@@ -75,6 +75,8 @@ Jason operational playbooks use a standard 22-section structure covering trigger
 - [Jason Standard Playbook Template](docs/playbooks/Jason-Standard-Playbook-Template.md)
 - [DRMM Site Variable Master Registry](docs/playbooks/Jason-DRMM-Site-Variable-Master-Registry.md)
 - [Endpoint Availability Verification Playbook](07-Operations/Endpoint-Availability-Verification-Playbook.md)
+- [Server / Site Offline Localization](docs/playbooks/Jason-Server-Site-Offline-Localization.md)
+- [Windows Security Log Cleared Attribution and Triage](docs/playbooks/Jason-Windows-Security-Log-Cleared-Attribution-and-Triage.md)
 
 The endpoint-availability playbook establishes a reusable rule for DRMM-offline devices: inspect Last Seen first, defer with persisted state until the configured threshold, then attempt same-site read-only peer verification when possible. No peer is a recoverable condition, and failed ping alone is never treated as conclusive proof of power-off.
 

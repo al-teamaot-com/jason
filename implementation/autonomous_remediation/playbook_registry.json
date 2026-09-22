@@ -1,0 +1,71 @@
+{
+  "schema_version": 2,
+  "playbooks": [
+    {
+      "id": "endpoint_availability_verification",
+      "name": "Jason - Endpoint Availability Verification",
+      "version": "unversioned",
+      "lifecycle": "implemented_with_dependencies",
+      "enabled": false,
+      "review_status": "decision_state_complete_peer_probe_and_scheduler_dependencies_open",
+      "source": "07-Operations/Endpoint-Availability-Verification-Playbook.md",
+      "autonomy": {
+        "mode": "recommend_only",
+        "approval_status": "not_approved",
+        "approved_version": null,
+        "approved_source_sha256": null,
+        "approved_by": null,
+        "approved_at": null,
+        "review_expires_at": null,
+        "allowed_capabilities": [],
+        "maximum_targets": 1
+      }
+    },
+    {
+      "id": "server_site_offline_localization",
+      "name": "Jason - Server / Site Offline Localization",
+      "version": "1.0.0",
+      "lifecycle": "implemented",
+      "enabled": false,
+      "review_status": "diagnostic_localization_ready_production_acceptance_recorded",
+      "source": "docs/playbooks/Jason-Server-Site-Offline-Localization.md",
+      "autonomy": {
+        "mode": "recommend_only",
+        "approval_status": "not_approved",
+        "approved_version": null,
+        "approved_source_sha256": null,
+        "approved_by": null,
+        "approved_at": null,
+        "review_expires_at": null,
+        "allowed_capabilities": [],
+        "maximum_targets": 1
+      }
+    },
+    {
+      "id": "windows_security_log_cleared_attribution",
+      "name": "Jason - Windows Security Log Cleared Attribution and Triage",
+      "version": "1.0.0",
+      "lifecycle": "implemented",
+      "enabled": false,
+      "review_status": "diagnostic_attribution_ready_exact_execution_history_required_for_known_good_closure",
+      "source": "docs/playbooks/Jason-Windows-Security-Log-Cleared-Attribution-and-Triage.md",
+      "autonomy": {
+        "mode": "recommend_only",
+        "approval_status": "not_approved",
+        "approved_version": null,
+        "approved_source_sha256": null,
+        "approved_by": null,
+        "approved_at": null,
+        "review_expires_at": null,
+        "allowed_capabilities": [],
+        "maximum_targets": 1
+      }
+    }
+  ],
+  "autonomy": {
+    "global_enabled": false,
+    "default": "deny",
+    "requires_exact_source_hash": true,
+    "policy_version": 1
+  }
+}

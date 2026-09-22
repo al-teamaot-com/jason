@@ -318,6 +318,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Priority:** P1
 - **Status:** Planned
 - **Risk level:** Moderate
+- **Implementation progress (2026-09-22):** The Jason Playbook Control Center dashboard, Prometheus exporter, systemd unit, scrape target, and registry/autonomy metrics are now present in the documentation/Grafana catch-up branch. The dashboard exposes registered playbooks, lifecycle/review state, global autonomy, exact-playbook autonomy approval, active/blocked/recheck state, outcomes, verification, evidence sources, and execution telemetry. The broader successful-resolution candidate provenance/staleness workflow in this TODO remains open.
 - **Idea:** Add a Grafana page that makes each playbook's lifecycle, provenance, review state, approval state, and autonomous-use authorization immediately visible.
 - **Why it matters:** Technicians and governance reviewers need a single operational view showing how a real resolution became a candidate, whether it has been reviewed and approved, and whether it is explicitly authorized for autonomous execution. Stale candidates must also be visible so potentially valuable knowledge does not disappear indefinitely in review.
 - **Why not now:** The underlying lifecycle records and successful-resolution candidate workflow must expose stable data before Grafana can present an authoritative view.
