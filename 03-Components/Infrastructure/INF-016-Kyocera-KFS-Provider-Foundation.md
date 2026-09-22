@@ -1,6 +1,6 @@
 # INF-016 - Kyocera Fleet Services Provider Foundation
 
-**Status:** Implemented and validated in code; live activation blocked on KFS Manager login  
+**Status:** Implemented; first Jason live collection successful; production activation pending durable Manager-secret promotion and runtime/timer cutover
 **Mode:** Governed read-only  
 **Provider:** Kyocera Fleet Services (KFS)  
 **Canonical host:** `https://api.kyods.com`  
@@ -20,8 +20,12 @@ through the Central Orchestrator without direct provider access from agents.
 - `print.supplies.read` -> `kyocera_kfs.supplies.get`
 - `print.alert.search` -> `kyocera_kfs.alerts.list`
 
-All capabilities are read-only, client-scoped, deterministic, audited, and
-fail closed. Production selection remains gated by `JASON_KFS_ENABLED`.
+All capabilities are read-only, deterministic, audited, and fail closed.
+The first production activation is restricted by the connector to AOT-internal
+organization-wide reads (`organization_id=aot`, `client_id=None`). Per-client
+KFS access remains denied until explicit KFS serial-to-Autotask mapping and a
+canonical Jason client boundary are present. Production selection remains gated
+by `JASON_KFS_ENABLED`.
 
 ## Authentication boundary
 
@@ -65,6 +69,24 @@ child groups. Results are deduplicated by KFS device ID.
 Meters and consumables use the documented `Device` endpoint. Alerts use
 `DeviceLog` for a known device or `DeviceLogList` for a group tree.
 
+## Historical evidence plane
+
+Jason also maintains an append-oriented PostgreSQL history store populated by
+the deterministic nightly KFS collector. The restored Claw history and all new
+Jason collections use the same schema, preserving continuity across the
+migration.
+
+The historical store includes run metadata, raw provider responses, groups,
+devices, meter readings, consumable readings, device status readings, device
+logs, and per-run device deltas. PostgreSQL remains local-only on
+`127.0.0.1:5432`; provider credentials are not stored in the database.
+
+The collector is source-controlled under `infrastructure/kfs-collector/` and
+runs at midnight America/New_York after production cutover. Live provider reads
+remain authoritative for current-state questions; PostgreSQL history is the
+longitudinal evidence source for prior-state, trend, delta, billing-validation,
+and correlation workflows.
+
 ## Explicit write exclusion
 
 KFS documents `POST /KFS/ChangeStatus`, but it is not exposed by this
@@ -76,28 +98,37 @@ governance, mutation authority, verification, and acceptance testing.
 The KFS provider-specific GitHub Actions validation and the full Jason validation
 suite both pass with the documented session implementation.
 
-Credential-safe live testing also established:
+Credential-safe live testing established the root cause and successful path:
 
-- the Kyocera API gateway accepts the existing Authorization credential;
-- the vaulted gateway ID/password pair exactly matches the pair encoded in that
-  Authorization value;
-- using that gateway pair as the `/KFS/Login` body credentials returns KFS
-  status 401.
+- the Kyocera API gateway accepts the existing dealer Authorization credential;
+- the previously vaulted Manager fields had been populated with that same
+  gateway identity, which KFS rejects for `/KFS/Login`;
+- the working AOT/OpenClaw Manager identity is the separate account `apiuser`;
+- a verified Claw-to-Jason handoff of that Manager pair was used for one
+  controlled validation run without changing the durable OpenBao secret;
+- Jason `/KFS/Login` returned status 200 and a session cookie;
+- the full 2026-09-22 collection completed with status `ok`, 0 errors,
+  235 groups, 432 current devices, 7,274 meter readings, 1,509 consumable
+  readings, 549 device-log readings, and 472 raw KFS responses;
+- the restored PostgreSQL history was successfully appended by the live run.
 
-The v6.2 guide requires a KFS Manager-or-higher user for the login body. A prior
-working AOT/OpenClaw integration used a dedicated KFS Manager account named
-`apiuser`.
+The connector now also fails closed if the Manager username/password exactly
+matches the dealer Basic credential pair, preventing recurrence of this
+misconfiguration.
 
 ## Live activation gate
 
-Production KFS remains disabled until all of the following are true:
+The API/session blocker is resolved. Production KFS remains disabled until the
+remaining promotion steps are completed:
 
-1. A valid KFS Manager-or-higher integration login is available.
-2. The six-field runtime secret is present behind the dedicated KFS AppRole.
-3. Credential-safe `/KFS/Login` returns KFS status 200.
-4. Controlled `GroupList` and `DeviceList` reads validate response shape.
-5. A controlled meter, supplies, and alert read succeeds.
-6. `JASON_KFS_ENABLED=true` is deliberately enabled.
+1. Promote the verified separate Manager pair into the six-field OpenBao secret
+   without changing the dealer Authorization credential.
+2. Rebuild/deploy the Jason runtime with the KFS AppRole mounts present.
+3. Deliberately set `JASON_KFS_ENABLED=true`.
+4. Validate governed device search/read, meter, supplies, and alert capabilities.
+5. Install and enable the midnight America/New_York collector timer and verify
+   its first scheduled run.
+6. Only after those checks succeed, disable the legacy Claw KFS job.
 
-The Kyocera-issued API gateway credential must not be reset or changed as part
-of resolving the KFS Manager-login blocker.
+The Kyocera-issued dealer API gateway credential must not be reset or replaced
+as part of this promotion.

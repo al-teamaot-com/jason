@@ -180,11 +180,11 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-004 — Kyocera device data integration
 
 - **Priority:** P1
-- **Status:** Blocked
+- **Status:** In Progress
 - **Risk level:** Moderate
 - **Idea:** Add a governed Kyocera integration so Jason can retrieve copier/MFP operational data such as total meter counts, black-and-white and color copy/print counts, model and serial number, device status, toner/supply levels, fault/error conditions, and other useful device telemetry exposed by Kyocera.
 - **Why it matters:** Gives Jason direct visibility into managed copier usage and health. This can support meter collection, billing validation, proactive service, supply management, device inventory reconciliation, and faster ticket troubleshooting without relying on manual meter reads.
-- **Why not now:** The read-only KFS connector foundation is implemented, but live activation is blocked until AOT receives Kyocera's official dealer API header/operation contract and production credentials, provisions them through OpenBao, and completes a controlled read-only validation.
+- **Why not now:** The KFS v6.2 contract, governed connector, restored history database, and first full Jason live collection are validated. Remaining work is production promotion: write the verified separate Manager login into OpenBao, rebuild/deploy the runtime with KFS AppRole mounts, enable and test the governed `print.*` reads, enable the midnight collector timer, and only then retire the legacy Claw job.
 - **Prerequisites:**
   - identify the authoritative Kyocera data source available to AOT;
   - document authentication and tenant/client isolation requirements;
@@ -205,7 +205,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Evaluate when defining Jason copier/MFP workflows or when AOT wants to automate monthly meter collection and copier billing validation.
 
-- **Implementation status:** Read-only KFS provider foundation implemented on `feature/kfs-readonly-connector-20260921`; live provider selection is fail-closed behind `JASON_KFS_ENABLED` until the dealer contract and credentials are installed.
+- **Implementation status:** KFS v6.2 governed read-only provider is implemented behind `JASON_KFS_ENABLED`; Claw PostgreSQL history is restored on Jason; a full Jason live collection succeeded on 2026-09-22 with 235 groups, 432 current devices, 7,274 meter readings, 1,509 consumable readings, 549 device-log readings, and 0 errors. Source-controlled collector/timer and runtime AppRole mounts are staged on `feature/kfs-data-source-20260922`. Durable OpenBao Manager-field promotion, governed capability acceptance, timer enablement, and Claw retirement remain.
 
 ---
 
