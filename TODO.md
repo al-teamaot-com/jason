@@ -281,6 +281,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Prerequisites:** canonical deferred-work contract; durable job store; one-time and recurring schedule model; deduplication/idempotency key; client/requester/ticket/device context binding; reason-code taxonomy; cancellation on terminal state; bounded retry and aging rules; audit events; recovery after service restart; governed Autotask update capability; Grafana data source.
 - **Expected behavior:**
   1. Persist one-time and recurring follow-ups independently of the conversation/session that created them.
+  1a. Support sub-hour recurring operational checks such as the 10-minute online-status rechecks required by the Server / Site Offline Localization playbook, with duplicate suppression, cancellation, and durable ownership state.
   2. Support examples such as daily offline checks, next-day backup verification, post-patch verification, post-reboot verification, Wednesday-morning follow-up, and escalation after a defined aging threshold.
   3. Retain durable identity, source/correlation data, ticket/device/client/playbook references, next-run time, recurrence, lifecycle state, creation source, and a reason code explaining why the work exists.
   4. Execute no earlier than the requested time and rehydrate authorized context rather than creating new authority.
