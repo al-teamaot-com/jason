@@ -97,6 +97,7 @@ from orchestrator.resource_capability_catalog import (
     ENDPOINT_DEVICE_READ,
     ENDPOINT_DEVICE_SEARCH,
     ENDPOINT_SOFTWARE_SEARCH,
+    ENDPOINT_PATCH_SEARCH,
     MANAGEMENT_ALERT_SEARCH,
     MANAGEMENT_SITE_SEARCH,
     register_endpoint_resource_foundation,
@@ -910,6 +911,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, ENDPOINT_ALERT_HISTORY_SEARCH): "datto_rmm.device.alerts.resolved",
             (DATTO_RMM_PROVIDER, ENDPOINT_AUDIT_READ): "datto_rmm.device.audit.get",
             (DATTO_RMM_PROVIDER, ENDPOINT_SOFTWARE_SEARCH): "datto_rmm.device.software.list",
+            (DATTO_RMM_PROVIDER, ENDPOINT_PATCH_SEARCH): "datto_rmm.device.patches.list",
             (DATTO_RMM_PROVIDER, MANAGEMENT_ALERT_SEARCH): "datto_rmm.account.alerts.open",
             (DATTO_RMM_PROVIDER, MANAGEMENT_SITE_SEARCH): "datto_rmm.site.search",
             (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_STATUS_READ): "datto_edr.endpoint.status.read",
@@ -1018,6 +1020,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(ENDPOINT_ALERT_HISTORY_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_AUDIT_READ, datto_invoker)
     invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
+    invokers.register(ENDPOINT_PATCH_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_SITE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_SECURITY_STATUS_READ, datto_invoker)

@@ -15,6 +15,7 @@ class DattoRmmConnector(ConnectorBase):
     # The algorithm itself remains provider-neutral.
     adaptive_collection_keys = {
         "datto_rmm.site.search": "sites",
+        "datto_rmm.device.patches.list": "patches",
     }
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
@@ -27,6 +28,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.alerts.resolved",
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
+            "datto_rmm.device.patches.list",
         }
     )
 
@@ -38,6 +40,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.alerts.resolved",
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
+            "datto_rmm.device.patches.list",
             "datto_rmm.account.alerts.open",
             "datto_rmm.site.search",
             "datto_rmm.alerts.list",
@@ -105,6 +108,11 @@ class DattoRmmConnector(ConnectorBase):
                     access_token=token.access_token,
                     token_type=token.token_type,
                 )
+                if request.context.capability == "datto_rmm.device.patches.list":
+                    data = self._filter_device_patch_result(
+                        payload=data,
+                        arguments=request.arguments,
+                    )
         finally:
             token = None
 
@@ -529,7 +537,10 @@ class DattoRmmConnector(ConnectorBase):
                 ).strip()
                 == "complete"
                 or request.context.capability
-                == "datto_rmm.site.search"
+                in {
+                    "datto_rmm.site.search",
+                    "datto_rmm.device.patches.list",
+                }
             ),
         )
 
@@ -1088,6 +1099,83 @@ class DattoRmmConnector(ConnectorBase):
             "provider_data": payload,
         }
 
+    @classmethod
+    def _filter_device_patch_result(
+        cls,
+        *,
+        payload: Any,
+        arguments: Mapping[str, Any],
+    ) -> Any:
+        """Filter complete provider patch evidence by an exact grounded patch token.
+
+        The provider collection is completed before this filter runs. A KB/title
+        selector is matched only against provider-returned scalar values using
+        case-insensitive token boundaries; zero or multiple matches remain visible
+        and are never converted into first-match identity.
+        """
+
+        if not isinstance(payload, Mapping):
+            raise ValueError("Datto device patch response is not an object")
+
+        patches = payload.get("patches")
+        if not isinstance(patches, list):
+            raise ValueError("Datto device patch response does not expose a patches collection")
+        if not all(isinstance(item, Mapping) for item in patches):
+            raise ValueError("Datto device patch response contains a non-object patch record")
+
+        reference = str(
+            arguments.get("kb")
+            or arguments.get("patch_identity")
+            or arguments.get("patch")
+            or ""
+        ).strip()
+
+        if not reference:
+            return payload
+
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9]){re.escape(reference)}(?![A-Za-z0-9])",
+            flags=re.IGNORECASE,
+        )
+
+        numeric_reference = ""
+        if reference.casefold().startswith("kb"):
+            numeric_reference = reference[2:].strip()
+
+        def scalar_values(value: Any) -> Sequence[str]:
+            values: list[str] = []
+            if isinstance(value, Mapping):
+                for nested in value.values():
+                    values.extend(scalar_values(nested))
+            elif isinstance(value, (list, tuple)):
+                for nested in value:
+                    values.extend(scalar_values(nested))
+            elif isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                text = str(value).strip()
+                if text:
+                    values.append(text)
+            return tuple(values)
+
+        matches: list[Mapping[str, Any]] = []
+        for patch in patches:
+            values = scalar_values(patch)
+            if any(pattern.search(value) for value in values):
+                matches.append(dict(patch))
+                continue
+            if numeric_reference and any(
+                value.casefold() == numeric_reference.casefold()
+                for value in values
+            ):
+                matches.append(dict(patch))
+
+        result = dict(payload)
+        result["patches"] = matches
+        result["match_count"] = len(matches)
+        result["patch_selector"] = reference
+        result["exact_selector_match"] = len(matches) == 1
+        result["ambiguous"] = len(matches) > 1
+        return result
+
     @staticmethod
     def _device_records(payload: Any) -> Sequence[Mapping[str, Any]]:
         if isinstance(payload, (list, tuple)):
@@ -1206,6 +1294,35 @@ class DattoRmmConnector(ConnectorBase):
                 "page": max(int(arguments.get("page", 1)), 1),
                 "max": max(1, min(int(arguments.get("max", 50)), 50)),
             }
+
+        if capability == "datto_rmm.device.patches.list":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+
+            params: dict[str, Any] = {
+                "page": max(int(arguments.get("page", 0)), 0),
+                "max": max(1, min(int(arguments.get("max", 250)), 250)),
+            }
+
+            install_status = str(
+                arguments.get("install_status") or arguments.get("installStatus") or ""
+            ).strip().upper().replace(" ", "_").replace("-", "_")
+            if install_status:
+                allowed_statuses = {
+                    "INSTALLED",
+                    "APPROVED_PENDING",
+                    "NOT_APPROVED",
+                }
+                if install_status not in allowed_statuses:
+                    raise ValueError(
+                        "install_status must be INSTALLED, APPROVED_PENDING, or NOT_APPROVED"
+                    )
+                params["installStatus"] = install_status
+
+            return f"/api/v2/device/{device_uid}/patches", params
 
         if capability == "datto_rmm.account.alerts.open":
             params = {

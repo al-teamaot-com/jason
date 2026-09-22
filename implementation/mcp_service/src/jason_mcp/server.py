@@ -767,6 +767,7 @@ def _project_endpoint_collection(
     candidate_keys = (
         "alerts",
         "software",
+        "patches",
         "applications",
         "items",
         "results",
@@ -800,6 +801,10 @@ def _project_endpoint_collection(
             "count",
             "page",
             "max",
+            "match_count",
+            "patch_selector",
+            "exact_selector_match",
+            "ambiguous",
         ):
             if metadata_key in provider_data:
                 result[metadata_key] = _safe(
@@ -1252,40 +1257,33 @@ def _governed_read_for_identity(
                 or None,
             )
             if capability_name == "management.site.variable.list"
-            else (
-                _project_endpoint_search(result.output)
-                if capability_name == "endpoint.device.search"
-                else (
-                    _project_endpoint_read(result.output)
-                    if capability_name == "endpoint.device.read"
-                    else (
-                        _project_endpoint_audit(result.output)
-                        if capability_name == "endpoint.audit.read"
-                        else (
-                            _project_endpoint_collection(
-                                result.output,
-                                collection_kind="alerts",
-                            )
-                            if capability_name == "endpoint.alert.search"
-                            else (
-                                _project_endpoint_collection(
-                                    result.output,
-                                    collection_kind="software",
-                                )
-                                if capability_name == "endpoint.software.search"
-                                else (
-                                    _project_dynamic_evidence(
-                                        capability_name,
-                                        result.output,
-                                    )
-                                    if capability_name == "automation.component.search"
-                                    else _safe(dict(result.output))
-                                )
-                            )
-                        )
-                    )
-                )
+            else _project_endpoint_search(result.output)
+            if capability_name == "endpoint.device.search"
+            else _project_endpoint_read(result.output)
+            if capability_name == "endpoint.device.read"
+            else _project_endpoint_audit(result.output)
+            if capability_name == "endpoint.audit.read"
+            else _project_endpoint_collection(
+                result.output,
+                collection_kind="alerts",
             )
+            if capability_name == "endpoint.alert.search"
+            else _project_endpoint_collection(
+                result.output,
+                collection_kind="software",
+            )
+            if capability_name == "endpoint.software.search"
+            else _project_endpoint_collection(
+                result.output,
+                collection_kind="patches",
+            )
+            if capability_name == "endpoint.patch.search"
+            else _project_dynamic_evidence(
+                capability_name,
+                result.output,
+            )
+            if capability_name == "automation.component.search"
+            else _safe(dict(result.output))
         ),
     }
 
@@ -3654,6 +3652,12 @@ def _project_dynamic_evidence(
             collection_kind="software",
         )
 
+    if capability_name == "endpoint.patch.search":
+        return _project_endpoint_collection(
+            output,
+            collection_kind="patches",
+        )
+
     data = output.get("data")
 
     if not isinstance(data, Mapping):
@@ -4090,6 +4094,7 @@ def execute_read_capability(
         "endpoint.audit.read",
         "endpoint.alert.search",
         "endpoint.software.search",
+        "endpoint.patch.search",
     }
 
     if capability_name not in known_projected:
