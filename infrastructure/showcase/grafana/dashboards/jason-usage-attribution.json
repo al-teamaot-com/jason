@@ -22,7 +22,7 @@
     },
     {
       "type": "stat",
-      "title": "Observable Usage Events — 24h",
+      "title": "Observable Usage Events \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -61,7 +61,7 @@
     },
     {
       "type": "stat",
-      "title": "Attribution Coverage — 24h",
+      "title": "Attribution Coverage \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -121,7 +121,7 @@
     },
     {
       "type": "stat",
-      "title": "Unattributed Usage — 24h",
+      "title": "Unattributed Usage \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -174,7 +174,7 @@
     },
     {
       "type": "stat",
-      "title": "Human Email Coverage — 24h",
+      "title": "Human Email Coverage \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -269,7 +269,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Who / What Is Consuming Resources — 24h",
+      "title": "Who / What Is Consuming Resources \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -278,7 +278,7 @@
         {
           "expr": "jason_usage_actor_events_24h",
           "instant": true,
-          "legendFormat": "{{actor_type}} · {{email}}{{workload_name}}{{actor_id}} · {{source_channel}}",
+          "legendFormat": "{{actor_type}} \u00b7 {{email}}{{workload_name}}{{actor_id}} \u00b7 {{source_channel}}",
           "refId": "A"
         }
       ],
@@ -304,7 +304,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Provider / Product Usage — 24h",
+      "title": "Provider / Product Usage \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -313,7 +313,7 @@
         {
           "expr": "jason_usage_provider_events_24h",
           "instant": true,
-          "legendFormat": "{{provider}} · {{product}} · {{billing_class}} · {{telemetry_quality}}",
+          "legendFormat": "{{provider}} \u00b7 {{product}} \u00b7 {{billing_class}} \u00b7 {{telemetry_quality}}",
           "refId": "A"
         }
       ],
@@ -339,7 +339,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Known Cost by Provider / Product — 24h",
+      "title": "Known Cost by Provider / Product \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -348,7 +348,7 @@
         {
           "expr": "jason_usage_provider_cost_usd_24h",
           "instant": true,
-          "legendFormat": "{{provider}} · {{product}}",
+          "legendFormat": "{{provider}} \u00b7 {{product}}",
           "refId": "A"
         }
       ],
@@ -376,7 +376,7 @@
     },
     {
       "type": "piechart",
-      "title": "Billing Class — 24h",
+      "title": "Billing Class \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -437,7 +437,7 @@
     },
     {
       "type": "table",
-      "title": "Who / Why / Provider / Correlation — Recent 24h",
+      "title": "Who / Why / Provider / Correlation \u2014 Recent 24h",
       "description": "Bounded recent trace rows. Purpose is structured operational metadata, never raw prompt text. Value is the event timestamp.",
       "datasource": {
         "type": "prometheus",
@@ -514,7 +514,7 @@
     },
     {
       "type": "table",
-      "title": "Attribution Gaps — Recent 24h",
+      "title": "Attribution Gaps \u2014 Recent 24h",
       "description": "Anything here is observable consumption that Jason retained but cannot yet explain by actor. These rows drive instrumentation cleanup.",
       "datasource": {
         "type": "prometheus",
@@ -586,7 +586,7 @@
     },
     {
       "type": "row",
-      "title": "OpenAI API — Authoritative Organization Usage",
+      "title": "OpenAI API \u2014 Authoritative Organization Usage",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -651,7 +651,7 @@
     },
     {
       "type": "stat",
-      "title": "OpenAI Requests — 24h",
+      "title": "OpenAI Requests \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -689,14 +689,14 @@
     },
     {
       "type": "stat",
-      "title": "OpenAI Cost — Reported 24h",
+      "title": "OpenAI Estimated Cost \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
       "targets": [
         {
-          "expr": "jason_openai_org_cost_usd_24h",
+          "expr": "jason_openai_org_estimated_cost_usd_24h",
           "refId": "A"
         }
       ],
@@ -726,7 +726,58 @@
         "graphMode": "none",
         "justifyMode": "auto"
       },
-      "description": "Authoritative cost only when OpenAI has published cost rows; no fabricated estimate."
+      "description": "Provisional standard-rate estimate from provider-reported token usage. Not an invoice value; long-context and special-tier adjustments may differ."
+    },
+    {
+      "type": "stat",
+      "title": "OpenAI Reported Cost \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_openai_org_cost_usd_24h * (jason_openai_org_reported_cost_available == bool 1) + (-1) * (jason_openai_org_reported_cost_available == bool 0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "PENDING"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 45
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Authoritative OpenAI Costs API value. Shows PENDING until OpenAI publishes a cost row for the rolling window."
     },
     {
       "type": "stat",
@@ -749,8 +800,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 4,
+        "x": 16,
         "y": 45
       },
       "options": {
@@ -770,7 +821,7 @@
     },
     {
       "type": "bargauge",
-      "title": "OpenAI Tokens — 24h",
+      "title": "OpenAI Tokens \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -791,8 +842,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 20,
         "y": 45
       },
       "options": {
@@ -805,7 +856,7 @@
     },
     {
       "type": "table",
-      "title": "OpenAI Usage by Model / Project / API Key — 24h",
+      "title": "OpenAI Usage by Model / Project / API Key \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -880,6 +931,6 @@
   "timezone": "browser",
   "title": "Jason Usage & Attribution",
   "uid": "jason-usage-attribution",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
