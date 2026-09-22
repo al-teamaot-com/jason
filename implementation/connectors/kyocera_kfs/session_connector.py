@@ -20,7 +20,7 @@ from connectors.kyocera_kfs.read_operations import (
     alerts_list,
     device_get,
     device_search,
-    require_device_id,
+    resolve_device_id,
 )
 
 _CAPABILITY_OPERATIONS = {
@@ -89,7 +89,7 @@ class KyoceraKfsSessionConnector:
 
         device_id = None
         if operation in {"device_get", "meters_get", "supplies_get"}:
-            device_id = require_device_id(arguments)
+            device_id = resolve_device_id(client, arguments)
 
         if operation == "device_get":
             return device_get(client, device_id, ("all",), ("all",))
