@@ -667,6 +667,28 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement before claiming the Server / Site Offline Localization playbook can fully determine network-layer root cause autonomously.
 
+### TODO-NET-002 — DRMM-first SNMP and network-device telemetry
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Expand Jason's governed Datto RMM network-device/SNMP reads so Jason can use DRMM as the first source for switch, firewall, router, UPS, printer, and other SNMP-managed infrastructure evidence before adding direct vendor integrations.
+- **Why it matters:** AOT already discovers and monitors many infrastructure devices through DRMM. Reusing DRMM preserves the Kaseya-first architecture, reduces connector sprawl, and gives Jason client/site-correlated evidence without introducing unnecessary direct credentials.
+- **Current production evidence:** At Riggins, Jason can already read the DRMM SNMP/audit record for the SonicWall TZ 500 at `192.168.1.1`, including device identity, MAC/IP, SNMP description, and uptime. The current governed capability does not expose arbitrary SNMP OIDs or normalized port/interface/uplink telemetry.
+- **Expected behavior:**
+  1. Enumerate DRMM-discovered network/SNMP devices for an exact authorized site.
+  2. Read SNMP identity, model/description, uptime, IP/MAC, and DRMM monitor/alert history.
+  3. Where DRMM exposes it, read interface/port operational state, speed/duplex, traffic counters, errors, CRCs, discards, link transitions, STP/topology state, LACP state, WAN/interface state, and power/UPS health.
+  4. Preserve timestamps so telemetry can be correlated with server/site outage windows.
+  5. Allow bounded reads of approved OIDs only when a normalized DRMM field is unavailable; do not provide arbitrary unrestricted SNMP walking by default.
+  6. Correlate network devices to client/site/topology before use.
+  7. Treat missing DRMM telemetry as a capability gap, not as healthy evidence.
+  8. Use direct SonicWall/UniFi/vendor APIs only when DRMM cannot provide the required authoritative evidence.
+- **Governance:** Read-only first. No switch-port bounce, VLAN change, firewall change, PoE action, reboot, or other network mutation is authorized by this item.
+- **Playbook dependency:** `docs/playbooks/Jason-Server-Site-Offline-Localization.md`.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement before claiming autonomous root-cause localization for switch/uplink/firewall/WAN events.
+
 ## New-item template
 
 Copy this section when adding an idea:
