@@ -34,6 +34,22 @@ Items remain on this list until the underlying issue is fixed and the expected b
 
 ## Open support items
 
+### SUPPORT-CONN-008 — Concurrent VulScan playbook runs can duplicate deterministic ticket mutations
+
+- **Priority:** P1
+- **Status:** Open — reproduced 2026-09-22
+- **Owner:** Jason Platform / Orchestration
+- **Issue:** Two concurrent governed executions of the same VulScan ticket disposition can both pass pre-mutation checks and create equivalent deterministic notes and ticket updates.
+- **Impact:** Autonomous or multi-session Jason work could duplicate internal notes, perform redundant ticket updates, or create conflicting ownership signals even though each individual provider mutation is correctly governed and readback-verified.
+- **Observed behavior:** During controlled acceptance on Autotask ticket `T20260918.0012` / ID `140636`, two independent `service.ticket.note.create` executions began about 1.5 seconds apart under `person-al`. They produced note IDs `30506066` and `30506067`. Orchestration audit proves separate execution/correlation IDs rather than an Autotask retry. A second independent ticket-update sequence was also observed after the first verified completion.
+- **Expected behavior:** Exactly one active playbook run may own a ticket/playbook disposition at a time. A second concurrent run must detect the durable claim/idempotency state before any provider mutation and exit without creating a duplicate note or redundant update.
+- **Scope:** Playbook orchestration, Autotask ticket ownership/claim lifecycle, deterministic note creation, and mutation idempotency. Provider note/update readback is healthy.
+- **Likely architectural path:** Extend the durable ticket-work claim/idempotency mechanism so the claim is acquired atomically before the first playbook mutation and can support disposition-only workflows even when the endpoint is offline. Do not solve this with note-text matching alone because simultaneous runs can race before either note exists.
+- **Verification required for closure:** Start two controlled concurrent executions for the same test ticket/playbook state. Prove only one acquires the claim, exactly one deterministic note is created, exactly one intended terminal/handoff mutation occurs, the second execution exits with a stable already-claimed/idempotent result, and authoritative readback confirms no duplicate provider mutation.
+- **Last observed:** 2026-09-22 during the `KB5121003` VulScan acceptance test.
+
+---
+
 ### SUPPORT-CONN-001 — Autotask ticket read path failing through Jason
 
 - **Priority:** P1
