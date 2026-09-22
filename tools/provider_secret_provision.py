@@ -61,6 +61,8 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir": Path(
             "/var/lib/jason/runtime-secrets/openbao/claw-approle"
         ),
+        "runtime_uid": 1000,
+        "runtime_gid": 1000,
     },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
@@ -273,7 +275,13 @@ def collect_values(provider: str) -> dict[str, str]:
     return values
 
 
-def write_private_file(path: Path, value: str) -> None:
+def write_private_file(
+    path: Path,
+    value: str,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+) -> None:
     descriptor = os.open(
         path,
         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
@@ -285,7 +293,7 @@ def write_private_file(path: Path, value: str) -> None:
             handle.write("\n")
     finally:
         os.chmod(path, 0o600)
-        os.chown(path, 0, 0)
+        os.chown(path, owner_uid, owner_gid)
 
 
 def admin_login(address: str, username: str, password: str) -> str:
@@ -312,6 +320,8 @@ def configure_read_approle(
     policy_name = str(spec["policy_name"])
     role_name = str(spec["role_name"])
     credential_dir = Path(spec["credential_dir"])
+    runtime_uid = int(spec.get("runtime_uid", 0))
+    runtime_gid = int(spec.get("runtime_gid", 0))
 
     api_request(
         address,
@@ -389,10 +399,16 @@ def configure_read_approle(
     )
 
     credential_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
-    os.chown(credential_dir, 0, 0)
+    os.chown(credential_dir, runtime_uid, runtime_gid)
     os.chmod(credential_dir, 0o700)
-    write_private_file(credential_dir / "role-id", role_id)
-    write_private_file(credential_dir / "secret-id", secret_id)
+    write_private_file(
+        credential_dir / "role-id", role_id,
+        owner_uid=runtime_uid, owner_gid=runtime_gid,
+    )
+    write_private_file(
+        credential_dir / "secret-id", secret_id,
+        owner_uid=runtime_uid, owner_gid=runtime_gid,
+    )
 
     now = datetime.now(timezone.utc)
     metadata = {
@@ -412,6 +428,8 @@ def configure_read_approle(
     write_private_file(
         credential_dir / "credential-metadata.json",
         json.dumps(metadata, indent=2, sort_keys=True),
+        owner_uid=runtime_uid,
+        owner_gid=runtime_gid,
     )
     return {
         "credential_dir": str(credential_dir),
@@ -487,6 +505,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "credential_dir": str(spec["credential_dir"]),
                     "runtime_authentication": "approle",
                     "runtime_token_persisted": False,
+                    "runtime_uid": int(spec.get("runtime_uid", 0)),
+                    "runtime_gid": int(spec.get("runtime_gid", 0)),
                     "network_contacted": False,
                     "secret_entered": False,
                     "status": "pass",

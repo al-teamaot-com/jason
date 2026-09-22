@@ -67,14 +67,25 @@ def _credential_state(provider: str) -> dict[str, Any]:
     }
 
 
-def _atomic_private_file(path: Path, value: str) -> None:
+def _runtime_owner(provider: str) -> tuple[int, int]:
+    spec = base.PROVIDERS[provider]
+    return (int(spec.get("runtime_uid", 0)), int(spec.get("runtime_gid", 0)))
+
+
+def _atomic_private_file(
+    path: Path,
+    value: str,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+) -> None:
     tmp = path.with_name(path.name + ".new")
     descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(value)
             handle.write("\n")
-        os.chown(tmp, 0, 0)
+        os.chown(tmp, owner_uid, owner_gid)
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     finally:
@@ -140,9 +151,12 @@ def _write_rotation_metadata(provider: str, accessor: str) -> None:
             "service_token_num_uses": 2,
         }
     )
+    runtime_uid, runtime_gid = _runtime_owner(provider)
     _atomic_private_file(
         directory / "credential-metadata.json",
         json.dumps(metadata, indent=2, sort_keys=True),
+        owner_uid=runtime_uid,
+        owner_gid=runtime_gid,
     )
 
 
@@ -167,7 +181,11 @@ def rotate_identity(*, address: str, admin_token: str, provider: str) -> dict[st
         provider=provider,
     )
     directory = Path(spec["credential_dir"])
-    _atomic_private_file(directory / "secret-id", new_secret_id)
+    runtime_uid, runtime_gid = _runtime_owner(provider)
+    _atomic_private_file(
+        directory / "secret-id", new_secret_id,
+        owner_uid=runtime_uid, owner_gid=runtime_gid,
+    )
     _write_rotation_metadata(provider, new_accessor)
     new_secret_id = ""
     _revoke_secret_id_accessor(
