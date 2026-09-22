@@ -34,6 +34,20 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 name="hostname",
                 description="Endpoint hostname used for discovery.",
             ),
+            SelectorDefinition(
+                name="kb",
+                description="Exact Windows KB identifier used to filter device patch evidence.",
+            ),
+            SelectorDefinition(
+                name="patch_identity",
+                description="Exact patch/update identity token used for provider-evidence matching.",
+            ),
+            SelectorDefinition(
+                name="install_status",
+                description=(
+                    "Provider patch-state filter: INSTALLED, APPROVED_PENDING, or NOT_APPROVED."
+                ),
+            ),
         ),
         operations=(
             IntegrationOperation(
@@ -102,6 +116,23 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 ),
                 read_only=True,
                 selector_names=("resource_id",),
+            ),
+            IntegrationOperation(
+                operation_id="endpoint.patch.search",
+                kind=OperationKind.SEARCH,
+                capability_name="endpoint.patch.search",
+                description=(
+                    "Read complete device patch metadata and optionally select "
+                    "an exact KB/update from provider-returned patch evidence."
+                ),
+                read_only=True,
+                selector_names=(
+                    "resource_id",
+                    "kb",
+                    "patch_identity",
+                    "install_status",
+                ),
+                collection_supported=True,
             ),
         ),
         observations=(

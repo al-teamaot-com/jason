@@ -436,6 +436,11 @@ def test_read_surface_operations_translate_to_confirmed_get_endpoints() -> None:
             "/api/v2/audit/device/dev-1/software",
         ),
         (
+            "datto_rmm.device.patches.list",
+            {"resource_id": "dev-1"},
+            "/api/v2/device/dev-1/patches",
+        ),
+        (
             "datto_rmm.account.alerts.open",
             {},
             "/api/v2/account/alerts/open",
@@ -458,6 +463,7 @@ def test_device_scoped_read_surface_requires_durable_identity() -> None:
         "datto_rmm.device.alerts.resolved",
         "datto_rmm.device.audit.get",
         "datto_rmm.device.software.list",
+        "datto_rmm.device.patches.list",
     ):
         try:
             DattoRmmConnector._resolve_operation(capability, {})
@@ -475,6 +481,7 @@ def test_datto_connector_exposes_confirmed_read_surface() -> None:
         "datto_rmm.device.alerts.resolved",
         "datto_rmm.device.audit.get",
         "datto_rmm.device.software.list",
+        "datto_rmm.device.patches.list",
         "datto_rmm.account.alerts.open",
         "datto_rmm.site.search",
     }
@@ -486,6 +493,7 @@ def test_device_scoped_read_capabilities_are_declared_for_generic_resolution() -
         "datto_rmm.device.alerts.resolved",
         "datto_rmm.device.audit.get",
         "datto_rmm.device.software.list",
+        "datto_rmm.device.patches.list",
     } <= DattoRmmConnector.device_scoped_read_capabilities
 
 
@@ -958,3 +966,55 @@ def test_site_only_device_search_enumerates_complete_account_before_filtering(mo
     assert [x["resource_id"] for x in result.data["resource_matches"]] == ["atomic-1","atomic-2"]
     assert [c["params"]["page"] for c in transport.calls] == [0,1,2]
     assert all(c["params"]["max"] == connector.fallback_discovery_page_size for c in transport.calls)
+
+
+def test_device_patch_read_uses_bounded_full_device_collection() -> None:
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.patches.list",
+        {"resource_id": "device-1"},
+    )
+
+    assert path == "/api/v2/device/device-1/patches"
+    assert params == {"page": 0, "max": 250}
+
+    _, filtered = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.patches.list",
+        {"resource_id": "device-1", "install_status": "approved pending"},
+    )
+    assert filtered["installStatus"] == "APPROVED_PENDING"
+
+
+def test_device_patch_read_rejects_unknown_install_status() -> None:
+    with pytest.raises(ValueError, match="install_status"):
+        DattoRmmConnector._resolve_operation(
+            "datto_rmm.device.patches.list",
+            {"resource_id": "device-1", "install_status": "maybe"},
+        )
+
+
+def test_device_patch_filter_matches_exact_kb_and_preserves_ambiguity() -> None:
+    payload = {
+        "pageDetails": {"totalCount": 3, "count": 3, "nextPageUrl": None},
+        "patches": [
+            {"title": "2026-08 Security Update (KB5121003)", "installStatus": "APPROVED_PENDING"},
+            {"title": "Different update", "kb": "5121004", "installStatus": "NOT_APPROVED"},
+            {"title": "Duplicate metadata KB5121003", "installStatus": "INSTALLED"},
+        ],
+    }
+
+    filtered = DattoRmmConnector._filter_device_patch_result(
+        payload=payload,
+        arguments={"kb": "KB5121003"},
+    )
+
+    assert filtered["match_count"] == 2
+    assert filtered["exact_selector_match"] is False
+    assert filtered["ambiguous"] is True
+    assert len(filtered["patches"]) == 2
+
+    single = DattoRmmConnector._filter_device_patch_result(
+        payload={**payload, "patches": payload["patches"][:2]},
+        arguments={"kb": "KB5121003"},
+    )
+    assert single["match_count"] == 1
+    assert single["exact_selector_match"] is True

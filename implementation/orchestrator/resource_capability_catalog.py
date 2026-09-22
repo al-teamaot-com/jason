@@ -31,6 +31,7 @@ ENDPOINT_ALERT_SEARCH = "endpoint.alert.search"
 ENDPOINT_ALERT_HISTORY_SEARCH = "endpoint.alert.history.search"
 ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
+ENDPOINT_PATCH_SEARCH = "endpoint.patch.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
 AUTOMATION_COMPONENT_SEARCH = "automation.component.search"
@@ -422,6 +423,37 @@ def endpoint_software_search(now: datetime) -> CapabilityDefinition:
     )
 
 
+def endpoint_patch_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_PATCH_SEARCH,
+        display_name="Read Endpoint Patches",
+        business_purpose=(
+            "Read complete Datto RMM patch metadata for one managed endpoint and "
+            "optionally select one exact KB/update without inferring approval from "
+            "aggregate device patch counts."
+        ),
+        resource_types="endpoint_patch,patch,endpoint",
+        operation="search",
+        selector_keys="resource_id,kb,patch_identity,install_status",
+        fact_hints=(
+            "patch,patches,windows update,windows updates,kb,kb number,security update,"
+            "installed patch,approved pending,not approved,patch approval,patch status"
+        ),
+        canonical_facts=(
+            "patch identity,patch install status,exact patch approval state,"
+            "installed patches,approved pending patches,not approved patches"
+        ),
+        planning_guidance=(
+            "Use for exact Windows patch/KB questions on a known managed endpoint. "
+            "When a KB is supplied, require provider-returned exact token evidence. "
+            "Zero or multiple matches remain unresolved; never substitute aggregate "
+            "device patch status for exact-patch evidence."
+        ),
+        collection_fact="patches",
+    )
+
+
 def management_alert_search(now: datetime) -> CapabilityDefinition:
     return _read_resource_capability(
         now=now,
@@ -791,6 +823,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_ALERT_HISTORY_SEARCH,
                 ENDPOINT_AUDIT_READ,
                 ENDPOINT_SOFTWARE_SEARCH,
+                ENDPOINT_PATCH_SEARCH,
                 MANAGEMENT_ALERT_SEARCH,
                 MANAGEMENT_SITE_SEARCH,
                 AUTOMATION_COMPONENT_SEARCH,
@@ -845,6 +878,7 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_alert_history_search(now))
     capabilities.register(endpoint_audit_read(now))
     capabilities.register(endpoint_software_search(now))
+    capabilities.register(endpoint_patch_search(now))
     capabilities.register(management_alert_search(now))
     capabilities.register(management_site_search(now))
     capabilities.register(automation_component_search(now))
