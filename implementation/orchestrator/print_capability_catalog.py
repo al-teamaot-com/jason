@@ -79,7 +79,7 @@ def _read_capability(
         maximum_attempts=2,
         failure_behavior="Fail closed without shell, browser, or agent fallback.",
         tenant_isolation_required=True,
-        client_isolation_required=True,
+        client_isolation_required=False,
         stewardship=CapabilityStewardship(
             steward="technology-steward",
             business_justification=(
@@ -104,6 +104,8 @@ def _read_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            "scope_model": "aot_internal_dealer_fleet",
+            "client_scope_status": "not_exposed_until_explicit_kfs_autotask_mapping",
         },
     )
 
@@ -114,10 +116,10 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             now=now,
             name=PRINT_DEVICE_SEARCH,
             display_name="Search Managed Print Devices",
-            purpose="Locate managed copier and MFP devices by client-scoped selectors.",
+            purpose="Locate managed copier and MFP devices in AOT's internal dealer fleet.",
             resource_types="print_device",
             operation="search",
-            selector_keys="serial_number,device_id,name,hostname,ip_address,client_id",
+            selector_keys="serial_number,device_id,name,hostname,ip_address",
             fact_hints="copier printer MFP Kyocera serial model device customer location",
         ),
         _read_capability(

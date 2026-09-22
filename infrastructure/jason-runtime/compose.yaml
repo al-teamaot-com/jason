@@ -48,6 +48,9 @@ services:
       JASON_OPENAI_OUTPUT_COST_PER_MILLION: "4.50"
       JASON_DYNAMIC_CONVERSATION_ENABLED: "true"
       JASON_CONVERSATION_EXPERIENCE_ENABLED: "true"
+      JASON_KFS_ENABLED: ${JASON_KFS_ENABLED:-false}
+      JASON_KFS_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/role_id
+      JASON_KFS_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/secret_id
       JASON_SES_REGION: us-east-1
       JASON_SES_DEFAULT_SENDER: jason@teamaot.com
       JASON_OLLAMA_URL: http://jason-ollama:11434
@@ -70,6 +73,8 @@ services:
       - ${JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/it-glue/secret_id:ro
       - ${JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/role_id:ro
       - ${JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/secret_id:ro
+      - ${JASON_KFS_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/role-id}:/run/jason-secrets/openbao/kyocera-kfs/role_id:ro
+      - ${JASON_KFS_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/secret-id}:/run/jason-secrets/openbao/kyocera-kfs/secret_id:ro
     networks:
       - openclaw
       - core

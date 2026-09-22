@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from connectors.core.contracts import (
@@ -88,12 +90,12 @@ def credentials():
     }
 
 
-def context(capability, mode="observe"):
+def context(capability, mode="observe", *, organization_id="aot", client_id=None):
     return ConnectorContext(
         correlation_id="corr-kfs-001",
         principal_id="tech-al",
-        organization_id="aot",
-        client_id="client-1",
+        organization_id=organization_id,
+        client_id=client_id,
         capability=capability,
         mode=mode,
     )
@@ -170,6 +172,49 @@ def test_missing_manager_login_fails_closed():
                 {"device_id": "dev-1"},
             )
         )
+
+
+def test_manager_login_must_not_equal_gateway_basic_pair():
+    values = credentials()
+    values["kfs_username"] = "gateway-id"
+    values["kfs_password"] = "gateway-password"
+    raw = b"gateway-id:gateway-password"
+    values["authorization"] = "Basic " + base64.b64encode(raw).decode("ascii")
+    connector, _, _ = build(values)
+    with pytest.raises(ConnectorConfigurationError, match="must be distinct"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert FakeSessionClient.calls == []
+
+
+def test_client_scoped_request_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="AOT-internal"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get", client_id="client-1"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeSessionClient.calls == []
+
+
+def test_non_aot_request_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="AOT-internal"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get", organization_id="other"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeSessionClient.calls == []
 
 
 def test_non_observe_mode_is_rejected_before_provider_call():
