@@ -148,6 +148,21 @@ def test_meter_read_uses_device_endpoint_and_all_counters():
     assert audit.events[0][1]["operation"] == "meters_get"
 
 
+def test_meter_read_resolves_serial_number_before_device_read():
+    connector, _, _ = build()
+    result = connector.execute(
+        ConnectorRequest(
+            context("kyocera_kfs.meters.get"),
+            {"serial_number": "ABC123"},
+        )
+    )
+    assert result.data["devices"][0]["deviceId"] == "dev-1"
+    paths = [path for path, _ in FakeSessionClient.calls]
+    assert paths[:2] == ["/KFS/GroupList", "/KFS/DeviceList"]
+    assert paths[-1] == "/KFS/Device"
+    assert FakeSessionClient.calls[-1][1]["device"] == "dev-1"
+
+
 def test_alert_search_uses_device_log_list_for_group():
     connector, _, _ = build()
     connector.execute(
