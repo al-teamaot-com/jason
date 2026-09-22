@@ -294,3 +294,37 @@ Items remain on this list until the underlying issue is fixed and the expected b
 - **Last observed:** 2026-09-22 on `T20260922.0017`.
 
 ---
+
+
+### SUPPORT-CONN-007 — Autotask ticket CI association unavailable through governed ticket update
+
+- **Priority:** P1
+- **Status:** Open
+- **Owner:** Jason Platform / Autotask Connector
+- **Issue:** Jason can deterministically identify the correct Autotask configuration item for a ticket, but the governed `service.ticket.update` path does not currently attach that CI.
+- **Impact:** Playbooks cannot enforce the AOT rule that tickets should be associated to the affected device when one is available. This reduces asset context, weakens automation safety, and forces technicians to repair ticket hygiene manually.
+- **Production example:** `T20260918.0012` / `OWNSHOP412LT1`.
+- **Observed behavior:**
+  - DRMM uniquely identified endpoint UID `785e1f79-1572-4061-d01b-0f9ec931fae2`.
+  - Autotask configuration search uniquely identified CI `1578` for the same endpoint.
+  - Ticket `T20260918.0012` had `configurationItemID=null`.
+  - Governed `service.ticket.update` attempted to set `configurationItemID=1578`.
+  - Mutation returned `CAPABILITY_INVOCATION_FAILED`.
+  - Authoritative ticket readback confirmed `configurationItemID` remained null.
+- **Expected behavior:** Jason should be able to attach exactly one authoritatively resolved Autotask CI to one exact ticket through a bounded governed mutation with readback verification.
+- **Safety requirements:**
+  1. CI must belong to the same Autotask company as the ticket after authoritative client resolution.
+  2. CI selection must be deterministic; no fuzzy best-match writes.
+  3. Exactly one provider mutation attempt.
+  4. Post-mutation readback must confirm the exact CI.
+  5. No unrelated ticket fields may change.
+- **Verification required for closure:**
+  1. Use a controlled ticket with no CI and one uniquely matched endpoint/CI.
+  2. Attach the CI through Jason.
+  3. Read the ticket back and confirm the exact configurationItemID.
+  4. Confirm no unrelated fields changed.
+  5. Repeat on a VulScan or monitoring ticket.
+- **Operational workaround:** Document the resolved CI in an internal note and use the DRMM UID/CI ID as evidence, but do not claim the ticket is asset-associated.
+- **Last observed:** 2026-09-22 during controlled test of `T20260918.0012`.
+
+---
