@@ -421,7 +421,6 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
                 ("bucket_width", "1d"),
                 ("limit", "2"),
                 ("group_by", "project_id"),
-                ("group_by", "api_key_id"),
                 ("group_by", "line_item"),
             ],
             admin_key,
