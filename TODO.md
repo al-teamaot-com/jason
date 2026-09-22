@@ -357,6 +357,29 @@ Items in this document are not approved capabilities and must not be enabled mer
 
 ---
 
+
+### TODO-CONN-005 — Reconcile IT Glue notification tickets to the authoritative client at intake
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add deterministic client reconciliation for IT Glue notification emails so tickets created by the generic `notifications@itglue.com` sender are associated with the actual client identified by the IT Glue event rather than the sender contact's Catchall company.
+- **Why it matters:** Generic vendor notification contacts are intentionally shared across clients. Using sender-contact ownership as the ticket company can misassociate client data, break tenant isolation assumptions, block correct CI/documentation correlation, and make autonomous handling unsafe.
+- **Production example:** `T20260922.0017` was created under Catchall company `1162` while the notification body identified `Gromelski And Associates Inc.`; DRMM independently maps that client to Autotask company `597`.
+- **Expected behavior:**
+  1. Detect recognized IT Glue notification messages before client-scoped automation begins.
+  2. Parse the authoritative organization/network identity from structured notification content or provider metadata.
+  3. Resolve that identity to exactly one client using approved mappings such as IT Glue organization ID/name and DRMM site -> Autotask company mapping.
+  4. If exactly one client is proven, create or reassign the ticket to that company and clear incompatible generic contact/location references.
+  5. If no unique match exists, leave the ticket in a neutral intake/Catchall state, mark `identification_blocked`, and request human review.
+  6. Record the source evidence and mapping decision in an internal note/audit record.
+  7. Do not use fuzzy company-name similarity as sole authority.
+  8. Apply the same pattern to other generic multi-client vendor senders where appropriate.
+- **Prerequisites:** SUPPORT-CONN-006 ticket company/contact reassignment; canonical cross-provider organization mapping; IT Glue Network Discovery read capability or equivalent structured notification parser; duplicate-suppression/idempotency.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before autonomous processing of IT Glue Network Discovery or other generic vendor-notification tickets.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
