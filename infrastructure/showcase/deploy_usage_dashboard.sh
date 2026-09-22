@@ -240,8 +240,26 @@ deploy() {
   wait_http "http://127.0.0.1:9465/metrics" 30 1 || return 1
   wait_http "http://127.0.0.1:9466/metrics" 30 1 || return 1
 
-  curl -fsS http://127.0.0.1:9465/metrics | grep -q '^jason_usage_exporter_build_info' || return 1
-  curl -fsS http://127.0.0.1:9466/metrics | grep -q '^jason_usage_attribution_exporter_build_info' || return 1
+  local usage_snapshot attribution_snapshot
+  usage_snapshot="$(mktemp)" || return 1
+  attribution_snapshot="$(mktemp)" || { rm -f "$usage_snapshot"; return 1; }
+  curl -fsS -o "$usage_snapshot" http://127.0.0.1:9465/metrics || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  curl -fsS -o "$attribution_snapshot" http://127.0.0.1:9466/metrics || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  grep -q '^jason_usage_exporter_build_info' "$usage_snapshot" || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  grep -q '^jason_usage_attribution_exporter_build_info' "$attribution_snapshot" || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  rm -f "$usage_snapshot" "$attribution_snapshot"
 
   say "EXPORTERS=PASS"
 
