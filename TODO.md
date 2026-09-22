@@ -584,7 +584,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-008 — Read DRMM patch process/policy assignment and exact-KB effective approval
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Partially implemented — exact device patch state live 2026-09-22
 - **Risk level:** Moderate
 - **Idea:** Add governed Datto RMM read capabilities that expose the patch process/policy assigned to a specific endpoint and determine the effective approval state of an exact Windows update/KB for that device.
 - **Why it matters:** AOT's Datto RMM patch process is the normal authority that determines whether a patch is approved for a device. Aggregate endpoint states such as `ApprovedPending` and counts of approved/not-approved patches are useful but do not prove the approval state of a specific KB.
@@ -599,6 +599,7 @@ Items in this document are not approved capabilities and must not be enabled mer
   8. Fail closed when policy inheritance or patch identity is ambiguous.
   9. Provide stable evidence IDs/provider identifiers for ticket documentation and playbook verification.
 - **First production case:** `T20260918.0012` / `OWNSHOP412LT1` / `KB5121003`.
+- **Implementation checkpoint — 2026-09-22:** Governed read capability `endpoint.patch.search` is live in production from source `5b6c96e79dcd044f7685e050b2e0b3b9c01f6d10`. It uses Datto RMM `GET /api/v2/device/{deviceUid}/patches`, completes the bounded provider collection before matching, and fails closed on zero or multiple KB matches. Controlled acceptance returned one exact `KB5121003` record with `installStatus=APPROVED_PENDING`, `manualOverride=true`, and patch ID `800d68a0-03d1-47a4-92f3-1feb02f141aa`. This closes the exact current device-patch-state portion of the item. Remaining work: patch-process/policy provenance and effective approval interpretation for cases where the patch record is `INSTALLED` or where approval history/policy inheritance is required to distinguish approved-installed from not-approved-installed.
 - **Playbook dependency:** `Jason-VulScan-Managed-Windows-Endpoint-Vulnerability-Remediation.md`.
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Implement before claiming the Windows VulScan playbook can authoritatively decide whether a specific patch is approved for a device.
