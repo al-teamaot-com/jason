@@ -46,7 +46,7 @@ Dashboard UID: jason-user-activity-audit
 
 The dashboard provides observable Jason activity events, attribution coverage, unattributed event count, observed human identities, activity grouped by user/workload and source/channel, capability and provider activity, and recent trace rows containing identity, source, purpose, capability, provider, service, outcome, correlation ID, and timestamp.
 
-Where approval, mutation, autonomous-execution, or client-access dimensions are not yet emitted as dedicated metrics, the dashboard must not imply that those dimensions are complete. They remain required audit fields for future telemetry expansion.
+Dedicated metrics are emitted for persisted approvals, governed mutation lifecycle events, explicit non-human orchestration requests, and requests carrying an explicit governed client_id. Autonomous activity is never inferred from capability names or outcomes; it is counted only when requester telemetry explicitly identifies a non-human requester. Client-access history likewise includes only requests carrying an authoritative client scope.
 
 ## Authority
 

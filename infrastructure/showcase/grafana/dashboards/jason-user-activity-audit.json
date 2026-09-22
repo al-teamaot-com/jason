@@ -339,13 +339,321 @@
     },
     {
       "type": "row",
-      "title": "Recent Governed Activity Trace",
+      "title": "Governance & Execution Audit",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 20
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Approvals \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_audit_approvals_24h)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 21
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Persisted approval decisions from Jason authority records."
+    },
+    {
+      "type": "stat",
+      "title": "Mutation Requests \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_audit_mutation_events_24h{event_type=\"connector.mutation.requested\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 21
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Governed provider mutation requests observed by orchestration."
+    },
+    {
+      "type": "stat",
+      "title": "Verified Mutations \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_audit_mutation_events_24h{event_type=\"connector.mutation.verified\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 21
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Autonomous Requests \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(jason_audit_autonomous_requests_24h)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 21
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "description": "Only explicit non-human requester telemetry is counted; Jason does not infer autonomy."
+    },
+    {
+      "type": "bargauge",
+      "title": "Approvals by Capability \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (capability,status) (jason_audit_approvals_24h)",
+          "instant": true,
+          "legendFormat": "{{capability}} \u00b7 {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Mutation Lifecycle by Capability \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (capability,event_type) (jason_audit_mutation_events_24h)",
+          "instant": true,
+          "legendFormat": "{{capability}} \u00b7 {{event_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Client-Scoped Access \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (client_id,principal_id,capability) (jason_audit_client_access_24h)",
+          "instant": true,
+          "legendFormat": "client {{client_id}} \u00b7 {{principal_id}} \u00b7 {{capability}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      },
+      "description": "Only requests carrying explicit governed client_id scope appear here."
+    },
+    {
+      "type": "bargauge",
+      "title": "Autonomous / Workload Activity \u2014 24h",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (requester_kind,principal_id,capability) (jason_audit_autonomous_requests_24h)",
+          "instant": true,
+          "legendFormat": "{{requester_kind}} \u00b7 {{principal_id}} \u00b7 {{capability}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "minVizWidth": 8,
+        "minVizHeight": 16
+      }
+    },
+    {
+      "type": "row",
+      "title": "Recent Governed Activity Trace",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
       },
       "panels": []
     },
@@ -419,7 +727,7 @@
         "h": 13,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 38
       },
       "options": {
         "showHeader": true,
@@ -491,7 +799,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 51
       },
       "options": {
         "showHeader": true,
@@ -506,7 +814,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 61
       },
       "panels": []
     },
@@ -545,7 +853,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 45
+        "y": 62
       },
       "options": {
         "reduceOptions": {
@@ -584,7 +892,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 45
+        "y": 62
       },
       "options": {
         "reduceOptions": {
@@ -624,7 +932,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 45
+        "y": 62
       },
       "options": {
         "reduceOptions": {
@@ -675,7 +983,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 45
+        "y": 62
       },
       "options": {
         "reduceOptions": {
@@ -716,7 +1024,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 45
+        "y": 62
       },
       "options": {
         "reduceOptions": {
@@ -758,7 +1066,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 45
+        "y": 62
       },
       "options": {
         "displayMode": "gradient",
@@ -816,7 +1124,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 66
       },
       "options": {
         "showHeader": true,
@@ -844,6 +1152,6 @@
   "timezone": "browser",
   "title": "Jason User Activity & Audit",
   "uid": "jason-user-activity-audit",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

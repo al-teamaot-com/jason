@@ -39,6 +39,12 @@ IDENTITY_BINDINGS_DB = Path(
         "/var/lib/jason/openclaw/teams-identity-bindings.sqlite3",
     )
 )
+AUTHORITY_DB = Path(
+    os.environ.get(
+        "JASON_AUTHORITY_DB",
+        "/var/lib/jason/authority/authority.sqlite3",
+    )
+)
 MAX_RECENT_EVENT_SERIES = int(os.environ.get("JASON_ATTRIBUTION_MAX_RECENT_EVENTS", "250"))
 
 
@@ -194,6 +200,77 @@ def _orchestration_events() -> list[dict]:
         }
         for row in rows
     ]
+
+
+def _authority_approvals() -> list[dict]:
+    connection = _connect_readonly(AUTHORITY_DB)
+    try:
+        rows = connection.execute("SELECT approval_id, payload FROM approvals ORDER BY rowid").fetchall()
+    finally:
+        connection.close()
+    result = []
+    for row in rows:
+        payload = _safe_json(row["payload"])
+        decided_at = _timestamp(payload.get("decided_at"))
+        if decided_at is None:
+            continue
+        result.append({
+            "approval_id": str(row["approval_id"]),
+            "capability": str(payload.get("capability") or "unknown"),
+            "client_id": str(payload.get("client_id") or ""),
+            "organization_id": str(payload.get("organization_id") or ""),
+            "requested_by": str(payload.get("requested_by") or "unknown"),
+            "decided_by": str(payload.get("decided_by") or "unknown"),
+            "status": str(payload.get("status") or "unknown"),
+            "request_id": str(payload.get("request_id") or ""),
+            "decided_at": decided_at,
+        })
+    return result
+
+
+def _audit_dimensions(events: list[dict], approvals: list[dict], now: datetime) -> dict:
+    start = now - timedelta(hours=24)
+    mutation_types = {
+        "connector.mutation.requested",
+        "connector.mutation.accepted",
+        "connector.mutation.completed",
+        "connector.mutation.verified",
+        "connector.mutation.failed",
+    }
+    mutations, autonomous, client_access = [], [], []
+    for event in events:
+        occurred_at = event.get("occurred_at")
+        if occurred_at is None or not (start <= occurred_at <= now):
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        event_type = str(event.get("event_type") or "")
+        capability = str(event.get("capability") or "unknown")
+        principal_id = str(event.get("principal_id") or "unknown")
+        correlation_id = str(event.get("correlation_id") or "")
+        execution_id = str(event.get("execution_id") or "")
+        client_id = str(payload.get("client_id") or "")
+        requester_kind = str(payload.get("requester_kind") or "").strip().casefold()
+        common = {
+            "capability": capability, "principal_id": principal_id,
+            "correlation_id": correlation_id, "execution_id": execution_id,
+            "client_id": client_id, "occurred_at": occurred_at,
+        }
+        if event_type in mutation_types:
+            mutations.append({**common, "event_type": event_type})
+        if event_type == "orchestration.request.received" and requester_kind and requester_kind != "human":
+            autonomous.append({**common, "requester_kind": requester_kind})
+        if event_type == "orchestration.request.received" and client_id:
+            client_access.append({**common, "requester_kind": requester_kind or "unknown"})
+    recent_approvals = [
+        row for row in approvals
+        if row["organization_id"] == ORGANIZATION_ID and start <= row["decided_at"] <= now
+    ]
+    return {
+        "approvals": recent_approvals,
+        "mutations": mutations,
+        "autonomous": autonomous,
+        "client_access": client_access,
+    }
 
 
 def _provider_product(provider: str) -> str:
@@ -464,6 +541,18 @@ def render_metrics(now: datetime | None = None) -> str:
         f'jason_usage_attribution_source_available{{source="orchestration_events"}} {orchestration_available}'
     )
 
+    approval_rows: list[dict] = []
+    authority_available = 0
+    try:
+        approval_rows = _authority_approvals()
+        authority_available = 1
+    except (OSError, sqlite3.Error, ValueError):
+        pass
+    lines.append(
+        f'jason_usage_attribution_source_available{{source="authority"}} {authority_available}'
+    )
+    audit = _audit_dimensions(orchestration_rows, approval_rows, now)
+
     events: list[dict] = []
     for entry in model_rows:
         normalized = _model_event(entry, emails)
@@ -614,6 +703,63 @@ def render_metrics(now: datetime | None = None) -> str:
         lines.append(
             f"jason_usage_recent_event_info{{{labels}}} {event['occurred_at'].timestamp():.3f}"
         )
+
+    lines.extend([
+        "# HELP jason_audit_approvals_24h Persisted approval decisions in the last 24 hours.",
+        "# TYPE jason_audit_approvals_24h gauge",
+    ])
+    approval_counts = defaultdict(int)
+    for item in audit["approvals"]:
+        approval_counts[(item["status"], item["capability"], item["decided_by"])] += 1
+    for (status, capability, decided_by), count in sorted(approval_counts.items()):
+        labels = _labels({"status": status, "capability": capability, "decided_by": decided_by})
+        lines.append(f"jason_audit_approvals_24h{{{labels}}} {count}")
+
+    lines.extend([
+        "# HELP jason_audit_mutation_events_24h Governed mutation lifecycle events in the last 24 hours.",
+        "# TYPE jason_audit_mutation_events_24h gauge",
+    ])
+    mutation_counts = defaultdict(int)
+    for item in audit["mutations"]:
+        mutation_counts[(item["event_type"], item["capability"], item["principal_id"])] += 1
+    for (event_type, capability, principal_id), count in sorted(mutation_counts.items()):
+        labels = _labels({"event_type": event_type, "capability": capability, "principal_id": principal_id})
+        lines.append(f"jason_audit_mutation_events_24h{{{labels}}} {count}")
+
+    lines.extend([
+        "# HELP jason_audit_autonomous_requests_24h Explicit non-human orchestration requests in the last 24 hours.",
+        "# TYPE jason_audit_autonomous_requests_24h gauge",
+    ])
+    autonomous_counts = defaultdict(int)
+    for item in audit["autonomous"]:
+        autonomous_counts[(item["requester_kind"], item["capability"], item["principal_id"])] += 1
+    for (requester_kind, capability, principal_id), count in sorted(autonomous_counts.items()):
+        labels = _labels({"requester_kind": requester_kind, "capability": capability, "principal_id": principal_id})
+        lines.append(f"jason_audit_autonomous_requests_24h{{{labels}}} {count}")
+
+    lines.extend([
+        "# HELP jason_audit_client_access_24h Governed requests explicitly scoped to a client in the last 24 hours.",
+        "# TYPE jason_audit_client_access_24h gauge",
+    ])
+    client_counts = defaultdict(int)
+    for item in audit["client_access"]:
+        client_counts[(item["client_id"], item["capability"], item["principal_id"], item["requester_kind"])] += 1
+    for (client_id, capability, principal_id, requester_kind), count in sorted(client_counts.items()):
+        labels = _labels({"client_id": client_id, "capability": capability, "principal_id": principal_id, "requester_kind": requester_kind})
+        lines.append(f"jason_audit_client_access_24h{{{labels}}} {count}")
+
+    lines.extend([
+        "# HELP jason_audit_recent_approval_info Bounded recent approval records.",
+        "# TYPE jason_audit_recent_approval_info gauge",
+    ])
+    for item in audit["approvals"][-MAX_RECENT_EVENT_SERIES:]:
+        labels = _labels({
+            "approval_id": item["approval_id"], "status": item["status"],
+            "capability": item["capability"], "requested_by": item["requested_by"],
+            "decided_by": item["decided_by"], "client_id": item["client_id"],
+            "request_id": item["request_id"],
+        })
+        lines.append(f"jason_audit_recent_approval_info{{{labels}}} {item['decided_at'].timestamp():.3f}")
 
     newest = events[-1]["occurred_at"].timestamp() if events else 0
     lines.extend(
