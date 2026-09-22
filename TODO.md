@@ -718,6 +718,27 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement before claiming autonomous root-cause localization for switch/uplink/firewall/WAN events.
 
+### TODO-CONN-010 — Search DRMM automation execution history for security attribution
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add governed read-only Datto RMM automation execution-history search so Jason can attribute security-sensitive endpoint actions to an exact AOT/DRMM job.
+- **Why it matters:** Process ancestry such as `powershell.exe -> cagservice.exe` proves likely DRMM origin but does not prove authorization. Security events such as Windows Event ID 1102 must not be closed as known-good without an exact execution/job/operator/approval match.
+- **Expected behavior:**
+  1. Search historical DRMM executions by exact device UID/hostname and bounded time range.
+  2. Return job ID, component name/UID, start/end time, status, requester/operator where available, and execution target.
+  3. Return correlation/approval evidence where Jason initiated the job through governed execution.
+  4. Allow exact job read/output retrieval from search results without redispatch.
+  5. Support filtering by component name/UID and job ID.
+  6. Preserve client isolation and auditability.
+  7. Fail closed when timestamps or device identity are ambiguous.
+  8. Never expose credentials or secret variable values in execution history.
+- **First production case:** `T20260919.0037` / `Atomic-50291` / Datto EDR `Windows Event Logs Cleared`, where provider evidence shows `wevtutil.exe cl Security` launched by PowerShell with `cagservice.exe` ancestry.
+- **Playbook dependency:** `docs/playbooks/Jason-Windows-Security-Log-Cleared-Attribution-and-Triage.md`.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement before allowing autonomous known-good closure of security events based on inferred AOT/DRMM origin.
+
 ## New-item template
 
 Copy this section when adding an idea:
