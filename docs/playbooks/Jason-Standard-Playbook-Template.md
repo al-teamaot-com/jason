@@ -167,6 +167,18 @@ Examples:
 
 If a gate fails, Jason must not skip it simply to reach remediation.
 
+### Mandatory software-update preflight
+
+For **any software update or upgrade**, before installation Jason must authoritatively determine and document:
+- the currently installed version;
+- the exact version the proposed update method intends to download/install;
+- the update source/channel or package identity used to establish the intended target version;
+- the version comparison and resulting decision.
+
+Jason must not install when the intended target version is older than, equal to, ambiguous relative to, or otherwise not demonstrably appropriate for the installed version and remediation goal. If the target version cannot be determined before installation, the update gate fails and Jason must investigate or escalate rather than install speculatively.
+
+After installation, Jason must re-read and document the resulting installed version. A successful installer exit code alone is not proof that the intended version was installed.
+
 ---
 
 ## 9. Remediation
