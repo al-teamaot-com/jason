@@ -380,6 +380,31 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before autonomous processing of IT Glue Network Discovery or other generic vendor-notification tickets.
 
 
+
+### TODO-OBS-002 — Grafana client-specific playbook coverage page
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Low
+- **Idea:** Add a Grafana page that shows client-specific Jason playbooks, their operational status, recent executions, exceptions, and coverage. Use **Gromelski And Associates Inc.** as the first production client-specific playbook case, beginning with the rule that every newly discovered network device must be investigated, documented, and either confirmed expected or escalated.
+- **Why it matters:** Some clients have unique operating rules, network designs, approval expectations, or recurring workflows that should not be forced into a global playbook. Technicians need a visible way to see which client-specific rules exist and whether Jason is actually following them.
+- **Expected behavior:**
+  1. Provide a client selector/filter.
+  2. Show all client-specific playbooks for the selected client.
+  3. Display playbook name, lifecycle state, version, owner, last review date, last execution, next scheduled check when applicable, and whether autonomous use is approved.
+  4. Show current active cases/tickets governed by each client-specific playbook.
+  5. Show recent successful runs, escalations, blocked cases, failed diagnostics, and unresolved exceptions.
+  6. Show capability gaps and dependencies that prevent full execution.
+  7. Clearly distinguish global playbooks from client-specific overrides/additions.
+  8. Link each playbook to its source document and relevant source tickets/evidence where available.
+  9. Make client-specific autonomy explicit; a client-specific playbook being approved must not imply global autonomy.
+  10. Include a **coverage gap** view showing recurring client conditions that do not yet have a client-specific or global playbook.
+- **First production case:** Gromelski And Associates Inc. — New Network Device Discovery. Every newly detected/unmatched device must be reviewed; known-good status requires evidence or confirmation, and unexplained devices must remain open/escalated.
+- **Prerequisites:** canonical client-specific playbook metadata; persisted playbook execution/state data; source-ticket linkage; TODO-OBS-001 lifecycle data where reusable; reliable client identity correlation; Grafana-readable metrics or query source.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement as client-specific playbooks begin entering production, starting with the Gromelski network-device discovery workflow.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
