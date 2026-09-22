@@ -105,10 +105,18 @@ the current 432-device live fleet.
    `JASON_KFS_ENABLED=true`.
 7. Validate governed reads for device search, device read, meters, supplies,
    and alerts.
-8. Enable the midnight timer:
-   `systemctl --user enable --now jason-kfs-collector.timer`
-9. Confirm the timer is scheduled and the next run succeeds.
-10. Only then disable the legacy Claw KFS job.
+8. Align production provenance before acceptance: set the MCP
+   `JASON_SOURCE_REVISION`, `com.teamaot.jason.source`,
+   `com.teamaot.jason.source_revision`, and `org.opencontainers.image.revision`
+   values to the same full Git commit used for the production image.
+9. Update `/var/lib/jason/production-health/contract.json` with the accepted MCP
+   image tag and full source revision, reload the Production Health exporter,
+   and require the image/source/profile/scope checks plus
+   `jason_datto_governed_execution_contract` to report `1`.
+10. Enable the midnight timer:
+    `systemctl --user enable --now jason-kfs-collector.timer`
+11. Confirm the timer is scheduled and the next run succeeds.
+12. Only then disable the legacy Claw KFS job.
 
 ## Failure behavior
 

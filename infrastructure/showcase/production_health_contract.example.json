@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-22T00:00:00+00:00",
+  "mcp_image": "jason-mcp:<approved-release>",
+  "mcp_source_revision": "<approved-full-git-sha>",
+  "provider_profile": "<approved-provider-profile>",
+  "autotask_requester_mode": "jason_managed",
+  "datto_execution_profile": "owner-diagnostic-v1",
+  "datto_execution_allowlist": "AOT governed diagnostic pilot",
+  "datto_components_json": "<exact-approved-components-json>",
+  "datto_device_uid": "<approved-device-uid>",
+  "datto_device_class": "Desktop",
+  "site_variable_identity_mode": "reuse_datto_execution_identity",
+  "kfs_enabled": true
+}

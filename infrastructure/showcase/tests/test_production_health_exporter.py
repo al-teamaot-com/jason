@@ -3,16 +3,28 @@ from __future__ import annotations
 import builtins
 import importlib.util
 import io
+import json
+import os
 from pathlib import Path
 
 
-def load_exporter():
+def load_exporter(contract_path: Path | None = None):
     path = Path(__file__).resolve().parents[1] / "production_health_exporter.py"
-    spec = importlib.util.spec_from_file_location("jason_production_health_exporter", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    previous = os.environ.get("JASON_PRODUCTION_HEALTH_CONTRACT_PATH")
+    os.environ["JASON_PRODUCTION_HEALTH_CONTRACT_PATH"] = str(
+        contract_path or Path("/definitely/missing/jason-production-health-contract.json")
+    )
+    try:
+        spec = importlib.util.spec_from_file_location("jason_production_health_exporter", path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if previous is None:
+            os.environ.pop("JASON_PRODUCTION_HEALTH_CONTRACT_PATH", None)
+        else:
+            os.environ["JASON_PRODUCTION_HEALTH_CONTRACT_PATH"] = previous
 
 
 def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contract(monkeypatch):
@@ -38,7 +50,6 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
                 f"JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON={module.EXPECTED_DATTO_COMPONENTS_JSON}",
                 f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID={module.EXPECTED_DATTO_DEVICE_UID}",
                 f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS={module.EXPECTED_DATTO_DEVICE_CLASS}",
-                f"JASON_DATTO_SITE_VARIABLE_MCP_PROFILE={module.EXPECTED_DATTO_SITE_VARIABLE_PROFILE}",
             ],
         },
         "HostConfig": {
@@ -84,7 +95,6 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     assert 'jason_mcp_contract{check="provider_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="datto_execution_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="datto_execution_scope"} 1' in metrics
-    assert 'jason_mcp_contract{check="datto_site_variable_profile"} 1' in metrics
     assert 'jason_mcp_contract{check="environment_unique"} 0' in metrics
     assert 'jason_mcp_env_duplicate_count{key="JASON_PROVIDER_READ_ACTIVATION_PROFILE"} 1' in metrics
     assert "jason_mcp_required_secret_mount_contract 1" in metrics
@@ -93,10 +103,43 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     assert "jason_host_kernel_error_count 0" in metrics
     assert "jason_root_filesystem_writable 1" in metrics
     assert "jason_mcp_rollback_available 1" in metrics
-    assert 'jason_production_health_exporter_build_info{version="4"} 1' in metrics
+    assert "jason_production_health_contract_loaded 0" in metrics
+    assert 'jason_production_health_exporter_build_info{version="5"} 1' in metrics
 
     for forbidden in ("password", "secret_id=", "role_id=", "access_token", "refresh_token"):
         assert forbidden not in metrics.casefold()
+
+
+def test_durable_contract_overrides_stale_environment_expectations(monkeypatch, tmp_path: Path):
+    contract_path = tmp_path / "contract.json"
+    contract = {
+        "schema_version": 1,
+        "mcp_image": "jason-mcp:approved-release",
+        "mcp_source_revision": "abcdef1234567890",
+        "provider_profile": "approved-provider-profile",
+        "autotask_requester_mode": "jason_managed",
+        "datto_execution_profile": "owner-diagnostic-v1",
+        "datto_execution_allowlist": "AOT governed diagnostic pilot",
+        "datto_components_json": "[{\"uid\":\"approved\"}]",
+        "datto_device_uid": "approved-device",
+        "datto_device_class": "Desktop",
+    }
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    monkeypatch.setenv("JASON_EXPECTED_MCP_IMAGE", "stale-image")
+    monkeypatch.setenv("JASON_EXPECTED_MCP_SOURCE_REVISION", "stale-source")
+    monkeypatch.setenv("JASON_EXPECTED_PROVIDER_PROFILE", "stale-profile")
+    monkeypatch.setenv("JASON_EXPECTED_AUTOTASK_REQUESTER_MODE", "stale-mode")
+
+    module = load_exporter(contract_path)
+
+    assert module.EXPECTED_MCP_IMAGE == contract["mcp_image"]
+    assert module.EXPECTED_SOURCE_REVISION == contract["mcp_source_revision"]
+    assert module.EXPECTED_PROVIDER_PROFILE == contract["provider_profile"]
+    assert module.EXPECTED_AUTOTASK_MODE == contract["autotask_requester_mode"]
+    assert module.EXPECTED_DATTO_COMPONENTS_JSON == contract["datto_components_json"]
+    assert "/run/jason-secrets/openbao/kyocera-kfs/role_id" in module.REQUIRED_SECRET_MOUNTS
+    assert "/run/jason-secrets/openbao/kyocera-kfs/secret_id" in module.REQUIRED_SECRET_MOUNTS
+
 
 
 def test_datto_contract_fails_closed_when_scope_does_not_match(monkeypatch):

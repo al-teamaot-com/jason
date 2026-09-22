@@ -54,14 +54,25 @@ The original production acceptance sample returned `jason_root_filesystem_writab
 
 ## Jason runtime / MCP contract monitors
 
+### Durable desired-state contract — 2026-09-22
+
+Production Health now reads the secret-safe desired-state contract at `/var/lib/jason/production-health/contract.json` before falling back to the older `JASON_EXPECTED_*` systemd environment values. This prevents an approved MCP release from appearing unhealthy merely because the long-lived exporter unit still names a prior image or source revision.
+
+The contract contains only deployment metadata needed for verification: approved MCP image/source revision, provider activation profile, Autotask requester mode, bounded Datto execution profile/allowlist/component scope/device class, and feature-state metadata. It must never contain credentials, tokens, secret values, returned provider records, or client data. `infrastructure/showcase/production_health_contract.example.json` documents the schema. Updating this contract is part of each production MCP promotion.
+
+Datto site-variable create/update intentionally reuses the existing Datto execution identity; Production Health therefore verifies the shared Datto execution profile and the Datto execution credential mount pair rather than requiring the retired dedicated `owner-site-variable-v1` environment profile. When Kyocera KFS is part of the approved production MCP baseline, the KFS OpenBao role/secret mount destinations are also required and must be read-only.
+
+On 2026-09-22 the live MCP credential mounts were corrected to read-only, the duplicate/stale `JASON_SOURCE_REVISION` entry was removed, source provenance was aligned to the active KFS production commit, the runtime received its repository-defined `/healthz` Docker health check, and the exporter was advanced to contract version 5. Prometheus subsequently reported all Production Health contract signals healthy with zero firing alerts.
+
+
 | Signal | Expected production value |
 | --- | --- |
 | `jason-runtime` state | running |
 | `jason-runtime` Docker health | healthy |
 | `jason-mcp-pilot` state | running |
-| MCP image | `jason-mcp:autotask-entra-67da8d80ca97-repaired` until the next explicitly accepted release |
-| MCP source revision | `67da8d80ca9703505d651e9e0935f5bd1aa7c651` until superseded |
-| provider-read activation profile | `itglue-autotask-entra-governed-catalog-v4` |
+| MCP image | `jason-mcp:kfs-prod-c3e0728` at the 2026-09-22 accepted KFS release |
+| MCP source revision | `c3e0728eb6f434d2ba033ae6b3eb72e3616ef95d` at the 2026-09-22 accepted KFS release |
+| provider-read activation profile | `itglue-autotask-entra-procurement-catalog-v5` |
 | Autotask requester mode | `jason_managed` while transitional authorization remains approved |
 | MCP network | `jason-core` |
 | MCP port binding | `10.87.246.157:8765 -> 8000/tcp` |
@@ -69,17 +80,9 @@ The original production acceptance sample returned `jason_root_filesystem_writab
 | required read-only credential mounts | present |
 | watched MCP environment duplicate count | 0 desired |
 
-### Known current exception
+### Resolved production drift — 2026-09-22
 
-The live MCP currently contains duplicate Docker environment entries for source revision/profile/requester-mode because the v4 container was built from the previous environment file plus explicit overrides. Runtime composition and live capability execution prove the effective profile is v4, but the duplicate count remains visible as a warning until a controlled container recreation removes the ambiguity.
-
-The deployed exporter correctly reports one extra value for each of:
-
-- `JASON_SOURCE_REVISION`;
-- `JASON_PROVIDER_READ_ACTIVATION_PROFILE`;
-- `JASON_AUTOTASK_REQUESTER_AUTH_MODE`.
-
-The accepted image/source/profile/requester-mode checks otherwise pass. Issue #180 tracks cleanup.
+The prior duplicate/stale MCP environment state is resolved. `JASON_SOURCE_REVISION`, the MCP provenance labels, the active image tag, and `/var/lib/jason/production-health/contract.json` must identify the same accepted production release. `JasonMCPDuplicateEnvironment` and `JasonMCPContractDrift` remain enabled as regression detectors.
 
 The `JasonMCPDuplicateEnvironment` Prometheus rule uses a two-minute `for` period. An immediate post-deployment query can therefore legitimately show zero firing alerts even while the duplicate metric is nonzero; the rule should be evaluated after the hold period before asserting notification state.
 
@@ -147,7 +150,7 @@ Not every quality problem is suitable for a Prometheus alert, but the Command Ce
 
 1. **Provider foreign-key leakage:** unresolved IDs presented where a human/business value should have been resolved. First observed with Autotask assigned resource. Issue #178.
 2. **Microsoft tenant-level capability coverage:** Entra user reads are live; tenant/domain/license/Conditional Access/Exchange resource families remain missing. Issue #179.
-3. **Duplicate MCP environment entries:** current production warning until controlled cleanup. Issue #180.
+3. **Duplicate MCP environment entries:** resolved in production on 2026-09-22; retain the alert as a regression detector. Historical tracking: Issue #180.
 4. **Temporary provider requester authorization:** Autotask and IT Glue Jason-managed requester authorization remains transitional debt.
 5. **Continuous provider canaries:** acceptance proof exists but continuous governed canaries are pending. Issue #181.
 
@@ -190,6 +193,9 @@ The dedicated `Jason Production Health` dashboard provides at-a-glance panels fo
 - existing host CPU/memory trends.
 
 The existing Command Center, usage, and authority dashboards remain useful and should not be replaced.
+
+The `Jason Governed Actions` dashboard must render zero alert counts explicitly with `or vector(0)`, expose pending alerts separately from firing alerts, and show both pending/firing rows in its alert table. This prevents a healthy zero-alert state from appearing as Grafana `N/A` and preserves the Prometheus hold-period distinction.
+
 
 ## Notification routing
 
