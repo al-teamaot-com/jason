@@ -234,8 +234,13 @@ deploy() {
   MUTATED=1
 
   sudo systemctl daemon-reload || return 1
-  sudo systemctl enable --now "$usage_unit" || return 1
-  sudo systemctl enable --now "$attribution_unit" || return 1
+  sudo systemctl enable "$usage_unit" || return 1
+  sudo systemctl enable "$attribution_unit" || return 1
+  # The exporters are normally already active. enable --now would leave the
+  # existing process running after a unit/code update, so explicitly restart
+  # both services to load the newly installed runtime and credentials.
+  sudo systemctl restart "$usage_unit" || return 1
+  sudo systemctl restart "$attribution_unit" || return 1
 
   wait_http "http://127.0.0.1:9465/metrics" 30 1 || return 1
   wait_http "http://127.0.0.1:9466/metrics" 30 1 || return 1
