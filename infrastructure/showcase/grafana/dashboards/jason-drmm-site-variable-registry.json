@@ -1,0 +1,223 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "title": "Jason Production Health",
+      "type": "link",
+      "url": "/d/jason-production-health/jason-production-health",
+      "targetBlank": false
+    },
+    {
+      "title": "Jason Governed Actions",
+      "type": "link",
+      "url": "/d/jason-governed-actions/jason-governed-actions",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Sites Scanned",
+      "description": "Safe registry scan completeness. A partial scan must not authorize onboarding convergence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "vector(44)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Expected Sites",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "vector(45)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Unique Variable Names",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "vector(47)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Candidate Standards",
+      "description": "Discovery candidates at >=70% coverage. Human approval is still required.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "vector(5)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "text",
+      "title": "DRMM Site Variable Registry",
+      "description": "Value-free fleet inventory derived through Jason governed reads.",
+      "gridPos": {
+        "h": 32,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Master Registry Snapshot\n\n**Snapshot:** 2026-09-22 13:50 ET  \n**Sites:** 44/45 successfully read  \n**Failed:** OnDemand  \n**Unique logical variable names:** 47  \n**Values:** never collected into this dashboard; names and configured-state counts only.\n\n> **Important:** Candidate Standard is discovery only. It does **not** mean AOT-approved Standard. Onboarding creation must use the separately approved Standard subset.\n\n| Variable | Sites | Coverage | Configured | Status | Variants |\n|---|---:|---:|---:|---|---|\n| DNSFilter_SITESECRETKEY | 38/45 | 84.4% | 38 | Candidate Standard |  |\n| ITGlueOrgID | 38/45 | 84.4% | 38 | Candidate Standard |  |\n| usrDEBTokenSITE | 38/45 | 84.4% | 38 | Candidate Standard |  |\n| usrRCSerialSITE | 38/45 | 84.4% | 38 | Candidate Standard |  |\n| ClientAssetTagPrefix | 34/45 | 75.6% | 34 | Candidate Standard |  |\n| NetworkGlueCollectorKey | 27/45 | 60% | 27 | Observed |  |\n| ExpectedLegalNoticeCaption | 15/45 | 33.3% | 15 | Observed |  |\n| ExpectedLegalNoticeText | 15/45 | 33.3% | 15 | Observed |  |\n| VulScanDiscoveryAgent_installkey | 15/45 | 33.3% | 15 | Observed |  |\n| ClientBannedAppStoreApps | 11/45 | 24.4% | 11 | Observed |  |\n| Site_AutoRemediateRDP | 8/45 | 17.8% | 8 | Observed |  |\n| Duo_APIHostname | 4/45 | 8.9% | 4 | Observed |  |\n| Duo_IntegrationKey | 4/45 | 8.9% | 4 | Observed |  |\n| Duo_SecretKey | 4/45 | 8.9% | 4 | Observed |  |\n| Site_SystemProcessExclusions | 4/45 | 8.9% | 4 | Observed |  |\n| Duo_AgentDownloadURL | 3/45 | 6.7% | 3 | Observed |  |\n| Duo_AUTOPUSH | 3/45 | 6.7% | 3 | Observed |  |\n| Duo_FAILOPEN | 3/45 | 6.7% | 3 | Observed |  |\n| USB_MonitorNotificationEmail | 3/45 | 6.7% | 3 | Observed |  |\n| ZeroTier_NETWORK_ID | 3/45 | 6.7% | 3 | Observed |  |\n| AOT_OnboardingVariableBaseline | 2/45 | 4.4% | 2 | Control / Acceptance |  |\n| DuoApiHostname | 2/45 | 4.4% | 2 | Observed |  |\n| DuoIntegrationKey | 2/45 | 4.4% | 2 | Observed |  |\n| DuoSecretKey | 2/45 | 4.4% | 2 | Observed |  |\n| MaxAllowedFailedLogins | 2/45 | 4.4% | 2 | Observed |  |\n| Site_AllowRDP | 2/45 | 4.4% | 2 | Observed |  |\n| Site_LoLBAS_ExcludedPatterns | 2/45 | 4.4% | 2 | Observed |  |\n| UsbAllowedAssetIds | 2/45 | 4.4% | 2 | Observed |  |\n| UsbAllowedComputerNames | 2/45 | 4.4% | 2 | Observed |  |\n| UsbAllowedPNPDeviceIds | 2/45 | 4.4% | 2 | Naming Conflict | UsbAllowedPNPDeviceIds / UsbAllowedPNPDeviceIDs |\n| UsbPolicyMode | 2/45 | 4.4% | 2 | Observed |  |\n| AppName1 | 1/45 | 2.2% | 1 | Observed |  |\n| AutoEnableAuditAccountMgmt | 1/45 | 2.2% | 1 | Observed |  |\n| Install1 | 1/45 | 2.2% | 1 | Observed |  |\n| SetAuditing | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointListIds | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointListTitles | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointSiteIds | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointWebIds | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointWebTitles | 1/45 | 2.2% | 1 | Observed |  |\n| SharePointWebUrls | 1/45 | 2.2% | 1 | Observed |  |\n| Site_Firewall_AutoRemediateInboundBlock | 1/45 | 2.2% | 1 | Observed |  |\n| Site_Firewall_RequireAllProfilesEnabled | 1/45 | 2.2% | 1 | Observed |  |\n| Site_Firewall_RequireInboundBlock | 1/45 | 2.2% | 1 | Observed |  |\n| TargetTimeSource | 1/45 | 2.2% | 1 | Observed |  |\n| USB_AllowedDeviceSerialNumbers | 1/45 | 2.2% | 1 | Observed |  |\n| UsbPolicyVersion | 1/45 | 2.2% | 1 | Observed |  |\n"
+      }
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": [
+    "Jason",
+    "DRMM",
+    "site-variables",
+    "registry"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason DRMM Site Variable Registry",
+  "uid": "jason-drmm-site-variable-registry",
+  "version": 1,
+  "weekStart": ""
+}
