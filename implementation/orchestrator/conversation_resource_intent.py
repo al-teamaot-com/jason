@@ -353,6 +353,50 @@ class MetadataFirstResourceInquiryInterpreter:
                     candidate_facts=requested_facts,
                 )
 
+        # Semantic knowledge is the authoritative provider-neutral vocabulary for
+        # concepts that have migrated beyond the legacy fact vocabulary. Consult
+        # its active explicit terms before invoking any language reasoner.
+        #
+        # This grants no provider, capability, credential, or execution authority:
+        # the matched facts are still restricted to the governed facts declared by
+        # the endpoint capability contracts and are planned normally downstream.
+        if not requested_facts:
+            fact_resolver = getattr(
+                self,
+                "fact_resolver",
+                None,
+            )
+
+            if fact_resolver is not None:
+                eligible = set(
+                    self._eligible_canonical_facts(
+                        resource_type="endpoint",
+                    )
+                )
+
+                semantic_matches = (
+                    fact_resolver.match_explicit_facts(
+                        text
+                    )
+                )
+
+                requested_facts = tuple(
+                    item.canonical_fact
+                    for item in semantic_matches
+                    if item.canonical_fact in eligible
+                )
+
+                if (
+                    len(requested_facts)
+                    > self._MAX_BOUNDED_FACT_EXPANSION
+                ):
+                    raise ConversationClarificationRequiredError(
+                        reason_code=(
+                            "explicit_fact_set_exceeds_safe_bound"
+                        ),
+                        candidate_facts=requested_facts,
+                    )
+
         selector: dict[str, str] = {
             "hostname": endpoint_identifier,
         }
@@ -375,6 +419,11 @@ class MetadataFirstResourceInquiryInterpreter:
 
         bridge = SemanticRequestBridge(
             fact_vocabulary=self.fact_vocabulary,
+            fact_resolver=getattr(
+                self,
+                "fact_resolver",
+                None,
+            ),
         )
 
         semantic_request = bridge.build(

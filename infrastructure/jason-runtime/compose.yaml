@@ -24,6 +24,7 @@ services:
       JASON_SECURITY_AUDIT_DB: /var/lib/jason/openclaw/security-audit.sqlite3
       JASON_ORCHESTRATION_EVENTS_DB: /var/lib/jason/openclaw/orchestration-events.sqlite3
       JASON_MODEL_USAGE_DB: /var/lib/jason/openclaw/model-usage.sqlite3
+      JASON_PLAYBOOK_RUNS_PATH: /var/lib/jason/playbooks/runs
       JASON_TRUSTED_KEYS_REGISTRY: /var/lib/jason/openclaw/trusted-keys/registry.json
       JASON_ALLOWED_OPENCLAW_MACHINE_IDENTITIES: svc-openclaw-gateway
       JASON_OPENBAO_URL: http://openbao:8200
@@ -36,15 +37,17 @@ services:
       JASON_OPENAI_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/openai/role_id
       JASON_OPENAI_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/openai/secret_id
       JASON_HOSTED_SEMANTICS_ENABLED: "true"
-      JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
+      JASON_OPENAI_SEMANTIC_MODEL: "gpt-5-nano"
       JASON_HOSTED_CONVERSATION_ENABLED: "true"
-      JASON_OPENAI_CONVERSATION_MODEL: "gpt-5.4-mini"
-      JASON_OPENAI_PRICING_MODEL: "gpt-5.4-mini"
-      JASON_OPENAI_INPUT_COST_PER_MILLION: "0.75"
-      JASON_OPENAI_CACHED_INPUT_COST_PER_MILLION: "0.075"
-      JASON_OPENAI_OUTPUT_COST_PER_MILLION: "4.50"
+      JASON_OPENAI_CONVERSATION_MODEL: "gpt-5-nano"
+      JASON_OPENAI_PRICING_MODEL: "gpt-5-nano"
+      JASON_OPENAI_INPUT_COST_PER_MILLION: "0.05"
+      JASON_OPENAI_CACHED_INPUT_COST_PER_MILLION: "0.005"
+      JASON_OPENAI_OUTPUT_COST_PER_MILLION: "0.40"
       JASON_DYNAMIC_CONVERSATION_ENABLED: "true"
       JASON_CONVERSATION_EXPERIENCE_ENABLED: "true"
+      JASON_INVESTIGATION_LOOP_ENABLED: "true"
+      JASON_INVESTIGATION_MAXIMUM_READS: "4"
       JASON_SES_REGION: us-east-1
       JASON_SES_DEFAULT_SENDER: jason@teamaot.com
       JASON_OLLAMA_URL: http://jason-ollama:11434
@@ -52,6 +55,7 @@ services:
     volumes:
       - /var/lib/jason/authority:/var/lib/jason/authority:rw
       - /var/lib/jason/openclaw:/var/lib/jason/openclaw:rw
+      - /var/lib/jason/playbooks:/var/lib/jason/playbooks:rw
       - /var/lib/jason/openclaw/trusted-keys:/var/lib/jason/openclaw/trusted-keys:ro
       - ${JASON_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/role_id:ro
       - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro

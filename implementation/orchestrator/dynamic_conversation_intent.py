@@ -97,6 +97,19 @@ class GroundedConversationIntentBuilder:
             for item in capability.input_schema.get("selector_keys", ())
             if str(item).strip()
         )
+        selector_source_policy = {
+            str(key).strip(): str(value).strip()
+            for key, value
+            in capability.input_schema.get(
+                "selector_source_policy",
+                {},
+            ).items()
+            if (
+                str(key).strip()
+                and str(value).strip()
+            )
+        }
+
         if not selector_keys:
             # A capability without exposed structural selectors may still receive the
             # natural-language information request.  No identifier is manufactured.
@@ -129,6 +142,9 @@ class GroundedConversationIntentBuilder:
             "purpose": purpose,
             "capability": capability.model_view(),
             "allowed_argument_names": list(selector_keys),
+            "selector_source_policy": (
+                selector_source_policy
+            ),
             "verified_entity_sources": entity_sources,
             "literal_rule": (
                 "A literal binding value must be copied exactly from the human message."
@@ -144,7 +160,13 @@ class GroundedConversationIntentBuilder:
             proposal=proposal,
             text=text.strip(),
             selector_keys=set(selector_keys),
-            entity_sources={item["source_id"]: item["value"] for item in entity_sources},
+            selector_source_policy=(
+                selector_source_policy
+            ),
+            entity_sources={
+                item["source_id"]: item["value"]
+                for item in entity_sources
+            },
         )
         # Existing read capabilities use requested_facts as a provider-neutral signal
         # that a resolved resource should be read for the human's information request.
@@ -191,6 +213,7 @@ def _validate_and_dereference(
     proposal: Mapping[str, Any],
     text: str,
     selector_keys: set[str],
+    selector_source_policy: Mapping[str, str],
     entity_sources: Mapping[str, str],
 ) -> dict[str, Any]:
     raw_bindings = proposal.get("bindings", ())
@@ -220,6 +243,18 @@ def _validate_and_dereference(
                 raise DynamicIntentBindingError("entity binding source is not verified")
             value = entity_sources[clean_source_id]
         elif source_type == "literal":
+            if (
+                selector_source_policy.get(
+                    argument,
+                    "literal_or_verified",
+                )
+                == "verified_entity_only"
+            ):
+                raise DynamicIntentBindingError(
+                    "selector requires a verified "
+                    "entity source"
+                )
+
             if source_id is not None:
                 raise DynamicIntentBindingError("literal binding cannot carry an entity source")
             if literal is None:

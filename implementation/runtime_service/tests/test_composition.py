@@ -191,3 +191,15 @@ def test_production_composition_selects_conversation_experience_when_enabled(tmp
     flow = application.ingress.ingress.flow
 
     assert type(flow).__name__ == "TeamsConversationExperienceFlow"
+
+
+def test_runtime_composition_declares_integration_broker_foundation():
+    from pathlib import Path
+
+    source = Path(
+        "implementation/runtime_service/src/jason_runtime/composition.py"
+    ).read_text()
+
+    assert "IntegrationBroker(" in source
+    assert "build_datto_rmm_manifest()" in source
+    assert "integration_broker.register(" in source

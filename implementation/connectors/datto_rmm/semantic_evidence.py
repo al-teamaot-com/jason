@@ -16,6 +16,11 @@ class SemanticEvidenceField:
 # provider evidence; it never manufactures or infers provider values.
 DATTO_DEVICE_SEMANTIC_FIELDS = (
     SemanticEvidenceField(
+        canonical_fact="operating system",
+        semantic_contexts=("operating_system",),
+        provider_keys=("operatingSystem",),
+    ),
+    SemanticEvidenceField(
         canonical_fact="operating system build",
         semantic_contexts=("operating_system",),
         provider_keys=("build", "buildNumber", "osBuild", "osBuildNumber"),
@@ -34,6 +39,11 @@ DATTO_DEVICE_SEMANTIC_FIELDS = (
         canonical_fact="total memory",
         semantic_contexts=("memory", "hardware_inventory"),
         provider_keys=("totalMemory", "physicalMemory", "totalPhysicalMemory", "ram"),
+    ),
+    SemanticEvidenceField(
+        canonical_fact="reboot required",
+        semantic_contexts=("endpoint", "operating_system", "maintenance_state"),
+        provider_keys=("rebootRequired",),
     ),
 )
 

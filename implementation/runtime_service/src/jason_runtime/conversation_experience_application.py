@@ -13,6 +13,7 @@ import os
 from dataclasses import replace
 
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
+from orchestrator.universal_teams_query_flow import UniversalTeamsQueryFlow
 
 from .conversation_experience_cutover import (
     ConversationExperienceCutoverSettings,
@@ -42,10 +43,33 @@ def apply_conversation_experience_cutover(
         )
     governed = outer.ingress
     fallback_flow = getattr(governed, "flow", None)
+
+    # Generic idempotence boundary: if runtime composition has already
+    # produced a complete governed information front door, application-level
+    # cutover must not attempt to compose another one over it.
+    if bool(
+        getattr(
+            fallback_flow,
+            "governed_information_front_door",
+            False,
+        )
+    ):
+        return application
+
     if fallback_flow is None:
         raise RuntimeError(
             "Conversation Experience could not locate the governed conversation flow"
         )
+
+    # Normal runtime composition may already have applied the universal
+    # Conversation Experience cutover. The application wrapper is a rollback
+    # boundary, not a second composition authority. Treat an already-applied
+    # universal flow as success rather than wrapping it again.
+    if isinstance(
+        fallback_flow,
+        UniversalTeamsQueryFlow,
+    ):
+        return application
 
     identity_binder = getattr(fallback_flow, "identity_binder", None)
     request_factory = getattr(fallback_flow, "request_factory", None)

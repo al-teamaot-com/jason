@@ -213,6 +213,7 @@ class DynamicConversationPlan:
     resolved_references: tuple[ConversationReferenceResolution, ...] = ()
     topic: str | None = None
     clarification_question: str | None = None
+    clarification_basis: str | None = None
     conversation_response: str | None = None
 
     def __post_init__(self) -> None:
@@ -224,6 +225,16 @@ class DynamicConversationPlan:
             raise DynamicConversationPlanError("plan outcome requires at least one capability")
         if self.outcome != "plan" and self.requirements:
             raise DynamicConversationPlanError("non-plan outcome cannot execute capabilities")
+        if self.clarification_basis not in {
+            None,
+            "none",
+            "human_semantic",
+            "internal_planning",
+        }:
+            raise DynamicConversationPlanError(
+                "dynamic clarification basis is invalid"
+            )
+
         if self.outcome == "clarify":
             if not self.clarification_question or not self.clarification_question.strip():
                 raise DynamicConversationPlanError("clarify outcome requires a question")
@@ -305,10 +316,141 @@ class DynamicConversationResolver:
             schema=schema,
             max_output_tokens=512,
         )
-        return _validate_plan(proposal, offered_ids=set(ids), known_refs=set(known_refs))
+        # FIRST_PASS_GROUNDED_HUMAN_AMBIGUITY
+        if (
+            str(
+                proposal.get(
+                    "outcome",
+                    "",
+                )
+            ).strip()
+            == "clarify"
+            and str(
+                proposal.get(
+                    "clarification_basis",
+                    "none",
+                )
+            ).strip()
+            == "human_semantic"
+            and not _human_clarification_is_grounded(
+                proposal,
+                human_text=clean_text,
+                known_refs=set(known_refs),
+            )
+        ):
+            # The model invented at least part of the alleged human choice.
+            # Treat it as internal planning so the bounded retry resolves it
+            # instead of surfacing it to the human.
+            proposal=dict(proposal)
+            proposal[
+                "clarification_basis"
+            ]="internal_planning"
+
+        validated = _validate_plan(
+            proposal,
+            offered_ids=set(ids),
+            known_refs=set(known_refs),
+        )
+
+        if (
+            validated.outcome == "clarify"
+            and validated.clarification_basis
+            == "internal_planning"
+        ):
+            retry_payload = {
+                **payload,
+                "prior_internal_planning_attempt": {
+                    "question": (
+                        validated.clarification_question
+                    ),
+                    "instruction": (
+                        "Resolve this internal planning choice yourself "
+                        "from the offered governed capability contracts. "
+                        "Do not ask the human to choose an evidence source, "
+                        "provider, capability, record type, API, or retrieval "
+                        "strategy. Return a plan unless a separate genuine "
+                        "human semantic ambiguity remains."
+                    ),
+                },
+            }
+
+            retry_proposal = self.client.complete(
+                system=_INTERNAL_PLANNING_RETRY_INSTRUCTIONS,
+                user=json.dumps(
+                    retry_payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                schema=schema,
+                max_output_tokens=512,
+            )
+
+            # RETRY_GROUNDED_HUMAN_AMBIGUITY
+            if (
+                str(
+                    retry_proposal.get(
+                        "outcome",
+                        "",
+                    )
+                ).strip()
+                == "clarify"
+                and str(
+                    retry_proposal.get(
+                        "clarification_basis",
+                        "none",
+                    )
+                ).strip()
+                == "human_semantic"
+                and not _human_clarification_is_grounded(
+                    retry_proposal,
+                    human_text=clean_text,
+                    known_refs=set(known_refs),
+                )
+            ):
+                retry_proposal=dict(
+                    retry_proposal
+                )
+                retry_proposal[
+                    "clarification_basis"
+                ]="internal_planning"
+
+            validated = _validate_plan(
+                retry_proposal,
+                offered_ids=set(ids),
+                known_refs=set(known_refs),
+            )
+
+            if (
+                validated.outcome == "clarify"
+                and validated.clarification_basis
+                == "internal_planning"
+            ):
+                raise DynamicConversationPlanError(
+                    "planner could not resolve an internal "
+                    "capability/evidence choice without human input"
+                )
+
+        return validated
 
 
-_SYSTEM_INSTRUCTIONS = """You are Jason's bounded conversational planner. Interpret the human message using only the supplied conversation context and the self-describing governed capabilities supplied for this turn. There are no hidden phrase-to-provider, synonym, question-to-field, or fact mappings. Resolve references such as pronouns only when the supplied context supports the resolution. Select capabilities by their runtime descriptions and schemas, not by hard-coded provider assumptions. A capability selection is only a request to the Central Orchestrator; it does not grant authority and does not supply factual evidence. Never invent operational facts, entity identifiers, capabilities, provider results, completed actions, or authority. Do not ask the human to choose or provide an internal provider, registry, log, evidence source, or evidence location when an offered governed read/search capability can inspect the clearly identified resource. Uncertainty about whether a requested fact exists in returned evidence is not material ambiguity. For a clear factual read, select the best matching provider-neutral read/search capability using its resource types, business purpose, operation, and selectors, then let downstream governed evidence interpretation determine whether the requested fact is actually supported. Do not substitute a more specialized evidence collection merely because it might contain the fact when a general resource read better matches the human's target. If choosing among plausible meanings would materially change the target, authority, requested action, risk, or meaning, return clarify with one concise natural clarification question. Otherwise return the complete bounded plan needed for the user's request. Use conversation only when no capability invocation is required. For a conversation outcome, provide a concise, natural human-facing conversation_response that does not claim operational evidence or action. Return only the structured object required by the schema."""
+_SYSTEM_INSTRUCTIONS = """You are Jason's bounded conversational planner. Interpret the human message using only the supplied conversation context and the self-describing governed capabilities supplied for this turn. There are no hidden phrase-to-provider, synonym, question-to-field, or fact mappings. Resolve references such as pronouns only when the supplied context supports the resolution. Select capabilities by their runtime descriptions and schemas, not by hard-coded provider assumptions. A capability selection is only a request to the Central Orchestrator; it does not grant authority and does not supply factual evidence. Never invent operational facts, entity identifiers, capabilities, provider results, completed actions, or authority. Do not ask the human to choose or provide an internal provider, registry, log, evidence source, or evidence location when an offered governed read/search capability can inspect the clearly identified resource. Uncertainty about whether a requested fact exists in returned evidence is not material ambiguity. A search capability may explicitly declare selector_required=false and a collection_scope. When the human requests that authorized collection as a whole, absence of a selector is intentional collection scope, not unresolved target ambiguity. Do not ask the human to narrow a collection-wide request merely because the capability also accepts optional selectors. For a clear factual read, select the best matching provider-neutral read/search capability using its resource types, business purpose, operation, and selectors, then let downstream governed evidence interpretation determine whether the requested fact is actually supported. Do not substitute a more specialized evidence collection merely because it might contain the fact when a primary resource read or search structurally matches the human's target. When a primary capability can read or enumerate the requested authorized resource set, execute that primary capability first and let downstream evidence fulfillment determine whether specialized expansion is necessary. The existence of several possible downstream evidence sources is an internal planning concern and must not be converted into a human clarification. Classify every clarification by basis. clarification_basis=human_semantic means the human must choose because the target, requested meaning, authority, action, or risk would materially differ. Every human_semantic clarification must include clarification_choices describing at least two plausible alternatives. Each alternative must be grounded either in an exact substring of the current human message or in a verified conversation entity. Never invent an unmentioned site, scope, resource, target, authority choice, action, or evidence strategy merely to create an alternative. clarification_basis=internal_planning means the human meaning is already sufficient and the remaining uncertainty is only which capability, provider evidence, record type, collection, API, or retrieval strategy Jason should use. Internal-planning uncertainty is Jason's responsibility and must not normally become a human-facing question. If choosing among plausible human meanings would materially change the target, authority, requested action, risk, or meaning, return clarify with clarification_basis=human_semantic and one concise natural clarification question. Otherwise return the complete bounded plan needed for the user's request with clarification_basis=none. If only an internal planning choice remains on the first pass, mark that clarify proposal clarification_basis=internal_planning so the runtime can require you to resolve it internally before anything is shown to the human. Use conversation only when no capability invocation is required. For a conversation outcome, provide a concise, natural human-facing conversation_response that does not claim operational evidence or action. Return only the structured object required by the schema."""
+
+
+_INTERNAL_PLANNING_RETRY_INSTRUCTIONS = """You are Jason's bounded conversational planner performing a second pass because your prior proposal identified only internal planning uncertainty.
+
+The human must not be asked to choose among providers, capabilities, evidence sources, record types, collections, APIs, logs, or retrieval strategies.
+
+Use only the governed capabilities supplied in the payload.
+
+Prefer a primary resource read or search that structurally matches the human's target. If that capability supports the authorized collection requested by the human, use it without manufacturing a selector. Let downstream governed evidence interpretation and evidence-gap expansion determine whether more specialized evidence is later needed.
+
+Return outcome=plan when the human meaning is sufficient to begin governed evidence acquisition.
+
+Return outcome=clarify with clarification_basis=human_semantic only if a separate unresolved human choice would materially change target, meaning, authority, action, or risk. Include at least two clarification_choices, and ground every choice in an exact human-message substring or a verified conversation entity. An alternative that exists only in your own reasoning is not a human ambiguity.
+
+Do not invent facts, identifiers, capability names, authority, or provider results.
+
+Return only the structured object required by the schema."""
 
 
 def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) -> Mapping[str, Any]:
@@ -322,7 +464,7 @@ def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) 
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "outcome", "requirements", "resolved_references", "topic", "clarification_question", "conversation_response"
+            "outcome", "requirements", "resolved_references", "topic", "clarification_question", "clarification_basis", "clarification_choices", "conversation_response"
         ],
         "properties": {
             "outcome": {"type": "string", "enum": ["plan", "clarify", "conversation"]},
@@ -359,9 +501,173 @@ def _plan_schema(capability_ids: tuple[str, ...], entity_refs: tuple[str, ...]) 
             },
             "topic": {"type": ["string", "null"], "maxLength": _MAX_LABEL_CHARS},
             "clarification_question": {"type": ["string", "null"], "maxLength": 800},
+            "clarification_basis": {
+                "type": "string",
+                "enum": [
+                    "none",
+                    "human_semantic",
+                    "internal_planning",
+                ],
+            },
+            "clarification_choices": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "label",
+                        "source_type",
+                        "entity_ref",
+                        "literal",
+                    ],
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "maxLength": 256,
+                        },
+                        "source_type": {
+                            "type": "string",
+                            "enum": [
+                                "literal",
+                                "entity",
+                            ],
+                        },
+                        "entity_ref": {
+                            "type": [
+                                "string",
+                                "null",
+                            ],
+                            "maxLength": 256,
+                        },
+                        "literal": {
+                            "type": [
+                                "string",
+                                "null",
+                            ],
+                            "maxLength": 512,
+                        },
+                    },
+                },
+            },
             "conversation_response": {"type": ["string", "null"], "maxLength": 1600},
         },
     }
+
+
+def _human_clarification_is_grounded(
+    proposal: Mapping[str, Any],
+    *,
+    human_text: str,
+    known_refs: set[str],
+) -> bool:
+    """Require human clarification alternatives to come from human/context evidence.
+
+    A model may not manufacture a new site, scope, target, authority choice,
+    action, resource, or interpretation and then ask the human to choose it.
+    Genuine human ambiguity requires at least two plausible alternatives, and
+    every alternative must be grounded either in an exact substring of the
+    current human message or in an already-verified conversation entity.
+
+    Several interpretations may cite the same literal. That preserves cases
+    where one human phrase is genuinely ambiguous while preventing an invented
+    alternative from becoming a user-facing clarification.
+    """
+
+    raw_choices = proposal.get(
+        "clarification_choices",
+        (),
+    )
+
+    if (
+        not isinstance(
+            raw_choices,
+            Sequence,
+        )
+        or isinstance(
+            raw_choices,
+            (
+                str,
+                bytes,
+            ),
+        )
+        or len(raw_choices) < 2
+        or len(raw_choices) > 8
+    ):
+        return False
+
+    grounded_count=0
+
+    for raw in raw_choices:
+        if not isinstance(
+            raw,
+            Mapping,
+        ):
+            return False
+
+        label=str(
+            raw.get(
+                "label",
+                "",
+            )
+        ).strip()
+
+        source_type=str(
+            raw.get(
+                "source_type",
+                "",
+            )
+        ).strip()
+
+        entity_ref=raw.get(
+            "entity_ref"
+        )
+
+        literal=raw.get(
+            "literal"
+        )
+
+        if not label:
+            return False
+
+        if source_type == "literal":
+            if entity_ref is not None:
+                return False
+
+            if literal is None:
+                return False
+
+            value=str(
+                literal
+            )
+
+            if (
+                not value
+                or len(value) > 512
+                or value not in human_text
+            ):
+                return False
+
+        elif source_type == "entity":
+            if literal is not None:
+                return False
+
+            if entity_ref is None:
+                return False
+
+            ref=str(
+                entity_ref
+            ).strip()
+
+            if ref not in known_refs:
+                return False
+
+        else:
+            return False
+
+        grounded_count += 1
+
+    return grounded_count >= 2
 
 
 def _validate_plan(
@@ -370,10 +676,34 @@ def _validate_plan(
     outcome = str(proposal.get("outcome", "")).strip()
     raw_requirements = proposal.get("requirements", ())
     raw_resolutions = proposal.get("resolved_references", ())
+    raw_clarification_choices = proposal.get(
+        "clarification_choices",
+        (),
+    )
     if not isinstance(raw_requirements, Sequence) or isinstance(raw_requirements, (str, bytes)):
         raise DynamicConversationPlanError("requirements must be an array")
     if not isinstance(raw_resolutions, Sequence) or isinstance(raw_resolutions, (str, bytes)):
         raise DynamicConversationPlanError("resolved_references must be an array")
+    if (
+        not isinstance(
+            raw_clarification_choices,
+            Sequence,
+        )
+        or isinstance(
+            raw_clarification_choices,
+            (
+                str,
+                bytes,
+            ),
+        )
+    ):
+        raise DynamicConversationPlanError(
+            "clarification_choices must be an array"
+        )
+    if len(raw_clarification_choices) > 8:
+        raise DynamicConversationPlanError(
+            "clarification choice count exceeds safety bound"
+        )
 
     requirements: list[DynamicCapabilityRequirement] = []
     for raw in raw_requirements:
@@ -417,10 +747,41 @@ def _validate_plan(
     clarification = (
         None if clarification_value is None else str(clarification_value).strip() or None
     )
+    clarification_basis = str(
+        proposal.get(
+            "clarification_basis",
+            "none",
+        )
+    ).strip()
+
+    if clarification_basis not in {
+        "none",
+        "human_semantic",
+        "internal_planning",
+    }:
+        raise DynamicConversationPlanError(
+            "clarification_basis is invalid"
+        )
+
     response_value = proposal.get("conversation_response")
     conversation_response = (
         None if response_value is None else str(response_value).strip() or None
     )
+
+    # Clarification choices never influence execution authority.
+    # They exist only to prove that a human-facing ambiguity is grounded.
+    if outcome != "clarify" and raw_clarification_choices:
+        raise DynamicConversationPlanError(
+            "only clarify outcome may carry clarification choices"
+        )
+
+    # Normalize clarification basis against the declared outcome.
+    # Internal planning uncertainty is never silently converted into
+    # human semantic ambiguity.
+    if outcome != "clarify":
+        clarification_basis = "none"
+    elif clarification_basis == "none":
+        clarification_basis = "human_semantic"
 
     # Clarification is a stop decision. A structured model can occasionally
     # emit capability requirements while also declaring that clarification is
@@ -454,5 +815,6 @@ def _validate_plan(
         resolved_references=tuple(resolutions),
         topic=topic,
         clarification_question=clarification,
+        clarification_basis=clarification_basis,
         conversation_response=conversation_response,
     )

@@ -10,6 +10,11 @@ WORKDIR /app
 COPY implementation /app/implementation
 COPY config /app/config
 
+# Normalize packaged source permissions for the hardened non-root runtime.
+# Host working-tree modes must never determine whether runtime Python modules
+# or configuration can be read after COPY.
+RUN chmod -R a+rX /app/implementation /app/config
+
 RUN python -m pip install --no-cache-dir \
       /app/implementation \
       /app/implementation/connectors/openclaw \

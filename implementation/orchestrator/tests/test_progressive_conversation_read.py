@@ -102,7 +102,7 @@ class CapturingAnswerer:
         )
 
 
-def capability(name, *, types, role, purpose):
+def capability(name, *, types, role, purpose, selectors="name"):
     return SimpleNamespace(
         capability_name=name,
         lifecycle_status=CapabilityLifecycle.ACTIVE,
@@ -111,7 +111,7 @@ def capability(name, *, types, role, purpose):
             "read_only": "true",
             "resource_types": types,
             "operation": "search",
-            "selector_keys": "name",
+            "selector_keys": selectors,
             "resource_role": role,
         },
         risk_level=SimpleNamespace(value="low"),
@@ -270,11 +270,14 @@ def test_poor_specialized_order_only_adds_latency_and_cannot_become_the_answer()
         DynamicEvidenceSelection(answer_type="unavailable"),
         DynamicEvidenceSelection(
             answer_type="direct",
-            evidence_paths=("/answer",),
+            evidence_paths=("/sources/2/data/answer",),
         ),
     )
     # The backend deliberately chooses the wrong specialized resource first.
-    gaps = FakeClient({"capability_name": "endpoint.software.search"})
+    gaps = FakeClient(
+        {"capability_name": "endpoint.software.search"},
+        {"capability_name": "endpoint.history.search"},
+    )
     answerer = CapturingAnswerer()
     service = engine(
         catalog=catalog,
@@ -354,7 +357,10 @@ def test_exhausted_evidence_becomes_bounded_limitation_not_invented_support():
         DynamicEvidenceSelection(answer_type="unavailable"),
         DynamicEvidenceSelection(answer_type="unavailable"),
     )
-    gaps = FakeClient({"capability_name": "endpoint.software.search"})
+    gaps = FakeClient(
+        {"capability_name": "endpoint.software.search"},
+        {"capability_name": "endpoint.history.search"},
+    )
     answerer = CapturingAnswerer()
     service = engine(
         catalog=catalog,
@@ -411,3 +417,325 @@ def test_internal_capability_and_provider_identifiers_are_kept_for_answer_guardi
         "endpoint.device.search",
         "provider-one",
     }
+
+
+
+def test_specialized_read_is_shared_across_needs_for_same_target():
+    catalog = registry_catalog()
+
+    evidence = FakeEvidenceReasoner(
+        DynamicEvidenceSelection(
+            answer_type="unavailable"
+        ),
+        DynamicEvidenceSelection(
+            answer_type="direct",
+            evidence_paths=(
+                "/sources/1/data/first",
+            ),
+        ),
+        DynamicEvidenceSelection(
+            answer_type="direct",
+            evidence_paths=(
+                "/sources/1/data/second",
+            ),
+        ),
+    )
+
+    gaps = FakeClient(
+        {
+            "capability_name":
+                "endpoint.history.search"
+        }
+    )
+
+    answerer = CapturingAnswerer()
+
+    service = engine(
+        catalog=catalog,
+        evidence_reasoner=evidence,
+        gap_client=gaps,
+        answerer=answerer,
+    )
+
+    executor = FakeExecutor(
+        {
+            "endpoint.device.search": {
+                "unrelated": "base"
+            },
+            "endpoint.history.search": {
+                "first": "One",
+                "second": "Two",
+            },
+        }
+    )
+
+    service.fulfill(
+        question=(
+            "Give me both requested values "
+            "for NODE-77."
+        ),
+        resolution=resolution(
+            catalog,
+            need("first requested value"),
+            need("second requested value"),
+        ),
+        executor=executor,
+    )
+
+    assert [
+        item.capability_name
+        for item in executor.calls
+    ] == [
+        "endpoint.device.search",
+        "endpoint.history.search",
+    ]
+
+    request = answerer.requests[0]
+
+    assert {
+        item.value
+        for item in request.supports
+    } == {
+        "One",
+        "Two",
+    }
+
+
+
+def durable_selector_catalog(*, specialized_selectors):
+    return RegistryBackedFulfillmentCatalog(
+        registry=FakeRegistry(
+            (
+                capability(
+                    "endpoint.device.search",
+                    types="endpoint",
+                    role="primary",
+                    purpose="general endpoint read",
+                    selectors="hostname",
+                ),
+                capability(
+                    "endpoint.history.search",
+                    types="endpoint_history,endpoint",
+                    role="specialized",
+                    purpose="specialized endpoint read",
+                    selectors=specialized_selectors,
+                ),
+            )
+        )
+    )
+
+
+def selector_need():
+    return InformationNeed(
+        target=InformationTarget(
+            kind="endpoint",
+            source="literal",
+            reference="NODE-77",
+            selector="hostname",
+        ),
+        need="arbitrary requested endpoint information",
+        authority="observe",
+    )
+
+
+def test_incompatible_literal_selector_rebinds_specialized_read_to_verified_resource_id():
+    catalog = durable_selector_catalog(
+        specialized_selectors="resource_id"
+    )
+
+    evidence = FakeEvidenceReasoner(
+        DynamicEvidenceSelection(
+            answer_type="unavailable"
+        ),
+        DynamicEvidenceSelection(
+            answer_type="direct",
+            evidence_paths=(
+                "/sources/1/data/answer",
+            ),
+        ),
+    )
+
+    answerer = CapturingAnswerer()
+
+    service = engine(
+        catalog=catalog,
+        evidence_reasoner=evidence,
+        gap_client=FakeClient(
+            {"capability_name": "endpoint.history.search"}
+        ),
+        answerer=answerer,
+    )
+
+    executor = FakeExecutor(
+        {
+            "endpoint.device.search": {
+                "resolved_resource_id": "durable-77",
+                "resource_matches": [
+                    {
+                        "resource_id": "durable-77",
+                        "hostname": "NODE-77",
+                    }
+                ],
+                "provider_data": {
+                    "unrelated": "base",
+                },
+            },
+            "endpoint.history.search": {
+                "answer": "Recovered Value",
+            },
+        }
+    )
+
+    service.fulfill(
+        question="What is the requested endpoint information?",
+        resolution=resolution(
+            catalog,
+            selector_need(),
+        ),
+        executor=executor,
+    )
+
+    assert [
+        item.capability_name
+        for item in executor.calls
+    ] == [
+        "endpoint.device.search",
+        "endpoint.history.search",
+    ]
+
+    specialized_intent = executor.calls[1]
+
+    assert specialized_intent.arguments[
+        "resource_id"
+    ] == "durable-77"
+
+    assert (
+        "hostname"
+        not in specialized_intent.arguments
+    )
+
+    assert (
+        answerer.requests[0]
+        .supports[0]
+        .value
+        == "Recovered Value"
+    )
+
+
+def test_incompatible_selector_without_verified_resource_is_skipped_safely():
+    catalog = durable_selector_catalog(
+        specialized_selectors="resource_id"
+    )
+
+    evidence = FakeEvidenceReasoner(
+        DynamicEvidenceSelection(
+            answer_type="unavailable"
+        ),
+    )
+
+    answerer = CapturingAnswerer()
+
+    service = engine(
+        catalog=catalog,
+        evidence_reasoner=evidence,
+        gap_client=FakeClient(
+            {"capability_name": "endpoint.history.search"}
+        ),
+        answerer=answerer,
+    )
+
+    executor = FakeExecutor(
+        {
+            "endpoint.device.search": {
+                "unrelated": "base",
+            },
+            "endpoint.history.search": {
+                "answer": "must not execute",
+            },
+        }
+    )
+
+    service.fulfill(
+        question="What is the requested endpoint information?",
+        resolution=resolution(
+            catalog,
+            selector_need(),
+        ),
+        executor=executor,
+    )
+
+    assert [
+        item.capability_name
+        for item in executor.calls
+    ] == [
+        "endpoint.device.search",
+    ]
+
+    assert (
+        answerer.requests[0].supports
+        == ()
+    )
+
+    assert len(
+        answerer.requests[0].limitations
+    ) == 1
+
+
+def test_specialized_read_preserves_original_selector_when_supported():
+    catalog = durable_selector_catalog(
+        specialized_selectors="hostname"
+    )
+
+    evidence = FakeEvidenceReasoner(
+        DynamicEvidenceSelection(
+            answer_type="unavailable"
+        ),
+        DynamicEvidenceSelection(
+            answer_type="direct",
+            evidence_paths=(
+                "/sources/1/data/answer",
+            ),
+        ),
+    )
+
+    answerer = CapturingAnswerer()
+
+    service = engine(
+        catalog=catalog,
+        evidence_reasoner=evidence,
+        gap_client=FakeClient(
+            {"capability_name": "endpoint.history.search"}
+        ),
+        answerer=answerer,
+    )
+
+    executor = FakeExecutor(
+        {
+            "endpoint.device.search": {
+                "unrelated": "base",
+            },
+            "endpoint.history.search": {
+                "answer": "Recovered Value",
+            },
+        }
+    )
+
+    service.fulfill(
+        question="What is the requested endpoint information?",
+        resolution=resolution(
+            catalog,
+            selector_need(),
+        ),
+        executor=executor,
+    )
+
+    specialized_intent = executor.calls[1]
+
+    assert specialized_intent.arguments[
+        "hostname"
+    ] == "NODE-77"
+
+    assert (
+        "resource_id"
+        not in specialized_intent.arguments
+    )

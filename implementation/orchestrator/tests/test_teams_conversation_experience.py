@@ -24,7 +24,10 @@ from orchestrator.dynamic_conversation_kernel import (
 )
 from orchestrator.information_fulfillment import FulfillmentCapability, FulfillmentStep
 from orchestrator.information_need_intent import PlannedInformationNeed
-from orchestrator.teams_conversation_experience import TeamsConversationExperienceFlow
+from orchestrator.teams_conversation_experience import (
+    TeamsConversationExperienceFlow,
+    TeamsConversationExperienceResult,
+)
 from orchestrator.teams_conversation_flow import (
     BoundConversationPrincipal,
     ConversationIntent,
@@ -469,3 +472,37 @@ def test_request_factory_cannot_change_bound_principal_before_orchestrator():
 
     assert orchestrator.requests == []
     assert transport.sends == []
+
+
+def test_successful_governed_read_keeps_turn_succeeded_when_exploratory_read_failed():
+    result = TeamsConversationExperienceResult(
+        response_text="The requested governed fact is Value.",
+        transport_message_id="return-path:test",
+        correlation_id="corr-test",
+        orchestrations=(
+            OrchestrationResult(
+                execution_id="exec-success",
+                correlation_id="corr-test",
+                capability_name="endpoint.device.search",
+                status=OrchestrationStatus.SUCCEEDED,
+                stage=ExecutionStage.COMPLETED,
+                reason_codes=("completed",),
+                resolution=None,
+            ),
+            OrchestrationResult(
+                execution_id="exec-failed-probe",
+                correlation_id="corr-test",
+                capability_name="endpoint.audit.read",
+                status=OrchestrationStatus.FAILED,
+                stage=ExecutionStage.FAILED,
+                reason_codes=("failed_probe",),
+                resolution=None,
+            ),
+        ),
+    )
+
+    assert result.orchestration_status == "succeeded"
+    assert [item.status for item in result.orchestrations] == [
+        OrchestrationStatus.SUCCEEDED,
+        OrchestrationStatus.FAILED,
+    ]

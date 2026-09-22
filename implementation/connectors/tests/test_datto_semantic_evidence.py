@@ -8,7 +8,22 @@ def test_datto_display_version_is_not_treated_as_windows_release_evidence():
         "displayVersion": "4.4.11965.11965",
     })
     semantic = adapted.get("semantic_evidence", {})
-    assert "operating_system" not in semantic
+
+    # operatingSystem is now legitimately projected as the canonical
+    # "operating system" fact. displayVersion must still not become
+    # governed Windows release/display-version evidence.
+    operating_system = semantic.get(
+        "operating_system",
+        {},
+    )
+
+    assert (
+        operating_system.get("operating_system")
+        == "Microsoft Windows 11 Pro 10.0.26200"
+    )
+
+    assert "operating_system_display_version" not in operating_system
+    assert "display_version" not in operating_system
     assert adapted["operatingSystem"] == "Microsoft Windows 11 Pro 10.0.26200"
     assert adapted["displayVersion"] == "4.4.11965.11965"
 
@@ -51,3 +66,18 @@ def test_semantic_adapter_rejects_conflicting_duplicate_processor_aliases():
 
     semantic = adapted.get("semantic_evidence", {})
     assert "processor" not in semantic
+
+
+def test_operating_system_is_projected_as_governed_semantic_evidence():
+    adapted = adapt_datto_device_semantic_evidence(
+        {
+            "operatingSystem": "Microsoft Windows 11 Pro 10.0.26200",
+        }
+    )
+
+    assert (
+        adapted["semantic_evidence"]
+        ["operating_system"]
+        ["operating_system"]
+        == "Microsoft Windows 11 Pro 10.0.26200"
+    )

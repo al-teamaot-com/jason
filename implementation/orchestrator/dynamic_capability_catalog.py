@@ -70,6 +70,18 @@ def _offer(capability: CapabilityDefinition) -> OfferedConversationCapability:
     if selector_keys:
         description_parts.append("Accepted selector keys: " + ", ".join(selector_keys) + ".")
 
+    selector_required = structural.get("selector_required")
+    if selector_required is False:
+        description_parts.append(
+            "A selector is optional when the human requests the full authorized collection."
+        )
+
+    collection_scope = structural.get("collection_scope")
+    if collection_scope:
+        description_parts.append(
+            f"Collection scope: {collection_scope}."
+        )
+
     return OfferedConversationCapability(
         capability_id=capability.capability_name,
         description=" ".join(part for part in description_parts if part),
@@ -79,6 +91,16 @@ def _offer(capability: CapabilityDefinition) -> OfferedConversationCapability:
         input_schema={
             "$ref": capability.input_schema_reference,
             **({"selector_keys": list(selector_keys)} if selector_keys else {}),
+            **(
+                {"selector_required": selector_required}
+                if selector_required is not None
+                else {}
+            ),
+            **(
+                {"collection_scope": collection_scope}
+                if collection_scope
+                else {}
+            ),
         },
         output_schema={"$ref": capability.output_schema_reference},
         permission_mode=permission_mode,
@@ -107,6 +129,21 @@ def _structural_contract(metadata: Mapping[str, str]) -> Mapping[str, object]:
     resource_types = _csv(metadata.get("resource_types", ""))
     selector_keys = _csv(metadata.get("selector_keys", ""))
     operation = str(metadata.get("operation", "")).strip()
+
+    selector_required_raw = str(
+        metadata.get("selector_required", "")
+    ).strip().casefold()
+
+    selector_required = None
+    if selector_required_raw == "true":
+        selector_required = True
+    elif selector_required_raw == "false":
+        selector_required = False
+
+    collection_scope = str(
+        metadata.get("collection_scope", "")
+    ).strip()
+
     result: dict[str, object] = {}
     if resource_types:
         result["resource_types"] = resource_types
@@ -114,6 +151,10 @@ def _structural_contract(metadata: Mapping[str, str]) -> Mapping[str, object]:
         result["selector_keys"] = selector_keys
     if operation:
         result["operation"] = operation
+    if selector_required is not None:
+        result["selector_required"] = selector_required
+    if collection_scope:
+        result["collection_scope"] = collection_scope
     return result
 
 

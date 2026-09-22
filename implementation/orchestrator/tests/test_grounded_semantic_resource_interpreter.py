@@ -408,3 +408,57 @@ def test_hosted_semantic_contract_failure_still_fails_closed():
         )
 
     assert reasoner.calls == []
+
+
+def test_named_endpoint_restart_question_uses_governed_semantic_term_without_reasoner():
+    class ExplodingReasoner:
+        def infer(self, **kwargs):
+            raise AssertionError(
+                "explicit governed semantic term must not invoke reasoning"
+            )
+
+    candidate = GroundedSemanticResourceInquiryInterpreter(
+        contracts=(
+            {
+                "capability_name": "endpoint.device.search",
+                "resource_types": ("endpoint",),
+                "selector_keys": (
+                    "hostname",
+                    "name",
+                    "resource_id",
+                ),
+                "fact_hints": (
+                    "reboot required",
+                ),
+                "canonical_facts": (
+                    "reboot required",
+                ),
+                "selector_required": True,
+            },
+        ),
+        fallback=ForbiddenFallback(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+        semantic_fact_reasoner=ExplodingReasoner(),
+        fact_resolver=DEFAULT_SEMANTIC_FACT_RESOLVER,
+    )
+
+    inquiry = candidate.interpret(
+        text="Does AOT-50282 need to be restarted?",
+        principal=principal(),
+    )
+
+    assert inquiry is not None
+    assert inquiry.resource_type == "endpoint"
+    assert inquiry.resource_selector == {
+        "hostname": "AOT-50282",
+    }
+    assert inquiry.requested_facts == (
+        "reboot required",
+    )
+    assert inquiry.evidence_contexts == {
+        "reboot required": (
+            "endpoint",
+            "operating_system",
+            "maintenance_state",
+        ),
+    }

@@ -100,7 +100,7 @@ class DynamicEvidenceReasoner:
                     "evidence_paths": {
                         "type": "array",
                         "maxItems": _MAX_SELECTED_PATHS,
-                        "items": {"type": "string", "enum": list(selectable)},
+                        "items": {"type": "string"},
                     },
                 },
             },

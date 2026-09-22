@@ -118,6 +118,16 @@ def build_trusted_semantic_registry() -> SemanticKnowledgeRegistry:
             review_interval_days=180,
             retirement_criteria="retire only when superseded by a governed canonical OS-build concept",
         ),
+        SemanticConcept(
+            concept_id="endpoint.reboot_required",
+            canonical_label="reboot required",
+            kind="fact",
+            expected_shape="boolean",
+            evidence_contexts=("endpoint", "operating_system", "maintenance_state"),
+            provenance=provenance,
+            review_interval_days=90,
+            retirement_criteria="retire only when superseded by governed endpoint maintenance-state semantics",
+        ),
     )
 
     for concept in concepts:
@@ -165,6 +175,24 @@ def build_trusted_semantic_registry() -> SemanticKnowledgeRegistry:
             "operating system build number",
             "windows build number",
         ),
+        "endpoint.reboot_required": (
+            "reboot required",
+            "restart required",
+            "pending reboot",
+            "pending restart",
+            "reboot needed",
+            "restart needed",
+            "needs reboot",
+            "needs restart",
+            "need reboot",
+            "need restart",
+            "need to reboot",
+            "need to restart",
+            "need to be rebooted",
+            "need to be restarted",
+            "needs to be rebooted",
+            "needs to be restarted",
+        ),
     }
 
     for concept_id, aliases in terms.items():
@@ -183,6 +211,7 @@ def build_trusted_semantic_registry() -> SemanticKnowledgeRegistry:
         "processor.logical_count": ("logicalProcessors", "logicalProcessorCount", "processorCount", "threadCount"),
         "memory.total": ("totalMemory", "physicalMemory", "totalPhysicalMemory", "ram"),
         "operating_system.build": ("build", "buildNumber", "osBuild", "osBuildNumber"),
+        "endpoint.reboot_required": ("rebootRequired",),
     }
 
     for concept_id, provider_fields in datto_fields.items():

@@ -169,3 +169,155 @@ def test_sanitized_secret_value_cannot_become_conversation_support():
 
     assert raw == {"password": "DoNotExposeThis"}
     assert reasoner.calls[0][1]["password"] == "[REDACTED]"
+
+
+def test_governed_boolean_semantic_evidence_bypasses_language_selector():
+    from orchestrator.conversation_evidence_support import (
+        ConversationEvidenceSupportExtractor,
+    )
+    from orchestrator.conversation_kernel import (
+        InformationNeed,
+        InformationTarget,
+    )
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+
+    class ExplodingReasoner:
+        def select(self, *, question, sanitized_data):
+            raise AssertionError(
+                "trusted canonical boolean evidence must not require language selection"
+            )
+
+    extractor = ConversationEvidenceSupportExtractor(
+        reasoner=ExplodingReasoner(),
+    )
+
+    need = InformationNeed(
+        target=InformationTarget(
+            kind="endpoint",
+            source="literal",
+            reference="AOT-50282",
+        ),
+        need="restart required",
+        authority="observe",
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-reboot",
+        correlation_id="corr-reboot",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "provider_data": {
+                    "semantic_evidence": {
+                        "endpoint": {
+                            "operating_system": {
+                                "maintenance_state": {
+                                    "reboot_required": True,
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    assessment = extractor.assess(
+        need=need,
+        result=result,
+        support_prefix="semantic",
+    )
+
+    assert assessment.status == "supported"
+    assert len(assessment.supports) == 1
+    assert assessment.supports[0].value is True
+    assert (
+        assessment.selected_paths[0]
+        == "/provider_data/semantic_evidence/"
+        "endpoint/operating_system/maintenance_state/reboot_required"
+    )
+
+
+def test_canonical_requested_fact_drives_semantic_evidence_without_reinterpreting_need():
+    from orchestrator.conversation_evidence_support import (
+        ConversationEvidenceSupportExtractor,
+    )
+    from orchestrator.conversation_kernel import (
+        InformationNeed,
+        InformationTarget,
+    )
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+
+    class ExplodingReasoner:
+        def select(self, *, question, sanitized_data):
+            raise AssertionError(
+                "governed canonical semantic evidence must bypass language selection"
+            )
+
+    extractor = ConversationEvidenceSupportExtractor(
+        reasoner=ExplodingReasoner(),
+    )
+
+    need = InformationNeed(
+        target=InformationTarget(
+            kind="endpoint",
+            source="verified_entity",
+            reference="AOT-50282",
+            entity_ref="endpoint:AOT-50282",
+        ),
+        need="what operating system does it have",
+        authority="observe",
+    )
+
+    result = OrchestrationResult(
+        execution_id="exec-os",
+        correlation_id="corr-os",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "provider_data": {
+                    "semantic_evidence": {
+                        "operating_system": {
+                            "operating_system":
+                                "Microsoft Windows 11 Pro 10.0.26200"
+                        }
+                    }
+                }
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    assessment = extractor.assess(
+        need=need,
+        requested_facts=("operating system",),
+        result=result,
+        support_prefix="canonical",
+    )
+
+    assert assessment.status == "supported"
+    assert (
+        assessment.supports[0].value
+        == "Microsoft Windows 11 Pro 10.0.26200"
+    )

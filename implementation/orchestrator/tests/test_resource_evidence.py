@@ -1375,3 +1375,268 @@ def test_non_collection_fact_collapses_equivalent_duplicate_pointers():
         "/alerts/0/description",
         "/alerts/1/description",
     )
+
+
+def test_semantic_context_container_matching_fact_name_is_not_duplicate_evidence():
+    class NoEvidenceReasoner:
+        def locate(self, *, requested_facts, data):
+            raise AssertionError(
+                "canonical semantic leaf should resolve deterministically"
+            )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoEvidenceReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "semantic_evidence": {
+                    "operating_system": {
+                        "operating_system":
+                            "Microsoft Windows 11 Pro 10.0.26200",
+                    }
+                }
+            }
+        }
+    )
+
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("operating system",),
+        evidence_contexts={
+            "operating system": (
+                "operating_system",
+            ),
+        },
+    )
+
+    assert len(facts) == 1
+    assert (
+        facts[0].value
+        == "Microsoft Windows 11 Pro 10.0.26200"
+    )
+    assert (
+        facts[0].json_pointer
+        == "/provider_data/semantic_evidence/"
+        "operating_system/operating_system"
+    )
+
+
+def test_identical_direct_and_semantic_scalar_evidence_is_corroboration():
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+    from orchestrator.resource_evidence import (
+        GovernedResourceEvidenceInterpreter,
+    )
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    class NoReasoner:
+        def locate(self, *, requested_facts, data):
+            return ()
+
+    result = OrchestrationResult(
+        execution_id="exec-reboot-corroboration",
+        correlation_id="corr-reboot-corroboration",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "provider_data": {
+                    "rebootRequired": True,
+                    "semantic_evidence": {
+                        "endpoint": {
+                            "operating_system": {
+                                "maintenance_state": {
+                                    "reboot_required": True,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    facts = interpreter.interpret(
+        result=result,
+        requested_facts=("reboot required",),
+        evidence_contexts={
+            "reboot required": (
+                "endpoint",
+                "operating_system",
+                "maintenance_state",
+            ),
+        },
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value is True
+
+    pointers = (
+        facts[0].json_pointers
+        or (facts[0].json_pointer,)
+    )
+
+    assert (
+        "/provider_data/rebootRequired"
+        in pointers
+    )
+
+    assert (
+        "/provider_data/semantic_evidence/"
+        "endpoint/operating_system/"
+        "maintenance_state/reboot_required"
+        in pointers
+    )
+
+
+def test_conflicting_direct_and_semantic_scalar_evidence_fails_closed():
+    from orchestrator.contracts import (
+        ExecutionStage,
+        OrchestrationResult,
+        OrchestrationStatus,
+    )
+    from orchestrator.resource_evidence import (
+        GovernedResourceEvidenceInterpreter,
+    )
+    from orchestrator.canonical_fact_vocabulary import (
+        DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    class NoReasoner:
+        def locate(self, *, requested_facts, data):
+            return ()
+
+    result = OrchestrationResult(
+        execution_id="exec-reboot-conflict",
+        correlation_id="corr-reboot-conflict",
+        capability_name="endpoint.device.search",
+        status=OrchestrationStatus.SUCCEEDED,
+        stage=ExecutionStage.COMPLETED,
+        reason_codes=("capability_completed",),
+        resolution=None,
+        output={
+            "provider": "datto_rmm",
+            "data": {
+                "provider_data": {
+                    "rebootRequired": False,
+                    "semantic_evidence": {
+                        "endpoint": {
+                            "operating_system": {
+                                "maintenance_state": {
+                                    "reboot_required": True,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        attempts=1,
+        provider_id="datto_rmm",
+    )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    try:
+        interpreter.interpret(
+            result=result,
+            requested_facts=("reboot required",),
+            evidence_contexts={
+                "reboot required": (
+                    "endpoint",
+                    "operating_system",
+                    "maintenance_state",
+                ),
+            },
+        )
+    except LookupError:
+        pass
+    else:
+        raise AssertionError(
+            "conflicting duplicate evidence must fail closed"
+        )
+
+
+def test_semantic_context_accepts_identical_direct_corroboration():
+    class NoEvidenceReasoner:
+        def locate(self, *, requested_facts, data):
+            raise AssertionError(
+                "deterministic corroborated evidence "
+                "must not require language reasoning"
+            )
+
+    interpreter = GovernedResourceEvidenceInterpreter(
+        reasoner=NoEvidenceReasoner(),
+        fact_vocabulary=DEFAULT_CANONICAL_FACT_VOCABULARY,
+    )
+
+    orchestration_result = result(
+        data={
+            "provider_data": {
+                "rebootRequired": True,
+                "semantic_evidence": {
+                    "endpoint": {
+                        "operating_system": {
+                            "maintenance_state": {
+                                "reboot_required": True,
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    )
+
+    facts = interpreter.interpret(
+        result=orchestration_result,
+        requested_facts=("reboot required",),
+        evidence_contexts={
+            "reboot required": (
+                "endpoint",
+                "operating_system",
+                "maintenance_state",
+            ),
+        },
+    )
+
+    assert len(facts) == 1
+    assert facts[0].value is True
+
+    pointers = (
+        facts[0].json_pointers
+        or (facts[0].json_pointer,)
+    )
+
+    assert (
+        "/provider_data/semantic_evidence/"
+        "endpoint/operating_system/"
+        "maintenance_state/reboot_required"
+        in pointers
+    )
+
+    assert (
+        "/provider_data/rebootRequired"
+        in pointers
+    )

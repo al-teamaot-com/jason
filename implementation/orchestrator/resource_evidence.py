@@ -98,13 +98,20 @@ class GovernedResourceEvidenceInterpreter:
                 )
             )
             pointers = fact.json_pointers or (fact.json_pointer,)
-            if contexts and any(
-                not _evidence_matches_contexts(
+            if contexts and not any(
+                _evidence_matches_contexts(
                     pointer=pointer,
                     contexts=contexts,
                 )
                 for pointer in pointers
             ):
+                # Deterministically equivalent duplicate evidence is
+                # corroboration. Require at least one authoritative provenance
+                # path to establish the requested semantic context; a second
+                # structurally authoritative path carrying the exact same
+                # typed value does not invalidate that context. Conflicting
+                # duplicate values have already failed closed while direct
+                # facts are constructed.
                 continue
             if self.fact_vocabulary is not None:
                 definition = self.fact_vocabulary.resolve(fact.requested_fact)
@@ -384,9 +391,25 @@ def _deterministic_direct_facts(
                         for raw_key, child in value.items():
                             key = str(raw_key)
                             child_pointer = f"{pointer}/{_escape_json_pointer_segment(key)}"
-                            if _normalized_field_name(key) == wanted:
-                                candidates.append((child_pointer, child))
-                            walk_semantic(child, child_pointer)
+                            # Mapping nodes beneath semantic_evidence are
+                            # semantic context containers. A context name may
+                            # legitimately equal the canonical fact name
+                            # (for example operating_system/operating_system).
+                            # Only actual provider-derived values are candidate
+                            # evidence; never count a context container itself
+                            # as a second canonical assertion.
+                            if (
+                                _normalized_field_name(key) == wanted
+                                and not isinstance(child, Mapping)
+                            ):
+                                candidates.append(
+                                    (child_pointer, child)
+                                )
+
+                            walk_semantic(
+                                child,
+                                child_pointer,
+                            )
 
                     walk_semantic(
                         semantic_root,
@@ -400,14 +423,38 @@ def _deterministic_direct_facts(
                 pointer = f"{prefix}/{_escape_json_pointer_segment(key)}"
                 candidates.append((pointer, value))
 
-        if len(candidates) != 1:
+        if not candidates:
             continue
+
         pointer, value = candidates[0]
+
+        if len(candidates) > 1:
+            # The same provider-derived fact may legitimately appear both in a
+            # canonical semantic projection and in another structurally
+            # authoritative direct location. Identical observations are
+            # corroboration, not ambiguity. Any difference in runtime type or
+            # value remains fail-closed.
+            conflicting = any(
+                type(candidate_value) is not type(value)
+                or candidate_value != value
+                for _, candidate_value in candidates[1:]
+            )
+            if conflicting:
+                continue
+
+            pointers = tuple(
+                candidate_pointer
+                for candidate_pointer, _ in candidates
+            )
+        else:
+            pointers = ()
+
         verified.append(
             VerifiedResourceFact(
                 requested_fact=requested_fact,
                 value=value,
                 json_pointer=pointer,
+                json_pointers=pointers,
             )
         )
     return tuple(verified)

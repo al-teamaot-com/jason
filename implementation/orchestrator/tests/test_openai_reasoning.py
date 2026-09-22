@@ -222,3 +222,137 @@ def test_openai_structured_client_records_bound_dynamic_turn_usage(tmp_path):
     assert entries[0].tokens.total_tokens == 50
     assert entries[0].context.workflow_id == "teams-conversation-1"
     assert entries[0].context.request_id == "teams-message-1"
+
+
+def test_openai_structured_client_retries_once_when_response_is_incomplete_for_output_budget():
+    transport = Transport(
+        {
+            "status": "incomplete",
+            "incomplete_details": {
+                "reason": "max_tokens",
+            },
+            "output_text": '{"status":',
+        }
+    )
+
+    responses = iter(
+        (
+            {
+                "status": "incomplete",
+                "incomplete_details": {
+                    "reason": "max_tokens",
+                },
+                "output_text": '{"status":',
+            },
+            {
+                "status": "completed",
+                "incomplete_details": None,
+                "output_text": '{"status":"ok"}',
+            },
+        )
+    )
+
+    def request(**kwargs):
+        transport.calls.append(kwargs)
+        return next(responses)
+
+    transport.request = request
+
+    client = OpenAIStructuredJsonClient(
+        api_key="test-key",
+        transport=transport,
+        model="quality-model",
+    )
+
+    result = client.complete(
+        system="system",
+        user="user",
+        schema={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                }
+            },
+            "required": [
+                "status",
+            ],
+        },
+        max_output_tokens=80,
+    )
+
+    assert result == {
+        "status": "ok",
+    }
+
+    assert len(transport.calls) == 2
+    assert (
+        transport.calls[0]["json"]["max_output_tokens"]
+        == 80
+    )
+    assert (
+        transport.calls[1]["json"]["max_output_tokens"]
+        == 256
+    )
+
+
+def test_openai_structured_client_does_not_retry_completed_malformed_json():
+    transport = Transport(
+        {
+            "status": "completed",
+            "incomplete_details": None,
+            "output_text": "not-json",
+        }
+    )
+
+    client = OpenAIStructuredJsonClient(
+        api_key="test-key",
+        transport=transport,
+        model="quality-model",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="not valid JSON",
+    ):
+        client.complete(
+            system="system",
+            user="user",
+            schema={
+                "type": "object",
+            },
+        )
+
+    assert len(transport.calls) == 1
+
+
+def test_openai_structured_client_fails_closed_on_non_budget_incomplete_response():
+    transport = Transport(
+        {
+            "status": "incomplete",
+            "incomplete_details": {
+                "reason": "content_filter",
+            },
+            "output_text": '{"status":',
+        }
+    )
+
+    client = OpenAIStructuredJsonClient(
+        api_key="test-key",
+        transport=transport,
+        model="quality-model",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="incomplete: content_filter",
+    ):
+        client.complete(
+            system="system",
+            user="user",
+            schema={
+                "type": "object",
+            },
+        )
+
+    assert len(transport.calls) == 1

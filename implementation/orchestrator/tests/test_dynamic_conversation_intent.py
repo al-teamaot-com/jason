@@ -300,3 +300,199 @@ def test_non_plan_outcomes_never_create_orchestration_intents():
         plan=plan,
         capabilities=(endpoint_capability(),),
     ) is None
+
+
+def test_capability_can_require_verified_entity_for_selector():
+    capability = OfferedConversationCapability(
+        capability_id="generic.resource.read",
+        description=(
+            "Read one governed resource by verified identity."
+        ),
+        input_schema={
+            "selector_keys": [
+                "resource_id",
+            ],
+            "selector_source_policy": {
+                "resource_id": (
+                    "verified_entity_only"
+                ),
+            },
+        },
+        permission_mode="observe",
+        risk="low",
+    )
+
+    client = FakeStructuredClient(
+        [
+            {
+                "bindings": [
+                    {
+                        "argument": "resource_id",
+                        "source_type": "literal",
+                        "source_id": None,
+                        "literal": "AOT-50107",
+                    }
+                ]
+            }
+        ]
+    )
+
+    plan = DynamicConversationPlan(
+        outcome="plan",
+        requirements=(
+            DynamicCapabilityRequirement(
+                capability_id=(
+                    "generic.resource.read"
+                ),
+                purpose="Read the resource.",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        DynamicIntentBindingError,
+        match="requires a verified entity source",
+    ):
+        GroundedConversationIntentBuilder(
+            client=client
+        ).build(
+            text="Read AOT-50107",
+            context=context(),
+            plan=plan,
+            capabilities=(
+                capability,
+            ),
+        )
+
+
+def test_verified_entity_can_satisfy_verified_only_selector():
+    capability = OfferedConversationCapability(
+        capability_id="generic.resource.read",
+        description=(
+            "Read one governed resource by verified identity."
+        ),
+        input_schema={
+            "selector_keys": [
+                "resource_id",
+            ],
+            "selector_source_policy": {
+                "resource_id": (
+                    "verified_entity_only"
+                ),
+            },
+        },
+        permission_mode="observe",
+        risk="low",
+    )
+
+    client = FakeStructuredClient(
+        [
+            {
+                "bindings": [
+                    {
+                        "argument": "resource_id",
+                        "source_type": "entity",
+                        "source_id": (
+                            "device-1:canonical_id"
+                        ),
+                        "literal": None,
+                    }
+                ]
+            }
+        ]
+    )
+
+    plan = DynamicConversationPlan(
+        outcome="plan",
+        requirements=(
+            DynamicCapabilityRequirement(
+                capability_id=(
+                    "generic.resource.read"
+                ),
+                purpose="Read the resource.",
+                entity_refs=(
+                    "device-1",
+                ),
+            ),
+        ),
+    )
+
+    intent = GroundedConversationIntentBuilder(
+        client=client
+    ).build(
+        text="Read that device",
+        context=context(),
+        plan=plan,
+        capabilities=(
+            capability,
+        ),
+    )
+
+    assert isinstance(
+        intent,
+        ConversationIntent,
+    )
+
+    assert (
+        intent.arguments[
+            "resource_id"
+        ]
+        == "AOT-50107"
+    )
+
+
+def test_default_selector_policy_still_allows_exact_literal():
+    capability = OfferedConversationCapability(
+        capability_id="generic.resource.search",
+        description="Search resources.",
+        input_schema={
+            "selector_keys": [
+                "name",
+            ],
+        },
+        permission_mode="observe",
+        risk="low",
+    )
+
+    client = FakeStructuredClient(
+        [
+            {
+                "bindings": [
+                    {
+                        "argument": "name",
+                        "source_type": "literal",
+                        "source_id": None,
+                        "literal": "NODE-77",
+                    }
+                ]
+            }
+        ]
+    )
+
+    plan = DynamicConversationPlan(
+        outcome="plan",
+        requirements=(
+            DynamicCapabilityRequirement(
+                capability_id=(
+                    "generic.resource.search"
+                ),
+                purpose="Search the resource.",
+            ),
+        ),
+    )
+
+    intent = GroundedConversationIntentBuilder(
+        client=client
+    ).build(
+        text="Find NODE-77",
+        context=context(),
+        plan=plan,
+        capabilities=(
+            capability,
+        ),
+    )
+
+    assert (
+        intent.arguments["name"]
+        == "NODE-77"
+    )

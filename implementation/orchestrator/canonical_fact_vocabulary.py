@@ -501,6 +501,27 @@ DEFAULT_CANONICAL_FACT_VOCABULARY = CanonicalFactVocabulary(
             ),
         ),
         CanonicalFactDefinition(
+            canonical_fact="reboot required",
+            aliases=(
+                "reboot required",
+                "requires reboot",
+                "requires a reboot",
+                "restart required",
+                "requires restart",
+                "pending reboot",
+                "pending restart",
+                "reboot pending",
+                "restart pending",
+            ),
+            expected_shape="boolean",
+            evidence_hints=(
+                "reboot required",
+                "restart required",
+                "pending reboot",
+                "pending restart",
+            ),
+        ),
+        CanonicalFactDefinition(
             canonical_fact="free disk space",
             aliases=(
                 "free disk space",
