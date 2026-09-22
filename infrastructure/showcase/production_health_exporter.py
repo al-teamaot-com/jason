@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 HOST = os.environ.get("JASON_PRODUCTION_HEALTH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("JASON_PRODUCTION_HEALTH_PORT", "9467"))
@@ -55,11 +56,6 @@ EXPECTED_DATTO_DEVICE_CLASS = os.environ.get(
     "JASON_EXPECTED_DATTO_DEVICE_CLASS",
     "Desktop",
 )
-EXPECTED_DATTO_SITE_VARIABLE_PROFILE = os.environ.get(
-    "JASON_EXPECTED_DATTO_SITE_VARIABLE_PROFILE",
-    "owner-site-variable-v1",
-)
-
 EXPECTED_MCP_NETWORK = "jason-core"
 EXPECTED_MCP_HOST_IP = "10.87.246.157"
 EXPECTED_MCP_HOST_PORT = "8765"
@@ -74,7 +70,6 @@ WATCHED_ENV_KEYS = (
     "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID",
     "JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS",
-    "JASON_DATTO_SITE_VARIABLE_MCP_PROFILE",
 )
 
 REQUIRED_SECRET_MOUNTS = frozenset(
@@ -97,8 +92,47 @@ REQUIRED_SECRET_MOUNTS = frozenset(
         "/run/jason-secrets/openbao/aws-ses/secret_id",
         "/run/jason-secrets/openbao/datto-rmm-execution/role_id",
         "/run/jason-secrets/openbao/datto-rmm-execution/secret_id",
+        "/run/jason-secrets/openbao/kyocera-kfs/role_id",
+        "/run/jason-secrets/openbao/kyocera-kfs/secret_id",
     }
 )
+
+PRODUCTION_CONTRACT_PATH = Path(
+    os.environ.get(
+        "JASON_PRODUCTION_HEALTH_CONTRACT_PATH",
+        "/var/lib/jason/production-health/contract.json",
+    )
+)
+
+
+def _load_production_contract() -> dict[str, object]:
+    try:
+        payload = json.loads(PRODUCTION_CONTRACT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+_PRODUCTION_CONTRACT = _load_production_contract()
+
+
+def _contract_value(key: str, fallback: str) -> str:
+    value = _PRODUCTION_CONTRACT.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return fallback
+
+
+EXPECTED_MCP_IMAGE = _contract_value("mcp_image", EXPECTED_MCP_IMAGE)
+EXPECTED_SOURCE_REVISION = _contract_value("mcp_source_revision", EXPECTED_SOURCE_REVISION)
+EXPECTED_PROVIDER_PROFILE = _contract_value("provider_profile", EXPECTED_PROVIDER_PROFILE)
+EXPECTED_AUTOTASK_MODE = _contract_value("autotask_requester_mode", EXPECTED_AUTOTASK_MODE)
+EXPECTED_DATTO_EXECUTION_PROFILE = _contract_value("datto_execution_profile", EXPECTED_DATTO_EXECUTION_PROFILE)
+EXPECTED_DATTO_ALLOWLIST = _contract_value("datto_execution_allowlist", EXPECTED_DATTO_ALLOWLIST)
+EXPECTED_DATTO_COMPONENTS_JSON = _contract_value("datto_components_json", EXPECTED_DATTO_COMPONENTS_JSON)
+EXPECTED_DATTO_DEVICE_UID = _contract_value("datto_device_uid", EXPECTED_DATTO_DEVICE_UID)
+EXPECTED_DATTO_DEVICE_CLASS = _contract_value("datto_device_class", EXPECTED_DATTO_DEVICE_CLASS)
+
 
 _CACHE: dict[str, tuple[float, int]] = {}
 
@@ -277,11 +311,6 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         EXPECTED_DATTO_EXECUTION_PROFILE
         in env["JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE"]
     )
-    datto_site_variable_profile_ok = (
-        EXPECTED_DATTO_SITE_VARIABLE_PROFILE
-        in env["JASON_DATTO_SITE_VARIABLE_MCP_PROFILE"]
-    )
-
     datto_scope_ok = all(
         expected in env[key]
         for key, expected in (
@@ -300,7 +329,6 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         "autotask_requester_mode": 1 if EXPECTED_AUTOTASK_MODE in env["JASON_AUTOTASK_REQUESTER_AUTH_MODE"] else 0,
         "datto_execution_profile": 1 if datto_profile_ok else 0,
         "datto_execution_scope": 1 if datto_scope_ok else 0,
-        "datto_site_variable_profile": 1 if datto_site_variable_profile_ok else 0,
         "network": 1 if network_ok else 0,
         "port_binding": 1 if port_ok else 0,
         "restart_policy": 1 if restart_ok else 0,
@@ -343,12 +371,16 @@ def render_metrics() -> str:
         and mount_contract == 1
     ) else 0
 
+    destinations = {
+        str(item.get("Destination") or "")
+        for item in mcp.get("Mounts", [])
+        if isinstance(item, dict) and item.get("Type") == "bind"
+    }
     site_variable_contract = 1 if (
         checks.get("running") == 1
-        and checks.get("image") == 1
-        and checks.get("source_revision") == 1
-        and checks.get("datto_site_variable_profile") == 1
-        and mount_contract == 1
+        and checks.get("datto_execution_profile") == 1
+        and "/run/jason-secrets/openbao/datto-rmm-execution/role_id" in destinations
+        and "/run/jason-secrets/openbao/datto-rmm-execution/secret_id" in destinations
     ) else 0
 
     lines = [
@@ -413,9 +445,12 @@ def render_metrics() -> str:
             + _metric_escape(EXPECTED_PROVIDER_PROFILE)
             + '"} 1'
         ),
+        "# HELP jason_production_health_contract_loaded Whether a durable production health desired-state contract was loaded.",
+        "# TYPE jason_production_health_contract_loaded gauge",
+        f"jason_production_health_contract_loaded {1 if _PRODUCTION_CONTRACT else 0}",
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="4"} 1',
+        'jason_production_health_exporter_build_info{version="5"} 1',
     ])
 
     return "\n".join(lines) + "\n"
