@@ -103,7 +103,7 @@ A public IP that blocks ICMP may still be healthy; combine ICMP with other avail
 
 ## 6. State Model
 
-`identified -> scope_correlating -> live_validating -> path_localizing -> classified -> verifying -> complete`
+`identified -> scope_correlating -> live_validating -> path_localizing -> waiting_recheck -> classified -> verifying -> complete`
 
 Additional states:
 - `waiting_for_endpoint`
@@ -351,17 +351,45 @@ All modifying or disruptive remediation remains separately governed.
 
 ## 11. Periodic Rechecks
 
-For an active outage:
-- default recheck: every 5 minutes for critical server/site events;
-- recheck current endpoint state, public reachability where supported, and newly resolved/open alerts;
-- suppress duplicate scheduled checks for the same site incident.
+For an active server/site offline event, Jason must perform **10-minute online-status rechecks** while Jason owns the diagnostic workflow.
 
-Stop when:
-- classification and stable recovery are verified;
+**Default cadence:** every 10 minutes.
+
+At each recheck Jason must:
+1. read the current DRMM online/offline state for every affected server/device;
+2. record current `last_seen` and whether a new offline/online alert transition occurred;
+3. where the device reports online, prove current reachability with a fresh safe read-only check when practical rather than relying only on DRMM's green state;
+4. correlate any new site-level alerts that appeared since the prior check;
+5. update the authoritative Autotask ticket with an internal note containing timestamp, device states, any changed evidence, and the next decision;
+6. preserve the same playbook instance and suppress duplicate scheduled checks/jobs.
+
+Suggested note title:
+`Jason - Offline Localization - 10 Minute Recheck`
+
+**Default bounded handoff threshold:** three consecutive 10-minute rechecks (approximately 30 minutes) with the affected critical server/site still materially offline or not functionally verifiable.
+
+After the third still-offline recheck:
+- transition to `state = escalated`;
+- move the controlling Autotask ticket to **Help Desk I** (queue ID `29682833`);
+- leave the ticket in an appropriate open/non-complete status;
+- add an internal escalation/handoff note summarizing the timeline, affected assets, all localization evidence, recheck results, current classification, and recommended technician next step;
+- stop Jason's autonomous recheck loop unless a technician explicitly returns ownership to Jason.
+
+If the affected systems return online before the handoff threshold:
+- transition to `state = verifying`;
+- run the required functional verification in Section 17;
+- if verification passes, complete the ticket;
+- if verification fails, continue diagnosis or hand off to Help Desk I rather than completing.
+
+Stop rechecks when:
+- verified recovery is complete and the ticket is completed;
+- the Help Desk I handoff threshold is reached;
 - a human takes ownership;
-- ticket closes;
-- escalation occurs;
-- maintenance explains the event.
+- the ticket closes for another authoritative reason;
+- a documented maintenance/change explains the event;
+- another terminal escalation condition applies.
+
+The 10-minute cadence requires durable scheduled-work support so it survives conversation/session boundaries. Until that capability is fully implemented, the playbook must not falsely claim unattended rechecks occurred.
 
 ---
 
@@ -395,6 +423,42 @@ Document the missing dependency and add/associate a TODO/support item when it ma
 ---
 
 ## 14. Documentation Requirements
+
+### Ticket lifecycle and ownership
+
+For a ticket-controlled server/site offline incident:
+
+1. **Start / active investigation**
+   - keep the ticket open;
+   - when the Jason queue lifecycle capability is active, place Jason-owned work in the Jason queue while Jason is actively diagnosing;
+   - add an initial internal note documenting that the offline-localization playbook started.
+
+2. **During investigation**
+   - add a meaningful internal note for each diagnostic phase;
+   - while waiting on recovery, add the required **10-minute recheck note** at each scheduled check;
+   - do not create repetitive duplicate notes outside the scheduled recheck cadence unless evidence materially changes.
+
+3. **Verified recovery**
+   - verify every originally affected critical server is online and functioning properly per Section 17;
+   - confirm correlated DRMM alerts are resolved;
+   - add the final resolution note;
+   - set the ticket to **Complete** and read back the final ticket state.
+
+4. **Still offline / not functionally recovered**
+   - after three consecutive 10-minute still-offline/not-verifiable rechecks by default, or earlier if evidence requires human intervention, move the ticket to **Help Desk I** (queue ID `29682833`);
+   - use an appropriate open/non-complete status;
+   - document the handoff and current evidence;
+   - stop the Jason-owned recheck loop after successful handoff unless ownership is explicitly returned.
+
+5. **Multiple correlated tickets**
+   - correlate duplicate monitoring tickets into one incident view;
+   - do not lose the individual alert/ticket evidence;
+   - avoid multiple independent Jason loops for the same site outage;
+   - use one controlling ticket/workflow where AOT lifecycle policy supports it, and cross-reference related tickets.
+
+Ticket completion is permitted only after authoritative readback confirms the recovered/healthy condition. A DRMM alert auto-closing by itself is not sufficient.
+
+### Documentation content
 
 Document:
 - incident correlation window and affected devices;
@@ -455,15 +519,21 @@ Escalation note must include timeline, affected devices, reboot evidence, live v
 ## 17. Verification
 
 After recovery:
-1. prove at least one affected server is freshly reachable;
-2. prove representative workstation(s) are freshly reachable where applicable;
-3. verify gateway reachability;
-4. verify Internet by IP;
-5. verify DNS/name resolution;
-6. verify external public-IP state where meaningful;
-7. confirm affected alerts resolved;
-8. observe a stability window appropriate to severity, default 15 minutes for repeated site events;
-9. confirm no new correlated offline alerts appeared during the stability window.
+1. prove **every originally affected critical server** is back online in DRMM;
+2. prove at least one affected server is freshly reachable with a current governed read-only execution;
+3. prove representative workstation(s) are freshly reachable where applicable;
+4. verify gateway reachability;
+5. verify Internet by IP;
+6. verify DNS/name resolution and TCP 443 connectivity;
+7. verify external public-IP state where meaningful;
+8. confirm affected DRMM alerts resolved;
+9. confirm core server functionality relevant to the incident is healthy enough to return to service; do not equate "DRMM online" with functional recovery;
+10. observe a stability window appropriate to severity, default 15 minutes for repeated site events;
+11. confirm no new correlated offline alerts appeared during the stability window.
+
+If all verification passes, Jason may complete the controlling Autotask ticket and add a final resolution note.
+
+If any affected critical server remains offline, cannot be freshly validated, or fails functional verification after the bounded 10-minute recheck window, Jason must **not** complete the ticket. Move it to Help Desk I (queue ID `29682833`) in an open status with a full handoff note.
 
 Auto-resolve alone is not sufficient verification.
 
@@ -474,11 +544,16 @@ Auto-resolve alone is not sufficient verification.
 Complete only when:
 1. affected objects are identified;
 2. incident scope/timeline is documented;
-3. current connectivity is independently verified;
-4. a reasonable localization classification is established or a human accepts an unresolved vendor/network disposition;
-5. required remediation belongs to an approved downstream workflow or was separately approved and verified;
-6. no new correlated alert occurs during the defined stability window;
-7. final resolution note exists.
+3. **all originally affected critical servers are online again**;
+4. current connectivity is independently verified with fresh evidence;
+5. core functionality is verified sufficiently to show the systems are actually functioning properly;
+6. a reasonable localization classification is established or a human accepts an unresolved vendor/network disposition;
+7. required remediation belongs to an approved downstream workflow or was separately approved and verified;
+8. no new correlated alert occurs during the defined stability window;
+9. final resolution note exists;
+10. the Autotask ticket is read back as Complete after the completion action.
+
+If these conditions are not met because the server/site remains offline after the bounded recheck window, the terminal disposition is **Help Desk I handoff**, not completion.
 
 ---
 
@@ -515,7 +590,7 @@ Current/narrow capabilities:
 - `automation.component.search/execute`
 - `automation.job.read`
 - `automation.job.output.read`
-- persisted/scheduled recheck support when available.
+- persisted/scheduled recheck support capable of durable 10-minute rechecks across session/service boundaries (`TODO-OPS-001`).
 
 Desired capability gaps:
 - governed DRMM-first SNMP/network-device telemetry exposing interface/port/uplink/error/WAN/power fields and bounded approved OID reads where necessary (`TODO-NET-002`);
@@ -569,7 +644,10 @@ Acceptance must prove:
 7. bounded classification;
 8. ticket documentation;
 9. correct handling of unavailable firewall/switch telemetry;
-10. no disruptive action.
+10. no disruptive action;
+11. 10-minute recheck note behavior;
+12. verified-recovery completion behavior;
+13. persistent-offline Help Desk I handoff behavior.
 
 ---
 
