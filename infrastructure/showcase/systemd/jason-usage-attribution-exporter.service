@@ -15,6 +15,11 @@ Environment=JASON_ATTRIBUTION_MAX_RECENT_EVENTS=250
 Environment=JASON_MODEL_USAGE_DB=/var/lib/jason/openclaw/model-usage.sqlite3
 Environment=JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/openclaw/orchestration-events.sqlite3
 Environment=JASON_TEAMS_IDENTITY_BINDINGS_DB=/var/lib/jason/openclaw/teams-identity-bindings.sqlite3
+Environment=JASON_OPENAI_USAGE_ROLE_ID_PATH=%d/openai_usage_role_id
+Environment=JASON_OPENAI_USAGE_SECRET_ID_PATH=%d/openai_usage_secret_id
+Environment=JASON_OPENAI_USAGE_CACHE_SECONDS=300
+LoadCredential=openai_usage_role_id:/opt/jason/bootstrap/secrets/openbao/openai-usage-reporting-approle/role-id
+LoadCredential=openai_usage_secret_id:/opt/jason/bootstrap/secrets/openbao/openai-usage-reporting-approle/secret-id
 ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/usage_attribution_exporter_runtime.py
 Restart=on-failure
 RestartSec=5
