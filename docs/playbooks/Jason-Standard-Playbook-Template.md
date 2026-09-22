@@ -141,3 +141,30 @@ Define a controlled real-world or safe test target. Prove trigger detection, obj
 ## 22. Section Goal Closure
 
 When acceptance succeeds, document implementation, capability additions, test results, limitations, Grafana/Project Jason Section Goal status, and any unresolved follow-up TODOs.
+
+
+## 23. Autonomous Execution Eligibility
+
+Every playbook must explicitly declare whether it is eligible for autonomous execution. Absence of an explicit approval means the playbook is **not** autonomous.
+
+Required metadata:
+
+- `autonomous_allowed: true|false`
+- approval owner and approval date
+- approved playbook/version or immutable content fingerprint
+- allowed trigger/scope
+- allowed actions/capabilities
+- actions that still require per-run approval
+- revocation/expiry condition where applicable
+
+Rules:
+
+1. Global autonomy never grants new operational authority by itself.
+2. Jason may autonomously execute only a playbook/version that has been explicitly approved for autonomous use and whose required capabilities remain active.
+3. Material playbook changes invalidate prior autonomous approval until the changed version is reviewed.
+4. Revocation must take effect before the next autonomous execution.
+5. Ambiguous scope, missing evidence, unavailable dependency, denied capability, or stale approval causes fail-closed behavior.
+6. User-disruptive actions remain approval-bound even when the surrounding playbook is autonomous. This includes reboot/shutdown, forced logoff, terminating user applications/processes, disconnecting network/VPN, restarting services that interrupt active work, and equivalent disruption.
+7. Autonomous approval never bypasses Central Orchestrator authority, client isolation, audit, provider verification, post-action verification, retry limits, or playbook-specific safety gates.
+
+Acceptance testing for an autonomous playbook must prove both paths: an approved autonomous execution succeeds within scope, and an unapproved/revoked/version-mismatched execution is blocked.
