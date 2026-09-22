@@ -131,10 +131,11 @@ rollback() {
     fi
   done
 
-  if [[ -n "${OLD_PROJECT:-}" && -f "${OLD_COMPOSE:-}" && -f "${OLD_ENV:-}" ]]; then
+  if [[ -n "${OLD_PROJECT:-}" && -f "${OLD_COMPOSE:-}" ]]; then
+    GRAFANA_ADMIN_USER="$GRAFANA_ADMIN_USER" \
+    GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
     docker compose \
       -p "$OLD_PROJECT" \
-      --env-file "$OLD_ENV" \
       -f "$OLD_COMPOSE" \
       up -d --no-deps prometheus grafana >/dev/null 2>&1 || true
   fi
@@ -194,10 +195,14 @@ precheck() {
     return 1
   }
   OLD_ENV="$OLD_SHOWCASE/.env"
-  [[ -f "$OLD_ENV" ]] || {
-    say "PRECHECK=FAIL existing showcase .env unavailable"
+  GRAFANA_ADMIN_USER="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' jason-grafana 2>/dev/null | sed -n 's/^GF_SECURITY_ADMIN_USER=//p' | head -n 1)"
+  GRAFANA_ADMIN_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' jason-grafana 2>/dev/null | sed -n 's/^GF_SECURITY_ADMIN_PASSWORD=//p' | head -n 1)"
+  GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-admin}"
+  [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || {
+    say "PRECHECK=FAIL Grafana admin credential unavailable from running container"
     return 1
   }
+  export GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD
 
   mkdir -p "$BACKUP_DIR" || return 1
   chmod 700 "$BACKUP_DIR" || return 1
@@ -241,9 +246,10 @@ deploy() {
   say "EXPORTERS=PASS"
 
   say "========== REBIND PROMETHEUS/GRAFANA TO VERSIONED DASHBOARD SOURCE =========="
+  GRAFANA_ADMIN_USER="$GRAFANA_ADMIN_USER" \
+  GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
   docker compose \
     -p "$OLD_PROJECT" \
-    --env-file "$OLD_ENV" \
     -f "$NEW_COMPOSE" \
     up -d --no-deps prometheus grafana || return 1
 
@@ -334,23 +340,16 @@ PY
   [[ $? -eq 0 ]] || return 1
 
   say "========== GRAFANA PROVISIONING ACCEPTANCE =========="
-  python3 - "$OLD_ENV" <<'PY'
+  python3 - <<'PY'
 import base64
 import json
-import sys
-from pathlib import Path
+import os
 from urllib.request import Request, urlopen
 
-values = {}
-for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    if not raw or raw.lstrip().startswith("#") or "=" not in raw:
-        continue
-    key, value = raw.split("=", 1)
-    values[key.strip()] = value.strip()
-user = values.get("GRAFANA_ADMIN_USER", "admin")
-password = values.get("GRAFANA_ADMIN_PASSWORD", "")
+user = os.environ.get("GRAFANA_ADMIN_USER", "admin")
+password = os.environ.get("GRAFANA_ADMIN_PASSWORD", "")
 if not password:
-    raise SystemExit("Grafana credential unavailable in existing .env")
+    raise SystemExit("Grafana credential unavailable from deployment environment")
 auth = base64.b64encode(f"{user}:{password}".encode()).decode()
 for uid in ("jason-command-center", "jason-usage-attribution"):
     request = Request(
