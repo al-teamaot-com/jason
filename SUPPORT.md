@@ -258,3 +258,39 @@ Items remain on this list until the underlying issue is fixed and the expected b
 - **Last observed:** 2026-09-18 when the user explicitly asked Jason to complete `T20260918.0005`.
 
 ---
+
+
+### SUPPORT-CONN-006 — Autotask ticket company/contact reassignment unavailable through governed update
+
+- **Priority:** P1
+- **Status:** Open
+- **Owner:** Jason Platform / Autotask Connector
+- **Issue:** Jason can read an Autotask ticket and determine that it is associated with the wrong company/contact, but the governed `service.ticket.update` path does not currently permit or successfully apply company/contact/location reassignment.
+- **Impact:** Jason cannot safely correct misassociated tickets before client-scoped troubleshooting or automation. This can block deterministic tenant isolation, configuration-item association, documentation lookup, billing context, and autonomous workflow execution.
+- **Production example:** `T20260922.0017` (Network Device Discovery Gromelski And Associates Inc.).
+- **Observed behavior:**
+  - Incoming IT Glue notification created the ticket under Autotask company `Catchall` (company ID `1162`) because sender `notifications@itglue.com` is a Catchall contact.
+  - Ticket body explicitly identifies the actual client as `Gromelski And Associates Inc.`.
+  - DRMM site `Gromelski And Associates Inc.` independently maps to Autotask company ID `597`.
+  - Governed update was attempted with `companyID=597`, `contactID=null`, and `companyLocationID=null`.
+  - `service.ticket.update` returned `CAPABILITY_INVOCATION_FAILED`.
+  - Authoritative readback confirmed `companyID=1162`, `companyLocationID=990`, and `contactID=30683770` remained unchanged.
+- **Expected behavior:** A narrowly governed ticket-reassociation operation should allow Jason to move one exact ticket to an explicitly resolved Autotask company, clear or replace incompatible contact/location references, and verify the exact fields through post-mutation readback.
+- **Safety requirements:**
+  1. Resolve the destination company from authoritative evidence; never infer from fuzzy text alone.
+  2. Require deterministic cross-provider evidence such as DRMM site -> Autotask company mapping, or another approved mapping source.
+  3. Validate/clear incompatible contact and location references.
+  4. Make exactly one bounded provider mutation attempt.
+  5. Verify company/contact/location after mutation.
+  6. Fail closed when client identity is ambiguous.
+- **Verification required for closure:**
+  1. On a controlled misassociated ticket, reassign to the correct company through Jason.
+  2. Clear or replace the old Catchall contact/location as required.
+  3. Read the ticket back and verify exact company/contact/location values.
+  4. Confirm no unrelated ticket fields changed.
+  5. Repeat using an IT Glue notification-derived ticket.
+  6. Preserve `direct_provider_access=false`.
+- **Operational workaround:** Document the authoritative client in an internal note and do not perform client-scoped writes based on the incorrect ticket company until reassignment is available.
+- **Last observed:** 2026-09-22 on `T20260922.0017`.
+
+---
