@@ -330,6 +330,31 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Implement when the playbook-candidate lifecycle begins producing durable production records, and before autonomous-playbook coverage expands enough that status ambiguity becomes an operational risk.
 
+### TODO-SEC-001 — "Dangerous Users" scheduled risk-pattern detection
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add a governed scheduled process that periodically reviews available security and operational evidence for users showing repeated high-risk behavior patterns. The operator-facing concept may be called **Dangerous Users**, with findings expressed as evidence-based statements such as: **"Tara has had repeated malicious downloads."**
+- **Why it matters:** Repeated risky events involving the same user can be easy to miss when each alert, ticket, download, phishing event, or endpoint incident is handled independently. Correlating those events over time can identify users who may need targeted security review, additional training, tighter controls, or investigation before another incident occurs.
+- **Why not now:** This depends on durable scheduled work, reliable identity correlation across providers, normalized security-event evidence, thresholds, false-positive controls, and a governed human-review workflow.
+- **Prerequisites:** TODO-OPS-001 persistent scheduled work; canonical user identity correlation; read access to relevant sources such as Datto EDR/AV, RMM, SaaS/security alerts, email-security events, Autotask tickets, and other approved evidence sources; event normalization; configurable lookback periods and thresholds; deduplication; privacy/access controls; audit history; human review and disposition workflow.
+- **Expected behavior:**
+  1. Run on a governed recurring schedule across all in-scope clients or an explicitly selected client population.
+  2. Correlate security events to a canonical user identity across devices and provider systems where evidence supports the mapping.
+  3. Detect repeated patterns such as malicious downloads, repeated malware/EDR detections, repeated phishing interaction, repeated unsafe attachment/link activity, repeated credential/security incidents, or other approved high-risk event classes.
+  4. Produce concise evidence-backed findings, for example: **"Tara has had repeated malicious downloads: 4 confirmed detections across 3 dates in the last 60 days."**
+  5. Include the supporting event dates, devices, source systems, ticket/alert references, and relevant disposition so a technician can verify the finding.
+  6. Use configurable thresholds, lookback windows, severity weighting, and decay/aging rules rather than treating a single event as a permanent user classification.
+  7. Distinguish confirmed malicious/high-risk events from blocked attempts, false positives, administrative tests, or otherwise explained activity.
+  8. Avoid inferring intent or automatically declaring a person malicious. "Dangerous User" is an operational review category triggered by documented behavior evidence, not a character judgment.
+  9. Route new or materially worsened findings for technician/security review and optionally create or update an Autotask ticket through governed workflows.
+  10. Do not automatically impose disciplinary, employment, access-removal, account-disablement, or other user-disruptive actions solely from this classification. Any such action remains subject to the appropriate playbook and human governance.
+  11. Record the detection rule/version, evidence set, generated finding, reviewer disposition, false-positive/explanation reason, and subsequent outcome for audit and future rule tuning.
+  12. Add a Grafana view or panel showing current flagged users, evidence count, severity/trend, last event, review status, aging, and cleared/closed findings while respecting client and role-based access boundaries.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement after TODO-OPS-001 provides durable recurring execution and enough normalized security evidence sources are available to produce reliable cross-event correlation.
+
 ---
 
 ## New-item template
