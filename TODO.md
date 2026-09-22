@@ -654,6 +654,19 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Address before treating Windows licensing monitor tickets as autonomously actionable or building a licensing-remediation playbook.
 
+### TODO-NET-001 — Governed external and infrastructure telemetry for offline localization
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add governed network-observability capabilities so Jason can localize server/site offline events using authoritative evidence outside the affected endpoint.
+- **Why it matters:** DRMM endpoint alerts alone cannot distinguish endpoint failure from LAN, switch/uplink, firewall, WAN/ISP, DNS, power, or RMM-provider-path failure.
+- **Required capabilities:** AOT-controlled external ICMP/TCP/HTTPS/DNS probes; firewall/router WAN state and event-log reads; switch port/uplink/STP/error reads; UPS/PDU and iLO/iDRAC event reads where available; site topology/dependency mapping; timestamped packet-loss/latency evidence.
+- **First production case:** Riggins Company, 2026-09-22. Four servers produced synchronized offline waves, a workstation independently logged DNS resolution failures at matching times, and current external probing of public IP `184.180.34.123` is healthy. Current Jason capabilities can prove endpoint/DRMM state and SNMP audit data but cannot yet read SonicWall WAN-event history or switch/UPS history directly.
+- **Governance:** Read-only first; no firewall/switch/power changes. External probes must be bounded and must not become intrusive scanning.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement before claiming the Server / Site Offline Localization playbook can fully determine network-layer root cause autonomously.
+
 ## New-item template
 
 Copy this section when adding an idea:
