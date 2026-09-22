@@ -1,5 +1,11 @@
 # Jason Playbook: Server / Site Offline Localization
 
+**Playbook ID:** `server_site_offline_localization`  
+**Version:** `1.0.0`  
+**Status:** Implemented — diagnostic/localization logic ready; production acceptance evidence recorded  
+**Autonomy posture:** Read-only diagnostics may be eligible when the underlying capability is standing-safe. No modifying or disruptive remediation is granted by this playbook.  
+**Primary evidence strategy:** DRMM/Kaseya-first, including DRMM SNMP/network-device evidence before direct-vendor integrations.
+
 ## 1. Section Goal
 
 **Goal:**  
@@ -511,6 +517,28 @@ Observed correlated events:
 - No affected server reboot aligned with those events.
 - DRMM server monitoring cadence is more frequent than workstation monitoring, so lack of workstation offline alerts is not exclusionary evidence.
 - Workstation `2023i5PC8` recorded `The remote name could not be resolved: 'endoflife.date'` near two correlated server-offline windows, providing independent DNS/Internet symptom evidence.
+
+### Acceptance evidence already demonstrated
+
+Riggins production evidence collected on 2026-09-22:
+- synchronized offline waves were correlated across `MAINSRV`, `SAGESRV`, `ADSRV`, and `VMHOST`;
+- physical host versus VM roles were identified;
+- affected systems showed no reboot aligned with the incident;
+- fresh governed DRMM executions completed on `ADSRV` and workstation `2023i5PC8`, proving current reachability rather than trusting DRMM green state alone;
+- workstation `2023i5PC8` independently logged DNS-resolution failures near two outage windows;
+- an AOT-controlled external probe to public IP `184.180.34.123` returned 4/4 replies, 0% packet loss, approximately 16 ms average latency after recovery;
+- DRMM SNMP audit identified the site edge as a SonicWall TZ 500 at `192.168.1.1` and showed uptime exceeding one day, ruling out a firewall reboot during the event;
+- evidence was documented in Autotask internal note `30506232`;
+- no disruptive action was taken.
+
+Current bounded classification for the acceptance case: `transient_site_connectivity`, with WAN/DNS/edge path more likely than server, guest, hypervisor, or firewall power failure. Exact root-cause localization remains limited by missing historical interface/port/WAN telemetry.
+
+### Remaining acceptance / implementation gaps
+
+- Live gateway, Internet-by-IP, and Internet-by-name testing from an in-site endpoint must be executed when exact per-run authority is available for the required ad-hoc diagnostic.
+- Deeper DRMM SNMP/interface/port telemetry is tracked in `TODO-NET-002`.
+- External/infrastructure telemetry beyond current capabilities is tracked in `TODO-NET-001`.
+- Direct vendor integrations are fallback paths only when DRMM cannot provide the required evidence.
 
 Acceptance must prove:
 1. trigger/site correlation;
