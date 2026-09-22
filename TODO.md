@@ -604,6 +604,42 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before claiming the Windows VulScan playbook can authoritatively decide whether a specific patch is approved for a device.
 
 
+
+### TODO-CONN-009 — Autotask Form Template read/apply support for canned ticket notes
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add governed Autotask support for searching, reading, and applying **Form Templates** so Jason can use centrally maintained canned text for ticket notes instead of duplicating standard wording inside playbooks.
+- **Why it matters:** AOT already uses standardized note language and repeatable service workflows. Keeping reusable note content in Autotask provides one operational source of truth, lets technicians maintain wording without code changes, and reduces drift between Jason playbooks and human technician workflows.
+- **Expected behavior:**
+  1. Search available Form Templates by exact or bounded name/category.
+  2. Read the template's current text/content and metadata.
+  3. Resolve supported variables/placeholders without exposing secrets.
+  4. Apply a selected Form Template to an exact Autotask ticket as a note.
+  5. Allow Jason to append case-specific evidence/results beneath the canned text when the playbook requires it.
+  6. Preserve note type, publish/visibility setting, and any template-defined metadata where Autotask supports it.
+  7. Prevent ambiguous template selection; fail closed if multiple templates match.
+  8. Record which template/version/name was used in the audit trail.
+  9. Verify the resulting ticket note through authoritative readback.
+  10. Expose read-only template discovery separately from note-creation/apply authority.
+- **Playbook use cases:**
+  - VulScan remediation/recheck notes;
+  - AV/EDR diagnostics and resolution notes;
+  - onboarding/offboarding communications;
+  - customer update templates;
+  - waiting-for-customer / waiting-for-device notes;
+  - standardized escalation and completion notes.
+- **Governance requirements:**
+  - preserve Autotask permissions and ticket visibility;
+  - no arbitrary cross-client template substitution;
+  - template application must not silently overwrite existing ticket data;
+  - playbook logic remains authoritative for decisions; Form Templates provide reusable text, not execution authority.
+- **Prerequisites:** Autotask API support for Form Templates or an equivalent supported provider endpoint; governed template search/read capability; governed apply/create-note action; readback verification.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before embedding additional reusable ticket-note language directly into Jason playbooks.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
