@@ -60,7 +60,7 @@
       "type": "stat",
       "title": "Firing Alerts",
       "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
-      "targets": [{"expr": "count(ALERTS{alertstate=\"firing\"})", "refId": "A"}],
+      "targets": [{"expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)", "refId": "A"}],
       "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
       "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
@@ -76,13 +76,23 @@
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
     },
     {
+      "type": "stat",
+      "title": "Pending Alerts",
+      "description": "Prometheus alerts still inside their hold period. Pending is distinct from firing and should be investigated if it persists.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "count(ALERTS{alertstate=\"pending\"}) or vector(0)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
       "type": "text",
-      "title": "Governed Production Proof — through 2026-09-21",
+      "title": "Governed Production Proof — through 2026-09-22",
       "description": "Accepted production proofs and standing administrative policy. Live authority is still evaluated per request.",
       "gridPos": {"h": 7, "w": 24, "x": 0, "y": 8},
       "options": {
         "mode": "markdown",
-        "content": "### Governed execution and ticket-work lifecycle are production accepted\n\n**Datto component execution**\n- Standing-safe diagnostics can execute on verified managed endpoints.\n- An authenticated technician's direct instruction is approval for that exact per-run component/endpoint execution; Jason may warn but does not require a redundant second approval.\n- Live Datto component-name resolution is authoritative over stale caller component UID hints.\n- `direct_provider_access=false` and disruptive-action approval remain intact.\n\n**Autotask ticket work start**\n- When Jason begins substantive work, it claims the exact ticket to **Jason**, **In Progress**, **Remote Support**.\n- Existing device association is preserved. Missing device association is written only after exact DRMM UID ↔ active Autotask configuration correlation; hostname-only/ambiguous matches fail closed.\n- Ticket Type / Issue Type / Sub-Issue Type are preserved unless exact supported classification labels are available; labels are resolved from live Autotask metadata.\n- Controlled acceptance: `T20260914.0026` / ID `140439`; one bounded mutation, readback verified.\n\n**Known transport issue**\n- `SUPPORT-CONN-002` is open: intermittent client-side MCP `UNAVAILABLE / Connection failed` reproduced while `jason-mcp-pilot` remained healthy and immediate retries succeeded. Process health alone does not prove end-to-end MCP transport health.\n\n**DRMM site variables**\n- Site-variable create/update reuses the existing governed Datto RMM execution identity.\n- Variable values are never exposed in Grafana or mutation results; delete remains disabled.\n- The site-variable action surface is separately activated and governed from component execution.\n- Onboarding convergence creates only approved Standard variable names, leaves values blank, and requires readback verification."
+        "content": "### 2026-09-22 production health and KFS acceptance\n\n- Production MCP is `jason-mcp:kfs-prod-c3e0728`; source revision environment and provenance labels are aligned to commit `c3e0728eb6f434d2ba033ae6b3eb72e3616ef95d`.\n- OpenBao credential bind mounts are read-only and the credential-mount contract is healthy.\n- Production Health reads the durable secret-safe desired-state contract at `/var/lib/jason/production-health/contract.json`.\n- The Governed Actions dashboard distinguishes **pending** from **firing** alerts and renders zero firing alerts as `0` rather than no-data.\n- Datto governed execution and DRMM site-variable readiness remain bounded by the existing governed execution identity and approval policy.\n\n### Governed execution and ticket-work lifecycle are production accepted\n\n**Datto component execution**\n- Standing-safe diagnostics can execute on verified managed endpoints.\n- An authenticated technician's direct instruction is approval for that exact per-run component/endpoint execution; Jason may warn but does not require a redundant second approval.\n- Live Datto component-name resolution is authoritative over stale caller component UID hints.\n- `direct_provider_access=false` and disruptive-action approval remain intact.\n\n**Autotask ticket work start**\n- When Jason begins substantive work, it claims the exact ticket to **Jason**, **In Progress**, **Remote Support**.\n- Existing device association is preserved. Missing device association is written only after exact DRMM UID ↔ active Autotask configuration correlation; hostname-only/ambiguous matches fail closed.\n- Ticket Type / Issue Type / Sub-Issue Type are preserved unless exact supported classification labels are available; labels are resolved from live Autotask metadata.\n- Controlled acceptance: `T20260914.0026` / ID `140439`; one bounded mutation, readback verified.\n\n**Known transport issue**\n- `SUPPORT-CONN-002` is open: intermittent client-side MCP `UNAVAILABLE / Connection failed` reproduced while `jason-mcp-pilot` remained healthy and immediate retries succeeded. Process health alone does not prove end-to-end MCP transport health.\n\n**DRMM site variables**\n- Site-variable create/update reuses the existing governed Datto RMM execution identity.\n- Variable values are never exposed in Grafana or mutation results; delete remains disabled.\n- The site-variable action surface is separately activated and governed from component execution.\n- Onboarding convergence creates only approved Standard variable names. When the real value is not yet known, it uses the non-secret sentinel `__AOT_UNSET__`, treats that state as present-but-not-populated, and requires a later governed fill/validation step plus readback verification."
       }
     },
     {
@@ -97,10 +107,10 @@
     },
     {
       "type": "table",
-      "title": "Active Jason Alerts",
+      "title": "Active / Pending Jason Alerts",
       "description": "Prometheus rule evaluation only. Dashboard state does not grant authority and no provider call is made from Grafana.",
       "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
-      "targets": [{"expr": "ALERTS{alertstate=\"firing\"}", "format": "table", "instant": true, "refId": "A"}],
+      "targets": [{"expr": "ALERTS{alertstate=~\"pending|firing\"}", "format": "table", "instant": true, "refId": "A"}],
       "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "Value": true, "__name__": true, "alertstate": true, "instance": true, "job": true}, "renameByName": {"alertname": "Alert", "severity": "Severity", "service": "Service"}}}],
       "gridPos": {"h": 9, "w": 12, "x": 12, "y": 15},
       "options": {"showHeader": true}
@@ -115,6 +125,6 @@
   "timezone": "browser",
   "title": "Jason Governed Actions",
   "uid": "jason-governed-actions",
-  "version": 3,
+  "version": 4,
   "weekStart": ""
 }

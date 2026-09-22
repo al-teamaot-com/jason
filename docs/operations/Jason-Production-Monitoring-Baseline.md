@@ -70,9 +70,9 @@ On 2026-09-22 the live MCP credential mounts were corrected to read-only, the du
 | `jason-runtime` state | running |
 | `jason-runtime` Docker health | healthy |
 | `jason-mcp-pilot` state | running |
-| MCP image | `jason-mcp:autotask-entra-67da8d80ca97-repaired` until the next explicitly accepted release |
-| MCP source revision | `67da8d80ca9703505d651e9e0935f5bd1aa7c651` until superseded |
-| provider-read activation profile | `itglue-autotask-entra-governed-catalog-v4` |
+| MCP image | `jason-mcp:kfs-prod-c3e0728` at the 2026-09-22 accepted KFS release |
+| MCP source revision | `c3e0728eb6f434d2ba033ae6b3eb72e3616ef95d` at the 2026-09-22 accepted KFS release |
+| provider-read activation profile | `itglue-autotask-entra-procurement-catalog-v5` |
 | Autotask requester mode | `jason_managed` while transitional authorization remains approved |
 | MCP network | `jason-core` |
 | MCP port binding | `10.87.246.157:8765 -> 8000/tcp` |
@@ -80,17 +80,9 @@ On 2026-09-22 the live MCP credential mounts were corrected to read-only, the du
 | required read-only credential mounts | present |
 | watched MCP environment duplicate count | 0 desired |
 
-### Known current exception
+### Resolved production drift — 2026-09-22
 
-The live MCP currently contains duplicate Docker environment entries for source revision/profile/requester-mode because the v4 container was built from the previous environment file plus explicit overrides. Runtime composition and live capability execution prove the effective profile is v4, but the duplicate count remains visible as a warning until a controlled container recreation removes the ambiguity.
-
-The deployed exporter correctly reports one extra value for each of:
-
-- `JASON_SOURCE_REVISION`;
-- `JASON_PROVIDER_READ_ACTIVATION_PROFILE`;
-- `JASON_AUTOTASK_REQUESTER_AUTH_MODE`.
-
-The duplicate environment drift was corrected in production on 2026-09-22. Issue #180 remains historical tracking; `JasonMCPDuplicateEnvironment` stays enabled as a regression detector.
+The prior duplicate/stale MCP environment state is resolved. `JASON_SOURCE_REVISION`, the MCP provenance labels, the active image tag, and `/var/lib/jason/production-health/contract.json` must identify the same accepted production release. `JasonMCPDuplicateEnvironment` and `JasonMCPContractDrift` remain enabled as regression detectors.
 
 The `JasonMCPDuplicateEnvironment` Prometheus rule uses a two-minute `for` period. An immediate post-deployment query can therefore legitimately show zero firing alerts even while the duplicate metric is nonzero; the rule should be evaluated after the hold period before asserting notification state.
 
@@ -201,6 +193,9 @@ The dedicated `Jason Production Health` dashboard provides at-a-glance panels fo
 - existing host CPU/memory trends.
 
 The existing Command Center, usage, and authority dashboards remain useful and should not be replaced.
+
+The `Jason Governed Actions` dashboard must render zero alert counts explicitly with `or vector(0)`, expose pending alerts separately from firing alerts, and show both pending/firing rows in its alert table. This prevents a healthy zero-alert state from appearing as Grafana `N/A` and preserves the Prometheus hold-period distinction.
+
 
 ## Notification routing
 
