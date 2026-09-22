@@ -555,6 +555,31 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement after the managed-Windows VulScan playbook is validated and before claiming broad autonomous VulScan remediation.
 
 
+
+### TODO-CONN-007 — Governed VulScan finding read and rescan integration
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed VulScan integration so Jason can read the authoritative vulnerability finding, correlate it to a client/device, and request or observe a rescan after remediation.
+- **Why it matters:** The Windows VulScan playbook can independently verify many findings locally, but it cannot currently prove from VulScan itself that a finding cleared. This weakens end-to-end verification and can leave stale vulnerability tickets open or cause premature closure.
+- **Expected behavior:**
+  1. Search findings by client/site/device/IP/MAC/hostname/CVE/KB/ticket reference.
+  2. Read authoritative finding details including scanner target identity, finding name, CVE/KB, CVSS/severity, first seen, last seen, current state, evidence/plugin output where safely available, and remediation guidance.
+  3. Correlate the finding to DRMM endpoint and Autotask CI without relying on IP alone.
+  4. Request a bounded rescan of the exact device/target where the VulScan API supports it.
+  5. Poll/read rescan status without redispatching duplicate scans.
+  6. Verify the exact finding is cleared, still present, or changed after remediation.
+  7. Preserve client isolation and `direct_provider_access=false`.
+  8. Expose rescan as a separately governed action from read-only finding access.
+  9. Record provider job/finding identifiers for ticket evidence and troubleshooting.
+  10. Fail closed when target identity is ambiguous or the scanner cannot distinguish a recycled IP.
+- **First production case:** `T20260918.0012` / `OWNSHOP412LT1` / missing `KB5121003`.
+- **Prerequisites:** VulScan/RapidFire Tools API capability discovery; credential governance; canonical vulnerability finding schema; device/client correlation; scan rate/impact controls; audit logging.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before declaring the VulScan Windows remediation playbook fully end-to-end or autonomous.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
