@@ -92,7 +92,13 @@ from orchestrator.resource_capability_catalog import (
     ENDPOINT_SOFTWARE_SEARCH,
     MANAGEMENT_ALERT_SEARCH,
     MANAGEMENT_SITE_SEARCH,
+    MICROSOFT_SHAREPOINT_PROVIDER,
+    SHAREPOINT_DOCUMENT_SEARCH,
+    SHAREPOINT_ITEM_READ,
+    SHAREPOINT_LIBRARY_LIST,
+    SHAREPOINT_SITE_SEARCH,
     register_endpoint_resource_foundation,
+    register_sharepoint_read_foundation,
 )
 from orchestrator.resource_evidence import (
     GovernedResourceEvidenceInterpreter,
@@ -135,6 +141,7 @@ from .dynamic_conversation_cutover import (
 )
 from .http import RuntimeHttpApplication
 from .microsoft_directory import build_microsoft_directory_runtime
+from .microsoft_sharepoint import build_microsoft_sharepoint_runtime
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
 
@@ -177,6 +184,7 @@ class RuntimeSettings:
     microsoft_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/secret_id"
     )
+    sharepoint_read_enabled: bool = False
     ses_openbao_role_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/role_id")
     ses_openbao_secret_id_path: Path = Path("/run/jason-secrets/openbao/aws-ses/secret_id")
     ses_region: str = "us-east-1"
@@ -312,6 +320,9 @@ class RuntimeSettings:
                     "/run/jason-secrets/openbao/microsoft-graph/secret_id",
                 )
             ),
+            sharepoint_read_enabled=os.getenv(
+                "JASON_SHAREPOINT_READ_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
             ses_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_SES_OPENBAO_ROLE_ID_PATH",
@@ -563,6 +574,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
     now = datetime.now(timezone.utc)
     register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
+    if settings.sharepoint_read_enabled:
+        register_sharepoint_read_foundation(
+            capabilities=capabilities,
+            providers=providers,
+            now=now,
+        )
     register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_email_send(capabilities=capabilities, providers=providers)
 
@@ -738,6 +755,32 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_RMM_PROVIDER, MANAGEMENT_SITE_SEARCH): "datto_rmm.site.search",
         },
     )
+    sharepoint_invoker = None
+    if settings.sharepoint_read_enabled:
+        sharepoint_runtime = build_microsoft_sharepoint_runtime(
+            boundary_db=microsoft_boundary_db,
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.microsoft_openbao_role_id_path,
+            secret_id_path=settings.microsoft_openbao_secret_id_path,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        sharepoint_invoker = GovernedConnectorCapabilityInvoker(
+            connectors={
+                MICROSOFT_SHAREPOINT_PROVIDER: sharepoint_runtime.connector,
+            },
+            provider_capability_map={
+                (MICROSOFT_SHAREPOINT_PROVIDER, SHAREPOINT_SITE_SEARCH):
+                    "microsoft_sharepoint.site.search",
+                (MICROSOFT_SHAREPOINT_PROVIDER, SHAREPOINT_LIBRARY_LIST):
+                    "microsoft_sharepoint.library.list",
+                (MICROSOFT_SHAREPOINT_PROVIDER, SHAREPOINT_DOCUMENT_SEARCH):
+                    "microsoft_sharepoint.document.search",
+                (MICROSOFT_SHAREPOINT_PROVIDER, SHAREPOINT_ITEM_READ):
+                    "microsoft_sharepoint.item.read",
+            },
+        )
+
     system_registry_invoker = GovernedSystemRegistryCapabilityInvoker(
         registry=load_production_system_registry()
     )
@@ -768,6 +811,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(ENDPOINT_SOFTWARE_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_ALERT_SEARCH, datto_invoker)
     invokers.register(MANAGEMENT_SITE_SEARCH, datto_invoker)
+    if sharepoint_invoker is not None:
+        invokers.register(SHAREPOINT_SITE_SEARCH, sharepoint_invoker)
+        invokers.register(SHAREPOINT_LIBRARY_LIST, sharepoint_invoker)
+        invokers.register(SHAREPOINT_DOCUMENT_SEARCH, sharepoint_invoker)
+        invokers.register(SHAREPOINT_ITEM_READ, sharepoint_invoker)
     invokers.register(SYSTEM_REGISTRY_SEARCH, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_READ, system_registry_invoker)
     invokers.register(SYSTEM_REGISTRY_TRACE, system_registry_invoker)

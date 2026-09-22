@@ -33,7 +33,12 @@ ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
+SHAREPOINT_SITE_SEARCH = "documentation.sharepoint.site.search"
+SHAREPOINT_LIBRARY_LIST = "documentation.sharepoint.library.list"
+SHAREPOINT_DOCUMENT_SEARCH = "documentation.sharepoint.document.search"
+SHAREPOINT_ITEM_READ = "documentation.sharepoint.item.read"
 DATTO_RMM_PROVIDER = "datto_rmm"
+MICROSOFT_SHAREPOINT_PROVIDER = "microsoft_sharepoint"
 
 
 def endpoint_device_search(now: datetime) -> CapabilityDefinition:
@@ -459,6 +464,158 @@ def management_site_search(now: datetime) -> CapabilityDefinition:
         ),
     )
 
+
+
+def _sharepoint_read_capability(
+    *,
+    now: datetime,
+    capability_name: str,
+    display_name: str,
+    business_purpose: str,
+    operation: str,
+    selector_keys: str,
+    fact_hints: str,
+) -> CapabilityDefinition:
+    return CapabilityDefinition(
+        capability_name=capability_name,
+        version="1.0",
+        display_name=display_name,
+        lifecycle_status=CapabilityLifecycle.ACTIVE,
+        business_purpose=business_purpose,
+        owner_service="Jason Documentation Intelligence",
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
+        risk_level=CapabilityRisk.LOW,
+        data_classifications=frozenset({"internal"}),
+        permitted_execution_modes=frozenset({"deterministic"}),
+        input_schema_reference=f"schema://jason/{capability_name.replace('.', '-')}/1.0",
+        output_schema_reference=f"schema://jason/{capability_name.replace('.', '-')}-result/1.0",
+        invoking_roles=frozenset({"orchestrator"}),
+        approval=CapabilityApproval(required=False),
+        evidence=CapabilityEvidence(
+            required=True,
+            requirements=("Microsoft Graph provider result", "AOT tenant boundary"),
+            verification_requirements=(
+                "read-only Microsoft Graph method",
+                "AOT organization boundary remains authoritative",
+                "no interactive-user connector fallback",
+            ),
+        ),
+        dependencies=frozenset(),
+        idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
+        idempotency_key_required=False,
+        timeout_seconds=30,
+        maximum_attempts=2,
+        failure_behavior="Fail closed without browser, shell, delegated-user, or write fallback.",
+        tenant_isolation_required=True,
+        client_isolation_required=False,
+        stewardship=CapabilityStewardship(
+            steward="technology-steward",
+            business_justification="Use AOT SharePoint as a governed read-only evidence source for Jason.",
+            review_interval_days=90,
+            retirement_criteria=("SharePoint is no longer an approved AOT documentation authority.",),
+            authoritative_change_sources=("Microsoft Graph SharePoint API documentation",),
+        ),
+        created_at=now,
+        metadata={
+            "provider_neutral": "true",
+            "read_only": "true",
+            "resource_types": "sharepoint_document,document,file,sharepoint_site",
+            "operation": operation,
+            "selector_keys": selector_keys,
+            "fact_hints": fact_hints,
+            "inquiry_hints": fact_hints,
+            "planning_guidance": "Use for AOT SharePoint documentation and evidence discovery only.",
+        },
+    )
+
+
+def microsoft_sharepoint_provider(now: datetime) -> ExecutionProvider:
+    return ExecutionProvider(
+        provider_id=MICROSOFT_SHAREPOINT_PROVIDER,
+        display_name="Microsoft SharePoint",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=ProviderLifecycle.AVAILABLE,
+        health_status=ProviderHealth.HEALTHY,
+        approval_status=ProviderApproval.APPROVED,
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=frozenset({
+            SHAREPOINT_SITE_SEARCH,
+            SHAREPOINT_LIBRARY_LIST,
+            SHAREPOINT_DOCUMENT_SEARCH,
+            SHAREPOINT_ITEM_READ,
+        }),
+        supported_classifications=frozenset({"internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(
+            maximum_concurrent_executions=5,
+            maximum_requests_per_minute=60,
+            maximum_execution_seconds=30,
+        ),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="zero-cost-foundation",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification="Microsoft SharePoint is an approved AOT documentation source.",
+            review_interval_days=90,
+            last_reviewed_at=now,
+            retirement_criteria=("AOT retires SharePoint as a documentation platform.",),
+            vendor_change_sources=("Microsoft Graph documentation",),
+            operational_owner="AOT IT Operations",
+            approval_owner="Jason Architecture Authority",
+        ),
+        created_at=now,
+        metadata={
+            "connector_id": MICROSOFT_SHAREPOINT_PROVIDER,
+            "resource_authority": "aot_sharepoint_documentation",
+            "permission_profile": "sharepoint-read",
+            "required_application_permission": "Sites.Read.All",
+        },
+    )
+
+
+def register_sharepoint_read_foundation(
+    *,
+    capabilities: CapabilityRegistryService,
+    providers: ExecutionProviderRegistryService,
+    now: datetime,
+) -> None:
+    capabilities.register(_sharepoint_read_capability(
+        now=now,
+        capability_name=SHAREPOINT_SITE_SEARCH,
+        display_name="Search AOT SharePoint Sites",
+        business_purpose="Find authorized AOT SharePoint sites through Microsoft Graph.",
+        operation="search",
+        selector_keys="query",
+        fact_hints="sharepoint,sharepoint site,site,documentation site",
+    ))
+    capabilities.register(_sharepoint_read_capability(
+        now=now,
+        capability_name=SHAREPOINT_LIBRARY_LIST,
+        display_name="List AOT SharePoint Libraries",
+        business_purpose="List document libraries for an authorized AOT SharePoint site.",
+        operation="list",
+        selector_keys="site_id",
+        fact_hints="sharepoint library,document library,drive,documents",
+    ))
+    capabilities.register(_sharepoint_read_capability(
+        now=now,
+        capability_name=SHAREPOINT_DOCUMENT_SEARCH,
+        display_name="Search AOT SharePoint Documents",
+        business_purpose="Search AOT SharePoint and OneDrive business documents as governed evidence.",
+        operation="search",
+        selector_keys="query,page_size",
+        fact_hints="sharepoint document,document,file,policy,procedure,spreadsheet,pdf",
+    ))
+    capabilities.register(_sharepoint_read_capability(
+        now=now,
+        capability_name=SHAREPOINT_ITEM_READ,
+        display_name="Read AOT SharePoint Item Metadata",
+        business_purpose="Read exact metadata for a resolved AOT SharePoint file or folder.",
+        operation="read",
+        selector_keys="drive_id,item_id",
+        fact_hints="sharepoint file,file metadata,document metadata,modified,size,web url",
+    ))
+    providers.register(microsoft_sharepoint_provider(now))
 
 def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
     return ExecutionProvider(
