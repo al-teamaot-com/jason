@@ -43,7 +43,8 @@ Jason must not infer that workstations remained healthy merely because they lack
 - gateway, DNS, Internet-by-IP, Internet-by-name, and peer reachability tests;
 - read-only Windows network/NIC/event-log diagnostics;
 - hypervisor/guest correlation;
-- read-only firewall/router/switch/UPS/iLO evidence where a governed provider capability exists;
+- DRMM-discovered SNMP/network-device evidence as the preferred first source for firewall/router/switch/UPS and other infrastructure telemetry;
+- direct vendor read-only telemetry only when DRMM cannot answer the required localization question;
 - duplicate alert suppression and site-level incident correlation.
 
 ### Out of Scope
@@ -67,7 +68,8 @@ Preserve Central Orchestrator authority, exact requester grants, provider/client
 5. Correlate alerts from the same site within 5 minutes; expand to 15 minutes where cadence differences justify it.
 6. Determine whether multiple alert tickets represent one site event. Preserve ticket history even when one parent incident is used operationally.
 7. Identify the site's apparent public IP from authoritative managed-endpoint evidence; do not infer it from another client.
-8. Note whether affected assets share a hypervisor, switch/uplink, VLAN, gateway, WAN IP, or DNS path when authoritative evidence exists.
+8. Enumerate DRMM-discovered network/SNMP devices for the affected site and identify likely gateway, firewall, switch/uplink, UPS, and other infrastructure objects.
+9. Note whether affected assets share a hypervisor, switch/uplink, VLAN, gateway, WAN IP, DNS path, or infrastructure power path when authoritative evidence exists.
 
 If identity or site mapping is ambiguous:
 
@@ -224,27 +226,52 @@ Select:
 - Matching NIC/link events on one host -> endpoint/host NIC path.
 - Same host has no NIC event while multiple systems disappear -> look upstream.
 
-### Step 10: Review firewall/router/WAN telemetry
+### Step 10: Harvest DRMM SNMP/network-device evidence first
+**Purpose:** Use AOT's existing RMM telemetry before adding or invoking direct-vendor integrations.  
+**Evidence source:** DRMM network-device discovery, endpoint device read, endpoint audit/SNMP data, DRMM alert history.  
+**Expected result:** identify site infrastructure objects and capture every available DRMM field relevant to the incident.
+
+For each relevant DRMM-discovered infrastructure device, record when available:
+- device type/vendor/model/description;
+- management IP and MAC;
+- SNMP uptime;
+- current DRMM online/monitor state;
+- current and historical alerts;
+- interface/port state and counters;
+- link transitions, errors, CRCs, discards;
+- STP/LACP/uplink state;
+- WAN/interface health;
+- UPS/power state.
+
+**Decision**
+- DRMM contains the needed evidence -> use it as the authoritative first source.
+- DRMM identifies the device but omits the needed telemetry -> record a bounded capability gap and then use an approved direct-vendor read capability if one exists.
+- DRMM has no authoritative network object -> use documented topology/provider evidence and mark the missing DRMM coverage.
+
+Do not interpret a missing SNMP field as a healthy value.
+
+### Step 11: Review firewall/router/WAN telemetry
 **Purpose:** Localize edge/WAN failure.  
-**Evidence source:** governed firewall/router connector or documented device telemetry.  
+**Evidence source priority:** DRMM SNMP/network-device telemetry first; direct SonicWall/UniFi/vendor read-only telemetry second when DRMM is insufficient.  
 **Look for:** WAN link up/down, DHCP/PPPoE renewals, ISP failover, gateway monitoring loss, DNS forwarder failures, device reboot/uptime change, packet loss, interface errors.  
 **Expected result:** stable edge state.
 
-If no governed network-device telemetry exists:
+If neither DRMM nor an approved vendor read can provide the evidence:
 `state = network_telemetry_unavailable`
 and document the capability gap.
 
-### Step 11: Review switch/uplink telemetry
+### Step 12: Review switch/uplink telemetry
 **Purpose:** Localize LAN/server-switch failure.  
+**Evidence source priority:** DRMM SNMP/network-device telemetry first; direct switch/controller API second when required.  
 **Look for:** port/uplink flap, STP topology change, CRC/errors, discards, port reset, LACP member loss, PoE/power event where relevant.  
 **Decision:** correlated errors on shared uplink -> `server_switch_or_uplink` or `site_lan`.
 
-### Step 12: Review power-management evidence
+### Step 13: Review power-management evidence
 **Purpose:** Determine whether infrastructure power, not server OS, dropped.  
 **Evidence source:** iLO/iDRAC, UPS, PDU, switch/firewall uptime/logs where governed.  
 **Important:** unchanged Windows server uptime does not exclude a switch/firewall/ISP-device power event.
 
-### Step 13: Test for DRMM/provider-path-only failure
+### Step 14: Test for DRMM/provider-path-only failure
 **Purpose:** Avoid declaring client outage when only RMM transport failed.  
 **Evidence:** external site reachability, local gateway/Internet/DNS tests, independent monitoring, current endpoint reads.  
 **Decision:**
@@ -330,8 +357,9 @@ Investigate ISP instability, edge device logs, switch/uplink health, DNS path, D
 
 Potential dependencies:
 - no external AOT probe;
-- no firewall/router log capability;
-- no switch telemetry;
+- DRMM does not expose required SNMP/interface/port telemetry;
+- no firewall/router log capability after DRMM-first review;
+- no switch telemetry after DRMM-first review;
 - no UPS/iLO telemetry;
 - no current network diagram or asset mapping;
 - DRMM ad-hoc command approval required;
@@ -457,15 +485,18 @@ Current/narrow capabilities:
 - `endpoint.audit.read`
 - `endpoint.alert.search`
 - `endpoint.alert.history.search`
+- DRMM network-device discovery and `endpoint.audit.read` SNMP evidence
+- DRMM network-device alert/history reads
 - `automation.component.search/execute`
 - `automation.job.read`
 - `automation.job.output.read`
 - persisted/scheduled recheck support when available.
 
 Desired capability gaps:
+- governed DRMM-first SNMP/network-device telemetry exposing interface/port/uplink/error/WAN/power fields and bounded approved OID reads where necessary (`TODO-NET-002`);
 - governed external network probe (ICMP/TCP/HTTPS/DNS) from AOT-controlled infrastructure;
-- governed firewall/router WAN-health and event-log reads;
-- governed switch port/uplink/STP/error reads;
+- direct firewall/router WAN-health and event-log reads only where DRMM is insufficient;
+- direct switch port/uplink/STP/error reads only where DRMM is insufficient;
 - governed UPS/PDU and server-management-controller event reads;
 - explicit site topology/dependency mapping.
 
@@ -498,8 +529,8 @@ Acceptance must prove:
 ## 22. Section Goal Closure
 
 Section Goal remains open until:
-- the Riggins acceptance case completes through live path localization;
-- missing external/network telemetry capabilities are recorded as explicit follow-up work;
+- the Riggins acceptance case demonstrates incident correlation, no-reboot checks, live endpoint validation, external public-IP reachability, DRMM SNMP infrastructure identification, and correct bounded classification/escalation behavior;
+- missing DRMM SNMP depth and external/network telemetry capabilities are recorded as explicit follow-up work (`TODO-NET-001` and `TODO-NET-002`);
 - results are documented in the authoritative ticket/case;
 - Grafana/Project Jason operational visibility is updated where applicable;
 - the playbook is reviewed for autonomy eligibility.
