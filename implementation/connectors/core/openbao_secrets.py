@@ -78,6 +78,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "microsoft_graph.mail_read": (
         "secret/data/connectors/microsoft-graph/production/mail-read"
     ),
+    "claw.runtime": (
+        "secret/data/connectors/claw/production/runtime"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -104,6 +107,13 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "certificate_pem",
             "certificate_thumbprint",
             "generation",
+        }
+    ),
+    "claw.runtime": frozenset(
+        {
+            "mcp_url",
+            "bearer_token",
+            "ca_cert_pem",
         }
     ),
 }

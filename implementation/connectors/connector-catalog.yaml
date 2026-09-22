@@ -14,6 +14,25 @@ connectors:
       - signed_requests_or_mtls
       - identity_mapping
       - health_and_capability_discovery
+  claw:
+    status: integration_ready_pending_secret_activation
+    priority: 1
+    mode: governed_read_first
+    secret: claw.runtime
+    display_name: Claw
+    endpoint: https://192.168.12.41/mcp
+    capabilities:
+      - operations.source.capabilities.read
+      - operations.source.status.read
+      - operations.artifact.read
+      - operations.task.request.search
+    staged_capabilities:
+      - operations.task.request.create
+    notes:
+      - Claw is the external legacy OpenClaw instance being migrated into Jason.
+      - Claw is distinct from Jason internal OpenClaw ingress and runtime components.
+      - No shell, arbitrary file, secrets, browser, device, or direct external action access is exposed.
+      - Task-request creation remains staged and is not MCP-action-enabled.
   autotask:
     status: foundation_built
     priority: 2

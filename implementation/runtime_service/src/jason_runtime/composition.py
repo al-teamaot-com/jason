@@ -16,6 +16,14 @@ from connectors.core.contracts import ConnectorContext
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
+from connectors.claw.connector import (
+    CLAW_ARTIFACT_READ,
+    CLAW_BRIDGE_READ,
+    CLAW_STATUS_READ,
+    CLAW_TASK_REQUEST_CREATE,
+    CLAW_TASK_REQUEST_SEARCH,
+    ClawConnector,
+)
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from jason_cap_007.kernel_registration import register_email_send
@@ -82,6 +90,15 @@ from orchestrator.ollama_reasoning import (
     OllamaStructuredJsonClient,
 )
 from orchestrator.integration_broker import IntegrationBroker
+from orchestrator.claw_capability_catalog import (
+    CLAW_PROVIDER,
+    OPERATIONS_ARTIFACT_READ,
+    OPERATIONS_SOURCE_CAPABILITIES_READ,
+    OPERATIONS_SOURCE_STATUS_READ,
+    OPERATIONS_TASK_REQUEST_CREATE,
+    OPERATIONS_TASK_REQUEST_SEARCH,
+    register_claw_resource_foundation,
+)
 from orchestrator.resource_capability_catalog import (
     DATTO_EDR_PROVIDER,
     DATTO_RMM_PROVIDER,
@@ -221,6 +238,13 @@ class RuntimeSettings:
     datto_edr_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/datto-edr/secret_id"
     )
+    claw_enabled: bool = False
+    claw_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/claw/role_id"
+    )
+    claw_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/claw/secret_id"
+    )
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     resolution_memory_db: Path = Path(
         "/var/lib/jason/openclaw/resolution-memory.sqlite3"
@@ -338,6 +362,21 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_DATTO_EDR_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/datto-edr/secret_id",
+                )
+            ),
+            claw_enabled=os.getenv(
+                "JASON_CLAW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            claw_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_CLAW_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/claw/role_id",
+                )
+            ),
+            claw_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_CLAW_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/claw/secret_id",
                 )
             ),
             ollama_url=os.getenv("JASON_OLLAMA_URL", "http://jason-ollama:11434").strip(),
@@ -671,6 +710,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
     now = datetime.now(timezone.utc)
     register_endpoint_resource_foundation(capabilities=capabilities, providers=providers, now=now)
+    register_claw_resource_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+        enabled=settings.claw_enabled,
+    )
     register_system_registry_resource_foundation(capabilities=capabilities, providers=providers, now=now)
     register_resolution_memory_runtime_foundation(
         capabilities=capabilities,
@@ -888,6 +933,25 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    claw_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.claw_openbao_role_id_path,
+        secret_id_path=settings.claw_openbao_secret_id_path,
+    )
+    claw = ClawConnector(
+        secrets=claw_openbao,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
+    claw_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={CLAW_PROVIDER: claw},
+        provider_capability_map={
+            (CLAW_PROVIDER, OPERATIONS_SOURCE_CAPABILITIES_READ): CLAW_BRIDGE_READ,
+            (CLAW_PROVIDER, OPERATIONS_SOURCE_STATUS_READ): CLAW_STATUS_READ,
+            (CLAW_PROVIDER, OPERATIONS_ARTIFACT_READ): CLAW_ARTIFACT_READ,
+            (CLAW_PROVIDER, OPERATIONS_TASK_REQUEST_SEARCH): CLAW_TASK_REQUEST_SEARCH,
+            (CLAW_PROVIDER, OPERATIONS_TASK_REQUEST_CREATE): CLAW_TASK_REQUEST_CREATE,
+        },
+    )
     datto_invoker = GovernedConnectorCapabilityInvoker(
         connectors={
             DATTO_RMM_PROVIDER: datto,
@@ -997,6 +1061,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
 
     invokers = CapabilityInvokerRegistry()
+    invokers.register(OPERATIONS_SOURCE_CAPABILITIES_READ, claw_invoker)
+    invokers.register(OPERATIONS_SOURCE_STATUS_READ, claw_invoker)
+    invokers.register(OPERATIONS_ARTIFACT_READ, claw_invoker)
+    invokers.register(OPERATIONS_TASK_REQUEST_SEARCH, claw_invoker)
+    invokers.register(OPERATIONS_TASK_REQUEST_CREATE, claw_invoker)
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
     invokers.register(ENDPOINT_ALERT_SEARCH, datto_invoker)

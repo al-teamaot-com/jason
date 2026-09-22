@@ -50,6 +50,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/autotask-write-approle"
         ),
     },
+    "claw": {
+        "logical_name": "claw.runtime",
+        "secret_path": "secret/data/connectors/claw/production/runtime",
+        "fields": ("mcp_url", "bearer_token", "ca_cert_pem"),
+        "required_fields": ("mcp_url", "bearer_token", "ca_cert_pem"),
+        "policy_name": "jason-claw-runtime-read",
+        "role_name": "jason-claw-runtime-read",
+        "connector_identity": "claw-runtime-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/claw-approle"
+        ),
+    },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
         "secret_path": "secret/data/connectors/datto-rmm/production/read-only",
@@ -219,9 +231,33 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
     }
 
 
+def _collect_claw_values() -> dict[str, str]:
+    mcp_url = input("claw MCP URL: ").strip()
+    token_path = Path(input("claw bearer token file path: ").strip())
+    ca_path = Path(input("claw CA certificate PEM path: ").strip())
+    if not mcp_url.startswith("https://"):
+        raise ProvisionError("Claw MCP URL must use HTTPS.")
+    try:
+        bearer_token = token_path.read_text(encoding="utf-8").strip()
+        ca_cert_pem = ca_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ProvisionError("Claw bootstrap credential file is unavailable.") from exc
+    if not bearer_token:
+        raise ProvisionError("Claw bearer token file is empty.")
+    if "BEGIN CERTIFICATE" not in ca_cert_pem:
+        raise ProvisionError("Claw CA certificate PEM is invalid.")
+    return {
+        "mcp_url": mcp_url,
+        "bearer_token": bearer_token,
+        "ca_cert_pem": ca_cert_pem,
+    }
+
+
 def collect_values(provider: str) -> dict[str, str]:
     if provider in {"microsoft_graph", "microsoft_graph_mail"}:
         return _collect_microsoft_graph_values()
+    if provider == "claw":
+        return _collect_claw_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
     required_fields = set(spec.get("required_fields", spec["fields"]))
