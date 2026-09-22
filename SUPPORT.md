@@ -37,7 +37,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
 ### SUPPORT-CONN-001 — Autotask ticket read path failing through Jason
 
 - **Priority:** P1
-- **Status:** Investigating
+- **Status:** Closed
 - **Owner:** Jason Platform / Connector Support
 - **Issue:** Jason's governed Autotask ticket read and mutation paths are failing for an active production ticket.
 - **Impact:** Jason can identify the Datto RMM alert and its associated Autotask ticket, but cannot reliably read the ticket details/notes or perform the currently exposed governed ticket-note mutation. This prevents complete autonomous troubleshooting documentation, ticket-state assessment, and ticket closeout.
@@ -69,7 +69,8 @@ Items remain on this list until the underlying issue is fixed and the expected b
   - The runtime Compose source does not explicitly declare `JASON_AUTOTASK_REQUESTER_AUTH_MODE`, so live container environment/configuration must be checked before changing anything.
 - **Next safe action:** Inspect the live `jason-runtime` environment for `JASON_AUTOTASK_REQUESTER_AUTH_MODE` without exposing secrets. If it is explicitly `impersonated`, restore the approved `jason_managed` mode, recreate only the affected runtime service using the governed deployment runbook, then repeat all five closure checks above.
 - **Blocked on:** Access to the production Jason runtime host/deployment path for configuration inspection and bounded remediation.
-- **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`, reconfirmed during Support List processing.
+- **Resolution verified:** 2026-09-22. In a fresh governed session, `service.ticket.search` for `T20260918.0005`, `service.ticket.read` for ticket `140629`, and `service.ticket.notes.search` all succeeded with `direct_provider_access=false`. The ticket is readable as status `5`, completed on 2026-09-18, and prior Jason-created internal verification notes are present. The original read-path blocker is no longer current.
+- **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`.
 
 ---
 
@@ -103,7 +104,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
 ### SUPPORT-CAP-003 — Missing governed Datto AV/EDR threat-detail and remediation-state capability
 
 - **Priority:** P1
-- **Status:** Open
+- **Status:** Closed
 - **Owner:** Jason Platform / Datto RMM Connector
 - **Issue:** Jason can see that Datto RMM raised an Endpoint Security threat alert, but the governed capability set does not expose the underlying Datto AV/EDR threat record needed to investigate and close the incident confidently.
 - **Impact:** Jason can confirm that an antivirus alert exists and can troubleshoot endpoint health, but cannot directly answer the most important incident questions: what threat was detected, where it was found, what Datto AV did with it, whether it was quarantined or removed, and whether any remediation remains outstanding. This prevents a deterministic end-to-end AV playbook and can leave a critical RMM alert/ticket open even when the endpoint otherwise appears healthy.
@@ -157,6 +158,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
   6. Demonstrate the same capability against a second controlled Endpoint Security alert.
   7. Confirm all reads work with `direct_provider_access=false`.
   8. If an alert-resolution capability is implemented, prove that it requires the intended approval/authority and verifies provider readback after mutation.
+- **Resolution verified:** 2026-09-22. `endpoint.security.detection.read`, `endpoint.security.detection.search`, `endpoint.security.quarantine.search`, `endpoint.security.status.read`, and scan-history capabilities are active. Live governed readback of provider alert `c3aa92e3-92af-4c8f-889a-51bafa50790f` returned threat `EXP/CVE-2016-7228`, the affected XLS path, SHA-256, quarantine state, remediation state, response action, and the matching quarantine record while `direct_provider_access=false` remained enforced.
 - **Last observed:** 2026-09-18 during antivirus investigation of `AOT-50282`.
 
 ---
@@ -165,7 +167,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
 ### SUPPORT-CAP-004 — Missing governed Datto RMM alert-resolution capability blocks alert closeout
 
 - **Priority:** P1
-- **Status:** Open
+- **Status:** Fixed
 - **Owner:** Jason Platform / Datto RMM Connector
 - **Issue:** Jason can read Datto RMM alerts but has no governed write capability to resolve/close an alert after troubleshooting and verification are complete.
 - **Production example:** `AOT-50282`, Datto RMM alert UID `bd0882e0-8700-4985-ad89-f789b865c76e`, Endpoint Security alert ID `15884344`, associated Autotask ticket `T20260918.0005`.
@@ -202,6 +204,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
   5. Verify it no longer appears in `endpoint.alert.search(..., status='open')`.
   6. Prove an unauthorized or ambiguous alert target fails closed.
   7. Repeat using an Endpoint Security alert so the `AOT-50282` workflow is covered.
+- **Current verification (2026-09-22):** `endpoint.alert.resolve` is now active, action-enabled, approval-required, and scoped by exact `alert_uid` with optional `device_uid`. The original `AOT-50282` threat alert is confirmed in resolved history (`resolved=true`, resolver `AT_AUTORESOLVER`) and no longer appears in the open-alert set. The missing-capability defect is fixed; a separate controlled mutation acceptance test should still be retained as regression evidence.
 - **Last observed:** 2026-09-18 when the user explicitly asked Jason to close Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`.
 
 ---
@@ -209,7 +212,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
 ### SUPPORT-CONN-005 — Autotask closeout workflow blocked: ticket reads, internal-note write, status discovery, and verified completion unavailable
 
 - **Priority:** P1
-- **Status:** Open
+- **Status:** Mitigated
 - **Owner:** Jason Platform / Autotask Connector
 - **Issue:** Jason could not complete Autotask ticket `T20260918.0005` because the governed Autotask read path and the tested internal-note mutation path failed, while the ticket-update capability requires a tenant-specific numeric status ID and successful post-mutation readback.
 - **Production example:** Autotask ticket `T20260918.0005`, internal ticket ID `140629`, associated with `AOT-50282`.
@@ -255,6 +258,7 @@ Items remain on this list until the underlying issue is fixed and the expected b
   6. Confirm no unrelated fields changed.
   7. Repeat the sequence on a fresh session.
   8. Re-run the exact `T20260918.0005` closeout flow if the ticket remains open.
+- **Current verification (2026-09-22):** The original ticket can now be searched, read, and its notes retrieved through the governed Autotask path. `T20260918.0005` is already completed, and Jason-authored EDR/AV verification notes are present. `service.ticket.note.create` and `service.ticket.update` are currently active governed write capabilities. Keep this item open only for the remaining semantic-status-resolution/fresh controlled mutation regression proof; the original read-path blocker is resolved.
 - **Last observed:** 2026-09-18 when the user explicitly asked Jason to complete `T20260918.0005`.
 
 ---
