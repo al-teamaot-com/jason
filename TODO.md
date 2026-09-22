@@ -143,14 +143,15 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-001 — Production OpenClaw transport
 
 - **Priority:** P0
-- **Status:** Planned
+- **Status:** Implemented
 - **Risk level:** High
 - **Idea:** Implement authenticated transport between OpenClaw and Jason using signed requests or mutual TLS.
 - **Why it matters:** Required for dependable identity, replay protection, authorization, and audit.
-- **Why not now:** Foundation exists, but production identity and deployment design are incomplete.
-- **Prerequisites:** certificate or key lifecycle, identity mapping, persistent replay store, health endpoint.
+- **Current state (2026-09-22):** Implemented with signed OpenClaw→Jason conversation envelopes using the deployed Ed25519 key identity, nonce-bearing canonical payloads, authenticated Microsoft/Bot Framework identity context, and governed Jason ingress. The transport remains subject to Jason authority and audit rather than becoming direct provider access.
+- **Historical note:** The original item called for signed requests or mutual TLS; the implemented design uses signed requests.
+- **Prerequisites:** Satisfied by the deployed key lifecycle, identity binding, replay/nonce controls, and operational health path.
 - **Decision owner:** Platform Owner
-- **Review trigger:** Before production pilot.
+- **Review trigger:** Re-review on key/transport redesign or replacement.
 
 ### TODO-CONN-002 — Autotask read-only production adapter and contract tests
 
@@ -322,6 +323,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Risk level:** Moderate
 - **Idea:** Add a Grafana page that makes each playbook's lifecycle, provenance, review state, approval state, and autonomous-use authorization immediately visible.
 - **Why it matters:** Technicians and governance reviewers need a single operational view showing how a real resolution became a candidate, whether it has been reviewed and approved, and whether it is explicitly authorized for autonomous execution. Stale candidates must also be visible so potentially valuable knowledge does not disappear indefinitely in review.
+- **Current state (2026-09-22):** The Jason Command Center now contains a governance/autonomy status section documenting the current control model and live capability notes. This is a partial foundation only; the authoritative lifecycle page described here still requires durable playbook/candidate lifecycle data and telemetry.
 - **Why not now:** The underlying lifecycle records and successful-resolution candidate workflow must expose stable data before Grafana can present an authoritative view.
 - **Prerequisites:** canonical candidate/playbook lifecycle schema; source-ticket linkage; reviewer/approver records; separate autonomy-approval fields; version history; evidence-completeness signal; aging/staleness thresholds; Grafana-readable metrics or query source.
 - **Expected behavior:**
@@ -720,7 +722,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement before claiming autonomous root-cause localization for switch/uplink/firewall/WAN events.
 
-### TODO-CONN-010 — Search DRMM automation execution history for security attribution
+### TODO-CONN-011 — Search DRMM automation execution history for security attribution
 
 - **Priority:** P1
 - **Status:** Planned
