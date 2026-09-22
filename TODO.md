@@ -641,6 +641,34 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before embedding additional reusable ticket-note language directly into Jason playbooks.
 
 
+### TODO-CONN-010 — Retell outbound vendor support inquiry and IVR navigation
+
+- **Priority:** P3
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Integrate a governed voice-calling provider such as Retell so Jason can place bounded outbound support calls to vendors, navigate auto-attendants/IVRs with DTMF, reach a human support representative, ask approved factual questions, and return the call transcript and structured result as operational evidence.
+- **Why it matters:** Some important operational facts are available only by telephone. For example, during a suspected ISP outage Jason could complete its normal diagnostics first, then call the documented provider, navigate to technical support, ask whether an outage exists for the client service, obtain an estimated restoration time and reference number, and add that evidence to the Autotask ticket.
+- **Why not now:** This is useful but not required for the current core platform. It introduces external voice-provider dependency, client/account authentication handling, consent/recording considerations, caller identity requirements, cost controls, and a new class of externally facing autonomous communication that should wait until Jason's communication governance is mature.
+- **Expected behavior:**
+  1. Use the client's documented provider/support profile rather than hard-coding Cox or any single vendor.
+  2. Place an outbound call from an AOT-controlled caller identity.
+  3. Navigate IVR/auto-attendant menus using approved DTMF behavior.
+  4. Clearly identify the caller as an automated assistant acting on behalf of Atlantic Office Technologies when appropriate.
+  5. Ask only playbook-approved factual questions such as outage state, affected service/area, start time, estimated restoration time, provider reference number, and whether the provider sees the customer edge device online.
+  6. Return transcript, call metadata, structured findings, provider reference numbers, and unresolved questions to Jason.
+  7. Make the result available as an evidence source for the active playbook and Autotask ticket.
+  8. Fail closed if account identity, client mapping, provider authorization, or requested action is ambiguous.
+- **Governance requirements:**
+  - Treat initial implementation as inquiry/read-only communication.
+  - Do not authorize modem resets, reprovisioning, circuit changes, static-IP changes, service changes, equipment orders, billable dispatches, contract changes, charges, or other modifying/disruptive actions without the separately required human approval.
+  - Store provider account identifiers, PINs, and other sensitive authentication material in governed secret storage and disclose only the minimum necessary during the call.
+  - Preserve client isolation, caller identity, call purpose, transcript/recording policy, and complete audit history.
+  - Route every outbound voice script through the Audience and Communication Policy Engine before production use.
+- **Initial use case:** Server/Site Offline Localization playbook: after local, DRMM, network, and public-IP evidence suggests an ISP/WAN issue, call the documented ISP (for example Cox Business) to confirm whether a known outage exists and capture the provider's status/reference information.
+- **Prerequisites:** TODO-COMM-001 audience policy enforcement; outbound voice connector; Retell or equivalent provider evaluation; DTMF/IVR navigation; governed provider-account profile; secret handling; call transcript/result normalization; Autotask note integration; approval boundaries for any requested vendor-side action; applicable recording/consent and caller-identification requirements.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Reconsider after core ticket/playbook automation and communication governance are stable, or when repeated vendor-support calls become a meaningful technician workload.
+
 ### TODO-OPS-004 — Windows licensing monitor false-negative investigation and correction
 
 - **Priority:** P1
