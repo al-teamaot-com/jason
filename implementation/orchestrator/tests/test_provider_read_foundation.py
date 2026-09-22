@@ -31,6 +31,8 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_FORM_TEMPLATE_READ,
+    SERVICE_FORM_TEMPLATE_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
@@ -96,6 +98,23 @@ def test_provider_read_foundation_is_read_only_pilot_until_live_acceptance() -> 
     assert autotask.health_status is ProviderHealth.UNKNOWN
     assert itg.metadata["activation_state"] == "awaiting_provider_backed_acceptance"
     assert autotask.metadata["activation_state"] == "awaiting_provider_backed_acceptance"
+
+
+def test_form_template_contracts_exist_but_autotask_does_not_advertise_unsupported_binding() -> None:
+    capabilities, providers = _services()
+
+    for capability_name in (SERVICE_FORM_TEMPLATE_SEARCH, SERVICE_FORM_TEMPLATE_READ):
+        definition = capabilities.get_current(
+            capability_name=capability_name,
+            allow_pilot=True,
+        )
+        assert definition.lifecycle_status is CapabilityLifecycle.PILOT
+        assert definition.metadata["read_only"] == "true"
+        assert "form_template" in definition.metadata["resource_types"]
+
+    autotask = providers.get(AUTOTASK_PROVIDER)
+    assert SERVICE_FORM_TEMPLATE_SEARCH not in autotask.capabilities
+    assert SERVICE_FORM_TEMPLATE_READ not in autotask.capabilities
 
 
 def test_planned_provider_reads_cannot_be_selected_even_when_pilot_is_allowed() -> None:

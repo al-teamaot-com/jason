@@ -6,6 +6,7 @@ from kernel.capabilities import CapabilityLifecycle, CapabilityRisk, Idempotency
 from orchestrator.provider_mutation_capability_catalog import (
     AUTOTASK_MUTATION_CAPABILITIES,
     SERVICE_TICKET_CREATE,
+    SERVICE_TICKET_NOTE_APPLY_TEMPLATE,
     SERVICE_TICKET_NOTE_CREATE,
     SERVICE_TICKET_NOTE_UPDATE,
     SERVICE_TICKET_UPDATE,
@@ -31,6 +32,7 @@ def test_autotask_mutation_catalog_contains_only_approved_pilot_operations() -> 
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
+        SERVICE_TICKET_NOTE_APPLY_TEMPLATE,
     }.issubset(AUTOTASK_MUTATION_CAPABILITIES)
     assert all("delete" not in item.capability_name for item in definitions)
     assert any(name.startswith("service.product.") for name in AUTOTASK_MUTATION_CAPABILITIES)
@@ -70,6 +72,11 @@ def test_create_operations_are_non_idempotent_and_updates_are_conditional() -> N
             assert (
                 definition.idempotency_behavior
                 is IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT
+            )
+        elif name.endswith(".template.apply"):
+            assert (
+                definition.idempotency_behavior
+                is IdempotencyBehavior.NON_IDEMPOTENT
             )
         else:
             raise AssertionError(f"unexpected mutation operation: {name}")

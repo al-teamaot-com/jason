@@ -17,6 +17,7 @@ SERVICE_TICKET_CREATE = "service.ticket.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
 SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
+SERVICE_TICKET_NOTE_APPLY_TEMPLATE = "service.ticket.note.template.apply"
 SERVICE_TICKET_CHARGE_CREATE = "service.ticket.charge.create"
 SERVICE_TICKET_CHARGE_UPDATE = "service.ticket.charge.update"
 SERVICE_PRODUCT_CREATE = "service.product.create"
@@ -39,6 +40,7 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
+        SERVICE_TICKET_NOTE_APPLY_TEMPLATE,
         SERVICE_TICKET_CHARGE_CREATE,
         SERVICE_TICKET_CHARGE_UPDATE,
         SERVICE_PRODUCT_CREATE,
@@ -196,6 +198,18 @@ def autotask_mutation_capability_definitions(
             business_purpose="Create one authorized note on a resolved service ticket.",
             resource_types="service_ticket_note,ticket_note",
             operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_NOTE_APPLY_TEMPLATE,
+            display_name="Apply Service Form Template to Ticket Note",
+            business_purpose=(
+                "Resolve one exact approved form template, render supported placeholders, "
+                "append bounded case-specific evidence when requested, and create one verified ticket note."
+            ),
+            resource_types="service_ticket_note,ticket_note,service_form_template,form_template",
+            operation="apply_template",
             idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
         _mutation_capability(

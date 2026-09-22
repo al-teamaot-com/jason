@@ -60,6 +60,8 @@ SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
+SERVICE_FORM_TEMPLATE_SEARCH = "service.form.template.search"
+SERVICE_FORM_TEMPLATE_READ = "service.form.template.read"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
 SERVICE_PRODUCT_VENDOR_SEARCH = "service.product.vendor.search"
@@ -595,6 +597,29 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="ticket note,ticket notes,note,notes,update,work note,description",
             authoritative_change_sources=at,
             collection_fact="ticket notes",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_FORM_TEMPLATE_SEARCH,
+            display_name="Search Service Form Templates",
+            business_purpose="Search reusable service-management form templates without applying them.",
+            resource_types="service_form_template,form_template,communication_template",
+            operation="search",
+            selector_keys="name,category,resource_id,page_size",
+            fact_hints="form template,form templates,canned text,speed code,template,standard note",
+            authoritative_change_sources=at,
+            collection_fact="form templates",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_FORM_TEMPLATE_READ,
+            display_name="Read Service Form Template",
+            business_purpose="Read one exact reusable service-management form template and its current content metadata.",
+            resource_types="service_form_template,form_template,communication_template",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="form template,canned text,speed code,template content,standard note",
+            authoritative_change_sources=at,
         ),
         _read_capability(
             now=now,
