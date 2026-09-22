@@ -580,6 +580,30 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before declaring the VulScan Windows remediation playbook fully end-to-end or autonomous.
 
 
+
+### TODO-CONN-008 — Read DRMM patch process/policy assignment and exact-KB effective approval
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add governed Datto RMM read capabilities that expose the patch process/policy assigned to a specific endpoint and determine the effective approval state of an exact Windows update/KB for that device.
+- **Why it matters:** AOT's Datto RMM patch process is the normal authority that determines whether a patch is approved for a device. Aggregate endpoint states such as `ApprovedPending` and counts of approved/not-approved patches are useful but do not prove the approval state of a specific KB.
+- **Expected behavior:**
+  1. Read the patch process/policy currently assigned to an exact DRMM endpoint.
+  2. Read effective policy inheritance/assignment and confirm the device is actually receiving that process.
+  3. Evaluate an exact patch/KB against the effective process and return a bounded state such as `approved`, `denied`, `deferred`, `excluded`, `not_applicable`, or `unknown`.
+  4. Return relevant deployment window/schedule metadata needed to determine whether Jason should wait for the normal patch cycle.
+  5. Correlate exact KB/update identity without relying only on display text.
+  6. Expose device-level aggregate patch state as corroborating evidence, not as a substitute for exact-KB approval.
+  7. Preserve client isolation and `direct_provider_access=false`.
+  8. Fail closed when policy inheritance or patch identity is ambiguous.
+  9. Provide stable evidence IDs/provider identifiers for ticket documentation and playbook verification.
+- **First production case:** `T20260918.0012` / `OWNSHOP412LT1` / `KB5121003`.
+- **Playbook dependency:** `Jason-VulScan-Managed-Windows-Endpoint-Vulnerability-Remediation.md`.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before claiming the Windows VulScan playbook can authoritatively decide whether a specific patch is approved for a device.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
