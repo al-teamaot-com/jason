@@ -320,3 +320,27 @@ For RMM-managed devices, Datto RMM remains the authoritative external provider f
 - Agents never invoke or communicate with other agents directly; all coordination goes through the Central Orchestrator.
 - Preserve identity-first authorization, policy-as-data, versioned workflows/prompts/policies, provider-neutral capability boundaries, centralized evidence by reference, event-based auditability, and integrate-before-innovate.
 - Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, RoleIDs, SecretIDs, OAuth bearer tokens, Microsoft access tokens, private signing keys, private certificate keys, or secret values in chat, repository content, logs, or evidence.
+
+
+## Governance and capability reconciliation — 2026-09-22
+
+### Playbook autonomy
+
+Autonomous authority is now explicitly treated as a property of an approved playbook/version, not as a consequence of a global autonomy switch. The canonical playbook template requires explicit autonomous eligibility, approval provenance, allowed scope/actions, revocation behavior, and fail-closed handling for version mismatch or missing authority.
+
+User-disruptive actions remain per-run approval-bound even inside an otherwise autonomous playbook.
+
+### Datto RMM site variables
+
+The live governed registry currently exposes `management.site.variable.list` for site-variable reads. Site-variable values are treated as potentially sensitive configuration and must not be disclosed to non-administrative requesters. Create/update are not currently active in the live registry; delete remains intentionally unexposed by default. See `07-Operations/Datto-RMM-Site-Variable-Governance.md`.
+
+### Revalidated production capabilities
+
+Live governed verification on 2026-09-22 confirmed:
+
+- Autotask ticket search/read/notes are functioning through Jason with `direct_provider_access=false`.
+- Datto EDR detection detail and quarantine evidence are available through governed endpoint-security reads.
+- `endpoint.alert.resolve` is active as an approval-required governed action.
+- The MCP is operating in `governed-read-plus-actions` mode through Central Orchestrator.
+
+The support and TODO backlogs were reconciled to reflect these current capabilities; unresolved mutation gaps remain tracked rather than inferred resolved.
