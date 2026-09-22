@@ -428,6 +428,111 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement with the Gromelski client-specific ticket operations playbook before claiming full enforcement of its primary-contact rule.
 
 
+
+### TODO-OPS-002 — Governed client user/contact lifecycle across Autotask, IT Glue, security, and training platforms
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Define and implement a governed end-to-end process for how client users are created, correlated, maintained, trained, validated, and retired across every platform where AOT needs a user/contact record. The process should establish one canonical user identity and then drive the required downstream records in systems such as Autotask, IT Glue, Microsoft 365/Entra where applicable, BullPhish ID, security-awareness/training platforms, and other client-specific systems.
+- **Why it matters:** User records are currently spread across multiple platforms with different purposes, schemas, ownership, and lifecycle behavior. Manual entry creates missing users, duplicates, stale records, inconsistent email/name/company mappings, training gaps, contact-routing problems, and incomplete offboarding. Jason needs a deterministic lifecycle so a user is either fully represented where required or explicitly documented as intentionally excluded.
+- **Core design principle:** Treat the **person/user** as the canonical governed object. Platform-specific contacts/accounts are derived representations of that object, not independent sources of truth.
+- **Lifecycle states:** Suggested persisted states include:
+  - `discovered`
+  - `identity_validated`
+  - `client_validated`
+  - `required_platforms_resolved`
+  - `provisioning`
+  - `training_enrollment_pending`
+  - `active`
+  - `change_pending`
+  - `offboarding`
+  - `retired`
+  - `exception`
+  - `blocked`
+- **Expected behavior:**
+  1. Define the authoritative source(s) used to establish that a person exists, belongs to a specific client, and is active.
+  2. Create a canonical identity record using stable identifiers where available, including client, legal/display name, primary email, alternate email where needed, job title/role, location, manager/supervisor where relevant, employment/status state, and source identifiers.
+  3. Determine which downstream platforms are required for that user based on client policy, employment type, role, licensing, location, security requirements, and service bundle.
+  4. Create or update the corresponding **Autotask contact** and associate it with the correct company/location.
+  5. Create or update the corresponding **IT Glue contact** and link/document related configurations or client-specific metadata when appropriate.
+  6. Create, validate, or correlate the user's Microsoft 365 / Entra identity when AOT manages that identity.
+  7. Create, validate, or correlate the user in **BullPhish ID** or the current approved phishing/security-awareness platform when the client participates in training/phishing programs.
+  8. Enroll the user in the correct required security-awareness/training curriculum based on client policy, role, regulatory framework, and onboarding date.
+  9. Track training assignment, completion, failure/non-completion, overdue state, exemptions, and retraining requirements.
+  10. Support additional client-specific platforms through policy-driven connectors rather than hard-coding a single platform list.
+  11. Prevent duplicate users by matching deterministic identifiers before creating anything.
+  12. Detect mismatches such as:
+      - user exists in Entra but not Autotask;
+      - Autotask contact exists but not IT Glue;
+      - user should be in BullPhish/training but is missing;
+      - user is disabled/offboarded in the authoritative source but remains active elsewhere;
+      - email/domain/client association differs between systems;
+      - duplicate or stale contacts exist.
+  13. Perform periodic reconciliation across all governed platforms and generate an actionable exception list.
+  14. For user changes such as name, email, role, location, manager, or client status, propagate only the fields each provider should own and preserve provider-specific metadata.
+  15. On offboarding, identify every governed downstream representation and retire/disable/archive/remove it according to provider capability and policy rather than assuming deletion is appropriate everywhere.
+  16. Preserve history and evidence so Jason can explain when a user was created, changed, enrolled in training, disabled, or retired and which source authorized that action.
+  17. Do not create, modify, disable, or delete high-impact identity records solely because another system disagrees; use confidence rules, approval gates, and exception handling.
+  18. Do not expose sensitive user/contact data to roles that are not authorized to view it.
+  19. Make client-specific exceptions possible, including clients that use different training providers, require extra contacts, exclude certain worker types, or have regulatory requirements.
+  20. Integrate with client onboarding/offboarding playbooks so user lifecycle is part of normal MSP operations rather than an isolated cleanup task.
+- **Training requirements:**
+  - define who must receive training;
+  - determine training package/curriculum by client and role;
+  - define onboarding training deadline;
+  - define recurring/annual training cadence where applicable;
+  - define phishing-simulation enrollment rules;
+  - track completion and failures;
+  - define overdue reminders/escalation;
+  - preserve exemptions and their approving authority;
+  - define retraining after failed phishing simulations or policy triggers where approved;
+  - provide reporting suitable for compliance/customer review.
+- **Reconciliation / assurance:** Add a scheduled **User Lifecycle Assurance** process that compares the canonical user population with downstream systems and produces:
+  - missing records;
+  - duplicates;
+  - stale/disabled users still active elsewhere;
+  - missing BullPhish/training enrollment;
+  - incomplete/overdue training;
+  - client/company mismatches;
+  - unresolved identities;
+  - unsupported provider/API gaps.
+- **Governance requirements:**
+  - client isolation is mandatory;
+  - canonical identity resolution must be deterministic;
+  - no cross-client matching based only on name;
+  - user-disruptive actions such as disabling an account remain subject to the appropriate approval/playbook;
+  - training enrollment and contact creation should have their own risk/authority classifications;
+  - all provider writes require readback verification where supported;
+  - provider failures must fail closed and become exceptions rather than silently leaving a user partially provisioned.
+- **Required capability areas:**
+  - Autotask contact search/read/create/update;
+  - IT Glue contact search/read/create/update;
+  - Microsoft 365 / Entra user read and governed lifecycle actions;
+  - BullPhish ID user/group/campaign/training enrollment read/write;
+  - security-awareness training status/completion read;
+  - provider-specific group/policy assignment;
+  - client policy / service-bundle lookup;
+  - scheduled reconciliation;
+  - persisted lifecycle state;
+  - exception ticket creation/update;
+  - Grafana/reporting telemetry.
+- **Grafana / operational visibility:** Add a user-lifecycle view showing, by client:
+  - total active canonical users;
+  - users fully synchronized;
+  - missing downstream records;
+  - duplicate/conflicting identities;
+  - BullPhish/training enrollment status;
+  - overdue/incomplete training;
+  - recent onboardings/offboardings;
+  - blocked/failed provisioning;
+  - stale downstream users;
+  - unresolved exceptions and aging.
+- **Initial acceptance test:** Select one controlled client and prove a new user can be identified, correlated, represented in all required platforms, enrolled in the correct training, documented, and subsequently reconciled. Then test a role/email change and a controlled offboarding/retirement path without creating duplicates or losing audit history.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement before claiming end-to-end autonomous client user onboarding/offboarding or compliance/training assurance.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
