@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Jason Kyocera KFS collector nightly
+
+[Timer]
+OnCalendar=*-*-* 00:00:00 America/New_York
+AccuracySec=1min
+Unit=jason-kfs-collector.service
+
+[Install]
+WantedBy=timers.target

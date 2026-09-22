@@ -1,0 +1,11 @@
+[Unit]
+Description=Jason Kyocera KFS nightly read-only collector
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/al/jason-runtime-tools/kfs/run_kfs_collector_container.sh
+WorkingDirectory=/home/al/jason-runtime-tools/kfs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

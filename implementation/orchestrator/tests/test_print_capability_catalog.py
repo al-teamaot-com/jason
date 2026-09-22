@@ -26,7 +26,7 @@ from orchestrator.print_capability_catalog import (
 NOW = datetime(2026, 9, 21, 19, 0, tzinfo=timezone.utc)
 
 
-def test_print_capability_catalog_is_read_only_and_client_scoped() -> None:
+def test_print_capability_catalog_is_read_only_and_aot_internal_scoped() -> None:
     definitions = print_capabilities(NOW)
 
     assert {item.capability_name for item in definitions} == {
@@ -37,7 +37,16 @@ def test_print_capability_catalog_is_read_only_and_client_scoped() -> None:
         PRINT_ALERT_SEARCH,
     }
     assert all(item.metadata["read_only"] == "true" for item in definitions)
-    assert all(item.client_isolation_required for item in definitions)
+    assert all(item.client_isolation_required is False for item in definitions)
+    assert all(
+        item.metadata["scope_model"] == "aot_internal_dealer_fleet"
+        for item in definitions
+    )
+    assert all(
+        item.metadata["client_scope_status"]
+        == "not_exposed_until_explicit_kfs_autotask_mapping"
+        for item in definitions
+    )
     assert all(item.approval.required is False for item in definitions)
 
 

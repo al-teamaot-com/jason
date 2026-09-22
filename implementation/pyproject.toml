@@ -12,6 +12,7 @@ dependencies = [
   "jsonschema>=4.23,<5",
   "msal>=1.35,<2",
   "PyJWT[crypto]>=2.9,<3",
+  "psycopg[binary]==3.1.17",
 ]
 
 [project.optional-dependencies]
