@@ -377,8 +377,19 @@ PY
     say "SECRET_SURFACE=FAIL"
     return 1
   fi
+  grep -q '^jason_openai_org_usage_source_available 1$' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_USAGE_SOURCE=FAIL"
+    return 1
+  }
+  grep -q '^jason_openai_org_requests_24h ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_USAGE_METRICS=FAIL"
+    return 1
+  }
   rm -f "$metric_snapshot"
   say "SECRET_SURFACE=PASS"
+  say "OPENAI_USAGE_SOURCE=PASS"
 
   say "DASHBOARD_TELEMETRY_DEPLOYMENT=PASS"
   say "BACKUP_DIR=$BACKUP_DIR"
