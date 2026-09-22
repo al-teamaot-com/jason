@@ -640,6 +640,20 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before embedding additional reusable ticket-note language directly into Jason playbooks.
 
 
+### TODO-OPS-004 — Windows licensing monitor false-negative investigation and correction
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Investigate and correct the Datto RMM `Monitor Windows Licence/License Status [WIN]` logic when it reports `Unable to ascertain OS licence` even though Windows authoritatively reports a fully licensed state.
+- **Why it matters:** False licensing alerts create stale Autotask tickets, technician noise, and can obscure real activation failures. Jason should be able to distinguish a genuine unlicensed endpoint from a monitor parsing/provider defect before any licensing action is considered.
+- **First production case:** `T20260907.0008` / `HER-50717`. The DRMM monitor reported `Unable to ascertain OS licence`, while an approved read-only local query of `SoftwareLicensingProduct` returned Windows Professional, Retail channel, `LicenseStatus=1`, grace period `0`, and exit code `0`.
+- **Expected behavior:** Review the monitor implementation and its assumptions; reproduce the failure safely; identify the exact parsing/WMI/CIM condition that yields the false negative; update or replace the monitor using authoritative local licensing state; preserve distinct states for licensed, notification/grace/unlicensed, query failure, and unsupported cases; verify against multiple Windows editions/channels before deployment.
+- **Governance:** Diagnostic reads may be automated when classified safe. Activation, key installation/change, edition change, KMS configuration, or other licensing mutations remain separately governed and must never be triggered solely by a monitor result.
+- **Prerequisites:** Access to the current DRMM monitor component source/logic; controlled test endpoints representing Retail/OEM/digital/KMS states; regression test cases; monitor deployment/change-control process.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Address before treating Windows licensing monitor tickets as autonomously actionable or building a licensing-remediation playbook.
+
 ## New-item template
 
 Copy this section when adding an idea:
