@@ -405,6 +405,29 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement as client-specific playbooks begin entering production, starting with the Gromelski network-device discovery workflow.
 
 
+
+### TODO-CONN-006 — Client-required primary-contact inclusion without replacing requester
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a governed Autotask ticket/contact mechanism that can include a client-designated primary stakeholder on every applicable ticket without replacing or losing the actual requester/end-user contact.
+- **Why it matters:** Some clients require a designated technical/management contact to be included on all tickets. Autotask currently exposes a single primary ticket `contactID` through Jason, so blindly setting that field would overwrite the real requester on user-generated tickets.
+- **First production case:** Gromelski And Associates Inc. requires **Chris Benton** (Autotask contact ID `30684489`, Network Security Director) to be included on all Gromelski tickets.
+- **Expected behavior:**
+  1. Resolve the designated client stakeholder from authoritative Autotask contact data at execution time.
+  2. For system-generated tickets with no human requester, set the designated stakeholder as the ticket contact when appropriate.
+  3. For user-generated tickets, preserve the actual requester and additionally include the designated stakeholder using a supported Autotask notification/additional-contact/watch-list mechanism.
+  4. Do not duplicate recipients.
+  5. Verify the resulting requester and stakeholder associations through authoritative readback where available.
+  6. Allow this requirement to be defined per client in client-specific playbooks/policy metadata.
+  7. Fail closed when the designated contact is inactive, moved to another company, ambiguous, or otherwise invalid.
+  8. Record the association decision in the ticket audit trail without exposing unnecessary contact data.
+- **Prerequisites:** authoritative Autotask contact metadata; supported additional-recipient/contact API or native Autotask workflow mechanism; client-specific playbook policy metadata; reliable ticket write verification.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement with the Gromelski client-specific ticket operations playbook before claiming full enforcement of its primary-contact rule.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
