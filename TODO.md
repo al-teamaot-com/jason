@@ -533,6 +533,28 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before claiming end-to-end autonomous client user onboarding/offboarding or compliance/training assurance.
 
 
+
+### TODO-OPS-003 — VulScan non-Windows and network-device vulnerability workflow
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Build a separate VulScan workflow for routers, firewalls, switches, printers, phones, appliances, embedded systems, IoT devices, and other non-Windows/unmanaged targets. Do not reuse the managed-Windows patch-remediation logic for these assets.
+- **Why it matters:** VulScan tickets may represent firmware, TLS/cipher, web-interface, EOL software, appliance configuration, or vendor-specific vulnerabilities where Windows patch tooling is irrelevant or unsafe.
+- **Expected behavior:**
+  1. Identify the device by client, site, IP, MAC, OUI, hostname, serial, IT Glue/Autotask asset, and network evidence.
+  2. Classify device type/vendor/model/firmware where possible.
+  3. Correlate the exact CVE/finding to vendor guidance and current firmware/software state.
+  4. Distinguish false/stale findings from confirmed vulnerabilities.
+  5. Determine whether remediation is firmware upgrade, configuration change, vendor replacement, compensating control, documented risk acceptance, or escalation.
+  6. Never apply Windows endpoint components to appliance/network-device findings.
+  7. Treat firmware/network changes as modifying or potentially disruptive and require the appropriate approval.
+  8. Verify remediation through authoritative rescan when available.
+- **Prerequisites:** governed VulScan finding/read/rescan capability; reliable IT Glue/Autotask network-asset correlation; vendor/model identification; client-specific network playbook integration.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement after the managed-Windows VulScan playbook is validated and before claiming broad autonomous VulScan remediation.
+
+
 ## New-item template
 
 Copy this section when adding an idea:
