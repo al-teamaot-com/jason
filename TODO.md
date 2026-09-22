@@ -155,11 +155,12 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-002 — Autotask read-only production adapter and contract tests
 
 - **Priority:** P0
-- **Status:** Planned
+- **Status:** Implemented
 - **Risk level:** Moderate
 - **Idea:** Validate current Autotask endpoints, authentication, pagination, field mappings, and sanitized fixtures.
 - **Why it matters:** This is the first production evidence source for Professional Ticket Investigation.
-- **Why not now:** Requires read-only credentials and AOT-specific field mapping.
+- **Current state (2026-09-22):** Implemented and live through governed capabilities including `service.ticket.search`, `service.ticket.read`, `service.ticket.notes.search`, `service.contact.search`, catalog/procurement reads, and other Autotask evidence paths. Live re-verification against `T20260918.0005` succeeded for search, read, and notes without direct-provider bypass.
+- **Why not now:** Historical note retained: this originally required read-only credentials and AOT-specific field mapping.
 - **Prerequisites:** test tenant or approved production read access, fixture sanitization, rate-limit policy.
 - **Decision owner:** Platform Owner
 - **Review trigger:** When credentials are available.
@@ -167,11 +168,12 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-CONN-003 — Governed production write execution
 
 - **Priority:** P1
-- **Status:** Blocked
+- **Status:** Planned
 - **Risk level:** Critical
 - **Idea:** Enable selected Autotask, Datto RMM, IT Glue, and n8n writes behind approval, idempotency, and precondition controls.
 - **Why it matters:** Converts Jason from recommendation-only to controlled operational assistance.
-- **Why not now:** The pilot is intentionally recommendation-first and read-only.
+- **Current state (2026-09-22):** Partially implemented. The live MCP is in `governed-read-plus-actions` mode with active bounded writes for Autotask ticket/note/update, Datto component execution, Datto alert resolution, Datto AV scan start, Teams messaging, and multiple Autotask catalog/procurement actions. The backlog item remains open because the broader originally described cross-provider write surface (including IT Glue/n8n and full playbook automation) is not complete.
+- **Why not now:** Historical note retained: the initial pilot was recommendation-first and read-only.
 - **Prerequisites:** mature audit chain, approval service, rollback patterns, connector contract tests, least-privilege credentials, sandbox testing, incident response process.
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Successful completion of the read-only shadow pilot and formal authorization to expand scope.
