@@ -558,7 +558,7 @@ def _render_openai_org_metrics(now: datetime) -> str:
     for row in data["rows"]:
         labels = {
             "model": row["model"], "project": row["project"],
-            "project_id": row["project_id"], "api_key": row["api_key"],
+            "project_id": row["project_id"], "api_key_name": row["api_key"],
             "api_key_id": row["api_key_id"],
         }
         for usage_type, field in (
