@@ -5,6 +5,7 @@ import json
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -249,3 +250,19 @@ def test_runtime_exporter_correlates_classifier_graph_and_provider_usage(tmp_pat
     assert "never-export-authorization" not in metrics
     assert "tenant-secret" not in metrics
     assert "object-secret" not in metrics
+
+
+def test_openai_standard_rate_estimate_uses_cached_input_discount():
+    module = load_runtime_exporter()
+
+    gpt55 = module._estimate_standard_cost_usd(
+        "gpt-5.5-2026-04-23", 15892217, 15250176, 36268
+    )
+    gpt54 = module._estimate_standard_cost_usd(
+        "gpt-5.4-2026-03-05", 1008713, 692480, 7943
+    )
+
+    assert gpt55 == Decimal("11.923333")
+    assert gpt54 == Decimal("1.0828475")
+    assert gpt55 + gpt54 == Decimal("13.0061805")
+    assert module._estimate_standard_cost_usd("gpt-5.4-mini", 1, 0, 0) is None

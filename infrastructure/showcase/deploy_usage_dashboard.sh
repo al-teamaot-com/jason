@@ -409,6 +409,16 @@ PY
     say "OPENAI_USAGE_METRICS=FAIL"
     return 1
   }
+  grep -q '^jason_openai_org_estimated_cost_usd_24h ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_COST_ESTIMATE=FAIL"
+    return 1
+  }
+  grep -q '^jason_openai_org_reported_cost_available ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_REPORTED_COST_STATUS=FAIL"
+    return 1
+  }
   rm -f "$metric_snapshot"
   say "SECRET_SURFACE=PASS"
   say "OPENAI_USAGE_SOURCE=PASS"

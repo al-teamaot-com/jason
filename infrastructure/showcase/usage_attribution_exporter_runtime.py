@@ -55,6 +55,48 @@ _OPENAI_USAGE_CACHE: dict[str, object] = {
     "last_success": None,
 }
 
+# Standard API text-token rates published by OpenAI on 2026-09-22.
+# Estimates deliberately exclude long-context, priority/flex/batch, regional,
+# Scale Tier, and other contractual adjustments. OpenAI's Costs API remains the
+# authoritative financial source once a reported cost row is available.
+_OPENAI_STANDARD_RATES_PER_MILLION = {
+    "gpt-5.5": (Decimal("5.00"), Decimal("0.50"), Decimal("30.00")),
+    "gpt-5.4": (Decimal("2.50"), Decimal("0.25"), Decimal("15.00")),
+}
+_OPENAI_RATE_BASIS = "openai-standard-2026-09-22"
+
+
+def _standard_rate_for_model(model: str) -> tuple[Decimal, Decimal, Decimal] | None:
+    normalized = str(model or "").strip().casefold()
+    for family, rates in _OPENAI_STANDARD_RATES_PER_MILLION.items():
+        # Dated snapshots look like gpt-5.5-2026-04-23. Do not accidentally
+        # classify gpt-5.5-mini/pro or other variants at the base-model rate.
+        if normalized == family or normalized.startswith(f"{family}-20"):
+            return rates
+    return None
+
+
+def _estimate_standard_cost_usd(
+    model: str,
+    input_tokens: int,
+    cached_input_tokens: int,
+    output_tokens: int,
+) -> Decimal | None:
+    rates = _standard_rate_for_model(model)
+    if rates is None:
+        return None
+    input_rate, cached_rate, output_rate = rates
+    cached = max(0, int(cached_input_tokens))
+    total_input = max(0, int(input_tokens))
+    uncached = max(0, total_input - cached)
+    output = max(0, int(output_tokens))
+    million = Decimal("1000000")
+    return (
+        Decimal(uncached) * input_rate
+        + Decimal(cached) * cached_rate
+        + Decimal(output) * output_rate
+    ) / million
+
 
 def _valid_email(value: object) -> str:
     text = str(value or "").strip()
@@ -457,19 +499,32 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
 
         dimensions = {(project_id, api_key_id) for _, project_id, api_key_id in detail}
         projects, keys = _openai_dimension_names(admin_key, dimensions)
-        rows = [
-            {
-                "model": model,
-                "project_id": project_id,
-                "project": projects.get(project_id, project_id or "unknown"),
-                "api_key_id": api_key_id,
-                "api_key": keys.get((project_id, api_key_id), api_key_id or "unknown"),
-                **values,
-            }
-            for (model, project_id, api_key_id), values in sorted(detail.items())
-        ]
+        rows = []
+        estimated_cost_usd = Decimal("0")
+        estimated_requests = 0
+        for (model, project_id, api_key_id), values in sorted(detail.items()):
+            estimate = _estimate_standard_cost_usd(
+                model,
+                values["input"],
+                values["cached_input"],
+                values["output"],
+            )
+            if estimate is not None:
+                estimated_cost_usd += estimate
+                estimated_requests += values["requests"]
+            rows.append(
+                {
+                    "model": model,
+                    "project_id": project_id,
+                    "project": projects.get(project_id, project_id or "unknown"),
+                    "api_key_id": api_key_id,
+                    "api_key": keys.get((project_id, api_key_id), api_key_id or "unknown"),
+                    **values,
+                }
+            )
 
         cost_usd = Decimal("0")
+        reported_cost_rows = 0
         for bucket in cost_buckets:
             for result in bucket.get("results", []):
                 if not isinstance(result, dict):
@@ -481,6 +536,7 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
                     continue
                 try:
                     cost_usd += Decimal(str(amount.get("value") or "0"))
+                    reported_cost_rows += 1
                 except Exception:
                     continue
 
@@ -490,6 +546,12 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
             "fetched_at": now.timestamp(),
             "last_activity": float(last_activity),
             "cost_usd": cost_usd,
+            "reported_cost_available": 1 if reported_cost_rows else 0,
+            "estimated_cost_usd": estimated_cost_usd,
+            "estimated_request_coverage_ratio": (
+                estimated_requests / totals["requests"] if totals["requests"] else 1.0
+            ),
+            "rate_basis": _OPENAI_RATE_BASIS,
             "rows": rows,
             **totals,
         }
@@ -521,7 +583,10 @@ def _openai_org_snapshot(now: datetime) -> dict[str, object]:
         return {
             "source_available": 0, "cost_source_available": 0,
             "fetched_at": 0.0, "last_activity": 0.0,
-            "cost_usd": Decimal("0"), "rows": [],
+            "cost_usd": Decimal("0"), "reported_cost_available": 0,
+            "estimated_cost_usd": Decimal("0"),
+            "estimated_request_coverage_ratio": 0.0,
+            "rate_basis": _OPENAI_RATE_BASIS, "rows": [],
             "requests": 0, "input": 0, "cached_input": 0, "output": 0,
         }
 
@@ -535,6 +600,9 @@ def _render_openai_org_metrics(now: datetime) -> str:
         "# HELP jason_openai_org_cost_source_available Whether authoritative OpenAI organization costs are reachable.",
         "# TYPE jason_openai_org_cost_source_available gauge",
         f"jason_openai_org_cost_source_available {int(data['cost_source_available'])}",
+        "# HELP jason_openai_org_reported_cost_available Whether OpenAI has published at least one cost row for the rolling window.",
+        "# TYPE jason_openai_org_reported_cost_available gauge",
+        f"jason_openai_org_reported_cost_available {int(data['reported_cost_available'])}",
         "# HELP jason_openai_org_requests_24h OpenAI requests reported over the rolling 24h window.",
         "# TYPE jason_openai_org_requests_24h gauge",
         f"jason_openai_org_requests_24h {int(data['requests'])}",
@@ -546,6 +614,15 @@ def _render_openai_org_metrics(now: datetime) -> str:
         "# HELP jason_openai_org_cost_usd_24h Cost reported by OpenAI for the rolling 24h query window.",
         "# TYPE jason_openai_org_cost_usd_24h gauge",
         f"jason_openai_org_cost_usd_24h {Decimal(data['cost_usd']):.8f}",
+        "# HELP jason_openai_org_estimated_cost_usd_24h Standard-rate estimate from provider-reported token usage; not an invoice value.",
+        "# TYPE jason_openai_org_estimated_cost_usd_24h gauge",
+        f"jason_openai_org_estimated_cost_usd_24h {Decimal(data['estimated_cost_usd']):.8f}",
+        "# HELP jason_openai_org_estimated_cost_coverage_ratio_24h Fraction of OpenAI requests covered by the configured standard-rate estimate.",
+        "# TYPE jason_openai_org_estimated_cost_coverage_ratio_24h gauge",
+        f"jason_openai_org_estimated_cost_coverage_ratio_24h {float(data['estimated_request_coverage_ratio']):.6f}",
+        "# HELP jason_openai_org_estimate_pricing_info Pricing schedule metadata for the provisional OpenAI estimate.",
+        "# TYPE jason_openai_org_estimate_pricing_info gauge",
+        f'jason_openai_org_estimate_pricing_info{{basis="{base._escape(data["rate_basis"])}"}} 1',
         "# HELP jason_openai_org_last_activity_timestamp_seconds End of the newest usage bucket containing requests.",
         "# TYPE jason_openai_org_last_activity_timestamp_seconds gauge",
         f"jason_openai_org_last_activity_timestamp_seconds {float(data['last_activity']):.3f}",
