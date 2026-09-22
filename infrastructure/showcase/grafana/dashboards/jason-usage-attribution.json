@@ -833,14 +833,14 @@
             "indexByName": {
               "model": 0,
               "project": 1,
-              "api_key": 2,
+              "api_key_name": 2,
               "usage_type": 3,
               "Value": 4
             },
             "renameByName": {
               "model": "Model",
               "project": "Project",
-              "api_key": "API Key",
+              "api_key_name": "API Key",
               "usage_type": "Metric",
               "Value": "Value"
             }
