@@ -269,25 +269,66 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Review trigger:** Implement before expanding autonomous multi-ticket troubleshooting so queue ownership is reliable across technicians and Jason.
 
 
-### TODO-OPS-001 — Durable deferred-work recheck scheduler
+### TODO-OPS-001 — Persistent deferred and scheduled work
 
 - **Related implementation:** `implementation/autonomous_remediation/availability.py` and `07-Operations/Endpoint-Availability-Verification-Playbook.md`
 - **Priority:** P1
 - **Status:** Planned
 - **Risk level:** Moderate
-- **Idea:** Add a governed durable scheduler that can resume persisted Jason workflow states at a requested future time, suppress duplicate rechecks, and stop scheduled work when the parent workflow reaches a terminal state.
-- **Why it matters:** Offline endpoints, backup verification, patch confirmation, post-reboot checks, waiting-for-device workflows, and similar cases must not depend on a technician remembering to return later.
-- **Why not now:** JKD-009 intentionally provides durable append-only event history but explicitly excludes scheduled retries. The new endpoint-availability gate can calculate and persist next_recheck_at, but production execution of that future recheck needs a separate governed scheduler.
-- **Prerequisites:** canonical deferred-work contract; durable job store; deduplication/idempotency key; client and requester context binding; cancellation on terminal state; bounded retry/aging rules; audit events; recovery after service restart.
+- **Idea:** Add a governed durable scheduled-work subsystem that persists one-time and recurring Jason follow-ups across sessions and service restarts. It must support deferred verification, recurring checks, escalation, reason codes, ticket updates, and operational visibility in Grafana.
+- **Why it matters:** Offline endpoints, backup verification, patch confirmation, post-reboot checks, waiting-for-device workflows, aging escalations, and similar cases must not depend on a technician remembering to return later or on the original ChatGPT/OpenClaw session still existing.
+- **Why not now:** JKD-009 provides durable append-only event history but explicitly excludes scheduled retries. The endpoint-availability gate can calculate and persist `next_recheck_at`, but production execution of future work still needs a separate governed scheduler and durable execution model.
+- **Prerequisites:** canonical deferred-work contract; durable job store; one-time and recurring schedule model; deduplication/idempotency key; client/requester/ticket/device context binding; reason-code taxonomy; cancellation on terminal state; bounded retry and aging rules; audit events; recovery after service restart; governed Autotask update capability; Grafana data source.
 - **Expected behavior:**
-  1. Accept a persisted workflow/correlation identity and next_recheck_at.
-  2. Execute no earlier than the requested time.
-  3. Rehydrate authorized client/device/workflow context rather than creating new authority.
-  4. Suppress duplicate scheduled rechecks for the same workflow generation.
-  5. Cancel automatically when the ticket/workflow completes, escalates, is retired, or otherwise reaches a terminal state.
-  6. Record schedule, execution, cancellation, and failure evidence.
+  1. Persist one-time and recurring follow-ups independently of the conversation/session that created them.
+  2. Support examples such as daily offline checks, next-day backup verification, post-patch verification, post-reboot verification, Wednesday-morning follow-up, and escalation after a defined aging threshold.
+  3. Retain durable identity, source/correlation data, ticket/device/client/playbook references, next-run time, recurrence, lifecycle state, creation source, and a reason code explaining why the work exists.
+  4. Execute no earlier than the requested time and rehydrate authorized context rather than creating new authority.
+  5. Re-apply current Jason governance at execution time. Scheduling an action must never bypass approval requirements that would apply if the action were initiated interactively.
+  6. Suppress duplicate execution and duplicate provider mutations using deterministic idempotency controls.
+  7. Permit governed ticket updates, escalation, deferral, completion, and cancellation as outcomes of scheduled work.
+  8. Cancel or retire scheduled work automatically when the parent ticket/workflow reaches a terminal state or the follow-up is no longer applicable.
+  9. Record creation, execution, retry, reschedule, deferral, cancellation, failure, escalation, and completion evidence.
+  10. Add a **Grafana Scheduled Work** view showing pending work, next execution, recurring work, overdue work, failed work, escalated work, recent completion history, source ticket/device/client, reason code, and governance/approval state where relevant.
 - **Decision owner:** Jason Governance Authority
-- **Review trigger:** Implement before claiming end-to-end autonomous deferred ticket handling or closing the Endpoint Availability Verification playbook Section Goal.
+- **Review trigger:** Implement before claiming end-to-end autonomous deferred ticket handling or closing playbooks that require future rechecks across sessions.
+
+### TODO-GOV-005 — Successful resolution to governed playbook candidate
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** When Jason and a technician successfully resolve a ticket, prompt the technician to submit the resolution as a playbook candidate and, when accepted, create a governed draft linked to the source ticket and resolution evidence.
+- **Why it matters:** Reusable operational knowledge should become institutional memory instead of being rediscovered ticket by ticket. Capturing proven resolutions also creates a controlled path from technician-assisted success to repeatable automation without silently granting autonomy.
+- **Why not now:** The playbook lifecycle and approval model exist conceptually, but the successful-resolution capture workflow, evidence package, candidate state model, and approval handoff are not yet implemented end to end.
+- **Prerequisites:** reliable ticket completion detection; source-ticket linkage; canonical playbook-candidate schema; evidence capture from diagnostics/remediation/verification; approval workflow; versioning; rejection/retirement handling; autonomy approval kept distinct from ordinary playbook approval.
+- **Expected behavior:**
+  1. On a verified successful ticket resolution involving Jason and a technician, prompt: "Would you like to submit this resolution as a playbook candidate?"
+  2. If accepted, create a governed candidate draft rather than an approved playbook.
+  3. Capture available evidence including source ticket, client/site, affected devices, trigger/symptoms, diagnostics, commands/components/capabilities used, relevant outputs, decision gates, remediation, verification, retries/failures, exceptions, technician approvals, communications/documentation steps, risks, dependencies, limitations, and suggested scope.
+  4. Preserve the lifecycle: **Successful Resolution → Candidate → Draft/Review → Approved Playbook → optionally Approved for Autonomous Use**.
+  5. Treat **Approved** and **Approved for Autonomous Use** as separate governance decisions. Approval as a playbook must never implicitly authorize autonomous execution.
+  6. Preserve source evidence and approval history so reviewers can reconstruct why the candidate was created and what proved the original resolution successful.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement as part of the production playbook lifecycle before broad autonomous remediation is enabled.
+
+### TODO-OBS-001 — Grafana playbook lifecycle and autonomy-status page
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Add a Grafana page that makes each playbook's lifecycle, provenance, review state, approval state, and autonomous-use authorization immediately visible.
+- **Why it matters:** Technicians and governance reviewers need a single operational view showing how a real resolution became a candidate, whether it has been reviewed and approved, and whether it is explicitly authorized for autonomous execution. Stale candidates must also be visible so potentially valuable knowledge does not disappear indefinitely in review.
+- **Why not now:** The underlying lifecycle records and successful-resolution candidate workflow must expose stable data before Grafana can present an authoritative view.
+- **Prerequisites:** canonical candidate/playbook lifecycle schema; source-ticket linkage; reviewer/approver records; separate autonomy-approval fields; version history; evidence-completeness signal; aging/staleness thresholds; Grafana-readable metrics or query source.
+- **Expected behavior:**
+  1. Display the lifecycle chain **Source Ticket / Resolution → Playbook Candidate → Under Review → Approved → Approved for Autonomous Use**.
+  2. Show candidate/playbook name and ID, source ticket, originating resolution, creation date, current lifecycle state, reviewer/approver, approval date, autonomy approval state/authority/date, most recent revision/version, evidence completeness, and age in current state.
+  3. Provide clear views for stale/aging candidates, rejected candidates with reason, items awaiting review, approved playbooks not approved for autonomy, and playbooks explicitly approved for autonomous use.
+  4. Make the difference between **Approved** and **Approved for Autonomous Use** visually unmistakable.
+  5. Preserve enough provenance to navigate from the dashboard state back to the source ticket and governed evidence record.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Implement when the playbook-candidate lifecycle begins producing durable production records, and before autonomous-playbook coverage expands enough that status ambiguity becomes an operational risk.
 
 ---
 
