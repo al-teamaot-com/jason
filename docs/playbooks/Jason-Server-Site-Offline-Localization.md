@@ -286,6 +286,25 @@ and document the capability gap.
 
 ---
 
+### Approved read-only path test
+
+AOT owner approval is recorded for this playbook to perform the following **read-only localization diagnostic** on an exact authorized in-scope endpoint:
+
+1. read the current default gateway;
+2. send a bounded reachability test to that gateway;
+3. send a bounded reachability test to an approved public IP (default `1.1.1.1`);
+4. resolve an approved public DNS name (default `www.microsoft.com`);
+5. perform a bounded TCP 443 connectivity test to that resolved/public name;
+6. record results, timestamps, target device, and job/correlation IDs.
+
+**Authority classification:** read-only / non-destructive diagnostic.
+
+This approval does **not** authorize any network or endpoint mutation, including NIC reset, DNS change, route change, firewall change, service restart, reboot, or switch/router action.
+
+The playbook approval does not bypass Jason's live governance. If the current execution policy still requires a per-run approval token/signal, Jason must use the requester approval for that exact run and must not weaken or bypass the policy.
+
+---
+
 ## 8. Decision Gates
 
 Before any remediation:
@@ -535,7 +554,7 @@ Current bounded classification for the acceptance case: `transient_site_connecti
 
 ### Remaining acceptance / implementation gaps
 
-- Live gateway, Internet-by-IP, and Internet-by-name testing from an in-site endpoint must be executed when exact per-run authority is available for the required ad-hoc diagnostic.
+- Live gateway, Internet-by-IP, DNS-name resolution, and TCP 443 testing from an in-site endpoint is an approved read-only playbook diagnostic. The Riggins acceptance run should execute it under the current live governance policy and record the exact job/correlation evidence.
 - Deeper DRMM SNMP/interface/port telemetry is tracked in `TODO-NET-002`.
 - External/infrastructure telemetry beyond current capabilities is tracked in `TODO-NET-001`.
 - Direct vendor integrations are fallback paths only when DRMM cannot provide the required evidence.
