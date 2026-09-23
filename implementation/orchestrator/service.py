@@ -58,6 +58,22 @@ class InvocationTelemetry:
     hosted_model_output_tokens: int = 0
     hosted_model_cost_usd: str = "0"
 
+    # REFLECT-001 bounded execution-quality telemetry. These fields contain
+    # counts/strategy labels only; raw prompts, provider records, and secrets
+    # do not belong in reflection telemetry.
+    reflection_normalized_intent: str = ""
+    reflection_selector_strategy: str = ""
+    reflection_requested_result_scope: str = "unknown"
+    reflection_result_count: int | None = None
+    reflection_candidate_count: int | None = None
+    reflection_provider_call_count: int = 0
+    reflection_pagination_count: int = 0
+    reflection_fallback_count: int = 0
+    reflection_evidence_item_count: int = 0
+    reflection_search_strategies: tuple[str, ...] = ()
+    reflection_search_result_counts: tuple[int, ...] = ()
+    reflection_warning_codes: tuple[str, ...] = ()
+
     def __post_init__(self) -> None:
         if self.hosted_model_input_tokens < 0 or self.hosted_model_output_tokens < 0:
             raise ValueError("hosted model token counts must not be negative")
@@ -70,6 +86,34 @@ class InvocationTelemetry:
                 raise ValueError("hosted model tokens require hosted_model_used")
             if self.hosted_model_cost_usd not in {"0", "0.0", "0.00", "0.000000"}:
                 raise ValueError("hosted model cost must be zero when no hosted model was used")
+
+        counts = (
+            self.reflection_result_count,
+            self.reflection_candidate_count,
+            self.reflection_provider_call_count,
+            self.reflection_pagination_count,
+            self.reflection_fallback_count,
+            self.reflection_evidence_item_count,
+        )
+        if any(value is not None and value < 0 for value in counts):
+            raise ValueError("reflection counts must not be negative")
+        if len(self.reflection_search_strategies) != len(
+            self.reflection_search_result_counts
+        ):
+            raise ValueError(
+                "reflection search strategies and result counts must align"
+            )
+        if len(self.reflection_search_strategies) > 32:
+            raise ValueError("reflection search telemetry is unbounded")
+        if len(self.reflection_warning_codes) > 64:
+            raise ValueError("reflection warning telemetry is unbounded")
+        bounded = (
+            (self.reflection_normalized_intent, 256),
+            (self.reflection_selector_strategy, 128),
+            (self.reflection_requested_result_scope, 64),
+        )
+        if any(len(value) > maximum for value, maximum in bounded):
+            raise ValueError("reflection telemetry string exceeds bounded length")
 
 
 @dataclass(frozen=True, slots=True)
@@ -715,6 +759,18 @@ class CentralOrchestrator:
                     "hosted_model_input_tokens": telemetry.hosted_model_input_tokens,
                     "hosted_model_output_tokens": telemetry.hosted_model_output_tokens,
                     "hosted_model_cost_usd": telemetry.hosted_model_cost_usd,
+                    "reflection_normalized_intent": telemetry.reflection_normalized_intent,
+                    "reflection_selector_strategy": telemetry.reflection_selector_strategy,
+                    "reflection_requested_result_scope": telemetry.reflection_requested_result_scope,
+                    "reflection_result_count": telemetry.reflection_result_count,
+                    "reflection_candidate_count": telemetry.reflection_candidate_count,
+                    "reflection_provider_call_count": telemetry.reflection_provider_call_count,
+                    "reflection_pagination_count": telemetry.reflection_pagination_count,
+                    "reflection_fallback_count": telemetry.reflection_fallback_count,
+                    "reflection_evidence_item_count": telemetry.reflection_evidence_item_count,
+                    "reflection_search_strategies": telemetry.reflection_search_strategies,
+                    "reflection_search_result_counts": telemetry.reflection_search_result_counts,
+                    "reflection_warning_codes": telemetry.reflection_warning_codes,
                 }
             )
         else:
