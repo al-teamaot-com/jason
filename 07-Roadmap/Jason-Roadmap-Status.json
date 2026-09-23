@@ -310,6 +310,87 @@
       "references": [
         "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/welcome-health-checks.html"
       ]
+    },
+    {
+      "id": "TODO-DATA-001",
+      "title": "Microsoft Graph Service Health integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "External Operational Intelligence",
+      "notes": "Use Microsoft Graph service communications as a read-only source for Microsoft 365 service health, active incidents, advisories, and affected services. Check this early in Microsoft 365 troubleshooting so Jason can distinguish tenant/device issues from Microsoft-side incidents.",
+      "references": [
+        "https://learn.microsoft.com/en-us/graph/api/resources/serviceannouncement?view=graph-rest-1.0"
+      ]
+    },
+    {
+      "id": "TODO-DATA-002",
+      "title": "Public Statuspage API vendor-health integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "External Operational Intelligence",
+      "notes": "Build a vendor-health registry using public Atlassian Statuspage-style JSON APIs and equivalent public status feeds. Track overall status, components, active incidents, incident history, and maintenance for critical AOT vendors; correlate simultaneous client tickets with upstream vendor incidents.",
+      "references": [
+        "https://support.atlassian.com/statuspage/docs/enable-your-statuspage-api/",
+        "https://www.atlassian.com/software/statuspage"
+      ]
+    },
+    {
+      "id": "TODO-DATA-003",
+      "title": "RIPEstat Internet routing intelligence integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Internet/WAN Outage Intelligence",
+      "notes": "Use the public RIPEstat Data API as read-only routing evidence for ASN, prefix ownership, BGP state/updates/history, RPKI validation, routing consistency, reverse DNS, and related Internet-routing context. Correlate with Cloudflare Radar, RIPE Atlas, AWS WAN probes, Datto Networking, and cross-client outage evidence.",
+      "references": [
+        "https://stat.ripe.net/docs/02.data-api/"
+      ]
+    },
+    {
+      "id": "TODO-DATA-004",
+      "title": "ICANN RDAP domain-registration intelligence integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Domain/DNS Assurance",
+      "notes": "Use RDAP for standardized domain-registration evidence including registrar, registration/status data, nameserver/delegation context, and authoritative RDAP source. Feed Domain Expiration, DNS, email-delivery, onboarding, and documentation-assurance workflows.",
+      "references": [
+        "https://www.icann.org/rdap"
+      ]
+    },
+    {
+      "id": "TODO-DATA-005",
+      "title": "SANS DShield / Internet Storm Center threat-intelligence integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Threat Reputation Intelligence",
+      "notes": "Use SANS Internet Storm Center/DShield as read-only threat-enrichment evidence for suspicious IPs, observed scanning/attack activity, attacked ports, and Internet-wide attack context. Correlate with RocketCyber, EDR/SIEM, firewall, SaaS Alerts, and other reputation sources; never treat a single reputation source as definitive.",
+      "references": [
+        "https://isc.sans.edu/api/",
+        "https://www.dshield.org/"
+      ]
+    },
+    {
+      "id": "TODO-DATA-006",
+      "title": "AbuseIPDB threat-reputation integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Threat Reputation Intelligence",
+      "notes": "Use the AbuseIPDB API selectively for investigation-time IP reputation, recent abuse reports, confidence, and related context. Respect free-tier limits and licensing/terms; avoid bulk querying when enrichment of active incidents is sufficient.",
+      "references": [
+        "https://docs.abuseipdb.com/",
+        "https://www.abuseipdb.com/pricing"
+      ]
+    },
+    {
+      "id": "TODO-DATA-007",
+      "title": "MaxMind GeoLite ASN/Country enrichment",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "External Operational Intelligence",
+      "notes": "Use MaxMind GeoLite ASN and Country data as a local/read-only enrichment source for IP-to-ASN/provider and country mapping. Use for ISP identification, outage correlation, security enrichment, and normalization; do not treat geolocation as precise physical-location proof.",
+      "references": [
+        "https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/",
+        "https://www.maxmind.com/en/geolite2/signup"
+      ]
     }
   ]
 }
