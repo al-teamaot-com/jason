@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently identified approval-governed action surface and shared security framework. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; adapter hardening is checkpointed at `0ed6911` and `e41e572`; shared absolute provider deadlines plus continuation/recovery dual-plan binding and durable recovery retry controls are checkpointed at `bf072af`. The consolidated security regression set is 186/186 PASS. A full orchestrator-suite comparison shows only the same three pre-existing IT Glue/provider-read failures present at baseline `10d1e9c`, with no new failures introduced by `bf072af`. No production deployment or provider mutation has occurred from this remediation branch; production acceptance remains pending.
+**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently identified approval-governed action surface and shared security framework. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; adapter hardening is checkpointed at `0ed6911` and `e41e572`; shared absolute provider deadlines plus continuation/recovery dual-plan binding and durable recovery retry controls are checkpointed at `bf072af`. The consolidated security regression set is 186/186 PASS. A full orchestrator-suite comparison shows only the same three pre-existing IT Glue/provider-read failures present at baseline `10d1e9c`, with no new failures introduced by `bf072af`. Clean no-cache MCP and runtime candidate builds from authoritative source `6e4e4c0979f3762b8dbd3b8b277850a1899deb18` are now verified, and exact current production MCP/runtime rollback images are pinned and isolated-runnability tested. No production container, provider state, or approval state was changed; production deployment and live acceptance remain pending.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: produce a clean reproducible build from authoritative remediation commit `bf072af` (or a later documentation-only descendant), preserve and verify the current production rollback, verify the deployed revision without a provider mutation, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
+- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: with clean candidate images and rollback now verified, perform a separately approved controlled production deployment, verify exact live revision/image/health/governance with zero provider mutations, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
 
 ## Durable operating principle
 
@@ -35,6 +35,18 @@ Confirmed current security-review state:
 Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
 
 Broader orchestrator validation with the required CAP-007 source path reaches the full suite and reports exactly three failures. The same three failures reproduce at baseline `10d1e9c`: IT Glue sensitive-output handling classification, IT Glue search selector metadata mismatch, and missing `DOCUMENTATION_FLEXIBLE_ASSET_SEARCH` test symbol. They are pre-existing provider-read/IT Glue work, not regressions from the security remediation.
+
+### Clean build and rollback readiness — 2026-09-23
+
+Authoritative source `6e4e4c0979f3762b8dbd3b8b277850a1899deb18` produced clean no-cache candidate images without reproducing the earlier Docker overlay-chain failure:
+
+- MCP candidate: `jason-mcp:security-remediation-6e4e4c0`, image ID `sha256:a5f2187f451d8f2ea99481434668519dfeb376a9f339b7b860393e86f24d507c`;
+- runtime candidate: `jason-runtime:security-remediation-6e4e4c0`, image ID `sha256:adf4c9d75f226d5968117b732b6d3cc660d712a9755914bcd02bb18a8b00639a`;
+- established MCP build base: `jason-mcp:generic-governed-8f1e864947a2`, image ID `sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a`;
+- MCP rollback tag: `jason-mcp:rollback-pre-execution-plan-20260923` -> exact live image ID `sha256:9d953d3cfb580c4c470e7e6c3bc7c44086706e22cd3b95e04c88f536fe121229`; and
+- runtime rollback tag: `jason-runtime:rollback-pre-execution-plan-20260923` -> exact live image ID `sha256:057a5412d9a6f5b3a8fcb01490aa26d804d6426250b64a8fcf4edd8d1abbc620`.
+
+Candidate image source hashes for the security-critical orchestrator, recovery, Datto, and Teams files match the authoritative worktree exactly. With `--network none`, both candidate images imported their new security contracts successfully, and both rollback images imported their production entry modules successfully. The live production MCP container remained `8ba7e3cda5c7808e3340cd096b1ba9dbb320929fdbf18a717d12d1edf219b8ef` on the approval-replay image; the live runtime container remained `ad7196cdef5b1d669bf28502495db12dc987223625578b06d0e5649cc00a059c` and healthy. No live container was recreated/restarted and no provider call was made.
 
 ### Execution-plan remediation compatibility state
 
