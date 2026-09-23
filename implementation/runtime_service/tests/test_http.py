@@ -80,6 +80,28 @@ def test_http_layer_cannot_turn_rejection_into_success():
     assert response.body["status"] == "rejected"
 
 
+def test_duplicate_authenticated_message_is_successful_idempotent_transport():
+    ingress = Ingress(
+        {
+            "request_id": "req-duplicate",
+            "correlation_id": "corr-duplicate",
+            "status": "duplicate",
+            "error_code": "duplicate_message",
+            "message_id": "teams-message-1",
+        }
+    )
+    response = RuntimeHttpApplication(ingress).dispatch(
+        method="POST",
+        path="/v1/openclaw/teams/conversation",
+        headers={"Content-Type": "application/json"},
+        body=request_body(),
+    )
+
+    assert response.status_code == 200
+    assert response.body["status"] == "duplicate"
+    assert response.body["error_code"] == "duplicate_message"
+
+
 def test_replay_rejection_is_conflict_not_success():
     ingress = Ingress(
         {
@@ -129,3 +151,50 @@ def test_unknown_ingress_status_fails_closed():
         body=request_body(),
     )
     assert response.status_code == 500
+
+
+def test_clarification_required_is_successful_conversation_transport():
+    ingress = Ingress(
+        {
+            "request_id":
+                "req-clarification",
+            "correlation_id":
+                "corr-clarification",
+            "status":
+                "clarification_required",
+            "error_code":
+                "canonical_fact_ambiguous",
+            "clarification": {
+                "text":
+                    "Do you mean LAN or WAN?",
+                "candidate_facts": [
+                    "LAN IP address",
+                    "WAN IP address",
+                ],
+                "requires_complete_request":
+                    True,
+            },
+        }
+    )
+
+    response = RuntimeHttpApplication(
+        ingress
+    ).dispatch(
+        method="POST",
+        path=(
+            "/v1/openclaw/teams/"
+            "conversation"
+        ),
+        headers={
+            "Content-Type":
+                "application/json"
+        },
+        body=request_body(),
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.body["status"]
+        == "clarification_required"
+    )

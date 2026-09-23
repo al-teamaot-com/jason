@@ -76,15 +76,35 @@ def root_group_ids(client: KyoceraKfsSessionClient) -> list[str]:
     ]
 
 
-def require_device_id(arguments: Mapping[str, Any]) -> str:
+def resolve_device_id(
+    client: KyoceraKfsSessionClient,
+    arguments: Mapping[str, Any],
+) -> str:
     device_id = str(
         arguments.get("device_id")
         or arguments.get("resource_id")
         or ""
     ).strip()
-    if not device_id:
-        raise ValueError("device_id or resource_id is required")
-    return device_id
+    if device_id:
+        return device_id
+
+    serial_number = str(arguments.get("serial_number") or "").strip()
+    if not serial_number:
+        raise ValueError("device_id, resource_id, or serial_number is required")
+
+    result = device_search(
+        client,
+        {"serial_number": serial_number, "limit": 2},
+    )
+    devices = result.get("devices") or []
+    if len(devices) != 1:
+        raise ValueError(
+            f"serial_number must resolve to exactly one KFS device; matched={len(devices)}"
+        )
+    resolved = str(devices[0].get("deviceId") or "").strip()
+    if not resolved:
+        raise ValueError("resolved KFS device is missing deviceId")
+    return resolved
 
 
 def device_get(

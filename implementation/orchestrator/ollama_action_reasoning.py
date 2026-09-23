@@ -72,6 +72,10 @@ class OllamaActionIntentReasoner:
                 sort_keys=True,
             ),
             schema=schema,
+            # Action arguments can contain human-authored text, so keep a larger
+            # budget than read-only classification while still preventing an
+            # unbounded local generation from consuming the Teams ingress window.
+            max_output_tokens=256,
         )
         if result.get("resolved") is not True:
             return None

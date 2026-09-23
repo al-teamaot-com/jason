@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from connectors.core.contracts import (
@@ -88,12 +90,12 @@ def credentials():
     }
 
 
-def context(capability, mode="observe"):
+def context(capability, mode="observe", *, organization_id="aot", client_id=None):
     return ConnectorContext(
         correlation_id="corr-kfs-001",
         principal_id="tech-al",
-        organization_id="aot",
-        client_id="client-1",
+        organization_id=organization_id,
+        client_id=client_id,
         capability=capability,
         mode=mode,
     )
@@ -146,6 +148,21 @@ def test_meter_read_uses_device_endpoint_and_all_counters():
     assert audit.events[0][1]["operation"] == "meters_get"
 
 
+def test_meter_read_resolves_serial_number_before_device_read():
+    connector, _, _ = build()
+    result = connector.execute(
+        ConnectorRequest(
+            context("kyocera_kfs.meters.get"),
+            {"serial_number": "ABC123"},
+        )
+    )
+    assert result.data["devices"][0]["deviceId"] == "dev-1"
+    paths = [path for path, _ in FakeSessionClient.calls]
+    assert paths[:2] == ["/KFS/GroupList", "/KFS/DeviceList"]
+    assert paths[-1] == "/KFS/Device"
+    assert FakeSessionClient.calls[-1][1]["device"] == "dev-1"
+
+
 def test_alert_search_uses_device_log_list_for_group():
     connector, _, _ = build()
     connector.execute(
@@ -170,6 +187,49 @@ def test_missing_manager_login_fails_closed():
                 {"device_id": "dev-1"},
             )
         )
+
+
+def test_manager_login_must_not_equal_gateway_basic_pair():
+    values = credentials()
+    values["kfs_username"] = "gateway-id"
+    values["kfs_password"] = "gateway-password"
+    raw = b"gateway-id:gateway-password"
+    values["authorization"] = "Basic " + base64.b64encode(raw).decode("ascii")
+    connector, _, _ = build(values)
+    with pytest.raises(ConnectorConfigurationError, match="must be distinct"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert FakeSessionClient.calls == []
+
+
+def test_client_scoped_request_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="AOT-internal"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get", client_id="client-1"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeSessionClient.calls == []
+
+
+def test_non_aot_request_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="AOT-internal"):
+        connector.execute(
+            ConnectorRequest(
+                context("kyocera_kfs.meters.get", organization_id="other"),
+                {"device_id": "dev-1"},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeSessionClient.calls == []
 
 
 def test_non_observe_mode_is_rejected_before_provider_call():

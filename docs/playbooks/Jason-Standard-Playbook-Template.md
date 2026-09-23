@@ -1,105 +1,289 @@
 # Jason Standard Playbook Template
 
-Use this as the default structure for every new Project Jason operational playbook. Preserve the sections; when one truly does not apply, mark it `Not applicable` instead of silently changing the standard.
+This document is the canonical default template for new Project Jason operational playbooks.
+
+## Default-use rule
+
+When a request is to build, create, design, or plan a **Jason playbook**, start from this template unless the requester explicitly specifies another structure. Preserve the sections even when a particular section is marked `Not applicable`, so playbooks remain comparable, auditable, and easy to implement.
+
+Do not treat this template as execution authority. All playbooks remain subject to the Jason Constitution, Central Orchestrator, exact requester grants, provider/client isolation, approval requirements, disruption controls, and `direct_provider_access=false`.
+
+---
+
+# Jason Playbook: [Playbook Name]
 
 ## 1. Section Goal
 
-Define exactly what Jason should be able to accomplish and the criteria that prove success. Do not close the Section Goal until acceptance criteria have been demonstrated and documented.
+Define exactly what Jason should be able to accomplish.
+
+**Goal:**  
+[Example: Process a specific monitoring alert from initial investigation through verified resolution or escalation.]
+
+**Success means:**
+- [criterion]
+- [criterion]
+- [criterion]
+
+Do not consider the Section Goal complete until all acceptance criteria have been demonstrated and documented.
+
+---
 
 ## 2. Trigger
 
-Define exactly when the playbook applies: ticket-title pattern, alert type, queue, provider event, device/site condition, or other deterministic trigger. Confirm the trigger before starting.
+Define exactly when this playbook applies.
+
+Examples:
+- Autotask ticket title contains: `[exact text/pattern]`
+- DRMM alert type: `[alert]`
+- Queue: `[queue]`
+- Device/site condition: `[condition]`
+
+Jason must confirm the trigger matches before starting the playbook.
+
+---
 
 ## 3. Scope and Boundaries
 
-Define in-scope systems, objects, diagnostics, and remediation. Define exclusions. Preserve Central Orchestrator authority, exact requester grants, provider/client isolation, approval rules, audit trail, and `direct_provider_access=false`.
+### In Scope
+- [systems/providers]
+- [ticket/device types]
+- [authorized diagnostics]
+- [authorized remediation]
+
+### Out of Scope
+- [excluded systems/actions]
+- disruptive actions unless separately approved
+- unrelated tickets/devices
+- direct provider access outside Jason governance
+
+Preserve:
+- `direct_provider_access=false`
+- Central Orchestrator authority
+- exact requester grants
+- provider/client isolation
+- audit trail
+- existing approval rules
+
+---
 
 ## 4. Initial Identification
 
-Identify the exact ticket/triggering object, client, affected asset/device/user, authoritative provider object, relevant IDs/timestamps, and any duplicate/stale/mismatched objects. If identity is uncertain, use `state = identification_blocked`, document, and escalate rather than guessing.
+Before troubleshooting:
+1. Identify the exact Autotask ticket or triggering object.
+2. Identify the client.
+3. Identify the affected asset/device/user.
+4. Resolve the object against the authoritative provider.
+5. Confirm there is no ambiguity, duplicate, stale object, or mismatched asset.
+6. Record relevant ticket/alert timestamps and external IDs.
+
+If the affected object cannot be identified confidently:
+
+`state = identification_blocked`
+
+Document and escalate rather than guessing.
+
+---
 
 ## 5. Expected State
 
-Define the healthy target condition before remediation: required software/service/policy/configuration/status, expected backup/monitoring behavior, or equivalent.
+Define what healthy should look like.
+
+Examples:
+- required software installed
+- required service running
+- device online
+- expected policy assigned
+- expected backup occurring
+- expected security agent version
+- expected configuration present
+
+Jason should know what condition it is trying to restore before taking remediation actions.
+
+---
 
 ## 6. State Model
 
-Define explicit persisted states. Suggested base flow:
+Every playbook should have explicit persisted states.
+
+Suggested base states:
 
 `identified -> waiting -> diagnosing -> blocked -> remediating -> verifying -> complete`
 
-or `escalated`.
+or:
 
-Add playbook-specific states as needed. State should survive rechecks, conversation boundaries, handoffs, and service restarts where practical.
+`escalated`
+
+Add playbook-specific states when required.
+
+State should survive conversation boundaries, scheduled rechecks, technician handoffs, and service restarts where practical. Jason must not repeat completed steps unnecessarily.
+
+---
 
 ## 7. Diagnostic Workflow
 
-For every diagnostic step record:
+For each diagnostic step define:
 
-- Purpose: what question the step answers.
-- Evidence source: Autotask, DRMM, IT Glue, Entra, provider, etc.
-- Exact read/command/component when known.
-- Expected healthy result.
-- Decision branches and next state/action.
+### Step [#]: [Name]
 
-Do not infer root cause solely from an alert when authoritative evidence can verify it.
+**Purpose:**  
+[What question does this answer?]
+
+**Evidence source:**  
+[Autotask / DRMM / IT Glue / Entra / provider / etc.]
+
+**Command/read/component:**  
+[Exact capability or component where known]
+
+**Expected result:**  
+[Healthy condition]
+
+### Decision
+
+If `[condition A]`:  
+-> [next state/action]
+
+If `[condition B]`:  
+-> [next state/action]
+
+If evidence is inconclusive:  
+-> gather additional evidence or escalate.
+
+Do not infer a failure solely from an alert if authoritative evidence can verify it.
+
+---
 
 ## 8. Decision Gates
 
-Define mandatory preconditions before remediation, such as endpoint identity, online/availability window, confirmed unhealthy state, required configuration/variable/license, maintenance conflicts, and requester authority. Do not bypass failed gates.
+Define conditions that must be satisfied before remediation.
+
+Examples:
+- device online
+- continuously online for required time
+- correct endpoint confirmed
+- software actually missing/unhealthy
+- required site variable exists
+- no active conflicting maintenance
+- requester has required authority
+
+If a gate fails, Jason must not skip it simply to reach remediation.
+
+---
 
 ## 9. Remediation
 
-For each remediation define:
+Define the exact authorized remediation.
 
-- exact action/component
-- preconditions
-- authority classification: read-only / non-destructive / modifying / disruptive
-- required verification
+For each remediation:
 
-Job submission is not success. Verify terminal completion and retrieve actual output where available.
+**Action/component:**  
+`[exact action]`
+
+**Preconditions:**
+- [condition]
+- [condition]
+
+**Approval classification:**
+- read-only
+- non-destructive
+- modifying
+- disruptive
+
+**Verification required:**  
+[how success is proven]
+
+Submission of a job is not proof of success. Jason must verify terminal completion and retrieve actual output where available.
+
+---
 
 ## 10. Retry Policy
 
-Use bounded retries. Define maximum full attempts and when another attempt is justified. Document each attempt. When the limit is reached, transition to `escalated`; never create endless loops.
+Define bounded retry behavior.
+
+Example:
+- Maximum full remediation attempts: `2`
+- Do not retry blindly.
+- Document the result of each attempt.
+- A second attempt should only occur when evidence indicates retrying is reasonable.
+
+After the limit is reached:
+
+`state = escalated`
+
+No endless remediation loops.
+
+---
 
 ## 11. Periodic Rechecks
 
-When waiting is required, define recheck interval, recheck condition, stop conditions, and duplicate-scheduled-job suppression. Stop rechecks after completion, escalation, closed ticket, stale/retired condition, or other terminal state.
+If the playbook requires waiting:
+
+**Recheck interval:**  
+[example: hourly]
+
+**Recheck condition:**  
+[what Jason checks]
+
+**Stop conditions:**
+- issue resolves
+- ticket closes
+- escalation threshold reached
+- asset becomes stale/retired
+- maximum waiting period reached
+
+Prevent duplicate scheduled jobs for the same ticket/playbook instance.
+
+---
 
 ## 12. Aging / Stale Condition
 
-Define when waiting becomes abnormal and requires investigation of retirement, replacement, stale/duplicate objects, rename/reimage, or broader connectivity/management problems. Do not retry indefinitely.
+Define when a normal waiting condition becomes abnormal.
+
+Example:
+
+If a device remains offline for more than `[X days]`, investigate:
+- retired device
+- replaced device
+- duplicate CI
+- stale DRMM object
+- renamed/reimaged endpoint
+- broader connectivity problem
+
+Do not continue periodic retries indefinitely.
+
+---
 
 ## 13. Dependency Handling
 
-For missing configuration, credentials, variables, licensing, documentation, or another team's work:
-
-1. Confirm the dependency is missing.
+If remediation depends on missing configuration, credentials, variables, licensing, documentation, or another team:
+1. Confirm the dependency is actually missing.
 2. Search for an existing open dependency ticket.
-3. Suppress duplicates.
-4. Create one only if authorized and needed.
-5. Cross-reference it.
-6. Put the original workflow into `state = blocked` when appropriate.
+3. Do not create duplicates.
+4. If none exists and Jason is authorized, create one.
+5. Cross-reference the dependency ticket.
+6. Put the original playbook into `state = blocked`.
 
-Never fabricate or borrow client-specific configuration.
+Never fabricate missing configuration or borrow values from another client.
+
+---
 
 ## 14. Documentation Requirements
 
-Document every meaningful step in the authoritative ticket/case when one exists. Include:
+Every meaningful step must be documented in the original Autotask ticket or authoritative case record when one exists.
 
-- what was checked and why
+Document:
+- what Jason checked
+- why
 - exact command/read/component
-- target and timestamp
+- target
+- timestamp
 - result
-- job/correlation ID where available
-- relevant StdOut/StdErr or sanitized summary
+- Job ID / correlation ID where available
+- relevant StdOut/StdErr
 - interpretation
 - resulting decision
 - next step
 
 Suggested note titles:
-
 - `Jason - [Playbook] - Asset Validation`
 - `Jason - [Playbook] - Diagnostic`
 - `Jason - [Playbook] - Recheck`
@@ -108,63 +292,166 @@ Suggested note titles:
 - `Jason - [Playbook] - Escalation`
 - `Jason - [Playbook] - Resolution`
 
-Never document passwords, API keys, tokens, private keys, or secret variable values. Presence/status may be documented when appropriate.
+### Secret Handling
+
+Never document:
+- passwords
+- API keys
+- tokens
+- private keys
+- secret variable values
+
+Document only presence/status where appropriate.
+
+---
 
 ## 15. Failure Handling
 
-Document failed reads, unmatched objects, component failures, missing output, timeout, missing dependencies, contradictory evidence, or denied authority as carefully as successes. Do not silently skip failures.
+Failed steps must be documented just as thoroughly as successful ones.
+
+Examples:
+- provider read failed
+- endpoint could not be matched
+- component failed
+- StdOut unavailable
+- job timed out
+- required variable missing
+- evidence contradictory
+- authority denied
+
+Do not silently skip failed steps.
+
+---
 
 ## 16. Escalation Criteria
 
-Define exact automatic-stop conditions: retry limit, disruptive action required, unresolved identity, unavailable dependency, unexpected provider result, repeated service failure, conflicting evidence, or out-of-scope issue. The escalation note should summarize symptoms, evidence, diagnostics, attempts/results, current state, and recommended next step.
+Define exactly when Jason stops automatic processing.
+
+Examples:
+- retry limit reached
+- disruptive action required
+- identity/asset cannot be resolved
+- required dependency cannot be created
+- unexpected provider result
+- repeated service failure
+- conflicting evidence
+- issue falls outside playbook scope
+
+Escalation note should summarize:
+- symptoms
+- evidence
+- diagnostics
+- actions attempted
+- results
+- current state
+- recommended technician next step
+
+---
 
 ## 17. Verification
 
-Define authoritative resolution evidence. Examples: successful backup, cleared alert, healthy service, agent reporting, user confirmation, event no longer recurring, or monitoring returned healthy. Do not close solely because a command/component succeeded.
+Remediation success and incident resolution are not necessarily the same thing.
+
+Define authoritative resolution evidence.
+
+Examples:
+- successful backup
+- alert cleared
+- service healthy
+- EDR reporting correctly
+- user confirmed functionality
+- event no longer occurring
+- monitoring condition returned to healthy
+
+Do not close solely because a command/component returned success.
+
+---
 
 ## 18. Completion Criteria
 
-Complete only when the correct object is identified, required diagnostics are done, root cause/resolution classification is established, required remediation succeeded, authoritative healthy-state evidence exists, all work is documented, and the final resolution note exists.
+The ticket/case may only complete when:
+1. the correct object was identified;
+2. required diagnostics completed;
+3. root cause or reasonable resolution classification established;
+4. remediation succeeded where required;
+5. authoritative healthy-state evidence exists;
+6. all actions/results are documented;
+7. final resolution note is present.
+
+---
 
 ## 19. Final Resolution Note
 
-Summarize original condition, root cause, relevant environment state, diagnostics, remediation, number of attempts, final verification and timestamp, and disposition.
+Summarize:
+- original condition
+- root cause
+- relevant device/client state
+- diagnostics performed
+- remediation performed
+- number of attempts
+- final verification
+- verification timestamp
+- final disposition
+
+---
 
 ## 20. Required Capabilities
 
-List the narrowest Jason capabilities required, such as Autotask ticket read/write/note/create, DRMM endpoint/software/service/component/job/output access, IT Glue reads, scheduler/recheck support, and persisted state. Do not broaden capabilities for convenience.
+List the narrowest Jason capabilities required.
+
+Examples:
+- Autotask ticket search/read
+- Autotask internal note create
+- Autotask ticket update
+- Autotask ticket create
+- DRMM endpoint search/read
+- DRMM software/service read
+- DRMM component discovery
+- DRMM component execution
+- job status
+- StdOut/StdErr
+- IT Glue reads
+- scheduled recheck support
+- persisted playbook state
+
+Do not broaden capabilities solely for convenience.
+
+---
 
 ## 21. Acceptance Test
 
-Define a controlled real-world or safe test target. Prove trigger detection, object association, documentation, diagnostics, gates, recheck/wait behavior, remediation, retry limits, failure handling, verification, completion/escalation, scheduled-job cleanup, and persisted state. Do not modify unrelated production objects.
+Define a controlled real-world test.
+
+**Test target:**  
+[device/ticket]
+
+Prove:
+1. trigger detection
+2. object association
+3. documentation
+4. diagnostics
+5. decision gates
+6. waiting/recheck behavior where applicable
+7. remediation
+8. retry limits
+9. failure handling
+10. verification
+11. completion/escalation
+12. scheduled-job cleanup
+13. persisted state
+
+Do not modify unrelated production objects during testing.
+
+---
 
 ## 22. Section Goal Closure
 
-When acceptance succeeds, document implementation, capability additions, test results, limitations, Grafana/Project Jason Section Goal status, and any unresolved follow-up TODOs.
+When the acceptance test succeeds:
+- document implementation
+- document capability additions
+- document test results
+- record known limitations
+- update Grafana / Project Jason Section Goal
+- mark the Section Goal complete
 
-
-## 23. Autonomous Execution Eligibility
-
-Every playbook must explicitly declare whether it is eligible for autonomous execution. Absence of an explicit approval means the playbook is **not** autonomous.
-
-Required metadata:
-
-- `autonomous_allowed: true|false`
-- approval owner and approval date
-- approved playbook/version or immutable content fingerprint
-- allowed trigger/scope
-- allowed actions/capabilities
-- actions that still require per-run approval
-- revocation/expiry condition where applicable
-
-Rules:
-
-1. Global autonomy never grants new operational authority by itself.
-2. Jason may autonomously execute only a playbook/version that has been explicitly approved for autonomous use and whose required capabilities remain active.
-3. Material playbook changes invalidate prior autonomous approval until the changed version is reviewed.
-4. Revocation must take effect before the next autonomous execution.
-5. Ambiguous scope, missing evidence, unavailable dependency, denied capability, or stale approval causes fail-closed behavior.
-6. User-disruptive actions remain approval-bound even when the surrounding playbook is autonomous. This includes reboot/shutdown, forced logoff, terminating user applications/processes, disconnecting network/VPN, restarting services that interrupt active work, and equivalent disruption.
-7. Autonomous approval never bypasses Central Orchestrator authority, client isolation, audit, provider verification, post-action verification, retry limits, or playbook-specific safety gates.
-
-Acceptance testing for an autonomous playbook must prove both paths: an approved autonomous execution succeeds within scope, and an unapproved/revoked/version-mismatched execution is blocked.
+Any unresolved capability gaps should become explicit follow-up TODO items rather than hidden exceptions.

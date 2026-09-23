@@ -32,6 +32,19 @@ class RuntimeHttpApplication:
     """
 
     ingress: TeamsConversationIngress
+    # Internal composition dependency only. This is never exposed through the HTTP
+    # contract. Conversation Experience may reuse the same already-governed structured
+    # reasoning runtime instead of recomposing a provider or resolving secrets again.
+    conversation_reasoning_client: Any | None = None
+
+    # Internal composition references for alternate governed ingress adapters.
+    # These are never exposed through the Teams HTTP contract.
+    governed_orchestrator: Any | None = None
+    identity_authority: Any | None = None
+    capabilities: Any | None = None
+    microsoft_identity_bindings: Any | None = None
+    microsoft_user_directory: Any | None = None
+
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
 
@@ -109,6 +122,10 @@ class RuntimeHttpApplication:
         status = str(result.get("status", "")).strip()
         error_code = str(result.get("error_code", "")).strip()
         if status == "completed":
+            return 200
+        if status == "duplicate":
+            return 200
+        if status == "clarification_required":
             return 200
         if status == "approval_required":
             return 202

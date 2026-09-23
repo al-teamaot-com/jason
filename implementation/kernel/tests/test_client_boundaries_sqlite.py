@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -112,4 +113,25 @@ def test_revoked_boundary_allows_replacement_active_mapping(tmp_path):
     assert repository.find_active_for_client(
         client_id="aot", provider="microsoft_graph"
     ) == second
+    store.close()
+
+
+def test_boundary_store_supports_process_cached_worker_thread_reads(tmp_path):
+    store = SQLiteClientBoundaryStore(tmp_path / "boundaries.sqlite3")
+    repository = SQLiteClientBoundaryRepository(store)
+    expected = boundary(
+        boundary_id="boundary-threaded",
+        client_id="client-threaded",
+        tenant_id="tenant-threaded",
+    )
+    repository.add(expected)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        observed = executor.submit(
+            repository.find_active_for_external_tenant,
+            provider=expected.provider,
+            external_tenant_id=expected.external_tenant_id,
+        ).result(timeout=5)
+
+    assert observed == expected
     store.close()

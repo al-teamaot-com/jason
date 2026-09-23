@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "playbooks": [
+    {
+      "id": "datto_edr_av",
+      "name": "Jason - Datto EDR/AV Diagnose & Repair",
+      "version": "1.2.0",
+      "lifecycle": "pilot",
+      "enabled": false,
+      "review_status": "threat_recurrence_gate_proven_scan_terminal_pending",
+      "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py"
+    }
+  ]
+}

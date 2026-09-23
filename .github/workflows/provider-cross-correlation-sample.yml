@@ -1,0 +1,63 @@
+name: Validate Provider Correlation Sampling
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/orchestrator/real_record_correlation_sample.py'
+      - 'implementation/orchestrator/tests/test_real_record_correlation_sample.py'
+      - 'tools/provider_cross_correlation_live_acceptance.py'
+      - 'tools/provider_cross_correlation_sample_live_acceptance.py'
+      - '.github/workflows/provider-cross-correlation-sample.yml'
+  push:
+    paths:
+      - 'implementation/orchestrator/real_record_correlation_sample.py'
+      - 'implementation/orchestrator/tests/test_real_record_correlation_sample.py'
+      - 'tools/provider_cross_correlation_live_acceptance.py'
+      - 'tools/provider_cross_correlation_sample_live_acceptance.py'
+      - '.github/workflows/provider-cross-correlation-sample.yml'
+
+jobs:
+  bounded-correlation-sampling:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Compile correlation sampling boundary
+        run: |
+          python -m py_compile \
+            implementation/orchestrator/real_record_correlation_sample.py \
+            tools/provider_cross_correlation_live_acceptance.py \
+            tools/provider_cross_correlation_sample_live_acceptance.py
+      - name: Test deterministic bounded sample selection
+        run: |
+          python -m pytest -q \
+            implementation/orchestrator/tests/test_real_record_correlation_sample.py
+      - name: Verify sampled live-read preflight is credential safe
+        run: |
+          rm -f /tmp/jason-sampled-cross-provider-acceptance.json
+          python tools/provider_cross_correlation_sample_live_acceptance.py \
+            --principal-id ci-operator \
+            --organization-id org-aot \
+            --correlation-id ci-sampled-cross-provider-acceptance \
+            --evidence-output /tmp/jason-sampled-cross-provider-acceptance.json \
+            --check-only \
+            > /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"network_contacted": false' /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"sample_maximum_records": 25' /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"selection_prefers_configuration_link": true' /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"selection_uses_first_provider_result": false' /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"selected_ticket_identifier_persisted": false' /tmp/jason-sampled-cross-provider-preflight.txt
+          grep -F '"hosted_model_used": false' /tmp/jason-sampled-cross-provider-preflight.txt
+          test ! -e /tmp/jason-sampled-cross-provider-acceptance.json
+          echo 'SAMPLED_CROSS_PROVIDER_PREFLIGHT=PASS'
+          echo 'PROVIDER_NETWORK_IO=NO'
+          echo 'PROVIDER_SECRET_RESOLUTION=NO'
+          echo 'HOSTED_MODEL_USED=NO'

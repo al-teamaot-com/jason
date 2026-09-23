@@ -73,15 +73,18 @@ class GovernedTeamsOrchestrationRequestFactory:
     approval_id_factory: Callable[[], str] = lambda: f"approval_{uuid4().hex}"
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
+    def new_correlation_id(self) -> str:
+        return self.correlation_id_factory()
+
     def build(
         self,
         *,
         principal: BoundConversationPrincipal,
         intent: ConversationIntent,
         identity: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
     ) -> OrchestrationRequest:
         execution_id = self.execution_id_factory()
-        correlation_id = self.correlation_id_factory()
 
         try:
             permission_mode = PermissionMode(intent.permission_mode)
@@ -181,6 +184,10 @@ class GovernedTeamsOrchestrationRequestFactory:
         if capability is not None and capability.idempotency_key_required:
             idempotency_key = self.idempotency_key_factory()
 
+        principal_attributes: dict[str, str] = {}
+        if principal.email_address is not None:
+            principal_attributes["email"] = principal.email_address.strip().casefold()
+
         return OrchestrationRequest(
             execution_id=execution_id,
             correlation_id=correlation_id,
@@ -199,6 +206,7 @@ class GovernedTeamsOrchestrationRequestFactory:
             budget=self.budget,
             arguments=dict(intent.arguments),
             requester_kind="human",
+            principal_attributes=principal_attributes,
             policy_ids=self.policy_ids,
             authority_context_id=context.context_id,
             allow_pilot_capability=is_pilot,

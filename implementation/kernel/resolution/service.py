@@ -26,6 +26,9 @@ from kernel.resolution.contracts import (
 from kernel.resolution.translators import ProviderCandidateTranslator
 
 
+_PROVIDER_EXECUTION_SECONDS_METADATA = "provider_maximum_execution_seconds"
+
+
 class GovernedCapabilityResolutionEngine:
     """Resolve capability requests without executing provider work."""
 
@@ -162,6 +165,17 @@ class GovernedCapabilityResolutionEngine:
         outcome = self._resolution_outcome(decision.outcome)
         plan = decision.plan
         selected_provider_id = plan.provider_id if plan is not None else None
+        metadata: dict[str, str] = {}
+        if selected_provider_id is not None:
+            selected_provider = next(
+                (provider for provider in providers if provider.provider_id == selected_provider_id),
+                None,
+            )
+            if selected_provider is None:
+                raise RuntimeError("policy selected provider was not present in eligible providers")
+            maximum_execution_seconds = selected_provider.limits.maximum_execution_seconds
+            if maximum_execution_seconds is not None:
+                metadata[_PROVIDER_EXECUTION_SECONDS_METADATA] = str(maximum_execution_seconds)
         return CapabilityResolutionResult(
             execution_id=request.execution_id,
             correlation_id=request.correlation_id,
@@ -175,6 +189,7 @@ class GovernedCapabilityResolutionEngine:
             execution_decision=decision,
             execution_plan=plan,
             audit_required=decision.audit_required,
+            metadata=metadata,
         )
 
     @staticmethod

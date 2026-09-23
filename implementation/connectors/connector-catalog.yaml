@@ -48,6 +48,31 @@ connectors:
       - Provider-neutral endpoint capabilities are selected by Jason governance before connector invocation.
       - Datto RMM remains an implementation provider and is never selected directly by Teams, OpenClaw, or an agent.
       - Interactive Windows session identity is not yet declared as a Datto RMM capability because the existing connector does not expose a verified session endpoint.
+  datto_edr:
+    status: foundation_built
+    priority: 4
+    mode: read_only
+    secret: datto_edr.readonly
+    capabilities:
+      - datto_edr.endpoint.status.read
+      - datto_edr.alert.search
+      - datto_edr.alert.read
+      - datto_edr.policy.search
+      - datto_edr.scan_history.search
+      - datto_edr.quarantine.search
+    canonical_mappings:
+      endpoint.security.status.read: datto_edr.endpoint.status.read
+      endpoint.security.detection.search: datto_edr.alert.search
+      endpoint.security.detection.read: datto_edr.alert.read
+      endpoint.security.policy.read: datto_edr.policy.search
+      endpoint.security.scan.history.search: datto_edr.scan_history.search
+      endpoint.security.quarantine.search: datto_edr.quarantine.search
+    notes:
+      - Endpoint identity is correlated from the durable Datto RMM device UID to Datto EDR deviceId.
+      - Hostname alone is never used to select among duplicate EDR agent records.
+      - Detection and quarantine evidence never imply endpoint compromise without explicit supporting evidence.
+      - Provider mutation routes such as scan, quarantine, isolation, archive, and response remain unregistered.
+
   it_glue:
     status: foundation_built
     priority: 4

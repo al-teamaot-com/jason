@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from connectors.core.contracts import (
     AuditSink,
+    ConnectorAuthorizationError,
     ConnectorRequest,
     ConnectorResult,
     HttpTransport,
@@ -19,7 +20,7 @@ from connectors.kyocera_kfs.read_operations import (
     alerts_list,
     device_get,
     device_search,
-    require_device_id,
+    resolve_device_id,
 )
 
 _CAPABILITY_OPERATIONS = {
@@ -51,6 +52,10 @@ class KyoceraKfsSessionConnector:
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         require_capability(request, self.capabilities)
+        if request.context.organization_id != "aot" or request.context.client_id is not None:
+            raise ConnectorAuthorizationError(
+                "Kyocera KFS is currently authorized only for AOT-internal organization-wide reads."
+            )
         credentials = self._secrets.resolve(self.logical_secret, request.context)
         require_kfs_credentials(credentials)
         operation = _CAPABILITY_OPERATIONS[request.context.capability]
@@ -84,7 +89,7 @@ class KyoceraKfsSessionConnector:
 
         device_id = None
         if operation in {"device_get", "meters_get", "supplies_get"}:
-            device_id = require_device_id(arguments)
+            device_id = resolve_device_id(client, arguments)
 
         if operation == "device_get":
             return device_get(client, device_id, ("all",), ("all",))

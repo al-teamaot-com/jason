@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -127,6 +126,57 @@ def test_resolves_autotask_secret_without_exposing_extra_fields() -> None:
     revoke_request = requests[2]
     assert revoke_request.full_url.endswith("/v1/auth/token/revoke-self")
     assert revoke_request.headers["X-vault-token"] == "temporary-token"
+
+
+def test_resolves_autotask_write_secret_from_separate_path() -> None:
+    requested_urls: list[str] = []
+
+    def opener(request, timeout):
+        del timeout
+        requested_urls.append(request.full_url)
+
+        if request.full_url.endswith("/v1/auth/approle/login"):
+            return FakeResponse({"auth": {"client_token": "temporary-token"}})
+        if request.full_url.endswith(
+            "/v1/secret/data/connectors/autotask/production/write"
+        ):
+            return FakeResponse(
+                {
+                    "data": {
+                        "data": {
+                            "username": "write-api-user",
+                            "secret": "write-api-secret",
+                            "integration_code": "integration-code",
+                            "unexpected": "must-not-be-returned",
+                        }
+                    }
+                }
+            )
+        if request.full_url.endswith("/v1/auth/token/revoke-self"):
+            return FakeResponse({})
+        raise AssertionError(f"Unexpected request: {request.full_url}")
+
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        role_id = root / "role-id"
+        secret_id = root / "secret-id"
+        role_id.write_text("role-value\n", encoding="utf-8")
+        secret_id.write_text("secret-id-value\n", encoding="utf-8")
+
+        resolver = _resolver(
+            opener=opener,
+            role_id_path=role_id,
+            secret_id_path=secret_id,
+        )
+        values = resolver.resolve("autotask.write", _context())
+
+    assert values == {
+        "integration_code": "integration-code",
+        "secret": "write-api-secret",
+        "username": "write-api-user",
+    }
+    assert any(url.endswith("/connectors/autotask/production/write") for url in requested_urls)
+    assert not any(url.endswith("/connectors/autotask/production/read-only") for url in requested_urls)
 
 
 def test_unknown_logical_secret_fails_closed() -> None:

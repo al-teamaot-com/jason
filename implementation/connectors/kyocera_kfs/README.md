@@ -57,17 +57,31 @@ Central Orchestrator.
 This activation remains read-only and fail-closed. The KFS write endpoint
 `/KFS/ChangeStatus` is deliberately not exposed by this connector.
 
-The runtime remains gated by `JASON_KFS_ENABLED`; production enablement should
-occur only after credential-safe live validation succeeds.
+The first production scope is AOT-internal organization-wide access only. The
+connector requires `organization_id=aot` and `client_id=None`; any client-scoped
+request is rejected before secret resolution or provider contact. Per-client
+KFS access requires an explicit serial-to-Autotask mapping and canonical Jason
+client boundary before it can be exposed.
 
-## Current live blocker
+The runtime remains gated by `JASON_KFS_ENABLED`; production enablement occurs
+only after credential-safe live validation and deliberate promotion.
 
-The Kyocera-issued gateway Authorization credential is accepted by the API
-gateway. The currently vaulted gateway ID/password pair is the same pair encoded
-inside that Authorization value, but KFS returns body status 401 when that pair
-is used as the `/KFS/Login` Manager login.
+The connector rejects a secret when the Manager username/password exactly
+matches the dealer Basic credential pair. KFS requires those identities to be
+separate.
 
-KFS v6.2 documents that the login body requires a KFS Manager-or-higher user.
-A previously working AOT integration used a dedicated KFS Manager account named
-`apiuser`. Live activation therefore remains blocked on a valid KFS Manager
-login only; the Kyocera-issued API credentials must not be reset or changed.
+## Live validation status
+
+The original 401 blocker was traced to the Manager fields being populated with
+the dealer gateway identity. The working AOT Manager account is the separate
+`apiuser` identity.
+
+On 2026-09-22, a verified Manager credential handoff was injected only for one
+controlled Jason validation run while the existing dealer Authorization and
+request-routing values remained unchanged. `/KFS/Login` returned status 200 and
+a session cookie, and the full collection completed with 0 errors across 235
+groups and 432 current devices.
+
+The durable OpenBao secret still requires promotion of the verified Manager
+fields before `JASON_KFS_ENABLED` is turned on. The Kyocera-issued dealer API
+credential must remain unchanged.

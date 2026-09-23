@@ -1,72 +1,102 @@
 # Jason Command Center Showcase
 
-SHOWCASE-001 makes Project Jason visibly observable without changing runtime authority. The Command Center now also reflects the later local-LLM and Autotask business-context milestones built on top of the original showcase.
-
-## Components
-
-- Grafana provides the human-visible Command Center.
-- Prometheus stores showcase and host metrics.
-- Node Exporter reports Linux host CPU, memory, filesystem, and related metrics.
-- `status_exporter.py` exposes Jason-specific roadmap and component-readiness metrics.
-- The machine-readable roadmap is stored in `07-Roadmap/Jason-Roadmap-Status.json`.
-- Ollama provides the loopback-only local model runtime used by governed local-AI capabilities.
+Project Jason's observability stack provides human-visible operational status without changing runtime authority. Grafana is provisioned from repository JSON under `infrastructure/showcase/grafana/dashboards`; Prometheus stores and evaluates secret-safe metrics; exporters read only local Jason/host state.
 
 ## Security boundary
 
-- OpenBao remains on its existing deployment and is not reconfigured by this stack.
-- Prometheus is bound to loopback only.
-- Grafana is bound to TCP 3000 so the internal administrator can view the dashboard from the LAN.
-- Grafana self-registration and analytics reporting are disabled.
-- The Grafana administrator password is generated locally into `.env`; it is not committed to Git.
-- Ollama is bound to loopback only.
-- The status exporter is observational only. It reads roadmap state, Docker container state, local TCP readiness, and local model readiness. It does not execute Jason capabilities or contact external providers.
-- Dashboard status never grants capability authority. Execution remains subject to normal Jason governance, orchestration, policy, and audit boundaries.
+- Grafana and Prometheus are observational only. Dashboard state never grants Jason or provider authority.
+- Monitoring does not call Autotask, Datto RMM, IT Glue, or other production providers directly.
+- Provider credentials, OAuth/JWT material, OpenBao AppRole values, prompts/responses, and raw provider evidence are not exported.
+- `direct_provider_access=false`, Jason identity/authority, Central Orchestrator routing, exact grants, provider authorization, approval policy, and audit remain authoritative independently of monitoring state.
 
-## Install
+## Production-health deployment
 
-From the repository root on the Jason host:
+For a monitoring-only refresh from a clean repository worktree:
 
 ```bash
-chmod +x infrastructure/showcase/install_showcase.sh
-infrastructure/showcase/install_showcase.sh
+chmod +x infrastructure/showcase/deploy_production_health_dashboard.sh
+JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_production_health_dashboard.sh
 ```
 
-The script prints the Grafana URL and generated local administrator credential.
+The deployment is rollback-protected. It validates source/configuration, installs only `jason-production-health-exporter.service`, refreshes only Prometheus and Grafana, verifies the Prometheus target/rules and Grafana provisioning, and confirms that Jason runtime, Jason MCP, OpenBao, Ollama, and node-exporter container identities did not change.
 
-## Dashboard
+The script can safely recover the existing Grafana compose credential from the already-running Grafana container when the original mode-600 `.env` file is unavailable; secret values are not printed.
 
-The provisioned `Jason Command Center` dashboard shows:
+## Current production MCP monitoring contract
 
-- Jason host availability;
-- CPU use;
-- memory use;
-- root filesystem use;
-- roadmap completion percentage;
-- completed milestone count;
-- roadmap milestone table;
-- OpenBao health;
-- OpenClaw Gateway health;
-- local LLM readiness;
-- canonical Autotask read-capability readiness;
-- CAP-003 Autotask Business Context milestone state; and
-- host CPU and memory history.
+The 2026-09-16 accepted governed-action production boundary is monitored against:
 
-The roadmap table is sourced from the machine-readable roadmap, so CAP-002 remains visibly identified as a transitional proof while CAP-003 convergence is still in progress.
+- MCP image `jason-mcp:generic-governed-8f1e864947a2`;
+- deployed code source `8f1e864947a2e6e79bf47d3de14daacde7d73144`;
+- provider-read profile `itglue-autotask-entra-governed-catalog-v4`;
+- Autotask requester mode `jason_managed`;
+- network `jason-core`;
+- port binding `10.87.246.157:8765 -> 8000/tcp`;
+- restart policy `no`;
+- exact Datto governed-execution profile `owner-diagnostic-v1`;
+- exact controlled Datto allowlist/component/device/class scope used for the production proof;
+- required read-only OpenBao credential mounts, including bounded Autotask write and Datto execution identities.
 
-## Local LLM
+The source-revision contract accepts the exact runtime source environment value when current, and also accepts the commit-encoded current image tag. This prevents a preserved historical `JASON_SOURCE_REVISION` environment value from falsely overriding the stronger immutable deployed image identity.
 
-SHOWCASE-002 deployed CPU-only Ollama with `qwen3:1.7b` on the Jason host. The host has 4 Intel Skylake-era CPU cores, 31 GiB RAM, and no discrete GPU, so local inference remains a governed pilot rather than a high-throughput production service.
+## Exporters
 
-The local runtime has been validated for structured JSON responses and is used by CAP-003 through a loopback-only endpoint. CAP-003 projects only bounded business-relevant Autotask fields into the model context rather than sending entire raw provider objects.
+### Production health exporter
 
-## CAP-003 visible milestone
+`production_health_exporter.py` exposes secret-safe metrics on TCP 9467, including:
 
-CAP-003 Autotask Business Context completed its first governed live validation on 2026-08-07.
+- runtime/MCP/OpenBao health;
+- current MCP image/source/profile/network/port/restart/requester-mode contract checks;
+- Datto bounded execution profile/scope checks;
+- required credential mount contract;
+- `jason_datto_governed_execution_contract`, a configuration-readiness gauge for the exact bounded Datto pilot;
+- environment duplicate counts;
+- kernel/systemd/root-filesystem health;
+- preserved MCP rollback availability.
 
-The validated path was:
+`jason_datto_governed_execution_contract=1` means the current MCP deployment matches the approved bounded configuration and required credential mounts. It is not a provider canary and does not mean a new execution is authorized.
 
-`operator request -> Central Orchestrator -> canonical Autotask reads -> bounded business context -> local Qwen model -> briefing/evidence -> durable orchestration completion`
+### Other exporters
 
-The validation resolved Autotask company ID `208`, read contacts, configurations, tickets, contracts, and projects through observe-only capabilities, generated a local business briefing, wrote protected evidence outside the repository, and made no provider-side change.
+- `status_exporter.py` provides roadmap/legacy component-readiness and OpenClaw authority metrics.
+- `usage_exporter.py` provides read-only model usage/cost and governed-request metrics from durable telemetry.
+- `usage_attribution_exporter.py` provides authenticated-identity/capability attribution metrics.
 
-CAP-003 remains `in_progress` until ticket-analysis parity is proven and the transitional CAP-002 implementation can be retired without leaving duplicate capabilities.
+## Grafana dashboards
+
+### Jason Governed Actions
+
+`jason-governed-actions.json` is the focused operational view for the current governed-action boundary. It shows:
+
+- MCP availability;
+- full production MCP contract state;
+- credential mount contract;
+- bounded Datto governed-execution contract;
+- rollback availability;
+- firing alerts;
+- individual MCP contract checks; and
+- the dated 2026-09-16 bounded production proof context.
+
+The proof panel records that `Get-DNS Settings AOT Ver 06042025-1` on `AOT-50282` was accepted as one provider mutation/one attempt after explicit approval and was later verified `completed` through read-only `automation.job.read`. It intentionally does not treat that historical proof as authority for another execution.
+
+### Jason Production Health
+
+`jason-production-health.json` remains the broader host/runtime/MCP/OpenBao health dashboard. Its `MCP Contract` stat automatically includes the new Datto execution profile/scope checks because they are part of `jason_mcp_contract`.
+
+### Jason Command Center
+
+`jason-command-center.json` remains the broad host, roadmap, component, cost/usage, and attribution view.
+
+## Alerts
+
+Prometheus rules under `prometheus/alerts/jason-production.yml` remain fail-closed for runtime, MCP, OpenBao, deployment-contract, secret-mount, host-kernel/systemd/filesystem, rollback, and disk-capacity problems. Because the Datto profile/scope checks are part of `jason_mcp_contract`, drift is included in the existing `JasonMCPContractDrift` rule.
+
+Prometheus/Grafana rule evaluation does not itself send Teams/email/pages. External notification routing is a separate operational decision.
+
+## Current evidence
+
+Current production state: `docs/control/CURRENT.md`.
+
+Final bounded Datto proof: `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`.
+
+Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.

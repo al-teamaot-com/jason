@@ -33,6 +33,29 @@ KASEYA_RESOURCE_FAMILIES: tuple[ResourceTypeDefinition, ...] = (
         ),
     ),
     ResourceTypeDefinition(
+        name="entity",
+        provider="autotask",
+        provider_type="generic_entity",
+        operations=frozenset(
+            {
+                ResourceOperation.DESCRIBE,
+                ResourceOperation.GET,
+                ResourceOperation.QUERY,
+            }
+        ),
+    ),
+    ResourceTypeDefinition(
+        name="ticket_note",
+        provider="autotask",
+        provider_type="ticket_note",
+        operations=frozenset(
+            {
+                ResourceOperation.GET,
+                ResourceOperation.QUERY,
+            }
+        ),
+    ),
+    ResourceTypeDefinition(
         name="device",
         provider="datto_rmm",
         provider_type="device",

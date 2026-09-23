@@ -11,13 +11,14 @@ class OperationDefinition:
     path_arguments: tuple[str, ...] = ()
     parameter_mappings: Mapping[str, str] | None = None
     optional_parameters: frozenset[str] = frozenset()
+    static_parameters: Mapping[str, Any] | None = None
 
 
 APPROVED_IT_GLUE_ENTITIES: Mapping[str, str] = {
     "Organizations": "organizations",
     "Configurations": "configurations",
     "FlexibleAssets": "flexible_assets",
-    "Documents": "documents",
+    "FlexibleAssetTypes": "flexible_asset_types",
     "Contacts": "contacts",
     "Locations": "locations",
 }
@@ -61,10 +62,30 @@ IT_GLUE_OPERATIONS: Mapping[str, OperationDefinition] = {
             {"flexible_asset_type_id"}
         ),
     ),
+    "it_glue.document.search": OperationDefinition(
+        method="GET",
+        path_template="/organizations/{organization_id}/relationships/documents",
+        path_arguments=("organization_id",),
+    ),
     "it_glue.document.get": OperationDefinition(
         method="GET",
         path_template="/documents/{document_id}",
         path_arguments=("document_id",),
+    ),
+    "it_glue.document.attachment.search": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments",
+        path_arguments=("document_id",),
+    ),
+    "it_glue.document.attachment.get": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments/{attachment_id}",
+        path_arguments=("document_id", "attachment_id"),
+    ),
+    "it_glue.document.attachment.content.get": OperationDefinition(
+        method="GET",
+        path_template="/documents/{document_id}/relationships/attachments/{attachment_id}",
+        path_arguments=("document_id", "attachment_id"),
     ),
     "it_glue.relationships.list": OperationDefinition(
         method="GET",
@@ -129,7 +150,7 @@ def resolve_operation(
         **path_values
     )
 
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = dict(definition.static_parameters or {})
 
     for argument_name, provider_name in (
         definition.parameter_mappings or {}
@@ -154,7 +175,10 @@ def resolve_operation(
 
         params[provider_name] = value
 
-    if capability == "it_glue.entity.query":
+    if capability in {
+        "it_glue.entity.query",
+        "it_glue.document.search",
+    }:
         filters = arguments.get("filters", {})
 
         if not isinstance(filters, Mapping):

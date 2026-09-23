@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Mapping, Protocol
 
 from orchestrator.teams_conversation_flow import (
-    TeamsConversationFlowResult,
+    ConversationClarificationRequiredError,
+    ConversationGuidanceRequiredError,
+    ConversationIntentUnresolvedError,
     TeamsConversationPrincipalEvidence,
     TeamsConversationRequest,
 )
@@ -23,8 +26,33 @@ class ConversationAuditSink(Protocol):
     def append(self, event_type: str, payload: Mapping[str, Any]) -> None: ...
 
 
+class GovernedConversationFlowResult(Protocol):
+    transport_message_id: str
+
+
 class GovernedConversationFlow(Protocol):
-    def handle(self, request: TeamsConversationRequest) -> TeamsConversationFlowResult: ...
+    def handle(self, request: TeamsConversationRequest) -> GovernedConversationFlowResult: ...
+
+
+def _conversation_failure_diagnostic(error: Exception) -> dict[str, object]:
+    """Return bounded, already-sanitized diagnostic metadata for operator use."""
+
+    fields = {
+        "error_type": type(error).__name__,
+        "status_code": getattr(error, "status_code", None),
+        "retry_after_seconds": getattr(error, "retry_after_seconds", None),
+        "service": getattr(error, "service", None),
+        "provider_error_type": getattr(error, "provider_error_type", None),
+        "provider_error_code": getattr(error, "provider_error_code", None),
+        "provider_error_param": getattr(error, "provider_error_param", None),
+        "provider_error_message": getattr(error, "provider_error_message", None),
+    }
+
+    return {
+        key: value
+        for key, value in fields.items()
+        if value is not None and value != ""
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +234,28 @@ class GovernedOpenClawTeamsConversationIngress:
                 machine_identity=machine_identity,
             )
 
+        message_claim_key = _teams_message_claim_key(parsed)
+        if not self.replay.claim(message_claim_key):
+            self.audit.append(
+                "openclaw.teams_conversation_duplicate_suppressed",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "microsoft_tenant_id": parsed.microsoft_tenant_id,
+                    "microsoft_object_id": parsed.microsoft_object_id,
+                    "conversation_id": parsed.conversation_id,
+                    "message_id": parsed.message_id,
+                },
+            )
+            return {
+                "request_id": parsed.request_id,
+                "correlation_id": parsed.correlation_id,
+                "status": "duplicate",
+                "error_code": "duplicate_message",
+                "message_id": parsed.message_id,
+            }
+
         self.audit.append(
             "openclaw.teams_conversation_authenticated",
             {
@@ -247,34 +297,117 @@ class GovernedOpenClawTeamsConversationIngress:
                     "status": "approval_required",
                     "error_code": "approval_required",
                 }
+            diagnostic_message = str(error).strip()
+            if len(diagnostic_message) > 500:
+                diagnostic_message = diagnostic_message[:500] + "..."
+
             return self._deny(
                 parsed=parsed,
                 machine_identity=machine_identity,
                 reason="conversation_denied",
+                diagnostic={
+                    "error_type": type(error).__name__,
+                    "error_message": diagnostic_message,
+                },
             )
-        except LookupError:
+        except ConversationClarificationRequiredError as error:
+            clarification_text = _clarification_text(error.candidate_facts)
+            self.audit.append(
+                "openclaw.teams_conversation_clarification_required",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "reason_code": error.reason_code,
+                    "candidate_facts": list(error.candidate_facts),
+                },
+            )
+            return {
+                "request_id": parsed.request_id,
+                "correlation_id": parsed.correlation_id,
+                "status": "clarification_required",
+                "error_code": error.reason_code,
+                "clarification": {
+                    "text": clarification_text,
+                    "candidate_facts": list(error.candidate_facts),
+                    "requires_complete_request": True,
+                },
+            }
+        except ConversationGuidanceRequiredError as error:
+            if error.reason_code == "dynamic_conversation_response":
+                self.audit.append(
+                    "openclaw.teams_conversation_response_returned",
+                    {
+                        "request_id": parsed.request_id,
+                        "correlation_id": parsed.correlation_id,
+                        "machine_identity": machine_identity,
+                        "reason_code": error.reason_code,
+                    },
+                )
+                return {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "status": "conversation_response",
+                    "reply": {"text": error.guidance_text},
+                }
+            self.audit.append(
+                "openclaw.teams_conversation_guidance_returned",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "reason_code": error.reason_code,
+                    "requested_facts": list(error.requested_facts),
+                },
+            )
+            return {
+                "request_id": parsed.request_id,
+                "correlation_id": parsed.correlation_id,
+                "status": "clarification_required",
+                "error_code": error.reason_code,
+                "clarification": {
+                    "text": error.guidance_text,
+                    "candidate_facts": list(error.requested_facts),
+                    "requires_complete_request": False,
+                },
+            }
+        except ConversationIntentUnresolvedError:
             return self._reject(
                 request_id=parsed.request_id,
                 correlation_id=parsed.correlation_id,
                 reason="conversation_unresolved",
                 machine_identity=machine_identity,
             )
-        except Exception:
+        except Exception as error:
+            diagnostic_message = str(error).strip()
+            if len(diagnostic_message) > 500:
+                diagnostic_message = diagnostic_message[:500] + "..."
+
+            diagnostic = _conversation_failure_diagnostic(error)
+
             self.audit.append(
                 "openclaw.teams_conversation_failed",
                 {
                     "request_id": parsed.request_id,
                     "correlation_id": parsed.correlation_id,
                     "machine_identity": machine_identity,
+                    "error_type": type(error).__name__,
+                    "error_message": diagnostic_message,
+                    "diagnostic": diagnostic,
                 },
             )
-            return {
+
+            result = {
                 "request_id": parsed.request_id,
                 "correlation_id": parsed.correlation_id,
                 "status": "failed",
                 "error_code": "conversation_failed",
             }
+            if diagnostic:
+                result["diagnostic"] = diagnostic
+            return result
 
+        orchestration_status = _conversation_orchestration_status(result)
         self.audit.append(
             "openclaw.teams_conversation_completed",
             {
@@ -282,7 +415,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 "correlation_id": parsed.correlation_id,
                 "machine_identity": machine_identity,
                 "transport_message_id": result.transport_message_id,
-                "orchestration_status": result.orchestration.status.value,
+                "orchestration_status": orchestration_status,
             },
         )
         return {
@@ -290,7 +423,7 @@ class GovernedOpenClawTeamsConversationIngress:
             "correlation_id": parsed.correlation_id,
             "status": "completed",
             "transport_message_id": result.transport_message_id,
-            "orchestration_status": result.orchestration.status.value,
+            "orchestration_status": orchestration_status,
         }
 
     def _freshness_error(
@@ -336,6 +469,7 @@ class GovernedOpenClawTeamsConversationIngress:
         parsed: OpenClawTeamsConversationEnvelope,
         machine_identity: str,
         reason: str,
+        diagnostic: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.audit.append(
             "openclaw.teams_conversation_denied",
@@ -344,6 +478,7 @@ class GovernedOpenClawTeamsConversationIngress:
                 "correlation_id": parsed.correlation_id,
                 "machine_identity": machine_identity,
                 "reason": reason,
+                **(dict(diagnostic) if diagnostic is not None else {}),
             },
         )
         return {
@@ -352,6 +487,47 @@ class GovernedOpenClawTeamsConversationIngress:
             "status": "denied",
             "error_code": reason,
         }
+
+
+def _conversation_orchestration_status(result: GovernedConversationFlowResult) -> str:
+    explicit = getattr(result, "orchestration_status", None)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    orchestration = getattr(result, "orchestration", None)
+    status = getattr(orchestration, "status", None)
+    value = getattr(status, "value", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
+    raise RuntimeError(
+        "governed conversation flow result did not declare orchestration status"
+    )
+
+
+def _clarification_text(candidate_facts: tuple[str, ...]) -> str:
+    if len(candidate_facts) == 2:
+        options = f"{candidate_facts[0]} or {candidate_facts[1]}"
+    else:
+        options = ", ".join(candidate_facts[:-1]) + f", or {candidate_facts[-1]}"
+
+    return (
+        "I need one detail before I can continue. "
+        f"Do you mean {options}? "
+        "Please send a complete request naming the one you want."
+    )
+
+
+def _teams_message_claim_key(parsed: OpenClawTeamsConversationEnvelope) -> str:
+    canonical = "\x00".join(
+        (
+            parsed.microsoft_tenant_id,
+            parsed.microsoft_object_id,
+            parsed.conversation_id,
+            parsed.message_id,
+        )
+    ).encode("utf-8")
+    return "teams-message-v1:" + sha256(canonical).hexdigest()
 
 
 def _parse_utc(value: str) -> datetime:

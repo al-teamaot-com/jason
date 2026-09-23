@@ -53,6 +53,84 @@ def test_it_glue_generic_entity_query_translation_preserves_filters() -> None:
     assert invocation.arguments["page_size"] == 100
 
 
+def test_it_glue_generic_entity_query_is_bounded_and_pages_without_provider_url() -> None:
+    first = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="entity",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"entity": "Organizations"},
+        )
+    )
+    next_page = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="entity",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"entity": "Organizations"},
+            page_size=25,
+            cursor="2",
+        )
+    )
+
+    assert first.arguments == {
+        "entity": "Organizations",
+        "filters": {},
+        "page_size": 100,
+    }
+    assert next_page.arguments == {
+        "entity": "Organizations",
+        "filters": {},
+        "page_size": 25,
+        "page_number": 2,
+    }
+
+    with pytest.raises(ValueError, match="positive integer"):
+        translate_it_glue_resource(
+            ResourceQuery(
+                provider="it_glue",
+                resource_type="entity",
+                operation=ResourceOperation.QUERY,
+                organization_id="208",
+                filters={"entity": "Organizations"},
+                cursor="not-a-page",
+            )
+        )
+
+
+def test_it_glue_document_get_and_query_use_generic_read_boundary() -> None:
+    exact = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="document",
+            operation=ResourceOperation.GET,
+            organization_id="208",
+            resource_id="42",
+        )
+    )
+    search = translate_it_glue_resource(
+        ResourceQuery(
+            provider="it_glue",
+            resource_type="document",
+            operation=ResourceOperation.QUERY,
+            organization_id="208",
+            filters={"organization_id": "208", "name": "Remote Access Policy"},
+            page_size=25,
+        )
+    )
+
+    assert exact.capability == "it_glue.document.get"
+    assert exact.arguments == {"document_id": "42"}
+    assert search.capability == "it_glue.entity.query"
+    assert search.arguments == {
+        "entity": "Documents",
+        "filters": {"organization_id": "208", "name": "Remote Access Policy"},
+        "page_size": 25,
+    }
+
+
 def test_it_glue_relationship_translation_is_generic() -> None:
     invocation = translate_it_glue_resource(
         ResourceQuery(
@@ -98,19 +176,42 @@ def test_datto_device_and_related_resource_translation() -> None:
     assert jobs.arguments == {"device_uid": "device-123"}
 
 
-def test_datto_device_query_preserves_bounded_page_size() -> None:
+def test_datto_device_query_preserves_ambiguity_and_resource_selectors() -> None:
     invocation = translate_datto_rmm_resource(
         ResourceQuery(
             provider="datto_rmm",
             resource_type="device",
             operation=ResourceOperation.QUERY,
             organization_id="aot",
-            filters={},
+            filters={"hostname": "SERVER", "site": "Customer-B"},
             page_size=1,
         )
     )
     assert invocation.capability == "datto_rmm.device.search"
-    assert invocation.arguments == {"search": "", "page": 1, "max": 1}
+    assert invocation.arguments == {
+        "page": 0,
+        "hostname": "SERVER",
+        "site": "Customer-B",
+        "max": 2,
+    }
+
+
+def test_datto_legacy_search_filter_maps_to_hostname_without_first_match_semantics() -> None:
+    invocation = translate_datto_rmm_resource(
+        ResourceQuery(
+            provider="datto_rmm",
+            resource_type="device",
+            operation=ResourceOperation.QUERY,
+            organization_id="aot",
+            filters={"search": "SERVER"},
+            page_size=25,
+        )
+    )
+    assert invocation.arguments == {
+        "page": 0,
+        "hostname": "SERVER",
+        "max": 25,
+    }
 
 
 def test_adapter_fails_closed_for_untranslated_operation() -> None:

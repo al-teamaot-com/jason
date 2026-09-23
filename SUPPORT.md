@@ -1,334 +1,38 @@
 # Project Jason Support List
 
-This document is the governed support backlog for current defects, degraded capabilities, connector failures, operational blockers, and other issues that require repair or investigation.
+This list is break/fix for Project Jason. Put an item here when Jason should already be able to perform the workflow but cannot, or when a defect/blocker is discovered while troubleshooting real support work. New capabilities, integrations, and future enhancements that Jason is not yet expected to provide belong in the TODO backlog instead. An item closes only after the blocked workflow is reproduced, corrected through the governed architecture, and verified with authoritative readback or equivalent acceptance evidence. Manually completing the blocked technician task is not a substitute for fixing Jason and must not be used as closure evidence for autonomous capability or playbook behavior; live mutations are reserved for an explicitly authorized controlled acceptance test after the capability is built.
 
-It is intentionally separate from `TODO.md`. The TODO list tracks future ideas, enhancements, and planned capabilities; this Support List tracks things that should already work, or operational conditions that are preventing Jason from working as intended.
+| ID | Priority | Status | Item | Current blocker / evidence | Acceptance criteria |
+| --- | --- | --- | --- | --- | --- |
+| SUPPORT-CONN-001 | P1 | Resolved 2026-09-18 (regression fixed) | Autotask ticket read path failing through Jason | Regression root cause was local runtime thread affinity, not Autotask requester mode: process-cached `SQLiteClientBoundaryStore` used the default thread-bound sqlite connection while MCP synchronous tools execute in worker threads. That caused `sqlite3.ProgrammingError` during Microsoft-bound requester enrichment after successful Autotask provider reads, surfacing as `CAPABILITY_INVOCATION_FAILED`. Production fix `1fa93d61a2b010a3b53dab12d6e731c8aad46571` sets `check_same_thread=false` for that durable identifier-only store and adds cross-thread regression coverage. Post-deploy acceptance: 5/5 consecutive `service.ticket.read` calls succeeded, followed by 3/3 exact `service.ticket.search` and 3/3 `service.ticket.count` calls succeeding with unique correlations and exact count `1`. | Autotask reads succeed repeatedly through Jason governance under `jason_managed` requester authorization; the process-cached Microsoft/client boundary lookup is safe across MCP worker threads; write surfaces remain active and continue to use provider-native requester impersonation, approval, provider preflight, and readback verification. |
+| SUPPORT-CONN-002 | P1 | Open — reproduced again 2026-09-20 | MCP `UNAVAILABLE / Connection failed` interruptions | The transient transport failure remains reproducible. On 2026-09-20 a controlled alternating-read test performed 16 governed calls (8 Autotask `service.ticket.search` + 8 Datto `endpoint.device.search`); 15 succeeded with normal Jason correlation IDs and one Datto read failed at the MCP client with `UNAVAILABLE / Connection failed` and no Jason correlation ID. The immediately following retry succeeded. At the same observation window, `jason-mcp-pilot` was healthy with restart count 0, the Jason host showed no physical-interface errors/drops, kernel logs showed no related network event, and MCP container logs contained no matching ingress/error event for the failed call. This further localizes the defect to the ChatGPT MCP client/session/transport path before normal Jason ingress rather than Autotask/Datto provider execution. | Isolate the failing hop between the ChatGPT MCP client/session and healthy `jason-mcp-pilot`. Capture platform/session transport telemetry for a failed call and correlate it to the known-good adjacent calls. If the failure is outside Jason ingress, implement the supported connector/session remediation or platform-side retry/keepalive mechanism rather than weakening Jason governance. Then require a sustained repeated-call acceptance across status, Autotask reads, Datto reads, and one read-before-write workflow with zero `UNAVAILABLE` failures. |
+| SUPPORT-CAP-003 | P1 | Resolved 2026-09-18 | Governed Datto AV/EDR threat-detail reads | Revalidated live after the EDR read-backend deployment: all read-only endpoint-security capabilities are now authority-allowed. AOT-50282 status, detection search/detail, quarantine history, and scan history all succeeded through Jason with `direct_provider_access=false`. The apparent HTTP 500 was reproduced only when the DRMM numeric threat reference `15884344` was incorrectly supplied as a provider-native Datto EDR alert UUID. Using the exact EDR alert ID `c3aa92e3-92af-4c8f-889a-51bafa50790f` returned the authoritative AV detection, SHA-256, quarantine state, provider disposition, and quarantine path. | Governed read backend is live and verified. Provider-native threat detail, quarantine state, scan history, and endpoint security status are readable through Jason without direct-provider bypass. Cross-provider correlation of a DRMM numeric threat reference to the EDR alert UUID is tracked separately so callers do not have to know the provider-native identifier. |
+| SUPPORT-CAP-004 | P1 | Resolved 2026-09-18 | Governed Datto alert resolution | Live acceptance completed against stale open AOT-50282 alert `a162d5e0-1d84-48f3-a67f-2acf1b18c0e6` associated with completed ticket `T20260917.0015`. Jason executed active governed capability `endpoint.alert.resolve` against exact device UID `69571572-83f7-1e33-9cdf-01717d4e74a4` through Central Orchestrator with `direct_provider_access=false`. The action completed with correlation `corr_mcp_action_ce450d920b8b4cadb62d700732c4ae68`, `provider_attempts=1`, `mutation_performed=true`, and built-in `readback_verified=true`. An independent governed `endpoint.alert.history.search` then confirmed the exact alert `resolved=true`, `resolvedBy=AOT_Jason_RW`. | Governed Datto alert resolution is active and verified end-to-end: exact alert UID + exact endpoint UID, one bounded provider attempt, post-action readback, independent history verification, and no direct-provider bypass. |
+| SUPPORT-CONN-005 | P1 | Resolved 2026-09-20 (blank-title regression fixed and production-proven) | Autotask closeout read/write primitives blocked | The same worker-thread SQLite regression caused internal-note requester resolution to fail with `sqlite3.ProgrammingError`, while natural generic note requests expressed as `ticket_id` + `note` could separately reach the connector without the provider payload envelope and surface as `CONNECTOR_AUTHORIZATION_DENIED`. Fix `1fa93d61a2b010a3b53dab12d6e731c8aad46571` makes the client-boundary store worker-thread safe and canonicalizes technician-friendly `service.ticket.note.create` arguments into the fixed internal-note payload (`noteType=3`, `publish=1`). Controlled acceptance on old test ticket `T20240801.0001` / ID `7680` created note `30502969` through the generic governed action with `provider_attempts=1`, built-in `readback_verified=true`, and `impersonator_recorded=true`. Independent governed `service.ticket.notes.search` then found the exact note with the expected description/title, `noteType=3`, `publish=1`, `creatorResourceID=29682885`, and `impersonatorCreatorResourceID=29682930`. A second regression was identified on 2026-09-20: generic note creation allowed a blank title, while Autotask monitoring/security ticket categories can reject blank-title TicketNotes with HTTP 500. Fix `9663c42` now supplies safe default title `Jason Internal Note` whenever the caller omits a title and enforces Autotask's 250-character title limit. Production image `jason-mcp:internal-note-title-fix-9663c42` is live with rollback container `jason-mcp-pilot-pre-internal-note-fix-20260920T145641Z`. Controlled blank-title acceptance on test ticket ID `7680` created verified note `30503932`; exact previously failing security ticket `T20260919.0058` / ID `140741` created verified note `30503933`. The remaining seven correlated AOT-caused log-clear tickets were backfilled successfully with verified internal notes `30503934` through `30503940`. | Autotask ticket read, note create, ticket update, and post-write readback primitives are healthy through governance. Natural technician note requests are server-canonicalized to the fixed internal-note visibility, requester attribution is preserved, and playbook-level automatic documentation must still be proven by the playbook/orchestrator itself rather than by an operator manually invoking the note primitive. |
+| SUPPORT-CAP-006 | P1 | Resolved 2026-09-18 | Governed Datto component execution across managed targets | Root causes were a hard-coded single pilot target, redundant second approval for technician-directed per-run components, and stale caller component UIDs causing `DATTO_COMPONENT_IDENTITY_MISMATCH`. Fixes `1bb11393d7d920da258787d8b4297523e8bfcae0`, `98d06316b2bc9ccdea37bd916324947890998069`, and `f01a38fd96557ca041fbc7b5c0b865be05f4fb59` now verify exact managed targets, treat an authenticated technician's direct exact-run instruction as approval, preserve standing-safe autonomous execution, and make unique live Datto component-name resolution authoritative over stale caller UIDs. Live acceptance proved standing-safe execution on non-pilot HRR-50441, deterministic read-only ad-hoc PowerShell on HRR-50441, technician-instructed per-run `Detect Boot Type (BIOS/UEFI) [WIN]` execution on AOT-50282, and successful execution even when a deliberately bogus stale component UID was supplied alongside the exact live component name. | Jason may autonomously run only components/commands it deterministically understands as standing-safe. For unknown, ambiguous, mutating, sensitive, or otherwise per-run components/commands, an authenticated technician's direct instruction for the exact component/command and exact managed endpoint is the approval for that run; Jason may warn but must not require a second approval exchange. Targets and component identities remain authoritatively verified, execution remains bounded/audited, and `direct_provider_access=false`. |
+| SUPPORT-CAP-012 | P1 | Resolved 2026-09-18 | Correlate DRMM threat references to provider-native Datto EDR detections | Production already contains deterministic governed cross-provider correlation introduced in the Datto EDR support work. Live acceptance on AOT-50282 used exact device UID `69571572-83f7-1e33-9cdf-01717d4e74a4`, DRMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`, and numeric threat reference `15884344`; `endpoint.security.detection.read` resolved the exact EDR agent `0cf9b495-879b-4b6c-8c60-ac229e01d136`, exact provider-native EDR alert `c3aa92e3-92af-4c8f-889a-51bafa50790f`, and returned the full detection/quarantine record including SHA-256, threat status `Quarantined`, and quarantine path. Returned correlation evidence recorded `event_delta_seconds=3`, basis `exact_device_uid+exact_agent_id+drmm_threat_reference+event_time_window`, and `fail_closed=true`. A bogus threat reference `99999999` failed closed with `DATTO_THREAT_CORRELATION_DRMM_ALERT_NOT_FOUND`; source contract tests also prove two plausible EDR matches fail with `DATTO_THREAT_CORRELATION_EDR_ALERT_AMBIGUOUS`. | Deterministic governed DRMM→EDR correlation is live and verified. It starts from authoritative exact device identity, derives the exact EDR agent, requires the matching DRMM threat reference and event-time window, fails closed on zero or multiple plausible matches, preserves evidence explaining the match, never selects by hostname alone, and returns the exact EDR detail/quarantine record without caller knowledge of the provider-native EDR UUID. |
+| SUPPORT-CAP-013 | P1 | Resolved 2026-09-18 | Governed Datto EDR/AV on-demand scan action | Root cause was a missing governed mutation path, not a Datto product limitation. Datto's current EDR client uses `POST /api/agents/scan` with exact agent selection and AV options (`diskScan=true`, mutually exclusive Quick/Full scan). Jason now exposes active governed action `endpoint.security.scan.start`, requires exact Datto RMM endpoint UID + exact EDR agent ID + explicit `quick`/`full`, verifies identity and AV licensing before mutation, refuses when a scan is already in progress, enforces Datto's one-scan-per-device-per-hour guard, performs exactly one provider attempt, and preserves `direct_provider_access=false`. Production source `a7c06f2b45c0d24ca50338312642dc0d68338ef8` passed all seven CI workflows and was promoted with profile `owner-av-scan-v1`. The live acceptance scan was performed on that build. After acceptance, production was hardened to `8776ac5dc56c4a22e0f86dceb780f0cff4fd70f9`, adding the explicit `datto_edr.execution` logical secret alias and Datto client compatibility field `installed=true`; all relevant CI workflows passed before promotion. No second scan was launched immediately because the provider one-hour guard must be respected. Controlled acceptance on AOT-50282 (`69571572-83f7-1e33-9cdf-01717d4e74a4`, EDR agent `0cf9b495-879b-4b6c-8c60-ac229e01d136`) started one native Quick Scan through Central Orchestrator, correlation `corr_mcp_action_418f8aaad2d74af6b914fc631871074c`, `provider_attempts=1`. Independent governed status readback advanced `last_av_scan_time` from `2026-09-18T14:33:05.685Z` through `created`/`in-progress` to terminal `completed` at `2026-09-18T16:25:10.009Z`, with `last_av_scan_type=av-quick-scan`. Governed scan-history readback then published durable scan ID `ba2ad23d-8cb7-4ecf-ac2d-55af309406c3`, type `Quick scan`, status `completed`, created `2026-09-18T16:25:14.937Z`. Datto does not return an immediate task ID from the start route, so Jason uses exact endpoint + exact agent + provider scan timestamp/type as start identity and the subsequent governed scan-history ID as the durable terminal identity. A post-scan governed detection search produced no newly created detection from this scan. | Native Quick/Full Datto AV scan initiation is available through governance and proven live on AOT-50282. Continue using `endpoint.security.status.read` and `endpoint.security.scan.history.search` for progress/terminal readback; post-scan detection/quarantine verification remains part of the EDR/AV playbook workflow rather than a missing scan-start capability. |
 
-## How to use this document
+| SUPPORT-CAP-014 | P1 | Resolved — verified 2026-09-18 | Governed Datto component target canonicalization rejects valid technician-directed execution | While investigating Autotask ticket `T20260918.0030`, Jason identified exact managed endpoint `VZ-50618` (Datto RMM UID `cfc8a846-b110-24c6-0a2e-e622d561875a`) and exact live component `Run Ad Hoc Command (PowerShell 2-5) [WIN]` (UID `8a1c153c-feee-41c5-9c9b-58a48e0214fe`) to run a read-only browser-policy diagnostic. The authenticated technician explicitly instructed Jason to proceed. Governed `automation.component.execute` rejected `device_uid` + `component_uid` with `DATTO_COMPONENT_IDENTITY_MISMATCH`; retry using exact `hostname` + `component_name` was rejected with `DATTO_COMPONENT_TARGET_REQUIRED`; retry using nested exact `target` and `component` objects was also rejected with `DATTO_COMPONENT_TARGET_REQUIRED`. No provider execution occurred and no endpoint change was made. This is a regression/contract gap in an already expected capability previously closed under `SUPPORT-CAP-006`, not a request for a new capability. | Canonicalize technician-friendly exact endpoint/component selectors at the governed action boundary so a direct authorized request can resolve the unique live managed endpoint and unique live component without the caller having to know an undocumented provider payload shape. Re-run the same bounded read-only PowerShell diagnostic on `VZ-50618` through `automation.component.execute`; require target/component identity verification, exactly one Datto provider execution, terminal job readback, governed StdOut retrieval showing the requested Edge/Chrome/GPO policy data, no redundant second approval, and `direct_provider_access=false`. Resolved by restoring the proven CAP-006 managed-target execution line and correcting the projected component-catalog evidence contract. Production commits `323f86d879473b5e962cac804d6c628e8f234f0d` and `2bdf19c8cd83f56c90bcbe5ce602f49bc78bf210`. Acceptance from ticket context verified Autotask company 311 -> Datto VisualZen site -> unique endpoint VZ-50618, exactly one provider attempt for the original diagnostic, terminal job `613f88c4-08c9-4fcc-ac1a-f07dba2731f6`, governed StdOut, and `direct_provider_access=false`. Follow-up read-only enumeration job `9d4ff987-af27-4461-833a-c9cda310be48` returned the actual Edge/Chrome policy tree; evidence was persisted to Autotask internal note `30503057`. Cross-company resources were not used. |
 
-Each item should include:
+| SUPPORT-CAP-015 | P1 | Open — provider API blocker confirmed 2026-09-18 | Governed per-device DRMM monitor enable/disable provider operation unavailable in documented Datto RMM API v2 | TODO-OPS-004 requires Jason to disable or re-enable one exact monitor on one exact managed device. Datto RMM 15.1 UI supports an Enabled toggle for individual device monitors and device policy enablement, but the current documented REST API v2 exposes alert reads/resolution, device/site reads, jobs, patching, variables, and related operations without a documented per-device monitor enable/disable mutation. Jason must not call an undocumented/private web endpoint or use direct provider bypass to simulate this capability. | Obtain a vendor-supported Datto RMM API operation (or other explicitly supported automation interface) that can read exact monitor assignment state and set one exact monitor enabled/disabled on one exact device. Then implement it through Central Orchestrator with company/site/device/monitor identity verification, explicit technician approval for disable, one provider attempt, post-mutation readback, re-enable support, audit evidence, and `direct_provider_access=false`. Do not substitute site/policy-wide suppression or maintenance mode for exact monitor control. |
 
-- **Issue** — what is failing or degraded.
-- **Impact** — what Jason or a technician cannot reliably do because of the issue.
-- **Observed behavior** — the concrete failure or evidence seen.
-- **Expected behavior** — what should happen instead.
-- **Scope** — affected connector, capability, provider, workflow, or environment.
-- **Priority** — P0, P1, P2, or P3.
-- **Status** — Open, Investigating, Mitigated, Blocked, Fixed, or Closed.
-- **Owner** — person or role responsible for resolution.
-- **Verification** — evidence required before the item can be closed.
-- **Last observed** — most recent confirmed occurrence.
+| SUPPORT-CAP-016 | P1 | Open — provider permission blocker confirmed 2026-09-19 | Governed Autotask NotificationHistory read cannot query production data | Jason now exposes active read-only `service.notification.history.search` through the documented Autotask `NotificationHistory/query` endpoint, bounded to an explicit company ID. Live `service.entity.describe` succeeded for `NotificationHistory` and reported `canQuery=true` but `userAccessForQuery=None`; the bounded company 311 production query then failed at Autotask with HTTP 500, correlation `corr_mcp_5418999b57bd45d28fed2f7f1f1f47c8`. Live provider preflight now confirms the read identity can query `Resources` (`userAccessForQuery=All`) but `NotificationHistory` reports `userAccessForQuery=None`; therefore this is specifically an Autotask security-level permission gap, not a general API/read-identity failure. No governed provider capability exists to administer Autotask security levels, and Jason did not broaden the read identity or use a private UI endpoint. | In Autotask, edit the security level assigned to the dedicated Jason read-only API user and enable only the Notification History query permission under the applicable Application-wide (Shared) Features/Admin permission; do not change the separate `Jason API - Ticket Mutation` profile or unrelated permissions. Re-run a company-bounded governed query and require successful readback of recent notification metadata, including `templateName`, recipient, sent time, company/ticket association, with `direct_provider_access=false`. |
 
-Items remain on this list until the underlying issue is fixed and the expected behavior is verified through the governed production path.
+| SUPPORT-CAP-017 | P1 | Resolved 2026-09-20 | Restricted Autotask read-only API profile could not query Services while existing read/write API identity could | Procurement v5 shadow acceptance under `autotask.readonly` shows `Services/entityInformation` returns `canQuery=true` but `userAccessForQuery=None`, and bounded Services queries fail with HTTP 500. A controlled GET-only comparison using the existing separate `autotask.write` identity succeeded: `Services/entityInformation` returned `userAccessForQuery=All`, `userAccessForCreate=All`, and `userAccessForUpdate=All`, and a bounded Services query returned three records (sample IDs 6, 7, 8). No provider mutation was attempted. This proves the Services API works in this tenant and isolates the blocker to an effective permission/security-profile difference between the read-only and read/write API identities. | Resolved after enabling the Autotask Products, Services & Inventory feature access on the API security level. Live v5 read acceptance now returns `userAccessForQuery=All` and bounded Services queries succeed. Autotask also exposes create/update authority with that feature, so Jason continues to enforce read-only behavior at the capability layer and routes catalog/procurement mutations through separately approval-gated governed actions. |
+| SUPPORT-CONN-018 | P1 | Open — Microsoft permission/credential blocker confirmed 2026-09-20 | Governed requester/vendor mailbox reads cannot activate because no separate `mail-read` Microsoft application / Exchange Application RBAC authority is provisioned | Procurement mailbox source support is implemented with bounded message search/read and attachment-metadata reads, exact approved-mailbox allowlisting, a separate `microsoft_graph_mail` client boundary, separate OpenBao AppRole/secret paths, logical secret `microsoft_graph.mail_read`, and explicit v6 activation profile. A controlled GET-only probe against the currently bound directory application returned HTTP 403 for Microsoft Graph `/messages`, proving that app does not have effective application `Mail.Read`. Jason intentionally did not add Mail.Read to the directory-read app or broaden v4/v5 authority. Source commit `e647e197e5056749b759f18bd67184dbaebba443` is deployed in `jason-mcp:procurement-mail-foundation-e647e19` under unchanged v5 activation; shadow and post-cutover verification confirm mail capabilities remain PILOT/unexposed. | Provision a separate Microsoft application/certificate credential for `mail-read`, register its service principal in Exchange Online, assign Exchange Application RBAC role `Application Mail.Read` to a custom resource scope containing only explicitly approved AOT requester/purchasing mailboxes, and do not add an unscoped Microsoft Entra Graph `Mail.Read` application grant. Then create the validated `microsoft_graph_mail` client boundary and OpenBao secret/AppRole, configure the exact mailbox allowlist, and activate only the v6 provider-read profile. Acceptance requires a controlled bounded message search/read and attachment-metadata read from an approved AOT mailbox, a denied read for a non-approved mailbox, and `direct_provider_access=false`. |
 
----
+## Classification migration — 2026-09-18
 
-## Priority legend
+`SUPPORT-CAP-007` through `SUPPORT-CAP-011` were reclassified into the TODO backlog because they describe new provider/integration capabilities Jason is not yet expected to have, rather than failures of an existing expected capability. Their original discovery evidence is preserved in Git history.
 
-- **P0** — production-blocking or safety-critical failure.
-- **P1** — significant operational degradation affecting active work.
-- **P2** — limited degradation with a usable workaround.
-- **P3** — minor issue, cleanup, or low-impact defect.
+## SUPPORT-CONN-001 closure evidence — 2026-09-18
 
----
-
-## Open support items
-
-### SUPPORT-CONN-001 — Autotask ticket read path failing through Jason
-
-- **Priority:** P1
-- **Status:** Closed
-- **Owner:** Jason Platform / Connector Support
-- **Issue:** Jason's governed Autotask ticket read and mutation paths are failing for an active production ticket.
-- **Impact:** Jason can identify the Datto RMM alert and its associated Autotask ticket, but cannot reliably read the ticket details/notes or perform the currently exposed governed ticket-note mutation. This prevents complete autonomous troubleshooting documentation, ticket-state assessment, and ticket closeout.
-- **Observed behavior:**
-  - Datto RMM correctly identified critical antivirus alert `bd0882e0-8700-4985-ad89-f789b865c76e` on `AOT-50282`.
-  - The alert correctly references Autotask ticket `T20260918.0005` / internal ticket ID `140629`.
-  - `service.ticket.search` failed with `CAPABILITY_INVOCATION_FAILED`.
-  - `service.ticket.read` failed with `CAPABILITY_INVOCATION_FAILED`.
-  - `service.ticket.notes.search` was denied with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
-  - Governed Datto RMM reads and component execution continued to work, isolating the observed degradation to the Autotask path rather than the endpoint itself.
-  - On 2026-09-18, an explicitly approved attempt to create an internal note on ticket `140629` using the dedicated `create_autotask_internal_note` governed tool failed with `CAPABILITY_INVOCATION_FAILED` and `provider_write_attempts=1`; no note was created.
-  - The active `service.ticket.update` capability requires a numeric tenant-specific Autotask status value and post-mutation readback verification. Because the read path is failing, Jason could not safely discover/verify the tenant's Complete status ID and did not guess or bypass governance.
-- **Expected behavior:** Jason should be able to search, read, and retrieve notes for authorized Autotask tickets through the governed read path, including `T20260918.0005`, without using direct provider access or bypassing governance.
-- **Scope:** Jason MCP -> governed Autotask reads and bounded mutations, including `service.ticket.search`, `service.ticket.read`, `service.ticket.notes.search`, `service.ticket.note.create`, and `service.ticket.update`.
-- **Operational workaround:** Continue safe endpoint diagnostics through the governed Datto RMM path, but do not treat the Autotask ticket workflow as complete until ticket read access is restored.
-- **Verification required for closure:**
-  1. Search for `T20260918.0005` succeeds through the governed Autotask path.
-  2. Read the ticket by its governed resource identifier succeeds.
-  3. Ticket notes can be retrieved by an authorized Jason request.
-  4. No direct-provider bypass is required.
-  5. Create and verify one bounded internal note on a controlled ticket through the governed mutation path.
-  6. Perform and verify one bounded ticket update through `service.ticket.update`.
-  7. Repeat the reads in a fresh session to confirm the fix is durable.
-- **Current diagnosis (2026-09-18):**
-  - Reproduced `service.ticket.search` and `service.ticket.count` failures for `T20260918.0005` with `CAPABILITY_INVOCATION_FAILED`.
-  - Reproduced the same `CAPABILITY_INVOCATION_FAILED` on a minimal `service.company.search`, showing the failure is broader than one ticket.
-  - `service.ticket.notes.search` and `service.entity.describe` reach the governed Autotask path but fail information release with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
-  - Current source defines `jason_managed` as the temporary production default because provider-native Autotask requester impersonation is known to produce an Autotask HTTP 500. The split live behavior is consistent with production running with a stale or explicit `impersonated` requester-authorization mode.
-  - The runtime Compose source does not explicitly declare `JASON_AUTOTASK_REQUESTER_AUTH_MODE`, so live container environment/configuration must be checked before changing anything.
-- **Next safe action:** Inspect the live `jason-runtime` environment for `JASON_AUTOTASK_REQUESTER_AUTH_MODE` without exposing secrets. If it is explicitly `impersonated`, restore the approved `jason_managed` mode, recreate only the affected runtime service using the governed deployment runbook, then repeat all five closure checks above.
-- **Blocked on:** Access to the production Jason runtime host/deployment path for configuration inspection and bounded remediation.
-- **Resolution verified:** 2026-09-22. In a fresh governed session, `service.ticket.search` for `T20260918.0005`, `service.ticket.read` for ticket `140629`, and `service.ticket.notes.search` all succeeded with `direct_provider_access=false`. The ticket is readable as status `5`, completed on 2026-09-18, and prior Jason-created internal verification notes are present. The original read-path blocker is no longer current.
-- **Last observed:** 2026-09-18 during active antivirus troubleshooting on `AOT-50282`.
-
----
-
-### SUPPORT-CONN-002 — Jason MCP transport intermittently returns UNAVAILABLE during governed work
-
-- **Priority:** P1
-- **Status:** Open
-- **Owner:** Jason Platform / Connector Support
-- **Issue:** The Jason MCP transport intermittently drops active governed requests with `UNAVAILABLE: McpServerError: Connection failed`.
-- **Impact:** Active endpoint troubleshooting is repeatedly interrupted. Readbacks and status polls must be retried, increasing latency and making long-running Datto jobs harder to monitor reliably.
-- **Observed behavior:**
-  - Multiple consecutive `UNAVAILABLE` transport failures occurred on 2026-09-18 while troubleshooting `AOT-50282`.
-  - Failures affected harmless reads such as `jason_mcp_status`, `automation.job.read`, `automation.job.output.read`, and alert reads.
-  - Successful retries often immediately followed failures, showing the issue is intermittent rather than a persistent Datto endpoint failure.
-  - The underlying Datto jobs remained intact across the transport failures; no evidence indicates the endpoint jobs themselves failed because of the disconnects.
-  - At the latest checkpoint, repeated consecutive failures made Jason MCP temporarily unreachable and blocked further governed endpoint work.
-- **Expected behavior:** Jason MCP should maintain reliable transport for governed reads/actions and allow stable polling of long-running provider jobs without repeated connection failures.
-- **Scope:** ChatGPT/connector -> Jason MCP transport/session reliability; affects governed Autotask and Datto workflows.
-- **Operational workaround:** Retry idempotent reads only; never redispatch a write or component solely because the readback transport failed. Preserve known job IDs and resume polling after MCP connectivity returns. Do not bypass Jason governance with direct-provider access.
-- **Verification required for closure:**
-  1. Run a sustained sequence of Jason status and governed read calls without `UNAVAILABLE` failures.
-  2. Launch one approved safe Datto diagnostic and poll it through terminal completion without transport loss.
-  3. Retrieve its StdOut successfully through the same governed session.
-  4. Confirm no provider job duplication occurred during the test.
-  5. Repeat from a fresh conversation/session.
-- **Last observed:** 2026-09-18 while troubleshooting `AOT-50282`; repeated failures culminated in multiple consecutive MCP connection failures that temporarily blocked further governed work.
-
----
-
-
-### SUPPORT-CAP-003 — Missing governed Datto AV/EDR threat-detail and remediation-state capability
-
-- **Priority:** P1
-- **Status:** Closed
-- **Owner:** Jason Platform / Datto RMM Connector
-- **Issue:** Jason can see that Datto RMM raised an Endpoint Security threat alert, but the governed capability set does not expose the underlying Datto AV/EDR threat record needed to investigate and close the incident confidently.
-- **Impact:** Jason can confirm that an antivirus alert exists and can troubleshoot endpoint health, but cannot directly answer the most important incident questions: what threat was detected, where it was found, what Datto AV did with it, whether it was quarantined or removed, and whether any remediation remains outstanding. This prevents a deterministic end-to-end AV playbook and can leave a critical RMM alert/ticket open even when the endpoint otherwise appears healthy.
-- **Production example:** `AOT-50282`, Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`, Endpoint Security alert ID `15884344`, Autotask ticket `T20260918.0005`.
-- **What Jason needed to do:**
-  1. Read the provider-native Datto Endpoint Security / Datto AV record for `esAlertId 15884344`.
-  2. Retrieve the threat name/classification and severity.
-  3. Retrieve the affected file, process, registry object, URL, or other detection source when available.
-  4. Retrieve file hash or other useful IOC data when available.
-  5. Determine the AV action taken: blocked, quarantined, deleted, cleaned, allowed, failed, or pending.
-  6. Determine whether the object still exists or remediation is incomplete.
-  7. Read quarantine/remediation state directly from Datto AV/EDR rather than inferring it from local folders.
-  8. Determine whether the Datto alert is safe to resolve after clean verification.
-  9. If supported by policy, perform or request the appropriate bounded remediation and then verify the threat state again.
-- **What Jason was allowed to do:**
-  - Read the Datto RMM endpoint record and see `Datto AV = RunningAndUpToDate`.
-  - Read the open RMM alert, which exposed only `Detected threat from Datto AV` plus `esAlertId 15884344`.
-  - Run approved Datto RMM diagnostic components on `AOT-50282`.
-  - Run `Check Datto EDR/AV Status AOT Ver 12122025-1`, which confirmed HUNTAgent and Datto AV health.
-  - Run `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1`, which confirmed `EndpointProtectionService` was Running and Automatic.
-  - Run Microsoft Safety Scanner (MSERT) and monitor its process/log state.
-  - Run approved read-only PowerShell through the governed Datto component path to inspect local Datto AV, Infocyte/HUNTAgent, Windows Event Log, and MSERT evidence.
-- **What was not available or not allowed:**
-  - No governed capability was exposed for something equivalent to `endpoint.security.threat.read`, `endpoint.security.threat.search`, Datto EDR threat-detail read, quarantine read, or remediation-state read.
-  - The standard `endpoint.alert.search` capability exposed the RMM wrapper alert but not the underlying threat name, file/path, hash, disposition, quarantine result, or remediation status.
-  - `discover_capabilities` did not reveal a provider-native Datto AV/EDR threat-detail capability.
-  - The Datto component catalog did not contain a native Datto AV threat-review or AV scan component that returned the missing provider threat record; MSERT was the only useful malware-scan component found.
-  - Jason was **not allowed to bypass governance by using direct provider access**. Production remained `direct_provider_access=false`, and that boundary was preserved.
-  - Jason therefore could not directly query Datto EDR/AV APIs or portal data outside the governed capability layer, even though that provider data was the authoritative source needed to identify the detection.
-  - No governed alert-resolution/remediation capability was identified during this investigation for safely closing the Datto Endpoint Security alert after verification.
-- **Observed workaround and why it is insufficient:**
-  - Jason searched local Datto AV files, Windows Application/System events, quarantine-like folders, and Infocyte/HUNTAgent logs using approved read-only PowerShell.
-  - This successfully established current product health and found historical evidence that the Datto AV engine had previously reported `not connected`.
-  - It did **not** expose the authoritative provider threat record for `15884344`.
-  - The exact alert ID was not found in recent local Datto AV files, Windows logs did not contain a corresponding threat/quarantine/remediation event, and the local quarantine search found only the SDK legal/license directory rather than an authoritative quarantine record.
-  - This filesystem/log approach is useful supplemental evidence but should not be the primary method for determining the disposition of a managed AV detection.
-- **Expected behavior:** Jason should have a governed, read-only Datto Endpoint Security capability that accepts an RMM alert identifier or Endpoint Security alert ID and returns the authoritative threat record, including available threat name, classification, affected object, IOC/hash, detection timestamp, action/disposition, quarantine/remediation state, and current resolution state. A separately governed mutation capability should exist for supported remediation or alert resolution when policy and approval allow it.
-- **Recommended capability design:**
-  - Read-only capabilities such as `endpoint.security.threat.search`, `endpoint.security.threat.read`, and `endpoint.security.quarantine.read`.
-  - Selectors should support `device_uid`, RMM `alert_uid`, and provider `es_alert_id`.
-  - Output should normalize provider fields into a canonical threat record while retaining provider evidence references.
-  - Read capability should remain low-risk and not require per-run approval.
-  - Any remediation, quarantine release, delete, isolate, or alert-resolution action should be a separate governed write capability with explicit risk classification and appropriate approval policy.
-  - No design should require setting `direct_provider_access=true`.
-- **Verification required for closure:**
-  1. Using only Jason governed capabilities, query `AOT-50282` alert `bd0882e0-8700-4985-ad89-f789b865c76e` or `esAlertId 15884344`.
-  2. Return the provider-native threat name/classification.
-  3. Return the affected object/path and IOC/hash when the provider supplies them.
-  4. Return the action/disposition and quarantine/remediation state.
-  5. Correlate the threat record back to the RMM alert and Autotask ticket.
-  6. Demonstrate the same capability against a second controlled Endpoint Security alert.
-  7. Confirm all reads work with `direct_provider_access=false`.
-  8. If an alert-resolution capability is implemented, prove that it requires the intended approval/authority and verifies provider readback after mutation.
-- **Resolution verified:** 2026-09-22. `endpoint.security.detection.read`, `endpoint.security.detection.search`, `endpoint.security.quarantine.search`, `endpoint.security.status.read`, and scan-history capabilities are active. Live governed readback of provider alert `c3aa92e3-92af-4c8f-889a-51bafa50790f` returned threat `EXP/CVE-2016-7228`, the affected XLS path, SHA-256, quarantine state, remediation state, response action, and the matching quarantine record while `direct_provider_access=false` remained enforced.
-- **Last observed:** 2026-09-18 during antivirus investigation of `AOT-50282`.
-
----
-
-
-### SUPPORT-CAP-004 — Missing governed Datto RMM alert-resolution capability blocks alert closeout
-
-- **Priority:** P1
-- **Status:** Fixed
-- **Owner:** Jason Platform / Datto RMM Connector
-- **Issue:** Jason can read Datto RMM alerts but has no governed write capability to resolve/close an alert after troubleshooting and verification are complete.
-- **Production example:** `AOT-50282`, Datto RMM alert UID `bd0882e0-8700-4985-ad89-f789b865c76e`, Endpoint Security alert ID `15884344`, associated Autotask ticket `T20260918.0005`.
-- **What Jason needed to do:**
-  1. Resolve the exact Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`.
-  2. Supply a bounded closeout reason/evidence reference if the provider supports it.
-  3. Read the same alert back after mutation.
-  4. Verify `resolved=true`, capture `resolvedOn` / `resolvedBy` when available, and confirm the alert no longer appears in the open-alert set.
-  5. Perform this through Central Orchestrator with `direct_provider_access=false`.
-- **What was available:**
-  - `endpoint.alert.search` and `endpoint.alert.history.search` for read-only alert inspection.
-  - `management.alert.search` for broader read-only alert inspection.
-  - Governed Datto component execution for endpoint diagnostics.
-- **Exact blocker:**
-  - `discover_capabilities` returned only read-only Datto alert capabilities.
-  - No active write capability equivalent to `endpoint.alert.resolve`, `management.alert.resolve`, `endpoint.alert.update`, or a provider-specific Datto RMM alert-close action was exposed.
-  - Because `direct_provider_access=false` is an intentional security boundary, Jason was not permitted to call Datto directly or use an unmanaged API/shell bypass to close the alert.
-  - The user explicitly authorized closeout, but requester intent alone cannot create a capability that is absent from the governed registry.
-- **Impact:** Jason can troubleshoot and verify endpoint health but cannot finish the operational workflow by clearing the RMM alert. This leaves resolved or likely-resolved conditions visible as active monitoring work and prevents true end-to-end playbook completion.
-- **Expected behavior:** Expose a narrowly governed Datto alert-resolution action that targets one exact alert UID, requires the appropriate authority/approval, performs one provider mutation attempt, and requires provider readback before reporting success.
-- **Recommended capability design:**
-  - Capability: `endpoint.alert.resolve` or `management.alert.resolve`.
-  - Required selector: exact `alert_uid`; optional `device_uid` as an additional target guard.
-  - Optional bounded fields: resolution reason, evidence/correlation reference, ticket number.
-  - No arbitrary alert editing.
-  - One provider mutation attempt; no broad-credential fallback.
-  - Post-mutation verification must confirm the exact alert is resolved and absent from open-alert results.
-  - Keep `direct_provider_access=false`.
-- **Verification required for closure:**
-  1. Select a controlled Datto RMM test alert by exact alert UID.
-  2. Resolve it through the governed capability.
-  3. Confirm exactly one provider mutation attempt.
-  4. Read the alert back and verify resolved state.
-  5. Verify it no longer appears in `endpoint.alert.search(..., status='open')`.
-  6. Prove an unauthorized or ambiguous alert target fails closed.
-  7. Repeat using an Endpoint Security alert so the `AOT-50282` workflow is covered.
-- **Current verification (2026-09-22):** `endpoint.alert.resolve` is now active, action-enabled, approval-required, and scoped by exact `alert_uid` with optional `device_uid`. The original `AOT-50282` threat alert is confirmed in resolved history (`resolved=true`, resolver `AT_AUTORESOLVER`) and no longer appears in the open-alert set. The missing-capability defect is fixed; a separate controlled mutation acceptance test should still be retained as regression evidence.
-- **Last observed:** 2026-09-18 when the user explicitly asked Jason to close Datto RMM alert `bd0882e0-8700-4985-ad89-f789b865c76e`.
-
----
-
-### SUPPORT-CONN-005 — Autotask closeout workflow blocked: ticket reads, internal-note write, status discovery, and verified completion unavailable
-
-- **Priority:** P1
-- **Status:** Mitigated
-- **Owner:** Jason Platform / Autotask Connector
-- **Issue:** Jason could not complete Autotask ticket `T20260918.0005` because the governed Autotask read path and the tested internal-note mutation path failed, while the ticket-update capability requires a tenant-specific numeric status ID and successful post-mutation readback.
-- **Production example:** Autotask ticket `T20260918.0005`, internal ticket ID `140629`, associated with `AOT-50282`.
-- **What Jason needed to do:**
-  1. Read ticket `140629` and confirm its current state before mutation.
-  2. Read or otherwise authoritatively resolve the tenant-specific Autotask status value representing **Complete**.
-  3. Add an internal troubleshooting/closeout note documenting the AV/EDR findings and the Datto alert limitation.
-  4. Update the exact ticket to Complete using `service.ticket.update`.
-  5. Read the ticket back and verify the status change actually persisted.
-  6. Confirm no unrelated fields changed.
-- **Exact blockers encountered:**
-  - `service.ticket.read` for ticket `140629` failed with `CAPABILITY_INVOCATION_FAILED`.
-  - Earlier `service.ticket.search` for `T20260918.0005` also failed with `CAPABILITY_INVOCATION_FAILED`.
-  - Earlier `service.ticket.notes.search` failed information release with `SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED` / `REQUEST_ACCESS`.
-  - An explicitly authorized attempt to create an internal note on ticket `140629` through `create_autotask_internal_note` failed with:
-    - `status=failed`
-    - `error_code=CAPABILITY_INVOCATION_FAILED`
-    - `provider_write_attempts=1`
-    - `note_id=null`
-  - The active `service.ticket.update` capability accepts a numeric `status` field, not a semantic value such as `Complete`.
-  - The valid numeric Complete status is tenant-specific and was not available from a working governed read/metadata capability during this incident.
-  - The ticket-update implementation requires requester-impersonated post-mutation GET readback and must fail if verification cannot be completed. With the Autotask read path broken, successful verified completion could not be guaranteed.
-- **What Jason deliberately did not do:**
-  - Did not guess a numeric Autotask status ID.
-  - Did not mark the ticket complete without first being able to verify the intended status value.
-  - Did not claim the failed internal-note mutation succeeded.
-  - Did not bypass requester impersonation, use the service account as fallback authority, or call Autotask directly outside the governed path.
-  - Did not bypass the required post-mutation verification contract.
-- **Impact:** Even when endpoint troubleshooting is complete, Jason cannot reliably document the work and complete the corresponding Autotask ticket. This breaks the final stage of autonomous ticket handling and prevents deterministic closeout.
-- **Expected behavior:** Jason should be able to resolve semantic ticket states such as **Complete** to the correct tenant-specific Autotask status ID, create an internal closeout note, perform one bounded ticket status update, and verify both mutations through provider readback.
-- **Recommended remediation:**
-  - Repair the governed Autotask read/authorization path described in `SUPPORT-CONN-001`.
-  - Restore reliable `service.ticket.read`, `service.ticket.search`, and `service.ticket.notes.search`.
-  - Restore the currently exposed `service.ticket.note.create` mutation path and its verification.
-  - Add a governed read capability for Autotask ticket field metadata/status picklist values, or a provider-neutral semantic status resolver so Jason can request `Complete` without hard-coding tenant IDs.
-  - Preserve the current safe `service.ticket.update` field allowlist and mandatory readback verification.
-- **Verification required for closure:**
-  1. Read a controlled ticket successfully.
-  2. Resolve semantic status `Complete` to the authoritative current Autotask status ID without hard-coded guessing.
-  3. Create an internal note and verify it exists.
-  4. Update the controlled ticket to Complete through `service.ticket.update`.
-  5. Verify the status through post-mutation readback.
-  6. Confirm no unrelated fields changed.
-  7. Repeat the sequence on a fresh session.
-  8. Re-run the exact `T20260918.0005` closeout flow if the ticket remains open.
-- **Current verification (2026-09-22):** The original ticket can now be searched, read, and its notes retrieved through the governed Autotask path. `T20260918.0005` is already completed, and Jason-authored EDR/AV verification notes are present. `service.ticket.note.create` and `service.ticket.update` are currently active governed write capabilities. Keep this item open only for the remaining semantic-status-resolution/fresh controlled mutation regression proof; the original read-path blocker is resolved.
-- **Last observed:** 2026-09-18 when the user explicitly asked Jason to complete `T20260918.0005`.
-
----
-
-
-### SUPPORT-CONN-006 — Autotask ticket company/contact reassignment unavailable through governed update
-
-- **Priority:** P1
-- **Status:** Open
-- **Owner:** Jason Platform / Autotask Connector
-- **Issue:** Jason can read an Autotask ticket and determine that it is associated with the wrong company/contact, but the governed `service.ticket.update` path does not currently permit or successfully apply company/contact/location reassignment.
-- **Impact:** Jason cannot safely correct misassociated tickets before client-scoped troubleshooting or automation. This can block deterministic tenant isolation, configuration-item association, documentation lookup, billing context, and autonomous workflow execution.
-- **Production example:** `T20260922.0017` (Network Device Discovery Gromelski And Associates Inc.).
-- **Observed behavior:**
-  - Incoming IT Glue notification created the ticket under Autotask company `Catchall` (company ID `1162`) because sender `notifications@itglue.com` is a Catchall contact.
-  - Ticket body explicitly identifies the actual client as `Gromelski And Associates Inc.`.
-  - DRMM site `Gromelski And Associates Inc.` independently maps to Autotask company ID `597`.
-  - Governed update was attempted with `companyID=597`, `contactID=null`, and `companyLocationID=null`.
-  - `service.ticket.update` returned `CAPABILITY_INVOCATION_FAILED`.
-  - Authoritative readback confirmed `companyID=1162`, `companyLocationID=990`, and `contactID=30683770` remained unchanged.
-- **Expected behavior:** A narrowly governed ticket-reassociation operation should allow Jason to move one exact ticket to an explicitly resolved Autotask company, clear or replace incompatible contact/location references, and verify the exact fields through post-mutation readback.
-- **Safety requirements:**
-  1. Resolve the destination company from authoritative evidence; never infer from fuzzy text alone.
-  2. Require deterministic cross-provider evidence such as DRMM site -> Autotask company mapping, or another approved mapping source.
-  3. Validate/clear incompatible contact and location references.
-  4. Make exactly one bounded provider mutation attempt.
-  5. Verify company/contact/location after mutation.
-  6. Fail closed when client identity is ambiguous.
-- **Verification required for closure:**
-  1. On a controlled misassociated ticket, reassign to the correct company through Jason.
-  2. Clear or replace the old Catchall contact/location as required.
-  3. Read the ticket back and verify exact company/contact/location values.
-  4. Confirm no unrelated ticket fields changed.
-  5. Repeat using an IT Glue notification-derived ticket.
-  6. Preserve `direct_provider_access=false`.
-- **Operational workaround:** Document the authoritative client in an internal note and do not perform client-scoped writes based on the incorrect ticket company until reassignment is available.
-- **Last observed:** 2026-09-22 on `T20260922.0017`.
-
----
-
-
-### SUPPORT-CONN-007 — Autotask ticket CI association unavailable through governed ticket update
-
-- **Priority:** P1
-- **Status:** Open
-- **Owner:** Jason Platform / Autotask Connector
-- **Issue:** Jason can deterministically identify the correct Autotask configuration item for a ticket, but the governed `service.ticket.update` path does not currently attach that CI.
-- **Impact:** Playbooks cannot enforce the AOT rule that tickets should be associated to the affected device when one is available. This reduces asset context, weakens automation safety, and forces technicians to repair ticket hygiene manually.
-- **Production example:** `T20260918.0012` / `OWNSHOP412LT1`.
-- **Observed behavior:**
-  - DRMM uniquely identified endpoint UID `785e1f79-1572-4061-d01b-0f9ec931fae2`.
-  - Autotask configuration search uniquely identified CI `1578` for the same endpoint.
-  - Ticket `T20260918.0012` had `configurationItemID=null`.
-  - Governed `service.ticket.update` attempted to set `configurationItemID=1578`.
-  - Mutation returned `CAPABILITY_INVOCATION_FAILED`.
-  - Authoritative ticket readback confirmed `configurationItemID` remained null.
-- **Expected behavior:** Jason should be able to attach exactly one authoritatively resolved Autotask CI to one exact ticket through a bounded governed mutation with readback verification.
-- **Safety requirements:**
-  1. CI must belong to the same Autotask company as the ticket after authoritative client resolution.
-  2. CI selection must be deterministic; no fuzzy best-match writes.
-  3. Exactly one provider mutation attempt.
-  4. Post-mutation readback must confirm the exact CI.
-  5. No unrelated ticket fields may change.
-- **Verification required for closure:**
-  1. Use a controlled ticket with no CI and one uniquely matched endpoint/CI.
-  2. Attach the CI through Jason.
-  3. Read the ticket back and confirm the exact configurationItemID.
-  4. Confirm no unrelated fields changed.
-  5. Repeat on a VulScan or monitoring ticket.
-- **Operational workaround:** Document the resolved CI in an internal note and use the DRMM UID/CI ID as evidence, but do not claim the ticket is asset-associated.
-- **Last observed:** 2026-09-22 during controlled test of `T20260918.0012`.
-
----
+- Root cause confirmed: one global `JASON_AUTOTASK_REQUESTER_AUTH_MODE` controlled both reads and mutations. `impersonated` preserved writes but caused the known Autotask read failure; `jason_managed` restored reads but the mutation surfaces previously refused to initialize.
+- Fix branch: `fix/jason-autotask-read-write-auth-split-20260918`.
+- Fix commit: `795427ea30f51eb158b34069e5e02fbb2165c35b`.
+- Focused regression result: 46 tests passed covering Autotask requester authorization, mutation connector behavior, internal-note creation, ticket update, and information authorization.
+- Candidate image: `jason-mcp:support-autotask-auth-split-2d184f74e843`.
+- Shadow acceptance: MCP healthy, `jason_managed` effective, write capabilities active, three repeated governed Autotask ticket reads succeeded, 30/30 health checks passed, zero restarts.
+- Production cutover completed with rollback container preserved as `jason-mcp-pilot-pre-autotask-auth-split-20260918T094417` and pre-change inspect backup under `/home/al/jason-cutover-backups/`.
+- Post-cutover external MCP proof: `jason_mcp_status` reports `direct_provider_access=false`, Central Orchestrator governance, and active `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`; governed `service.ticket.read` for `T20260918.0005` succeeded through provider `autotask`.

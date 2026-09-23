@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "source": "system-registry-production-host-observer",
+  "checks": [
+    {
+      "registry_id": "component.openbao",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "openbao"
+      }
+    },
+    {
+      "registry_id": "component.jason-runtime",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-runtime"
+      }
+    },
+    {
+      "registry_id": "component.openclaw-gateway",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "openclaw-openclaw-gateway-1"
+      }
+    },
+    {
+      "registry_id": "component.openclaw-jason-bridge",
+      "method": "docker-file-sha256-v1",
+      "probe": {
+        "type": "docker_file_sha256",
+        "container_name": "openclaw-openclaw-gateway-1",
+        "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs"
+      }
+    }
+  ]
+}

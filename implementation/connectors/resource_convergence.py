@@ -8,7 +8,12 @@ from connectors.core.contracts import Connector, ConnectorContext, ConnectorRequ
 from connectors.core.relationships import ProviderRelationshipEvidence, ResourceRef, VerificationState
 from connectors.core.resource_gateway import ResourceOperation, ResourceQuery, ResourceRegistry
 from connectors.kaseya_resource_catalog import build_kaseya_resource_registry
-from connectors.provider_resource_adapters import ConnectorInvocation, translate_datto_rmm_resource, translate_it_glue_resource
+from connectors.provider_resource_adapters import (
+    ConnectorInvocation,
+    translate_autotask_resource,
+    translate_datto_rmm_resource,
+    translate_it_glue_resource,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +47,8 @@ class ResourceConvergenceError(ValueError):
 def _translate(query: ResourceQuery) -> ConnectorInvocation:
     if query.provider == "it_glue":
         return translate_it_glue_resource(query)
+    if query.provider == "autotask":
+        return translate_autotask_resource(query)
     if query.provider == "datto_rmm":
         return translate_datto_rmm_resource(query)
     raise ResourceConvergenceError(f"Unsupported convergence provider: {query.provider}")

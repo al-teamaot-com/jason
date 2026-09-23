@@ -55,6 +55,21 @@ from connectors.it_glue.operations import (
             },
         ),
         (
+            "it_glue.document.search",
+            {
+                "organization_id": 42,
+                "filters": {"document_folder_id": None},
+                "page_number": 2,
+                "page_size": 25,
+            },
+            "/organizations/42/relationships/documents",
+            {
+                "filter[document_folder_id]": None,
+                "page[number]": 2,
+                "page[size]": 25,
+            },
+        ),
+        (
             "it_glue.document.get",
             {"document_id": 73},
             "/documents/73",
@@ -90,6 +105,17 @@ def test_resolves_registered_operation(
     assert params == expected_params
 
 
+def test_document_get_does_not_claim_unsupported_acl_include_contract() -> None:
+    method, path, params = resolve_operation(
+        "it_glue.document.get",
+        {"document_id": 73},
+    )
+
+    assert method == "GET"
+    assert path == "/documents/73"
+    assert params is None
+
+
 def test_registry_matches_connector_capabilities() -> None:
     assert set(IT_GLUE_OPERATIONS) == {
         "it_glue.entity.get",
@@ -97,7 +123,11 @@ def test_registry_matches_connector_capabilities() -> None:
         "it_glue.organization.get",
         "it_glue.configuration.search",
         "it_glue.flexible_asset.search",
+        "it_glue.document.search",
         "it_glue.document.get",
+        "it_glue.document.attachment.search",
+        "it_glue.document.attachment.get",
+        "it_glue.document.attachment.content.get",
         "it_glue.relationships.list",
     }
 
@@ -172,15 +202,6 @@ def test_rejects_missing_relationship_resource_type() -> None:
                 "entity_id": "42",
             },
             "/organizations/42",
-            None,
-        ),
-        (
-            "it_glue.entity.get",
-            {
-                "entity": "Documents",
-                "entity_id": 73,
-            },
-            "/documents/73",
             None,
         ),
         (

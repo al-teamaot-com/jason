@@ -68,11 +68,13 @@ class OrchestrationRequest:
     policy_ids: tuple[str, ...] = ()
     artifact_references: tuple[ArtifactReference, ...] = ()
     requester_kind: str = "human"
+    principal_attributes: Mapping[str, str] = field(default_factory=dict)
     permission_mode: str = "observe"
     allow_pilot_capability: bool = False
     allow_pilot_provider: bool = False
     authority_context_id: str | None = None
     idempotency_key: str | None = None
+    approval_id: str | None = None
 
     def __post_init__(self) -> None:
         required = {
@@ -95,6 +97,8 @@ class OrchestrationRequest:
             raise ValueError("authority_context_id must be non-empty when provided.")
         if self.idempotency_key is not None and not self.idempotency_key.strip():
             raise ValueError("idempotency_key must be non-empty when provided.")
+        if self.approval_id is not None and not self.approval_id.strip():
+            raise ValueError("approval_id must be non-empty when provided.")
         if self.requester_kind not in {"human", "service", "agent"}:
             raise ValueError("requester_kind must be human, service, or agent.")
         if self.permission_mode not in {
@@ -105,6 +109,14 @@ class OrchestrationRequest:
             "administer",
         }:
             raise ValueError("permission_mode is not a recognized authority mode.")
+        normalized_attributes: dict[str, str] = {}
+        for raw_key, raw_value in self.principal_attributes.items():
+            key = str(raw_key).strip()
+            value = str(raw_value).strip()
+            if not key or not value:
+                raise ValueError("principal_attributes keys and values must be non-empty.")
+            normalized_attributes[key] = value
+        object.__setattr__(self, "principal_attributes", normalized_attributes)
         forbidden = {"target_agent", "agent_endpoint", "invoke_agent", "recipient_agent"}
         present = sorted(forbidden.intersection(self.arguments))
         if present:
@@ -134,3 +146,13 @@ class OrchestrationResult:
             raise ValueError("reason_codes must not be empty.")
         if self.attempts < 0:
             raise ValueError("attempts must not be negative.")
+
+        # Some failure boundaries historically represented absent provider
+        # evidence as None. Normalize that state to the contract's empty mapping
+        # so callers can return the structured failure without attempting to
+        # project non-existent evidence. Non-mapping non-null output remains a
+        # contract violation and fails closed.
+        if self.output is None:
+            object.__setattr__(self, "output", {})
+        elif not isinstance(self.output, Mapping):
+            raise ValueError("output must be a mapping when provided.")

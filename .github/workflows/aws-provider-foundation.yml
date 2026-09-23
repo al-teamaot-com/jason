@@ -7,8 +7,8 @@ on:
       - "implementation/connectors/tests/test_aws_provider_foundation.py"
       - "implementation/connectors/connector-catalog.yaml"
       - "tools/aws_provider_foundation_check.py"
-      - "03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
-      - "07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md"
+      - "docs/components/infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
+      - "docs/operations/INF-015-AWS-Provider-Deployment-Checklist.md"
       - ".github/workflows/aws-provider-foundation.yml"
   pull_request:
     paths:
@@ -16,8 +16,8 @@ on:
       - "implementation/connectors/tests/test_aws_provider_foundation.py"
       - "implementation/connectors/connector-catalog.yaml"
       - "tools/aws_provider_foundation_check.py"
-      - "03-Components/Infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
-      - "07-Operations/INF-015-AWS-Provider-Deployment-Checklist.md"
+      - "docs/components/infrastructure/INF-015-AWS-Provider-Platform-Foundation.md"
+      - "docs/operations/INF-015-AWS-Provider-Deployment-Checklist.md"
       - ".github/workflows/aws-provider-foundation.yml"
 
 permissions:

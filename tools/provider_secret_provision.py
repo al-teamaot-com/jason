@@ -13,6 +13,19 @@ from urllib import error, parse, request
 
 
 PROVIDERS: dict[str, dict[str, object]] = {
+    "openai": {
+        "logical_name": "openai.semantic_intent",
+        "secret_path": "secret/data/providers/openai/production/semantic-intent",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-openai-semantic-intent-read",
+        "role_name": "jason-openai-semantic-intent-read",
+        "connector_identity": "openai-semantic-intent",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/"
+            "openai-semantic-intent-approle"
+        ),
+    },
     "aws_ses": {
         "logical_name": "aws_ses.sendmail",
         "secret_path": "secret/data/connectors/aws-ses/production/sendmail",
@@ -25,6 +38,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/aws-ses-sendmail-approle"
         ),
     },
+    "autotask_write": {
+        "logical_name": "autotask.write",
+        "secret_path": "secret/data/connectors/autotask/production/write",
+        "fields": ("username", "secret", "integration_code"),
+        "required_fields": ("username", "secret", "integration_code"),
+        "policy_name": "jason-autotask-write-secret-read",
+        "role_name": "jason-autotask-write-secret-read",
+        "connector_identity": "autotask-write",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/autotask-write-approle"
+        ),
+    },
     "datto_rmm": {
         "logical_name": "datto_rmm.readonly",
         "secret_path": "secret/data/connectors/datto-rmm/production/read-only",
@@ -34,6 +59,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "connector_identity": "datto-rmm-read",
         "credential_dir": Path(
             "/opt/jason/bootstrap/secrets/openbao/datto-rmm-read-approle"
+        ),
+    },
+    "datto_edr": {
+        "logical_name": "datto_edr.readonly",
+        "secret_path": "secret/data/connectors/datto-edr/production/read-only",
+        "fields": ("api_url", "api_token"),
+        "required_fields": ("api_url", "api_token"),
+        "policy_name": "jason-datto-edr-read",
+        "role_name": "jason-datto-edr-read",
+        "connector_identity": "datto-edr-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle"
         ),
     },
     "it_glue": {
@@ -61,6 +98,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "connector_identity": "microsoft-graph-directory-read",
         "credential_dir": Path(
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-directory-read-approle"
+        ),
+    },
+    "microsoft_graph_mail": {
+        "logical_name": "microsoft_graph.mail_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/mail-read",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-mail-read",
+        "role_name": "jason-microsoft-graph-mail-read",
+        "connector_identity": "microsoft-graph-mail-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
         ),
     },
     "kyocera_kfs": {
@@ -185,7 +238,7 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 
 
 def collect_values(provider: str) -> dict[str, str]:
-    if provider == "microsoft_graph":
+    if provider in {"microsoft_graph", "microsoft_graph_mail"}:
         return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]

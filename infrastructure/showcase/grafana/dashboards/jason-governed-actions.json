@@ -1,0 +1,120 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Jason MCP",
+      "description": "Live MCP container availability. This is health only and does not grant action authority.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_production_component_health{component=\"jason_mcp\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DOWN"}, "1": {"text": "RUNNING"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "MCP Production Contract",
+      "description": "Current image/source/profile/network/port/restart/requester-mode plus bounded Datto execution profile/scope checks. Duplicate environment entries are tracked separately.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "min(jason_mcp_contract{check!=\"environment_unique\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DRIFT"}, "1": {"text": "MATCH"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Credential Mount Contract",
+      "description": "Secret-safe check that all required read-only OpenBao credential mounts, including bounded Datto execution and Autotask write identities, are present.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_mcp_required_secret_mount_contract", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DRIFT"}, "1": {"text": "PASS"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Datto Governed Execution",
+      "description": "Secret-safe readiness of the exact bounded Datto execution pilot: current MCP image, owner-diagnostic profile, approved allowlist/endpoint/component scope, and required credential mounts. This does not call Datto and does not grant execution authority.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_datto_governed_execution_contract", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DRIFT / NOT READY"}, "1": {"text": "LIVE / BOUNDED"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "MCP Rollback",
+      "description": "A preserved timestamped MCP rollback container is present.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_mcp_rollback_available", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "MISSING"}, "1": {"text": "PRESERVED"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "Firing Alerts",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "count(ALERTS{alertstate=\"firing\"})", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "stat",
+      "title": "DRMM Site Variables",
+      "description": "Secret-safe readiness of governed DRMM site-variable create/update using Jason's existing Datto execution identity. This does not expose variable values and does not grant action authority.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_datto_site_variable_contract", "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DRIFT / NOT READY"}, "1": {"text": "LIVE / GOVERNED"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 4},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto"}
+    },
+    {
+      "type": "text",
+      "title": "Governed Production Proof — through 2026-09-21",
+      "description": "Accepted production proofs and standing administrative policy. Live authority is still evaluated per request.",
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 8},
+      "options": {
+        "mode": "markdown",
+        "content": "### Governed execution and ticket-work lifecycle are production accepted\n\n**Datto component execution**\n- Standing-safe diagnostics can execute on verified managed endpoints.\n- An authenticated technician's direct instruction is approval for that exact per-run component/endpoint execution; Jason may warn but does not require a redundant second approval.\n- Live Datto component-name resolution is authoritative over stale caller component UID hints.\n- `direct_provider_access=false` and disruptive-action approval remain intact.\n\n**Autotask ticket work start**\n- When Jason begins substantive work, it claims the exact ticket to **Jason**, **In Progress**, **Remote Support**.\n- Existing device association is preserved. Missing device association is written only after exact DRMM UID ↔ active Autotask configuration correlation; hostname-only/ambiguous matches fail closed.\n- Ticket Type / Issue Type / Sub-Issue Type are preserved unless exact supported classification labels are available; labels are resolved from live Autotask metadata.\n- Controlled acceptance: `T20260914.0026` / ID `140439`; one bounded mutation, readback verified.\n\n**Known transport issue**\n- `SUPPORT-CONN-002` is open: intermittent client-side MCP `UNAVAILABLE / Connection failed` reproduced while `jason-mcp-pilot` remained healthy and immediate retries succeeded. Process health alone does not prove end-to-end MCP transport health.\n\n**DRMM site variables**\n- Site-variable create/update reuses the existing governed Datto RMM execution identity.\n- Variable values are never exposed in Grafana or mutation results; delete remains disabled.\n- The site-variable action surface is separately activated and governed from component execution.\n- Onboarding convergence creates only approved Standard variable names, leaves values blank, and requires readback verification."
+      }
+    },
+    {
+      "type": "table",
+      "title": "MCP Contract Checks",
+      "description": "Individual secret-safe deployment and bounded-action checks. A zero indicates drift that should be investigated before expanding the action surface.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "jason_mcp_contract", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true}, "renameByName": {"check": "Check", "Value": "Pass"}}}],
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 15},
+      "options": {"showHeader": true}
+    },
+    {
+      "type": "table",
+      "title": "Active Jason Alerts",
+      "description": "Prometheus rule evaluation only. Dashboard state does not grant authority and no provider call is made from Grafana.",
+      "datasource": {"type": "prometheus", "uid": "jason-prometheus"},
+      "targets": [{"expr": "ALERTS{alertstate=\"firing\"}", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true, "Value": true, "__name__": true, "alertstate": true, "instance": true, "job": true}, "renameByName": {"alertname": "Alert", "severity": "Severity", "service": "Service"}}}],
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 15},
+      "options": {"showHeader": true}
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["Jason", "production", "governance", "actions", "Datto"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason Governed Actions",
+  "uid": "jason-governed-actions",
+  "version": 3,
+  "weekStart": ""
+}

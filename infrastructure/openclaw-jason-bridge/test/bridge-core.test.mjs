@@ -51,6 +51,27 @@ test("builds only the governed Teams transport contract", () => {
   }
 });
 
+test("preserves arbitrary natural-language wording without trigger phrases", () => {
+  const phrasings = [
+    "Who was on AOT-50282 last?",
+    "Can you tell me the most recent person to use AOT-50282?",
+    "What account last signed into AOT-50282?",
+    "Check AOT-50282 and tell me who used it most recently.",
+  ];
+
+  for (const [index, text] of phrasings.entries()) {
+    const value = buildConversationEnvelope({
+      text,
+      microsoftTenantId: tenantId,
+      microsoftObjectId: objectId,
+      conversationId: "conversation-1",
+      messageId: `message-${index + 10}`,
+      keyId: "openclaw-gateway-2",
+    });
+    assert.equal(value.text, text);
+  }
+});
+
 test("signs exactly the canonical payload Jason verifies", () => {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const signed = signConversationEnvelope(envelope(), privateKey);
@@ -103,4 +124,91 @@ test("never falls back to an ungoverned answer for runtime failures", () => {
     }),
     "Datto RMM reports Al.",
   );
+});
+
+
+test("renders governed clarification without inventing an answer", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 200,
+    payload: {
+      status: "clarification_required",
+      error_code: "canonical_fact_ambiguous",
+      clarification: {
+        text:
+          "I need one detail before I can continue. Do you mean LAN IP address or WAN IP address? Please send a complete request naming the one you want.",
+        candidate_facts: [
+          "LAN IP address",
+          "WAN IP address",
+        ],
+        requires_complete_request: true,
+      },
+    },
+  });
+
+  assert.equal(
+    reply,
+    "I need one detail before I can continue. Do you mean LAN IP address or WAN IP address? Please send a complete request naming the one you want.",
+  );
+});
+
+test("renders bounded conversation-only response", () => {
+  assert.equal(
+    replyForRuntimeResult({
+      httpStatus: 200,
+      payload: {
+        status: "conversation_response",
+        reply: { text: "Good morning. What can I help you with?" },
+      },
+    }),
+    "Good morning. What can I help you with?",
+  );
+});
+
+
+test("renders bounded provider diagnostics for failed runtime responses", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 500,
+    payload: {
+      request_id: "req-provider-failed",
+      correlation_id: "corr-provider-failed",
+      status: "failed",
+      error_code: "conversation_failed",
+      diagnostic: {
+        error_type: "ConnectorTransportError",
+        status_code: 429,
+        service: "api.example.com",
+        provider_error_type: "quota_error",
+        provider_error_code: "account_balance_exhausted",
+        provider_error_message:
+          "The provider account has no remaining service credit.",
+      },
+    },
+  });
+
+  assert.match(reply, /api\.example\.com/);
+  assert.match(reply, /no remaining service credit/i);
+  assert.match(reply, /HTTP status: 429/);
+  assert.match(reply, /corr-provider-failed/);
+  assert.match(reply, /No action was taken/);
+});
+
+test("failed runtime reply does not expose absent raw provider data", () => {
+  const reply = replyForRuntimeResult({
+    httpStatus: 500,
+    payload: {
+      correlation_id: "corr-safe-failure",
+      status: "failed",
+      error_code: "conversation_failed",
+      diagnostic: {
+        error_type: "ConnectorTransportError",
+        status_code: 503,
+      },
+    },
+  });
+
+  assert.match(reply, /ConnectorTransportError/);
+  assert.match(reply, /HTTP status: 503/);
+  assert.match(reply, /corr-safe-failure/);
+  assert.doesNotMatch(reply, /authorization/i);
+  assert.doesNotMatch(reply, /bearer/i);
 });

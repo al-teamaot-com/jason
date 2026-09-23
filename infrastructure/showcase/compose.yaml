@@ -10,6 +10,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/file_sd:/etc/prometheus/file_sd:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -68,10 +69,14 @@ services:
       - prometheus
     networks:
       - observability
+      - jason-core
 
 networks:
   observability:
     name: jason-observability
+  jason-core:
+    external: true
+    name: jason-core
 
 volumes:
   prometheus-data:

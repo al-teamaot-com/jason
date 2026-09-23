@@ -1,0 +1,18 @@
+services:
+  kfs-postgres:
+    image: postgres:16@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6
+    container_name: jason-kfs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kfs_collector
+      POSTGRES_DB: kfs_collector
+      POSTGRES_PASSWORD_FILE: /run/secrets/kfs_db_password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - jason_kfs_postgres_data:/var/lib/postgresql/data
+      - /home/al/jason-secrets/kfs/postgres_password:/run/secrets/kfs_db_password:ro
+
+volumes:
+  jason_kfs_postgres_data:
+    name: jason_kfs_postgres_data

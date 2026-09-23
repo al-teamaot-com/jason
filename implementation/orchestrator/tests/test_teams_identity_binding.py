@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
 
+import pytest
+
+from connectors.core.contracts import ConnectorTransportError
 from kernel.identity_authority import IdentityRecord
 from orchestrator.teams_conversation_flow import TeamsConversationPrincipalEvidence
 from orchestrator.teams_identity_binding import (
@@ -32,6 +35,16 @@ class Directory:
     def resolve_email(self, *, microsoft_tenant_id, microsoft_object_id):
         self.calls.append((microsoft_tenant_id, microsoft_object_id))
         return self.email
+
+
+@dataclass
+class FailingDirectory:
+    error: Exception
+    calls: list[tuple[str, str]] = field(default_factory=list)
+
+    def resolve_email(self, *, microsoft_tenant_id, microsoft_object_id):
+        self.calls.append((microsoft_tenant_id, microsoft_object_id))
+        raise self.error
 
 
 def evidence(*, tenant="tenant-1", object_id="object-1", assurance="botframework-authenticated"):
@@ -102,6 +115,34 @@ def test_directory_missing_email_does_not_fall_back_to_stale_binding():
     ).bind(evidence())
     assert principal is not None
     assert principal.email_address is None
+
+
+def test_directory_transport_failure_does_not_invalidate_verified_identity_binding():
+    directory = FailingDirectory(
+        ConnectorTransportError(
+            "HTTP transport failed with status 429",
+            status_code=429,
+            retry_after_seconds=30.0,
+        )
+    )
+    principal = binder(
+        email_address="stale@teamaot.com",
+        directory=directory,
+    ).bind(evidence())
+
+    assert principal is not None
+    assert principal.principal_id == "jason-user-1"
+    assert principal.organization_id == "aot"
+    assert principal.email_address is None
+    assert directory.calls == [("tenant-1", "object-1")]
+
+
+def test_directory_semantic_authority_failure_remains_fail_closed():
+    directory = FailingDirectory(
+        PermissionError("Microsoft Graph user identity did not match authenticated object")
+    )
+    with pytest.raises(PermissionError, match="did not match authenticated object"):
+        binder(directory=directory).bind(evidence())
 
 
 def test_unknown_microsoft_identity_fails_closed():

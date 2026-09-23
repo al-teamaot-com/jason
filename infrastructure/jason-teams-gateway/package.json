@@ -1,0 +1,15 @@
+{
+  "name": "jason-teams-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@microsoft/agents-hosting": "1.6.1",
+    "@microsoft/agents-hosting-express": "1.6.1",
+    "express": "5.1.0",
+    "json5": "2.2.3"
+  }
+}

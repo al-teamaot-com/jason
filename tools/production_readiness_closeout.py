@@ -12,9 +12,9 @@ except ModuleNotFoundError:
     from stateful_recovery_readiness import require_recovery_ready
 
 
-DEFAULT_RECORD = Path("07-Operations/Jason-Secret-Provider-Deployment-Record.md")
+DEFAULT_RECORD = Path("docs/operations/Jason-Secret-Provider-Deployment-Record.md")
 DEFAULT_RECOVERY_RECORD = Path(
-    "07-Operations/Jason-OpenBao-Initialization-and-Recovery-Record.md"
+    "docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md"
 )
 DEFAULT_BOOTSTRAP_TOKEN = Path("/etc/jason/openbao-bootstrap.token")
 

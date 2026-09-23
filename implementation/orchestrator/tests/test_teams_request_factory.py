@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import pytest
 
@@ -114,6 +115,7 @@ def test_factory_requires_jason_authority_and_preserves_execution_context():
         principal=principal(),
         intent=intent(),
         identity=identity_evidence(),
+            correlation_id="corr-teams-1",
     )
 
     assert request.principal_id == "person-al"
@@ -139,6 +141,7 @@ def test_factory_fails_closed_without_matching_authority_grant():
             principal=principal(),
             intent=intent(),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "AUTHORITY_DENIED"
@@ -153,6 +156,7 @@ def test_factory_surfaces_approval_requirement_without_execution_context():
             principal=principal(),
             intent=intent(),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "APPROVAL_REQUIRED"
@@ -167,7 +171,35 @@ def test_factory_refuses_silent_authority_downgrade():
             principal=principal(),
             intent=intent(permission_mode="execute"),
             identity=identity_evidence(),
+            correlation_id="corr-teams-1",
         )
 
     assert error.value.code == "AUTHORITY_DENIED"
     assert error.value.reason_codes == ("AUTHORITY_MODE_EXCEEDED",)
+
+
+def test_authenticated_component_imperative_is_exact_run_approval():
+    capability = SimpleNamespace(
+        metadata={
+            "conversation_authenticated_imperative_is_approval": "true",
+        }
+    )
+    component_intent = ConversationIntent(
+        capability_name="automation.component.execute",
+        arguments={
+            "device_uid": "device-123",
+            "component_name": "Exact Component",
+        },
+        execution_mode="deterministic",
+        permission_mode="execute",
+        risk="high",
+    )
+
+    assert (
+        GovernedTeamsOrchestrationRequestFactory
+        ._authenticated_imperative_may_approve(
+            capability,
+            component_intent,
+        )
+        is True
+    )

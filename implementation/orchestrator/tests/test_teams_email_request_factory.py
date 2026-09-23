@@ -97,6 +97,7 @@ def test_authenticated_email_imperative_creates_formal_approval_and_idempotency_
             conversation_id="conversation-1",
             message_id="message-1",
         ),
+        correlation_id="corr-email-1",
     )
 
     approval = approvals.get("approval-email-1")

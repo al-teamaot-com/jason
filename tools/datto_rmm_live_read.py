@@ -77,8 +77,9 @@ class UrlLibJsonTransport:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run one bounded governed Datto RMM device read (max=1) without "
-            "printing credentials, bearer tokens, or raw provider records."
+            "Run one bounded governed Datto RMM discovery read (max=2) so "
+            "ambiguity remains observable without printing credentials, bearer "
+            "tokens, or raw provider records."
         )
     )
     parser.add_argument("--live-read", action="store_true")
@@ -94,7 +95,8 @@ def main() -> int:
                     "provider": "datto_rmm",
                     "logical_secret": "datto_rmm.readonly",
                     "capability": "datto_rmm.device.search",
-                    "maximum_records": 1,
+                    "maximum_records": 2,
+                    "ambiguity_detection_enabled": True,
                     "network_contacted": False,
                     "provider_credentials_used": False,
                     "raw_provider_payload_persisted": False,
@@ -113,7 +115,7 @@ def main() -> int:
         operation=ResourceOperation.QUERY,
         organization_id="aot",
         filters={},
-        page_size=1,
+        page_size=2,
     )
     registry.authorize(query)
     invocation = translate_datto_rmm_resource(query)
@@ -145,28 +147,29 @@ def main() -> int:
         ConnectorRequest(context=context, arguments=invocation.arguments)
     )
 
-    top_level_keys = sorted(str(key) for key in result.data.keys())
-    collection_counts = {
-        str(key): len(value)
-        for key, value in result.data.items()
-        if isinstance(value, list)
-    }
-    if any(count > 1 for count in collection_counts.values()):
-        raise SystemExit("DENIED: provider returned more than the bounded one-record limit")
+    if not isinstance(result.data, Mapping):
+        raise SystemExit("DENIED: normalized provider result was not an object")
+    matches = result.data.get("resource_matches")
+    if not isinstance(matches, list):
+        raise SystemExit("DENIED: normalized provider result did not expose resource_matches")
+    if len(matches) > 2:
+        raise SystemExit("DENIED: provider exceeded the bounded discovery-record limit")
 
     print(
         json.dumps(
             {
                 "provider": result.provider,
                 "capability": result.capability,
-                "maximum_records": 1,
+                "maximum_records": 2,
+                "ambiguity_detection_enabled": True,
+                "match_count": len(matches),
+                "ambiguous": len(matches) > 1,
                 "network_contacted": True,
                 "provider_credentials_used": True,
                 "access_token_persisted": False,
                 "raw_provider_payload_persisted": False,
                 "raw_provider_payload_printed": False,
-                "response_top_level_keys": top_level_keys,
-                "collection_counts": collection_counts,
+                "normalized_response_keys": sorted(str(key) for key in result.data),
                 "audit_events": audit.events,
                 "status": "pass",
             },
