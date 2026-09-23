@@ -1,26 +1,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
+from typing import Iterable
 
 
-class MicrosoftCloud(StrEnum):
+class MicrosoftCloud(Enum):
     PUBLIC = "public"
 
 
-class MicrosoftService(StrEnum):
+class MicrosoftService(Enum):
     GRAPH = "graph"
     ENTRA = "entra"
-    EXCHANGE = "exchange"
-    SHAREPOINT = "sharepoint"
+    EXCHANGE = "exchange_online"
+    SHAREPOINT = "sharepoint_online"
+    ONEDRIVE = "onedrive"
     TEAMS = "teams"
+    INTUNE = "intune"
+    DEFENDER = "defender"
+    PURVIEW = "purview"
+    SERVICE_HEALTH = "service_health"
     LICENSING = "licensing"
 
 
-class MicrosoftOperationMode(StrEnum):
+class MicrosoftOperationMode(Enum):
     READ = "read"
-    WRITE = "write"
-    ADMIN = "admin"
+    RECOMMEND = "recommend"
+    WRITE_WITH_APPROVAL = "write_with_approval"
+    BOUNDED_AUTOMATION = "bounded_automation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +37,10 @@ class MicrosoftEndpointFamily:
     base_url: str
     default_api_version: str | None
     supported_modes: frozenset[MicrosoftOperationMode]
-    cloud: MicrosoftCloud = MicrosoftCloud.PUBLIC
+    notes: str = ""
+
+    def supports(self, mode: MicrosoftOperationMode) -> bool:
+        return mode in self.supported_modes
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,11 +51,22 @@ class MicrosoftPermissionProfile:
     application_permissions: tuple[str, ...]
     maximum_mode: MicrosoftOperationMode
 
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("Microsoft permission profile name must be non-empty.")
+        if not self.services:
+            raise ValueError("Microsoft permission profile must cover at least one service.")
+        if any(not permission.strip() for permission in self.application_permissions):
+            raise ValueError("Microsoft application permissions must be non-empty.")
 
-READ_ONLY = frozenset({MicrosoftOperationMode.READ})
-GOVERNED_WRITE = frozenset({MicrosoftOperationMode.READ, MicrosoftOperationMode.WRITE})
-GOVERNED_ADMIN = frozenset(
-    {MicrosoftOperationMode.READ, MicrosoftOperationMode.WRITE, MicrosoftOperationMode.ADMIN}
+
+READ_ONLY = frozenset({MicrosoftOperationMode.READ, MicrosoftOperationMode.RECOMMEND})
+GOVERNED_WRITE = frozenset(
+    {
+        MicrosoftOperationMode.READ,
+        MicrosoftOperationMode.RECOMMEND,
+        MicrosoftOperationMode.WRITE_WITH_APPROVAL,
+    }
 )
 
 
@@ -55,25 +76,35 @@ MICROSOFT_ENDPOINTS: dict[MicrosoftService, MicrosoftEndpointFamily] = {
         provider_name="microsoft_graph",
         base_url="https://graph.microsoft.com",
         default_api_version="v1.0",
-        supported_modes=READ_ONLY,
+        supported_modes=GOVERNED_WRITE,
+        notes="Primary API surface for Entra, users, groups, devices, Teams, SharePoint, licensing, audit, and security resources.",
     ),
     MicrosoftService.ENTRA: MicrosoftEndpointFamily(
         service=MicrosoftService.ENTRA,
         provider_name="microsoft_entra",
         base_url="https://graph.microsoft.com",
         default_api_version="v1.0",
-        supported_modes=GOVERNED_ADMIN,
+        supported_modes=GOVERNED_WRITE,
+        notes="Identity and directory operations are Graph-backed unless a capability explicitly requires another Microsoft endpoint.",
     ),
     MicrosoftService.EXCHANGE: MicrosoftEndpointFamily(
         service=MicrosoftService.EXCHANGE,
-        provider_name="microsoft_exchange",
+        provider_name="microsoft_exchange_online",
+        base_url="https://outlook.office365.com",
+        default_api_version=None,
+        supported_modes=GOVERNED_WRITE,
+        notes="Exchange Online PowerShell/REST and Graph mail surfaces are capability-selected; transport and trace features may require Exchange-specific APIs.",
+    ),
+    MicrosoftService.SHAREPOINT: MicrosoftEndpointFamily(
+        service=MicrosoftService.SHAREPOINT,
+        provider_name="microsoft_sharepoint_online",
         base_url="https://graph.microsoft.com",
         default_api_version="v1.0",
         supported_modes=GOVERNED_WRITE,
     ),
-    MicrosoftService.SHAREPOINT: MicrosoftEndpointFamily(
-        service=MicrosoftService.SHAREPOINT,
-        provider_name="microsoft_sharepoint",
+    MicrosoftService.ONEDRIVE: MicrosoftEndpointFamily(
+        service=MicrosoftService.ONEDRIVE,
+        provider_name="microsoft_onedrive",
         base_url="https://graph.microsoft.com",
         default_api_version="v1.0",
         supported_modes=GOVERNED_WRITE,
@@ -84,6 +115,36 @@ MICROSOFT_ENDPOINTS: dict[MicrosoftService, MicrosoftEndpointFamily] = {
         base_url="https://graph.microsoft.com",
         default_api_version="v1.0",
         supported_modes=GOVERNED_WRITE,
+    ),
+    MicrosoftService.INTUNE: MicrosoftEndpointFamily(
+        service=MicrosoftService.INTUNE,
+        provider_name="microsoft_intune",
+        base_url="https://graph.microsoft.com",
+        default_api_version="v1.0",
+        supported_modes=GOVERNED_WRITE,
+    ),
+    MicrosoftService.DEFENDER: MicrosoftEndpointFamily(
+        service=MicrosoftService.DEFENDER,
+        provider_name="microsoft_defender",
+        base_url="https://graph.microsoft.com",
+        default_api_version="v1.0",
+        supported_modes=GOVERNED_WRITE,
+        notes="Security capabilities may later bind to product-specific Defender endpoints through separate governed providers.",
+    ),
+    MicrosoftService.PURVIEW: MicrosoftEndpointFamily(
+        service=MicrosoftService.PURVIEW,
+        provider_name="microsoft_purview",
+        base_url="https://graph.microsoft.com",
+        default_api_version="v1.0",
+        supported_modes=READ_ONLY,
+        notes="Initial foundation is evidence and posture visibility only.",
+    ),
+    MicrosoftService.SERVICE_HEALTH: MicrosoftEndpointFamily(
+        service=MicrosoftService.SERVICE_HEALTH,
+        provider_name="microsoft_service_health",
+        base_url="https://graph.microsoft.com",
+        default_api_version="v1.0",
+        supported_modes=READ_ONLY,
     ),
     MicrosoftService.LICENSING: MicrosoftEndpointFamily(
         service=MicrosoftService.LICENSING,
@@ -117,6 +178,23 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
         ),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
+    "mail-investigation-read": MicrosoftPermissionProfile(
+        name="mail-investigation-read",
+        description="Read-only mailbox and mail-flow investigation profile using bounded metadata plus separately scoped Exchange content authority.",
+        services=frozenset({MicrosoftService.GRAPH, MicrosoftService.EXCHANGE}),
+        application_permissions=(
+            "Mail.ReadBasic.All",
+            "Exchange Application RBAC: Application Mail.Read",
+        ),
+        maximum_mode=MicrosoftOperationMode.READ,
+    ),
+    "mail-metadata": MicrosoftPermissionProfile(
+        name="mail-metadata",
+        description="Tenant-wide basic mail metadata analytics; bodies, previews, attachments, and extended properties are outside this profile.",
+        services=frozenset({MicrosoftService.GRAPH}),
+        application_permissions=("Mail.ReadBasic.All",),
+        maximum_mode=MicrosoftOperationMode.READ,
+    ),
     "mail-read": MicrosoftPermissionProfile(
         name="mail-read",
         description=(
@@ -128,17 +206,51 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
         application_permissions=("Exchange Application RBAC: Application Mail.Read",),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
-    "mail-send": MicrosoftPermissionProfile(
-        name="mail-send",
-        description="Governed Exchange Online mail send profile.",
-        services=frozenset({MicrosoftService.EXCHANGE}),
-        application_permissions=("Mail.Send",),
-        maximum_mode=MicrosoftOperationMode.WRITE,
+    "device-compliance-read": MicrosoftPermissionProfile(
+        name="device-compliance-read",
+        description="Read-only Intune managed-device and compliance investigation profile.",
+        services=frozenset({MicrosoftService.INTUNE, MicrosoftService.ENTRA}),
+        application_permissions=(
+            "DeviceManagementManagedDevices.Read.All",
+            "DeviceManagementConfiguration.Read.All",
+            "Directory.Read.All",
+        ),
+        maximum_mode=MicrosoftOperationMode.READ,
+    ),
+    "security-investigation-read": MicrosoftPermissionProfile(
+        name="security-investigation-read",
+        description="Read-only Microsoft security incident and alert investigation profile.",
+        services=frozenset({MicrosoftService.DEFENDER, MicrosoftService.ENTRA}),
+        application_permissions=(
+            "SecurityAlert.Read.All",
+            "SecurityIncident.Read.All",
+            "AuditLog.Read.All",
+            "Directory.Read.All",
+        ),
+        maximum_mode=MicrosoftOperationMode.READ,
+    ),
+    "collaboration-permissions-read": MicrosoftPermissionProfile(
+        name="collaboration-permissions-read",
+        description="Read-only Teams, SharePoint, OneDrive, group, membership, and sharing investigation profile.",
+        services=frozenset(
+            {
+                MicrosoftService.TEAMS,
+                MicrosoftService.SHAREPOINT,
+                MicrosoftService.ONEDRIVE,
+            }
+        ),
+        application_permissions=(
+            "Group.Read.All",
+            "Sites.Read.All",
+            "Team.ReadBasic.All",
+            "Channel.ReadBasic.All",
+        ),
+        maximum_mode=MicrosoftOperationMode.READ,
     ),
     "sharepoint-read": MicrosoftPermissionProfile(
         name="sharepoint-read",
         description="Read-only SharePoint and OneDrive content discovery.",
-        services=frozenset({MicrosoftService.SHAREPOINT}),
+        services=frozenset({MicrosoftService.SHAREPOINT, MicrosoftService.ONEDRIVE}),
         application_permissions=("Sites.Read.All",),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
@@ -148,13 +260,6 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
         services=frozenset({MicrosoftService.TEAMS}),
         application_permissions=("ChannelMessage.Read.All", "Team.ReadBasic.All"),
         maximum_mode=MicrosoftOperationMode.READ,
-    ),
-    "teams-write": MicrosoftPermissionProfile(
-        name="teams-write",
-        description="Governed Teams messaging and membership write profile.",
-        services=frozenset({MicrosoftService.TEAMS}),
-        application_permissions=("ChannelMessage.Send",),
-        maximum_mode=MicrosoftOperationMode.WRITE,
     ),
     "licensing-read": MicrosoftPermissionProfile(
         name="licensing-read",
@@ -167,23 +272,28 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
 
 
 def endpoint_for(service: MicrosoftService) -> MicrosoftEndpointFamily:
-    return MICROSOFT_ENDPOINTS[service]
+    try:
+        return MICROSOFT_ENDPOINTS[service]
+    except KeyError as exc:
+        raise LookupError(f"Microsoft service is not registered: {service.value}") from exc
 
 
 def permission_profile(name: str) -> MicrosoftPermissionProfile:
+    normalized = name.strip().lower()
     try:
-        return MICROSOFT_PERMISSION_PROFILES[name]
+        return MICROSOFT_PERMISSION_PROFILES[normalized]
     except KeyError as exc:
-        raise KeyError(f"Unknown Microsoft permission profile: {name}") from exc
+        raise LookupError("Microsoft permission profile is not registered.") from exc
 
 
 def validate_profile_for_services(
     profile: MicrosoftPermissionProfile,
-    services: frozenset[MicrosoftService],
+    services: Iterable[MicrosoftService],
 ) -> None:
-    unsupported = services.difference(profile.services)
+    requested = frozenset(services)
+    unsupported = requested - profile.services
     if unsupported:
         names = ", ".join(sorted(service.value for service in unsupported))
-        raise ValueError(
-            f"Microsoft permission profile {profile.name!r} does not authorize services: {names}"
+        raise PermissionError(
+            f"Microsoft permission profile {profile.name!r} does not authorize services: {names}."
         )

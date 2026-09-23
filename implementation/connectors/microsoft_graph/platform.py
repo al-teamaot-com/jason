@@ -15,6 +15,19 @@ from .service_catalog import (
 
 
 _ALLOWED_METHODS = {"GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"}
+_ALLOWED_QUERY_KEYS = frozenset(
+    {
+        "$select",
+        "$filter",
+        "$top",
+        "$orderby",
+        "$expand",
+        "$count",
+        "$search",
+        "$skip",
+        "$skiptoken",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +49,25 @@ class MicrosoftCloudRequest:
             raise ValueError("Microsoft request path contains an unsafe segment.")
         if "?" in self.path or "#" in self.path:
             raise ValueError("Query strings and fragments must not be embedded in the Microsoft request path.")
+        if len(self.path) > 2048:
+            raise ValueError("Microsoft request path exceeds the governed length bound.")
+
+        if self.query is not None:
+            if len(self.query) > 16:
+                raise ValueError("Microsoft request query exceeds the governed key bound.")
+            for raw_key, raw_value in self.query.items():
+                key = str(raw_key).strip()
+                value = str(raw_value)
+                if key not in _ALLOWED_QUERY_KEYS:
+                    raise ValueError(f"Unsupported Microsoft query option: {key!r}.")
+                if not value or len(value) > 4096:
+                    raise ValueError(
+                        f"Microsoft query option {key!r} is empty or exceeds the governed length bound."
+                    )
+                if any(ord(char) < 32 for char in value):
+                    raise ValueError(
+                        f"Microsoft query option {key!r} contains control characters."
+                    )
         object.__setattr__(self, "method", method)
 
 
