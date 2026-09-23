@@ -8,6 +8,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from orchestrator.backup_capability_catalog import (
+    BACKUP_BACKUPIQ_ALERT_SEARCH,
+    BACKUP_ENDPOINT_ASSET_READ,
+    BACKUP_ENDPOINT_ASSET_SEARCH,
+    BACKUP_ENDPOINT_BACKUP_SEARCH,
+)
 from orchestrator.conversation_action_intent import GovernedActionConversationIntentResolver
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
@@ -85,6 +91,24 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "replay.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "security.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
+
+
+def test_backup_capabilities_are_composed_but_provider_stays_gated_by_default(tmp_path):
+    application = build_runtime_application(_settings(tmp_path))
+    for capability_name in (
+        BACKUP_ENDPOINT_ASSET_SEARCH,
+        BACKUP_ENDPOINT_ASSET_READ,
+        BACKUP_ENDPOINT_BACKUP_SEARCH,
+        BACKUP_BACKUPIQ_ALERT_SEARCH,
+    ):
+        capability = application.capabilities.get_current(
+            capability_name=capability_name,
+        )
+        assert capability is not None
+        assert capability.metadata["read_only"] == "true"
+        assert capability.metadata["client_partition_enforced_by"] == (
+            "validated_backup_net_customer_boundary"
+        )
 
 
 def test_production_conversation_planning_is_resource_first_and_metadata_driven(tmp_path):

@@ -81,6 +81,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "kyocera_kfs.readonly": (
         "secret/data/connectors/kyocera-kfs/production/read-only"
     ),
+    "backup_net.readonly": (
+        "secret/data/connectors/backup-net/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -119,6 +122,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "kfs_password",
         }
     ),
+    "backup_net.readonly": frozenset({"client_id", "client_secret"}),
 }
 
 

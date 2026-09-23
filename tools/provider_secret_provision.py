@@ -134,6 +134,17 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle"
         ),
     },
+    "backup_net": {
+        "logical_name": "backup_net.readonly",
+        "secret_path": "secret/data/connectors/backup-net/production/read-only",
+        "fields": ("client_id", "client_secret"),
+        "policy_name": "jason-backup-net-read",
+        "role_name": "jason-backup-net-read",
+        "connector_identity": "backup-net-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle"
+        ),
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
