@@ -189,6 +189,45 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Technology Steward / Jason Architecture Authority
 - **Review trigger:** Begin during the next Teams/OpenClaw security-hardening window; complete before the dedicated gateway client secret reaches its first planned rotation/expiry boundary.
 
+### TODO-CONN-005 — Governed Autotask contract read/write capability
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add governed Autotask contract capabilities so Jason can search and read contracts and related contract-service/billing details, then support tightly controlled contract updates where the Autotask API permits them.
+- **Why it matters:** Contract visibility is required for vendor-cost reconciliation, client profitability analysis, billing validation, service reconciliation, and accurate operational decisions that depend on what AOT is actually contracted to provide and bill.
+- **Why not now:** The live Jason capability registry currently exposes no `service_contract` capability, and contract mutations require explicit schema validation, least-privilege authorization, approval controls, idempotency, audit evidence, and safe test coverage before production use.
+- **Prerequisites:** confirm Autotask contract and contract-service API entities and field permissions; implement governed read/search first; validate client isolation and pagination; add sanitized contract fixtures and contract tests; define allowed write fields and preconditions; require explicit approval for mutations; add audit, rollback/reconciliation, and verification behavior.
+- **Decision owner:** Platform Owner / Jason Governance Authority
+- **Review trigger:** Start as a high-priority near-term connector enhancement; prioritize read capability first, then controlled write/update support after successful validation.
+
+### TODO-CONN-006 — Expand governed Datto EDR response actions
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Critical
+- **Idea:** Expand Jason's Datto EDR integration beyond read visibility and AV scan initiation to include governed endpoint isolation/revert and quarantine-response actions where the Datto API supports them.
+- **Why it matters:** Jason can already investigate detections, quarantine state, policies, security status, and scan history. Adding tightly governed response actions would let approved playbooks contain active threats without requiring a technician to leave the workflow for routine EDR response steps.
+- **Target capabilities, in priority order:** endpoint isolate; revert isolation; quarantine file/detection; restore quarantined file; delete quarantined file; terminate malicious process; later, narrowly controlled EDR/AV policy changes.
+- **Important rule:** Before reverting isolation, Jason must identify which product imposed the isolation (Datto EDR, Datto RMM, RocketCyber, or another source) and must not attempt to release isolation through the wrong product.
+- **Why not now:** Only Datto AV scan start is presently exposed as a governed security action. Each additional EDR mutation must first be confirmed against the supported Datto API and proven with safe test targets.
+- **Prerequisites:** verify exact API endpoints and permissions; implement provider-native read-before-write checks; exact endpoint identity correlation; explicit per-action approval for isolation/release and destructive quarantine actions; idempotency and preconditions; client isolation; audit/evidence capture; rollback/recovery behavior; post-action verification; playbook-level autonomy gating.
+- **Decision owner:** Security Owner / Jason Governance Authority
+- **Review trigger:** Treat isolation/revert and quarantine management as the next high-priority Datto EDR API expansion after API capability verification.
+
+### TODO-CONN-007 — Datto Endpoint Backup API integration
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Add a governed Datto Endpoint Backup API connector so Jason can authoritatively determine whether an endpoint is protected, whether backup is healthy, when the last successful backup completed, what failures exist, and what recovery data is available.
+- **Why it matters:** Jason currently has to infer backup health from DRMM alerts and ticket context. Direct Endpoint Backup API visibility is required for reliable troubleshooting, ticket resolution, compliance evidence, and automated backup-health workflows.
+- **Initial read capabilities:** account/device lookup; protection/enrollment state; active/inactive status; last successful backup; last attempted backup; current backup state; failure/error details; backup history; recovery-point visibility; retention/plan metadata where exposed by the API.
+- **Later governed actions:** trigger supported backup operations, recovery/restore workflows, or other mutations only after the Datto API surface and safety model are validated.
+- **Prerequisites:** validate the current Datto Endpoint Backup public API and authentication model; map Endpoint Backup devices to DRMM/Autotask identities; implement client isolation and pagination; add read-only contract tests; normalize backup health states; capture audit/evidence; define approval and rollback requirements for any future write actions.
+- **Decision owner:** Platform Owner / Backup Service Owner / Jason Governance Authority
+- **Review trigger:** Begin as a high-priority connector enhancement; implement authoritative read/health capabilities first so Jason can answer whether a device is actively protected and whether backups are healthy without relying on inference.
+
 ---
 
 ## Governance and operational maturity
@@ -240,6 +279,30 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Prerequisites:** approved off-host secure storage; encryption-at-rest and in-transit design; named custody/authority model; backup scope classification; secret-safe inventory/references in the System Registry; rotation/revocation handling; documented total-host-loss recovery procedure; periodic restore test; evidence that backup artifacts never enter GitHub, normal documentation, logs, or chat.
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before Jason becomes materially difficult to reconstruct by reissuing credentials, before multi-host/production expansion, or during the next formal disaster-recovery review.
+
+### TODO-CONN-007 — Governed Datto RMM monitor-policy targeting updates
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add a governed Jason capability to read and modify Datto RMM monitor/policy targeting so Jason can exclude Linux endpoints from Windows-only monitors and apply OS-appropriate monitoring safely.
+- **Why it matters:** Claw/aoteq-OptiPlex-3040 is Ubuntu 24.04.5 LTS but inherited Windows-oriented AV and filesystem monitors. These produced false alerts and attempted PowerShell response scripts on Linux, including `Exec format error` failures. Jason can diagnose and clear resulting alerts today, but cannot correct the monitor assignment through the governed action layer.
+- **Why not now:** The current live capability registry exposes alert read/resolve and site-variable actions, but no monitor-policy mutation capability.
+- **Prerequisites:** Datto RMM API support for monitor/policy assignment changes; capability registry contract; OS-targeting guardrails; approval and audit policy; readback verification; test coverage against Linux and Windows endpoints.
+- **Decision owner:** Jason Governance Authority / MSP Operations
+- **Review trigger:** Before relying on Jason to autonomously remediate recurring monitor-policy false positives.
+
+### TODO-CONN-008 — Governed ad-hoc PowerShell on all eligible Windows endpoints
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** High
+- **Idea:** Expand Jason's governed `Run Ad Hoc Command (PowerShell 2-5) [WIN]` execution path from the current AOT-50282-only pilot scope to all eligible Datto RMM-managed Windows endpoints, including workstations and servers, while preserving strict governance.
+- **Why it matters:** Jason can often identify the exact read-only diagnostic command needed, but today the hard-coded device scope prevents execution on other customer systems such as HITT-51620. This forces manual technician intervention even for safe, deterministic diagnostics.
+- **Why not now:** The current MCP/runtime execution contract pins the ad-hoc PowerShell runner to a single device identity and target class as part of the original pilot safety boundary.
+- **Prerequisites:** replace single-device scope with governed endpoint resolution; validate OS and device identity before execution; support workstation/server target classes; preserve exact component UID binding; classify commands read-only vs mutating; require per-run technician approval for arbitrary commands; prohibit autonomous disruptive/destructive commands; enforce client isolation, audit evidence, bounded output, attempt limits, and job readback verification; add acceptance tests on representative Windows workstation and server targets.
+- **Decision owner:** Jason Governance Authority / MSP Operations
+- **Review trigger:** High priority; complete before Jason is expected to perform cross-client read-only diagnostics without technician-side command execution.
 
 ---
 
