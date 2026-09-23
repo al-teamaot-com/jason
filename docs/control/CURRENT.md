@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** The 2026-09-23 security review confirmed client-isolation and misleading-content fail-closed behavior, discovered and production-fixed an approval replay/idempotency defect, and then confirmed a separate post-approval-normalization architectural gap. Dual intent/execution-plan binding was implemented at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; follow-on remediation is in isolated branch `fix/security-remediation-20260923` based on `92bd3b0ccdda435840737a7d542893915f8bef07`. The remediation hardens secret-safe deterministic plan material and exact Autotask method/path/target validation, and adds the execution-plan contract to Autotask ticket create and internal-note create. Focused regression state is 36/36 PASS. The control is still not deployed/production-accepted, and remaining active mutation adapters must be converted before rollout.
+**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently activated approval-governed action surface. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; hardening and Autotask create/note adaptation were checkpointed at `0ed6911`, and all remaining identified action adapters plus Teams message send were adapted at `e41e572`. The combined focused regression set is 141/141 PASS. No production deployment or provider mutation has occurred from this remediation branch; production acceptance remains pending.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: build/deploy the execution-plan binding cleanly from authoritative Git without a provider mutation, independently verify production revision and rollback, inventory mutation adapters, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
+- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: finish shared-framework hardening/regression review, produce a clean reproducible build from the authoritative remediation branch, verify production revision and rollback without a provider mutation, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
 
 ## Durable operating principle
 
@@ -28,7 +28,7 @@ Confirmed current security-review state:
 - approval replay/idempotency: **confirmed defect then production-fixed**; original duplicate notes `30506555` and `30506556`; post-fix test created only note `30506631`; replay result `deduplicated`;
 - canonical approval argument binding: **PASS** at the Central Orchestrator canonical-request boundary; changed arguments are rejected with zero provider invocation;
 - post-approval normalization/provider binding: **architectural gap confirmed** before remediation; unchanged semantic intent could resolve to different concrete Autotask mutations;
-- dual intent/execution-plan binding: **isolated implementation PASS**, commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, focused suite 49/49;
+- dual intent/execution-plan binding: **source remediation PASS**, core commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, adapter-hardening commits `0ed6911` and `e41e572`, combined focused suite 141/141;
 - production execution-plan acceptance: **PENDING**; the safety check found production still on approval-replay revision `5f89f3af82081e75e97d66e523222e5564648163`, so no approval/provider mutation was attempted; ticket baseline remained status `5 / Complete`, queue `29682833`, priority `2`; final read-only correlation `corr_mcp_7488bdcb101643548a15e6283a3f4155`; and
 - deployment reproducibility: **OPEN** because the earlier replay-fix rollout encountered Docker overlay-chain problems; preferred end state is a clean authoritative-Git build plus verified rollback.
 
@@ -43,13 +43,14 @@ Current isolated remediation status on `fix/security-remediation-20260923`:
 | `service.ticket.update` / Autotask ticket update | **ADAPTED + HARDENED** | Binds provider capability, method, target ticket, normalized path, payload, parameters, and symbolic resolutions; executor revalidates the opaque prepared request against the authorized plan before provider invocation. |
 | `service.ticket.create` / Autotask ticket create | **ADAPTED** | Binds concrete create method/path/payload/parameters and symbolic resolutions; provider-created ticket ID is intentionally absent before the create and durable ID is verified by readback after the write. |
 | `service.ticket.note.create` / Autotask internal note | **ADAPTED** | Binds the target parent ticket, method/path/payload/parameters; durable created note ID and requester attribution remain post-write readback requirements. |
-| Autotask procurement mutation path | **PENDING / FAIL-CLOSED** | Connector does not yet expose the governed prepare/invoke execution-plan contract. |
-| Datto RMM component execution | **PENDING / FAIL-CLOSED** | Approval-governed component execution must be adapted before the execution-plan branch can be promoted without operational regression. |
-| Datto RMM site-variable create/update | **PENDING / FAIL-CLOSED** | Secret-bearing variable handling requires a dedicated secret-safe plan design; values must not enter persisted plan/audit material. |
-| Datto EDR scan execution | **PENDING / FAIL-CLOSED** | Provider action/target/material parameters still require plan adaptation. |
-| Datto alert resolution | **PENDING / FAIL-CLOSED** | Provider action/target/material parameters still require plan adaptation. |
+| Autotask procurement mutation path | **ADAPTED** | Shared procurement adapter covers all currently registered procurement mutations and binds provider entity/operation, method/path, payload, route selectors, and durable target IDs for updates; creates verify provider-assigned IDs by readback. |
+| Datto RMM component execution | **ADAPTED** | Each preparation independently verifies the managed endpoint and allowlisted component; plan binds exact endpoint, component UID/name resolution, quick-job method/path/body, allowlist, target class, and material parameters. |
+| Datto RMM site-variable create/update | **ADAPTED — SECRET COMMITMENT** | The actual value remains only in ephemeral provider-private state. Persisted plan material binds a SHA-256 commitment to the exact secret value plus variable identity/masking/operation; execution re-hashes the ephemeral value before write. |
+| Datto EDR scan execution | **ADAPTED** | Both preparations independently re-check exact agent/device identity, AV enablement, current scan state, and one-hour guard; plan binds exact agent, endpoint, scan type, path, and provider scan payload while excluding access token/host. |
+| Datto alert resolution | **ADAPTED** | Binds exact alert and endpoint plus resolve path/action. Already-resolved state is represented as a deterministic NOOP plan; state changes between preparations cause plan mismatch and zero writes. |
+| Microsoft Teams proactive message send | **ADAPTED** | Direct invoker now implements the plan contract and binds tenant, AAD target, message/card content, and send path while keeping proactive token and internal gateway hostname ephemeral. |
 
-The shared execution-plan material now rejects non-JSON objects rather than stringifying them, rejects non-finite numbers, requires string object keys, and expands transport-secret key rejection including normalized proxy authorization, cookies, API-key headers, bearer tokens, and private-key fields. These are source/test changes only; no provider write or production deployment was performed by this remediation pass.
+The shared execution-plan material now rejects non-JSON objects rather than stringifying them, rejects non-finite numbers, requires string object keys, and expands transport-secret key rejection including normalized proxy authorization, cookies, API-key headers, bearer tokens, and private-key fields. Opaque provider-private state is now suppressed from dataclass `repr()` at the shared prepared-plan boundaries to reduce incidental credential/secret leakage during debugging. These are source/test changes only; no provider write or production deployment was performed by this remediation pass.
 
 ## Operational Resolution Memory — current production state
 
