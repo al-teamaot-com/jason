@@ -156,6 +156,18 @@
       "title": "Facebook integration",
       "status": "planned",
       "phase": "Capabilities"
+    },
+    {
+      "id": "TODO-CONN-013",
+      "title": "SaaS Alerts webhook/API integration for event intake, historical search, correlation, deduplication, and webhook health monitoring",
+      "status": "planned",
+      "phase": "Capabilities"
+    },
+    {
+      "id": "TODO-CONN-014",
+      "title": "Datto Networking integration using CloudTrax/Datto Network Manager and DNA APIs; implement read-only diagnostics first, then governed write actions",
+      "status": "planned",
+      "phase": "Capabilities"
     }
   ]
 }
