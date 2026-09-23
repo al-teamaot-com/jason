@@ -3,7 +3,7 @@ services:
     build:
       context: ../..
       dockerfile: infrastructure/jason-runtime/Dockerfile
-    image: jason-runtime:local
+    image: jason-runtime:production
     container_name: jason-runtime
     user: "1000:1000"
     restart: unless-stopped

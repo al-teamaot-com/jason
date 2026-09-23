@@ -1,119 +1,73 @@
 #!/usr/bin/env bash
-
-# Refresh the local Jason runtime image from the current repository revision without
-# using the custom jason-builder BuildKit instance, then recreate the proven
-# non-dynamic Teams baseline through jason-ops.sh.
+set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DOCKERFILE="$REPO_ROOT/infrastructure/jason-runtime/Dockerfile"
-IMAGE="jason-runtime:local"
 RUNTIME_CONTAINER="jason-runtime"
+PRODUCTION_IMAGE="jason-runtime:production"
+COMPAT_IMAGE="jason-runtime:local"
 REVISION_LABEL="org.opencontainers.image.revision"
 
-cd "$REPO_ROOT" || return 1 2>/dev/null || exit 1
+cd "$REPO_ROOT"
 
-revision="$(git rev-parse HEAD 2>/dev/null)"
-if [ -z "$revision" ]; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=unable to resolve repository revision"
-    return 1 2>/dev/null || exit 1
-fi
+revision="$(git rev-parse HEAD)"
+short_revision="$(git rev-parse --short=12 HEAD)"
+candidate_image="jason-runtime:candidate-$short_revision"
+rollback_alias="jason-runtime:rollback-refresh-$(date -u +%Y%m%dT%H%M%SZ)"
 
-echo "========== JASON BASELINE IMAGE REFRESH =========="
+echo "========== JASON PRODUCTION RUNTIME REFRESH =========="
 echo "SOURCE_REVISION=$revision"
+echo "CANDIDATE_IMAGE=$candidate_image"
 
-if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    old_image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null)"
-    if [ -n "$old_image_id" ]; then
-        rollback_tag="jason-runtime:rollback-refresh-$(date +%Y%m%d-%H%M%S)"
-        docker image tag "$old_image_id" "$rollback_tag"
-        echo "ROLLBACK_IMAGE=$rollback_tag"
-    fi
-fi
+old_production_id="$(docker image inspect "$PRODUCTION_IMAGE" --format '{{.Id}}')"
+docker tag "$old_production_id" "$rollback_alias"
+echo "ROLLBACK_IMAGE=$rollback_alias"
 
-# The host's custom buildx builder previously failed deterministically while
-# exporting/importing this image. Use Docker's default buildx builder explicitly so
-# a source refresh does not reuse that failing deployment path.
 echo "BUILD_BUILDER=default"
-if ! docker buildx build \
-    --builder default \
-    --load \
-    --label "$REVISION_LABEL=$revision" \
-    --tag "$IMAGE" \
-    --file "$DOCKERFILE" \
-    "$REPO_ROOT"; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=default-builder image refresh failed"
-    return 1 2>/dev/null || exit 1
-fi
+docker buildx build   --builder default   --load   --no-cache   --label "$REVISION_LABEL=$revision"   --label "com.teamaot.jason.source_revision=$revision"   --label "com.teamaot.jason.deployment-purpose=production-candidate"   --tag "$candidate_image"   --file "$DOCKERFILE"   "$REPO_ROOT"
 
-built_revision="$(docker image inspect --format "{{index .Config.Labels \"$REVISION_LABEL\"}}" "$IMAGE" 2>/dev/null)"
-if [ "$built_revision" != "$revision" ]; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=image provenance does not match repository revision"
-    echo "IMAGE_REVISION=${built_revision:-missing}"
-    return 1 2>/dev/null || exit 1
-fi
-
+candidate_id="$(docker image inspect "$candidate_image" --format '{{.Id}}')"
+built_revision="$(docker image inspect "$candidate_image" --format "{{index .Config.Labels \"$REVISION_LABEL\"}}")"
+source_revision="$(docker image inspect "$candidate_image" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}')"
+test "$built_revision" = "$revision"
+test "$source_revision" = "$revision"
 echo "IMAGE_PROVENANCE=PASS"
-echo "IMAGE_REVISION=$built_revision"
 
-if ! bash "$REPO_ROOT/infrastructure/jason-runtime/jason-ops.sh" baseline-deploy; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=baseline recreation failed after image refresh"
-    return 1 2>/dev/null || exit 1
+docker run --rm --network none --entrypoint python "$candidate_image" -c   'from orchestrator.service import CentralOrchestrator; from orchestrator.approval_recovery_retry import GovernedApprovalRecoveryRetryExecutor; from jason_runtime.teams_message_send import TeamsMessageSendInvoker; assert hasattr(TeamsMessageSendInvoker,"prepare_execution_plan"); print("ISOLATED_SECURITY_SMOKE=PASS")'
+
+docker tag "$candidate_id" "$PRODUCTION_IMAGE"
+docker tag "$candidate_id" "$COMPAT_IMAGE"
+
+restore_aliases() {
+  docker tag "$old_production_id" "$PRODUCTION_IMAGE"
+  docker tag "$old_production_id" "$COMPAT_IMAGE"
+}
+
+if ! JASON_RUNTIME_PRODUCTION_IMAGE="$PRODUCTION_IMAGE"      JASON_SOURCE_REVISION_OVERRIDE="$revision"      bash "$REPO_ROOT/infrastructure/jason-runtime/production-deploy.sh"; then
+  restore_aliases
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=production cutover failed; production aliases restored"
+  exit 1
 fi
 
-# Image provenance is not sufficient by itself: prove the running container was
-# recreated from the just-built image rather than an older local image reference.
-expected_image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null)"
-running_image_id="$(docker inspect --format '{{.Image}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
-running_revision="$(docker inspect --format "{{index .Config.Labels \"$REVISION_LABEL\"}}" "$RUNTIME_CONTAINER" 2>/dev/null)"
+running_image_id="$(docker inspect "$RUNTIME_CONTAINER" --format '{{.Image}}')"
+running_revision="$(docker inspect "$RUNTIME_CONTAINER" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}')"
+running_health="$(docker inspect "$RUNTIME_CONTAINER" --format '{{.State.Health.Status}}')"
 
-if [ -z "$expected_image_id" ] || [ "$running_image_id" != "$expected_image_id" ]; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=running runtime container does not use the refreshed image"
-    echo "RUNNING_IMAGE_MATCH=FAIL"
-    return 1 2>/dev/null || exit 1
+if [ "$running_image_id" != "$candidate_id" ]; then
+  restore_aliases
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=running image does not match candidate"
+  exit 1
 fi
-
-if [ "$running_revision" != "$revision" ]; then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=running runtime provenance does not match repository revision"
-    echo "RUNNING_REVISION=${running_revision:-missing}"
-    return 1 2>/dev/null || exit 1
+if [ "$running_revision" != "$revision" ] || [ "$running_health" != "healthy" ]; then
+  restore_aliases
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=running revision or health verification failed"
+  exit 1
 fi
 
 echo "RUNNING_IMAGE_MATCH=PASS"
 echo "RUNNING_REVISION=$running_revision"
-
-# Prove the running container contains and executes the semantic presentation
-# boundary added to the current source. This is a diagnostic smoke proof only; it
-# grants no provider authority and performs no external calls.
-if ! docker exec -i "$RUNTIME_CONTAINER" python - <<'PY'
-from orchestrator.conversation_response import _normalize_semantic_presentation
-from orchestrator.teams_conversation_flow import ConversationIntent
-
-intent = ConversationIntent(
-    capability_name="endpoint.device.search",
-    arguments={
-        "hostname": "SMOKE-ENDPOINT",
-        "requested_facts": ("endpoint last seen",),
-    },
-    execution_mode="deterministic",
-    permission_mode="observe",
-)
-raw = "SMOKE-ENDPOINT — endpoint last seen: 1787134597000. Source: smoke."
-rendered = _normalize_semantic_presentation(raw, intent)
-expected = "SMOKE-ENDPOINT — endpoint last seen: 2026-08-19 10:16:37 UTC. Source: smoke."
-if rendered != expected:
-    raise SystemExit(f"semantic presentation smoke mismatch: {rendered!r}")
-print("RUNTIME_PRESENTATION_SMOKE=PASS")
-PY
-then
-    echo "BASELINE_REFRESH=FAIL"
-    echo "REASON=running runtime semantic presentation smoke failed"
-    return 1 2>/dev/null || exit 1
-fi
-
+echo "RUNTIME_HEALTH=healthy"
 echo "BASELINE_REFRESH=PASS"

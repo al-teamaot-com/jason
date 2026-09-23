@@ -20,11 +20,9 @@ Usage:
 
 Commands:
   status           Show runtime/gateway/Ollama container state.
-  deploy           Recover current live mount inputs, validate Compose, capture a rollback image,
-                   rebuild only jason-runtime, redeploy it, and wait for health.
-  baseline-deploy  Recreate the current runtime from the already-installed jason-runtime:local image
-                   with dynamic conversation disabled. No image build is performed and the repository/local
-                   Compose file is not modified.
+  deploy           Build a revision-pinned runtime candidate from the current Git checkout, validate it,
+                   promote it through the fail-closed production deploy helper, and preserve rollback.
+  baseline-deploy  Retired fail-closed legacy command. Use deploy or production-deploy.sh.
   capture          Capture recent Teams gateway, Ollama, security-audit, and orchestration evidence.
                    Default window: 5 minutes.
 EOF
@@ -160,142 +158,15 @@ build_runtime_image() {
 }
 
 deploy() {
-    echo "========== JASON RUNTIME DEPLOY =========="
-
-    if ! container_exists "$RUNTIME_CONTAINER"; then
-        echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=jason-runtime container not found"
-        return 1
-    fi
-
-    recover_live_inputs
-    if ! validate_live_inputs; then
-        echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=required live deployment input missing"
-        return 1
-    fi
-
-    if ! compose_runtime config --quiet; then
-        echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=compose validation failed"
-        return 1
-    fi
-    echo "COMPOSE_VALIDATION=PASS"
-
-    old_image_id="$(docker inspect --format '{{.Image}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
-    rollback_tag=""
-    if [ -n "$old_image_id" ]; then
-        rollback_tag="jason-runtime:rollback-$(date +%Y%m%d-%H%M%S)"
-        docker image tag "$old_image_id" "$rollback_tag"
-        echo "ROLLBACK_IMAGE=$rollback_tag"
-    fi
-
-    if ! build_runtime_image; then
-        echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=runtime build failed after bounded retry"
-        return 1
-    fi
-
-    if ! compose_runtime up -d --no-deps --force-recreate jason-runtime; then
-        echo "DEPLOY_RESULT=FAIL"
-        echo "REASON=runtime deployment failed"
-        [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
-        return 1
-    fi
-
-    if wait_for_runtime_health; then
-        echo "DEPLOY_RESULT=PASS"
-        echo "READY_FOR_LIVE_TEST=1"
-        return 0
-    fi
-
-    echo "DEPLOY_RESULT=FAIL"
-    echo "READY_FOR_LIVE_TEST=0"
-    [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
-    return 1
+    echo "========== JASON RUNTIME SOURCE DEPLOY =========="
+    exec bash "$REPO_ROOT/infrastructure/jason-runtime/jason-baseline-refresh.sh"
 }
 
 baseline_deploy() {
-    echo "========== JASON TEAMS WORKING BASELINE =========="
-
-    if ! container_exists "$RUNTIME_CONTAINER"; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=jason-runtime container not found"
-        return 1
-    fi
-
-    recover_live_inputs
-    if ! validate_live_inputs; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=required live deployment input missing"
-        return 1
-    fi
-
-    if ! docker image inspect jason-runtime:local >/dev/null 2>&1; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=existing jason-runtime:local image not found"
-        return 1
-    fi
-    echo "BASELINE_IMAGE=jason-runtime:local"
-    echo "BASELINE_BUILD=SKIPPED"
-
-    override_file="$(mktemp)"
-    cat > "$override_file" <<'EOF'
-services:
-  jason-runtime:
-    environment:
-      JASON_DYNAMIC_CONVERSATION_ENABLED: "false"
-EOF
-    JASON_COMPOSE_OVERRIDE_FILE="$override_file"
-
-    if ! compose_runtime config --quiet; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=baseline compose validation failed"
-        rm -f "$override_file"
-        JASON_COMPOSE_OVERRIDE_FILE=""
-        return 1
-    fi
-    echo "COMPOSE_VALIDATION=PASS"
-
-    old_image_id="$(docker inspect --format '{{.Image}}' "$RUNTIME_CONTAINER" 2>/dev/null)"
-    rollback_tag=""
-    if [ -n "$old_image_id" ]; then
-        rollback_tag="jason-runtime:rollback-$(date +%Y%m%d-%H%M%S)"
-        docker image tag "$old_image_id" "$rollback_tag"
-        echo "ROLLBACK_IMAGE=$rollback_tag"
-    fi
-
-    if ! compose_runtime up -d --no-build --no-deps --force-recreate jason-runtime; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=baseline runtime recreation failed"
-        [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
-        rm -f "$override_file"
-        JASON_COMPOSE_OVERRIDE_FILE=""
-        return 1
-    fi
-
-    baseline_rc=0
-    if ! wait_for_runtime_health; then
-        echo "BASELINE_MODE=FAIL"
-        echo "REASON=baseline runtime did not become healthy"
-        [ -n "$rollback_tag" ] && echo "ROLLBACK_IMAGE=$rollback_tag"
-        baseline_rc=1
-    else
-        dynamic_value="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$RUNTIME_CONTAINER" 2>/dev/null | grep '^JASON_DYNAMIC_CONVERSATION_ENABLED=' | tail -n 1 | cut -d= -f2-)"
-        if [ "${dynamic_value:-false}" = "false" ]; then
-            echo "BASELINE_MODE=PASS"
-            echo "JASON_DYNAMIC_CONVERSATION_ENABLED=false"
-            echo "READY_FOR_LIVE_TEST=1"
-        else
-            echo "BASELINE_MODE=FAIL"
-            echo "REASON=runtime did not start with dynamic conversation disabled"
-            baseline_rc=1
-        fi
-    fi
-
-    rm -f "$override_file"
-    JASON_COMPOSE_OVERRIDE_FILE=""
-    return "$baseline_rc"
+    echo "BASELINE_MODE=DISABLED"
+    echo "REASON=legacy baseline deployment is retired because it could bypass production provenance and rollback verification"
+    echo "USE=bash infrastructure/jason-runtime/jason-ops.sh deploy"
+    return 2
 }
 
 capture() {
