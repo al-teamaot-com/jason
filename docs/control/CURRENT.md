@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** Production is live on reconciled release source `bbe7d7ee87e0b6a4e338e84cf5ca8fead2061683`. The execution-plan security remediation, shared deadline/recovery hardening, IT Glue information-release fix, provider-read selector corrections, Microsoft cloud foundation repair, deployment hardening, System Registry reconciliation, and CI-isolation fixes are deployed. Runtime image `sha256:23dd4b28f347dc3b716dd6c0542f7e7afad1e0d2a27fb541a966bdc02af279ed` and MCP image `sha256:7103de2eb406ead2c79bb6f4c9abfd906541d9cd25d7dbcf6ea59cf68e9ee609` are running hardened (`read_only=true`, `cap_drop=ALL`, `no-new-privileges`, hardened `/tmp`). GitHub push gates for the final source commit passed. The Microsoft repair remains read-first/fail-closed, preserves `User.Read.All` for directory lookup and scoped Exchange Application RBAC for `mail-read`, and introduced no Microsoft tenant permission change. No provider mutation occurred during this deployment.
+**Status:** Production is live on authoritative `main` source `20d2e027443769af723af6bef069afad7cc58d7c` (tag `prod-2026-09-23-20d2e02`). Runtime image `sha256:71f7774fef39c5044da64903049aa30cac145b79fdd0742824ff47482549d816` and MCP image `sha256:3cd7cd9072521d9561c18d8f522e6c795229d297b88dff1c33d6bfef1b645fa3` are running from canonical `jason-runtime:production` / `jason-mcp:production` aliases with hardened controls (`read_only=true`, `cap_drop=ALL`, `no-new-privileges`, hardened `/tmp`). PR #219 merged the fully validated production reconciliation into `main`; the final `main` tree is identical to the PR head that passed the full GitHub validation matrix. The immediately previous `bbe7d7e` runtime/MCP images are retained as `:rollback-current` and as stopped rollback containers. Central Orchestrator remains authoritative, `direct_provider_access=false`, 24 governed write capabilities remain active, and no provider mutation occurred during the final constitutional convergence deployment.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** production security/Microsoft reconciliation is complete. Remaining optional acceptance work is controlled per-provider mutation-family testing (Autotask note/create/procurement, Datto component/site-variable/EDR/alert, Teams send) using explicitly safe test targets. The previously recorded IT Glue/provider-read failures have been resolved in the reconciled production line.
+- **Next safe actions:** repository/production constitutional convergence is complete. `main` is authoritative; production is pinned to the tagged `20d2e02` main revision; only active open-PR worktrees remain locally. Remaining work is normal feature review/acceptance (for example Backup.net) and optional controlled per-provider mutation-family acceptance using explicitly safe test targets.
 
 ## Durable operating principle
 
