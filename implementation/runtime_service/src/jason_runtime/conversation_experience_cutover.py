@@ -9,6 +9,7 @@ same governed runtime objects.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from connectors.core.http_transport import UrlLibJsonHttpTransport
@@ -44,6 +45,7 @@ from orchestrator.model_runtime_adapter import (
 )
 from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
 from orchestrator.progressive_conversation_read import ProgressiveConversationReadEngine
+from orchestrator.permissive_drmm_teams_flow import PermissiveDrmmTeamsFlow
 from orchestrator.teams_conversation_experience import TeamsConversationExperienceFlow
 
 
@@ -167,6 +169,21 @@ def select_conversation_experience_flow(
         ttl_seconds=settings.context_ttl_seconds,
     )
     catalog = RegistryBackedFulfillmentCatalog(registry=capabilities)
+
+    if os.getenv(
+        "JASON_PERMISSIVE_DRMM_BASELINE_ENABLED",
+        "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}:
+        baseline_reasoning = experience_pool.backends[0].client
+        return PermissiveDrmmTeamsFlow(
+            identity_binder=identity_binder,
+            request_factory=request_factory,
+            orchestrator=orchestrator,
+            transport=transport,
+            catalog=catalog,
+            reasoning=baseline_reasoning,
+            fallback_flow=fallback_flow,
+        )
     intent_builder = InformationNeedIntentBuilder(reasoning=work_pool)
     primary_resources = tuple(
         item
