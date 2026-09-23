@@ -266,6 +266,35 @@ Runtime identity:
 
 The production API host is restricted to `https://api.kyods.com`. KFS is read-only in this foundation and live selection also requires `JASON_KFS_ENABLED=true`.
 
+## UniView / Backup.net Public API contract
+
+Logical secret: `backup_net.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/backup-net/production/read-only`
+
+Durable OpenBao fields:
+
+- `client_id`
+- `client_secret`
+
+Runtime identity:
+
+- policy: `jason-backup-net-read`
+- AppRole: `jason-backup-net-read`
+- protected artifacts: `/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle/`
+
+Provision with the normal lifecycle command:
+
+`python3 tools/provider_secret.py create backup_net`
+
+The credential is created in UniView under **Settings -> Public APIs -> New** and is used only with the OAuth 2.0 client-credentials flow. The connector fixes authentication to `https://login.backup.net/connect/token` and API reads to `https://public-api.backup.net`; those hosts are not secret-configurable.
+
+Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jason client-boundary record mapping the exact Autotask company ID to the Backup.net customer UUID. Provider `customer_id` is never accepted from the caller. The connector injects the mapped UUID and verifies every returned record proves the same customer.
+
+For the controlled acceptance case, Autotask company search independently resolved **Deborah Gittens Virtuol Designs LLC** to company ID **1627**. Ticket `T20260922.0063` itself currently reports `companyID=0`, so the ticket field must not be used as the Backup.net boundary source.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
