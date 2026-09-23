@@ -19,6 +19,13 @@ class ReflectionSignalKind(str, Enum):
     USER_CORRECTION = "user_correction"
 
 
+class CandidateActorKind(str, Enum):
+    HUMAN = "human"
+    SYSTEM = "system"
+    CI = "ci"
+    RELEASE = "release"
+
+
 class CandidateLifecycle(str, Enum):
     OBSERVED = "observed"
     PROPOSED = "proposed"
