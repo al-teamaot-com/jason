@@ -47,10 +47,14 @@ jobs:
           export JASON_OLLAMA_MODEL=ci-local-model
           export JASON_OPENBAO_ROLE_ID_HOST_PATH=/tmp/base-role-id
           export JASON_OPENBAO_SECRET_ID_HOST_PATH=/tmp/base-secret-id
+          export JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH=/tmp/datto-edr-role-id
+          export JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH=/tmp/datto-edr-secret-id
           export JASON_SES_OPENBAO_ROLE_ID_HOST_PATH=/tmp/ses-role-id
           export JASON_SES_OPENBAO_SECRET_ID_HOST_PATH=/tmp/ses-secret-id
           export JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH=/tmp/microsoft-role-id
           export JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH=/tmp/microsoft-secret-id
+          export JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_HOST_PATH=/tmp/microsoft-mail-role-id
+          export JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_HOST_PATH=/tmp/microsoft-mail-secret-id
           export JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH=/tmp/openai-role-id
           export JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH=/tmp/openai-secret-id
           export JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH=/tmp/itglue-role-id

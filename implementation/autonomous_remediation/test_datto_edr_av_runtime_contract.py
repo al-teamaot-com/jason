@@ -1,6 +1,6 @@
 import pytest
 
-from datto_edr_av_playbook import (
+from .datto_edr_av_playbook import (
     AV_FORCE_UPDATE_COMMAND,
     ActionKind,
     ApprovalClass,
@@ -9,7 +9,7 @@ from datto_edr_av_playbook import (
     PlaybookRun,
     RepairStep,
 )
-from datto_edr_av_runtime_contract import (
+from .datto_edr_av_runtime_contract import (
     AUTOMATION_COMPONENT_EXECUTE,
     AUTOMATION_JOB_OUTPUT_READ,
     AUTOMATION_JOB_READ,
@@ -181,7 +181,7 @@ def test_ticket_work_handoff_uses_reason_and_blocker_fingerprint():
     }
 
 def test_threat_branch_binds_live_scan_start_and_verification_reads():
-    from datto_edr_av_runtime_contract import (
+    from .datto_edr_av_runtime_contract import (
         bind_security_detection_search,
         bind_security_scan_history,
         bind_security_scan_start,
@@ -196,7 +196,7 @@ def test_threat_branch_binds_live_scan_start_and_verification_reads():
 
 
 def test_threat_branch_scan_binding_fails_closed_on_ambiguous_inputs():
-    from datto_edr_av_runtime_contract import bind_security_scan_start
+    from .datto_edr_av_runtime_contract import bind_security_scan_start
     with pytest.raises(RuntimeBindingError):
         bind_security_scan_start(device_uid="", agent_id="agent-1", scan_type="quick")
     with pytest.raises(RuntimeBindingError):

@@ -1,11 +1,11 @@
-from datto_edr_av_playbook import (
+from .datto_edr_av_playbook import (
     HealthObservation,
     PlaybookRun,
     PlaybookState,
     metrics_payload,
     next_action,
 )
-from datto_edr_av_security import (
+from .datto_edr_av_security import (
     CompromiseSignal,
     ScanObservation,
     ScanResultStatus,
@@ -118,7 +118,7 @@ def test_metrics_expose_independent_health_and_security_states():
 
 
 def test_telemetry_event_is_low_cardinality_and_aggregate_safe():
-    from datto_edr_av_playbook import telemetry_event
+    from .datto_edr_av_playbook import telemetry_event
 
     r = run(SecurityTrigger.THREAT_ONLY)
     r.record_health(HealthObservation(status="Healthy"))

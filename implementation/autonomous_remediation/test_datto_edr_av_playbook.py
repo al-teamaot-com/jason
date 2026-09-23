@@ -1,4 +1,4 @@
-from datto_edr_av_playbook import (
+from .datto_edr_av_playbook import (
     ApprovalClass,
     ExecutionObservation,
     HealthObservation,

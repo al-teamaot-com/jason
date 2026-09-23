@@ -1,4 +1,4 @@
-from datto_edr_av_api_contract import (
+from .datto_edr_av_api_contract import (
     ApiDiscoveryResult,
     ENDPOINT_SECURITY_DETECTION_READ,
     ENDPOINT_SECURITY_DETECTION_SEARCH,
@@ -9,7 +9,7 @@ from datto_edr_av_api_contract import (
     normalize_scan_verification,
     undocumented_keys,
 )
-from datto_edr_av_security import EvidenceSource, ScanResultStatus
+from .datto_edr_av_security import EvidenceSource, ScanResultStatus
 
 
 def test_normalizes_documented_datto_alert_fields_without_inference():

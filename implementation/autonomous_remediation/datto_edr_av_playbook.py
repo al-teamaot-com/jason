@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
-from datto_edr_av_security import (
+from .datto_edr_av_security import (
     CompromiseSignal,
     ScanObservation,
     SecurityAssessment,

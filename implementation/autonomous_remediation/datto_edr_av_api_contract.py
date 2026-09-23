@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-from datto_edr_av_security import (
+from .datto_edr_av_security import (
     EvidenceSource,
     ScanObservation,
     ScanResultStatus,

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from datto_edr_av_playbook import (
+from .datto_edr_av_playbook import (
     AV_FORCE_UPDATE_COMMAND,
     ActionKind,
     PlannedAction,
