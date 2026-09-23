@@ -12,6 +12,7 @@ from orchestrator import (
     ArtifactReference,
     CentralOrchestrator,
     InvocationResult,
+    InvocationTelemetry,
     OrchestrationMode,
     OrchestrationRequest,
     OrchestrationStatus,
@@ -188,3 +189,57 @@ def test_provider_failure_is_sanitized_and_correlated():
 def test_direct_agent_invocation_contract_is_rejected():
     with pytest.raises(ValueError, match="Direct agent invocation"):
         request(requester_kind="agent", arguments={"target_agent": "other-agent"})
+
+
+def test_reflection_telemetry_is_bounded_and_written_to_orchestration_audit():
+    class ReflectionInvoker:
+        def invoke(self, *, request, resolution):
+            return InvocationResult(
+                output={"status": "ok"},
+                attempts=1,
+                telemetry=InvocationTelemetry(
+                    reflection_normalized_intent="open_ticket_search",
+                    reflection_selector_strategy="company_then_status_filter",
+                    reflection_requested_result_scope="bounded",
+                    reflection_result_count=3,
+                    reflection_candidate_count=3,
+                    reflection_provider_call_count=2,
+                    reflection_pagination_count=1,
+                    reflection_fallback_count=0,
+                    reflection_evidence_item_count=3,
+                    reflection_search_strategies=("exact",),
+                    reflection_search_result_counts=(3,),
+                    reflection_warning_codes=(),
+                ),
+            )
+
+    audit = Audit()
+    result = CentralOrchestrator(
+        resolution=Resolution(),
+        invoker=ReflectionInvoker(),
+        audit=audit,
+    ).execute(request())
+
+    assert result.status is OrchestrationStatus.SUCCEEDED
+    completed = [
+        payload
+        for event_type, payload in audit.events
+        if event_type == "orchestration.capability.completed"
+    ]
+    assert len(completed) == 1
+    payload = completed[0]
+    assert payload["reflection_normalized_intent"] == "open_ticket_search"
+    assert payload["reflection_provider_call_count"] == 2
+    assert payload["reflection_search_strategies"] == ("exact",)
+    assert "arguments" not in payload
+    assert "output" not in payload
+
+
+def test_reflection_telemetry_rejects_negative_or_misaligned_counts():
+    with pytest.raises(ValueError, match="must not be negative"):
+        InvocationTelemetry(reflection_provider_call_count=-1)
+    with pytest.raises(ValueError, match="must align"):
+        InvocationTelemetry(
+            reflection_search_strategies=("exact",),
+            reflection_search_result_counts=(),
+        )
