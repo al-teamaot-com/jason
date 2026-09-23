@@ -156,3 +156,121 @@ def test_handoff_rejects_caller_destination_override(monkeypatch):
                 "blocker_fingerprint": "needs-onsite-access",
             },
         )
+
+
+def test_start_fails_closed_when_device_has_no_exact_configuration(monkeypatch):
+    calls = []
+
+    def governed_read(*, capability_name, arguments):
+        calls.append((capability_name, dict(arguments)))
+        if capability_name == "service.ticket.read":
+            return _ticket_read(_ticket(configuration_id=None))
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [{
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                    }]
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
+        if capability_name == "service.configuration.search":
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": []}},
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: None),
+    )
+
+    with pytest.raises(ValueError, match="CONFIGURATION_NOT_FOUND"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 123,
+                "begin_work": True,
+                "work_kind": "diagnostic",
+                "device_name": "DEVICE-123",
+            },
+        )
+
+
+def test_start_fails_closed_when_multiple_exact_configurations_exist(monkeypatch):
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return _ticket_read(_ticket(configuration_id=None))
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [{
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                    }]
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
+        if capability_name == "service.configuration.search":
+            item = {
+                "isActive": True,
+                "referenceTitle": "DEVICE-123",
+                "referenceNumber": "device-uid-123",
+                "companyID": 99,
+            }
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": [
+                    {**item, "id": 1001},
+                    {**item, "id": 1002},
+                ]}},
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: None),
+    )
+
+    with pytest.raises(ValueError, match="CONFIGURATION_NOT_UNIQUE"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 123,
+                "begin_work": True,
+                "work_kind": "diagnostic",
+                "device_name": "DEVICE-123",
+            },
+        )
