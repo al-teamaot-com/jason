@@ -1,4 +1,4 @@
-ARG BASE_IMAGE
+ARG BASE_IMAGE=jason-mcp:generic-governed-8f1e864947a2
 FROM ${BASE_IMAGE}
 
 USER root
