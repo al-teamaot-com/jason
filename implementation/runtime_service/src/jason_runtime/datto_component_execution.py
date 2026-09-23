@@ -25,6 +25,7 @@ from connectors.datto_rmm.auth import (
 from connectors.datto_rmm.component_execution import (
     ComponentAllowlistEntry,
     DattoRmmComponentExecutionPolicy,
+    PreparedComponentExecution,
     StaticComponentAllowlist,
 )
 from connectors.datto_rmm.execution_identity import (
@@ -51,7 +52,8 @@ from kernel.execution_providers import (
     ProviderStewardship,
     ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
@@ -505,6 +507,16 @@ def register_datto_component_execution_runtime_foundation(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedDattoComponentExecution:
+    request: ConnectorRequest
+    requested_device: str
+    selected_component: DattoApprovedComponent
+    prepared: PreparedComponentExecution
+    credentials: Mapping[str, str]
+    token: Any
+
+
 class DattoRmmComponentExecutionConnector:
     provider_name = "datto_rmm"
     capabilities = frozenset(
@@ -603,103 +615,62 @@ class DattoRmmComponentExecutionConnector:
 
         return status
 
-    def execute(
+    def prepare_governed_execution(
         self,
         request: ConnectorRequest,
-    ) -> ConnectorResult:
-        if (
-            request.context.capability
-            != "datto_rmm.component.execute"
-        ):
+    ) -> ProviderPreparedExecution:
+        if request.context.capability != "datto_rmm.component.execute":
             raise ConnectorAuthorizationError(
-                "Datto execution connector exposes only "
-                "component execution"
+                "Datto execution connector exposes only component execution"
             )
-
         if request.context.mode != "execute":
             raise ConnectorAuthorizationError(
                 "Datto component execution requires execute mode"
             )
 
         pilot = self._pilot
-
         if pilot is None:
-            raise PermissionError(
-                "DATTO_COMPONENT_EXECUTION_PILOT_DISABLED"
-            )
+            raise PermissionError("DATTO_COMPONENT_EXECUTION_PILOT_DISABLED")
 
-        requested_allowlist = str(
-            request.arguments.get("allowlist_name")
-            or ""
-        ).strip()
-
+        requested_allowlist = str(request.arguments.get("allowlist_name") or "").strip()
         if requested_allowlist != pilot.allowlist_name:
-            raise PermissionError(
-                "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
-            )
+            raise PermissionError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
 
         requested_device = str(
             request.arguments.get("device_uid")
             or request.arguments.get("resource_id")
             or ""
         ).strip()
-
         if not requested_device:
-            raise PermissionError(
-                "DATTO_COMPONENT_TARGET_REQUIRED"
-            )
+            raise PermissionError("DATTO_COMPONENT_TARGET_REQUIRED")
 
-        requested_class = str(
-            request.arguments.get("device_class")
-            or ""
-        ).strip()
-
+        requested_class = str(request.arguments.get("device_class") or "").strip()
         if requested_class.casefold() != pilot.device_class.casefold():
-            raise PermissionError(
-                "DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"
-            )
+            raise PermissionError("DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED")
 
+        requested_component_name = str(request.arguments.get("component_name") or "").strip()
         selected_component = resolve_datto_component(
             pilot.components,
             component_uid=request.arguments.get("component_uid"),
             component_name=request.arguments.get("component_name"),
             catalog_verified=True,
         )
-
-        variables = request.arguments.get(
-            "variables",
-            {},
-        )
-
+        variables = request.arguments.get("variables", {})
         allowlist = StaticComponentAllowlist(
             entries=(
                 ComponentAllowlistEntry(
                     allowlist_name=pilot.allowlist_name,
-                    canonical_component_id=(
-                        f"datto:{pilot.allowlist_name}:{selected_component.uid}"
-                    ),
+                    canonical_component_id=f"datto:{pilot.allowlist_name}:{selected_component.uid}",
                     display_name=selected_component.name,
                     provider_component_uid=selected_component.uid,
-                    allowed_target_classes=frozenset(
-                        {
-                            pilot.device_class,
-                        }
-                    ),
-                    # The production pilot deliberately permits no
-                    # conversation-supplied component variables.
+                    allowed_target_classes=frozenset({pilot.device_class}),
                     variable_policies=(),
-                    requires_per_run_approval=(
-                        selected_component.requires_explicit_approval
-                    ),
+                    requires_per_run_approval=selected_component.requires_explicit_approval,
                     status="active",
                 ),
             )
         )
-
-        policy = DattoRmmComponentExecutionPolicy(
-            allowlist=allowlist
-        )
-
+        policy = DattoRmmComponentExecutionPolicy(allowlist=allowlist)
         prepared = policy.prepare(
             allowlist_name=pilot.allowlist_name,
             device_uid=requested_device,
@@ -713,80 +684,113 @@ class DattoRmmComponentExecutionConnector:
             observed_component_name=selected_component.name,
         )
 
-        credentials = self._secrets.resolve(
-            DATTO_RMM_EXECUTION_LOGICAL_SECRET,
-            request.context,
+        credentials = dict(
+            self._secrets.resolve(DATTO_RMM_EXECUTION_LOGICAL_SECRET, request.context)
         )
-
         require_durable_credentials(credentials)
-
-        token = acquire_access_token(
-            credentials=credentials
+        token = acquire_access_token(credentials=credentials)
+        auth_headers = {
+            "Authorization": f"{token.token_type} {token.access_token}",
+            "Accept": "application/json",
+        }
+        target = self._transport.request(
+            method="GET",
+            url=credentials["api_url"].rstrip("/") + f"/api/v2/device/{requested_device}",
+            headers=auth_headers,
+            params=None,
+            json=None,
+            timeout_seconds=10.0,
+        )
+        if not isinstance(target, Mapping):
+            raise DattoRmmComponentExecutionVerificationError(
+                "target pre-read was not an object"
+            )
+        observed_target = str(
+            target.get("uid") or target.get("deviceUid") or target.get("resource_id") or ""
+        ).strip()
+        if observed_target != requested_device:
+            raise DattoRmmComponentExecutionVerificationError(
+                "target pre-read uid did not match requested endpoint"
+            )
+        if target.get("deleted") is True or target.get("suspended") is True:
+            raise PermissionError("DATTO_COMPONENT_TARGET_NOT_ACTIVE")
+        self._audit.record(
+            "connector.target.verified",
+            request.context,
+            {
+                "provider": self.provider_name,
+                "capability": request.context.capability,
+                "device_uid_present": True,
+            },
         )
 
-        try:
-            headers = {
-                "Authorization": (
-                    f"{token.token_type} {token.access_token}"
-                ),
-                "Accept": "application/json",
-                "Content-Type": "application/json",
+        symbolic_resolutions = {
+            "component": {
+                "symbolic": requested_component_name or selected_component.name,
+                "resolved": selected_component.uid,
             }
+        }
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method=prepared.provider_request.method,
+            resource_type="managed_endpoint",
+            resource_identifier=requested_device,
+            normalized_path=prepared.provider_request.path,
+            payload=dict(prepared.provider_request.body),
+            parameters={
+                "allowlist_name": pilot.allowlist_name,
+                "device_class": pilot.device_class,
+                "component_name": selected_component.name,
+            },
+            symbolic_resolutions=symbolic_resolutions,
+            opaque=_PreparedDattoComponentExecution(
+                request=request,
+                requested_device=requested_device,
+                selected_component=selected_component,
+                prepared=prepared,
+                credentials=credentials,
+                token=token,
+            ),
+        )
 
-            target = self._transport.request(
-                method="GET",
-                url=(
-                    credentials["api_url"].rstrip("/")
-                    + f"/api/v2/device/{requested_device}"
-                ),
-                headers={
-                    "Authorization": (
-                        f"{token.token_type} {token.access_token}"
-                    ),
-                    "Accept": "application/json",
-                },
-                params=None,
-                json=None,
-                timeout_seconds=10.0,
-            )
+    def execute_governed_execution(
+        self,
+        prepared_execution: ProviderPreparedExecution,
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedDattoComponentExecution):
+            raise PermissionError("invalid Datto component prepared execution")
+        request = opaque.request
+        requested_device = opaque.requested_device
+        selected_component = opaque.selected_component
+        prepared = opaque.prepared
+        credentials = opaque.credentials
+        token = opaque.token
 
-            if not isinstance(target, Mapping):
-                raise DattoRmmComponentExecutionVerificationError(
-                    "target pre-read was not an object"
-                )
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Datto provider capability changed")
+        if str(prepared.provider_request.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Datto quick-job method changed")
+        if normalize_provider_relative_path(prepared.provider_request.path) != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Datto quick-job path changed")
+        if requested_device != str(prepared_execution.resource_identifier or ""):
+            raise PermissionError("prepared Datto quick-job target changed")
+        if dict(prepared.provider_request.body) != dict(prepared_execution.payload):
+            raise PermissionError("prepared Datto quick-job payload changed")
+        expected_parameters = {
+            "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
+            "device_class": self._pilot.device_class if self._pilot is not None else "",
+            "component_name": selected_component.name,
+        }
+        if expected_parameters != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Datto quick-job material parameters changed")
 
-            observed_target = str(
-                target.get("uid")
-                or target.get("deviceUid")
-                or target.get("resource_id")
-                or ""
-            ).strip()
-
-            if observed_target != requested_device:
-                raise DattoRmmComponentExecutionVerificationError(
-                    "target pre-read uid did not match requested endpoint"
-                )
-
-            if target.get("deleted") is True or target.get("suspended") is True:
-                raise PermissionError(
-                    "DATTO_COMPONENT_TARGET_NOT_ACTIVE"
-                )
-
-            self._audit.record(
-                "connector.target.verified",
-                request.context,
-                {
-                    "provider": self.provider_name,
-                    "capability": request.context.capability,
-                    "device_uid_present": True,
-                },
-            )
-
-            url = (
-                credentials["api_url"].rstrip("/")
-                + prepared.provider_request.path
-            )
-
+        headers = {
+            "Authorization": f"{token.token_type} {token.access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        try:
             self._audit.record(
                 "connector.mutation.requested",
                 request.context,
@@ -794,28 +798,22 @@ class DattoRmmComponentExecutionConnector:
                     "provider": self.provider_name,
                     "capability": request.context.capability,
                     "operation": "quickjob",
-                    "argument_digest": (
-                        prepared.provider_request.digest()
-                    ),
+                    "argument_digest": prepared.provider_request.digest(),
                 },
             )
-
             created = self._transport.request(
                 method=prepared.provider_request.method,
-                url=url,
+                url=credentials["api_url"].rstrip("/") + prepared.provider_request.path,
                 headers=headers,
                 params=None,
                 json=prepared.provider_request.body,
                 timeout_seconds=20.0,
             )
-
             if not isinstance(created, Mapping):
                 raise DattoRmmComponentExecutionVerificationError(
                     "quick-job response was not an object"
                 )
-
             job_uid = self._job_uid(created)
-
             self._audit.record(
                 "connector.mutation.completed",
                 request.context,
@@ -827,50 +825,30 @@ class DattoRmmComponentExecutionConnector:
             )
 
             last_status = None
-
-            for index in range(
-                self._maximum_status_reads
-            ):
+            for index in range(self._maximum_status_reads):
                 status_payload = self._transport.request(
                     method="GET",
-                    url=(
-                        credentials["api_url"].rstrip("/")
-                        + f"/api/v2/job/{job_uid}"
-                    ),
+                    url=credentials["api_url"].rstrip("/") + f"/api/v2/job/{job_uid}",
                     headers={
-                        "Authorization": (
-                            f"{token.token_type} "
-                            f"{token.access_token}"
-                        ),
+                        "Authorization": f"{token.token_type} {token.access_token}",
                         "Accept": "application/json",
                     },
                     params=None,
                     json=None,
                     timeout_seconds=10.0,
                 )
-
-                if not isinstance(
-                    status_payload,
-                    Mapping,
-                ):
+                if not isinstance(status_payload, Mapping):
                     raise DattoRmmComponentExecutionVerificationError(
                         "job read response was not an object"
                     )
-
                 readback_uid = self._job_uid(status_payload)
-
                 if readback_uid != job_uid:
                     raise DattoRmmComponentExecutionVerificationError(
                         "job readback uid did not match the created quick job"
                     )
-
-                status = self._status(
-                    status_payload
-                )
-
+                status = self._status(status_payload)
                 last_status = status
                 normalized = status.casefold()
-
                 if normalized in _SUCCESS_STATUSES:
                     self._audit.record(
                         "connector.mutation.verified",
@@ -882,7 +860,6 @@ class DattoRmmComponentExecutionConnector:
                             "terminal_status": normalized,
                         },
                     )
-
                     return ConnectorResult(
                         capability=request.context.capability,
                         provider=self.provider_name,
@@ -895,29 +872,16 @@ class DattoRmmComponentExecutionConnector:
                             "component_name": selected_component.name,
                             "readback_verified": True,
                             "completion_verified": True,
-                            "allowlist_name": (
-                                pilot.allowlist_name
-                            ),
+                            "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
                         },
-                        evidence_ids=(
-                            f"datto-rmm:job:{job_uid}",
-                        ),
+                        evidence_ids=(f"datto-rmm:job:{job_uid}",),
                     )
-
                 if normalized in _FAILURE_STATUSES:
                     raise DattoRmmComponentExecutionVerificationError(
                         "Datto quick job reached a failure terminal state"
                     )
-
-                if (
-                    index + 1
-                    < self._maximum_status_reads
-                    and self._status_interval_seconds
-                    > 0
-                ):
-                    self._sleeper(
-                        self._status_interval_seconds
-                    )
+                if index + 1 < self._maximum_status_reads and self._status_interval_seconds > 0:
+                    self._sleeper(self._status_interval_seconds)
 
             self._audit.record(
                 "connector.mutation.accepted",
@@ -930,7 +894,6 @@ class DattoRmmComponentExecutionConnector:
                     "completion_verified": False,
                 },
             )
-
             return ConnectorResult(
                 capability=request.context.capability,
                 provider=self.provider_name,
@@ -943,16 +906,13 @@ class DattoRmmComponentExecutionConnector:
                     "component_name": selected_component.name,
                     "readback_verified": True,
                     "completion_verified": False,
-                    "allowlist_name": pilot.allowlist_name,
+                    "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
                 },
-                evidence_ids=(
-                    f"datto-rmm:job:{job_uid}",
-                ),
+                evidence_ids=(f"datto-rmm:job:{job_uid}",),
                 warnings=(
                     "Datto quick job is still asynchronous; verify terminal completion with automation.job.read.",
                 ),
             )
-
         except Exception as error:
             self._audit.record(
                 "connector.mutation.failed",
@@ -964,9 +924,14 @@ class DattoRmmComponentExecutionConnector:
                 },
             )
             raise
-
         finally:
             token = None
+
+    def execute(
+        self,
+        request: ConnectorRequest,
+    ) -> ConnectorResult:
+        return self.execute_governed_execution(self.prepare_governed_execution(request))
 
 
 def build_datto_component_execution_invoker(

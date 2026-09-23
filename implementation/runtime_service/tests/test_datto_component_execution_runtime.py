@@ -634,3 +634,38 @@ def test_execution_fails_closed_outside_exact_pilot(
         )
 
     assert transport.calls == []
+
+
+def test_governed_prepare_is_side_effect_free_and_secret_free(monkeypatch):
+    mock_access_token(monkeypatch)
+    value, transport, audit = connector()
+
+    prepared = value.prepare_governed_execution(execution_request())
+
+    assert [call["method"] for call in transport.calls] == ["GET"]
+    assert prepared.resource_identifier == "device-uid-1"
+    assert prepared.action_method == "PUT"
+    assert prepared.normalized_path.endswith("/api/v2/device/device-uid-1/quickjob")
+    assert prepared.payload["jobComponent"]["componentUid"] == "component-uid-1"
+    assert prepared.symbolic_resolutions["component"] == {
+        "symbolic": "Pilot Diagnostic",
+        "resolved": "component-uid-1",
+    }
+    material = repr((prepared.payload, prepared.parameters, prepared.symbolic_resolutions))
+    assert "synthetic-token" not in material
+    assert "synthetic-key" not in material
+    assert "synthetic-secret" not in material
+
+
+def test_governed_execution_rejects_tampered_target_before_quickjob(monkeypatch):
+    from dataclasses import replace
+
+    mock_access_token(monkeypatch)
+    value, transport, audit = connector()
+    prepared = value.prepare_governed_execution(execution_request())
+    tampered = replace(prepared, resource_identifier="different-device")
+
+    with pytest.raises(PermissionError, match="target changed"):
+        value.execute_governed_execution(tampered)
+
+    assert [call["method"] for call in transport.calls] == ["GET"]

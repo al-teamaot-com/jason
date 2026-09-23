@@ -39,7 +39,8 @@ from kernel.execution_providers import (
     ProviderStewardship,
     ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
@@ -273,6 +274,19 @@ def _parse_utc(value: object) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedDattoEdrScan:
+    request: ConnectorRequest
+    resource_id: str
+    agent_id: str
+    scan_type: str
+    task_name: str
+    path: str
+    payload: Mapping[str, Any]
+    api_url: str
+    api_token: str
+
+
 class DattoEdrScanConnector:
     provider_name = "datto_edr"
     capabilities = frozenset({DATTO_EDR_PROVIDER_CAPABILITY})
@@ -288,7 +302,9 @@ class DattoEdrScanConnector:
         self._transport = transport
         self._audit = audit
 
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
         if request.context.capability != DATTO_EDR_PROVIDER_CAPABILITY:
             raise ConnectorAuthorizationError("connector exposes only Datto AV scan start")
         if request.context.mode != "execute":
@@ -312,7 +328,6 @@ class DattoEdrScanConnector:
         if not api_url or not api_token:
             raise ValueError("Datto EDR credential is incomplete")
 
-        params = {"access_token": api_token}
         filter_json = json.dumps(
             {"where": {"id": agent_id}, "limit": 2},
             separators=(",", ":"),
@@ -321,7 +336,7 @@ class DattoEdrScanConnector:
             method="GET",
             url=f"{api_url}/AgentDetails",
             headers={"Accept": "application/json"},
-            params={"filter": filter_json, **params},
+            params={"filter": filter_json, "access_token": api_token},
             json=None,
             timeout_seconds=10.0,
         )
@@ -359,23 +374,74 @@ class DattoEdrScanConnector:
             "options": options,
             "taskName": task_name,
         }
+        path = "/agents/scan"
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method="POST",
+            resource_type="endpoint_security_agent",
+            resource_identifier=agent_id,
+            normalized_path=path,
+            payload=payload,
+            parameters={
+                "resource_id": resource_id,
+                "agent_id": agent_id,
+                "scan_type": scan_type,
+            },
+            symbolic_resolutions={},
+            opaque=_PreparedDattoEdrScan(
+                request=request,
+                resource_id=resource_id,
+                agent_id=agent_id,
+                scan_type=scan_type,
+                task_name=task_name,
+                path=path,
+                payload=payload,
+                api_url=api_url,
+                api_token=api_token,
+            ),
+        )
+
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedDattoEdrScan):
+            raise PermissionError("invalid Datto EDR scan prepared execution")
+        request = opaque.request
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Datto EDR capability changed")
+        if str(prepared_execution.action_method).strip().upper() != "POST":
+            raise PermissionError("prepared Datto EDR scan method changed")
+        if normalize_provider_relative_path(opaque.path) != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Datto EDR scan path changed")
+        if opaque.agent_id != str(prepared_execution.resource_identifier or ""):
+            raise PermissionError("prepared Datto EDR scan target changed")
+        if dict(opaque.payload) != dict(prepared_execution.payload):
+            raise PermissionError("prepared Datto EDR scan payload changed")
+        expected_parameters = {
+            "resource_id": opaque.resource_id,
+            "agent_id": opaque.agent_id,
+            "scan_type": opaque.scan_type,
+        }
+        if expected_parameters != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Datto EDR scan parameters changed")
 
         self._audit.record(
             "connector.mutation.requested",
             request.context,
             {
                 "provider": self.provider_name,
-                "operation": "/agents/scan",
-                "scan_type": scan_type,
+                "operation": opaque.path,
+                "scan_type": opaque.scan_type,
                 "exact_agent": True,
             },
         )
         response = self._transport.request(
             method="POST",
-            url=f"{api_url}/agents/scan",
+            url=f"{opaque.api_url}{opaque.path}",
             headers={"Accept": "application/json", "Content-Type": "application/json"},
-            params=params,
-            json=payload,
+            params={"access_token": opaque.api_token},
+            json=opaque.payload,
             timeout_seconds=20.0,
         )
         self._audit.record(
@@ -383,11 +449,10 @@ class DattoEdrScanConnector:
             request.context,
             {
                 "provider": self.provider_name,
-                "operation": "/agents/scan",
+                "operation": opaque.path,
                 "provider_attempts": 1,
             },
         )
-
         task_id = ""
         if isinstance(response, Mapping):
             task_id = str(response.get("id") or response.get("taskId") or "").strip()
@@ -396,16 +461,21 @@ class DattoEdrScanConnector:
             provider=self.provider_name,
             data={
                 "status": "accepted",
-                "resource_id": resource_id,
-                "agent_id": agent_id,
-                "scan_type": scan_type,
-                "task_name": task_name,
+                "resource_id": opaque.resource_id,
+                "agent_id": opaque.agent_id,
+                "scan_type": opaque.scan_type,
+                "task_name": opaque.task_name,
                 "task_id": task_id or None,
                 "provider_accepted": True,
                 "readback_required": True,
             },
-            evidence_ids=(f"datto-edr:agent:{agent_id}:scan:{scan_type}",),
+            evidence_ids=(
+                f"datto-edr:agent:{opaque.agent_id}:scan:{opaque.scan_type}",
+            ),
         )
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        return self.execute_governed_execution(self.prepare_governed_execution(request))
 
 
 def build_datto_edr_scan_invoker(

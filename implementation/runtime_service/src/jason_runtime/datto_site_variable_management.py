@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,7 +39,8 @@ from kernel.execution_providers import (
     ProviderStewardship,
     ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
@@ -325,6 +327,24 @@ def _variable_id(row: Mapping[str, Any]) -> str:
 
 def _variable_name(row: Mapping[str, Any]) -> str:
     return str(row.get("name") or row.get("variableName") or "").strip()
+@dataclass(frozen=True, slots=True)
+class _PreparedDattoSiteVariableMutation:
+    request: ConnectorRequest
+    site_uid: str
+    name: str
+    masked: bool
+    target_variable_id: str
+    method: str
+    path: str
+    body: Mapping[str, Any]
+    credentials: Mapping[str, str]
+    token: Any
+
+
+def _secret_commitment(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 class DattoSiteVariableManagementConnector:
     provider_name = "datto_rmm"
     capabilities = frozenset({DATTO_SITE_VARIABLE_CREATE, DATTO_SITE_VARIABLE_UPDATE})
@@ -349,7 +369,9 @@ class DattoSiteVariableManagementConnector:
             )
         return _variable_rows(payload)
 
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
         if request.context.capability not in self.capabilities:
             raise ConnectorAuthorizationError(
                 "Datto site-variable connector exposes create and update only"
@@ -368,7 +390,6 @@ class DattoSiteVariableManagementConnector:
             raise ValueError("value must be a string")
         if len(value) > 20000:
             raise ValueError("value exceeds the Datto site-variable limit")
-
         unknown_allowed = {"site_uid", "name", "value", "masked", "variable_id"}
         unknown = set(request.arguments) - unknown_allowed
         if unknown:
@@ -376,9 +397,8 @@ class DattoSiteVariableManagementConnector:
                 "unsupported site-variable arguments: " + ", ".join(sorted(unknown))
             )
 
-        credentials = self._secrets.resolve(
-            DATTO_SITE_VARIABLE_LOGICAL_SECRET,
-            request.context,
+        credentials = dict(
+            self._secrets.resolve(DATTO_SITE_VARIABLE_LOGICAL_SECRET, request.context)
         )
         require_durable_credentials(credentials)
         token = acquire_access_token(credentials=credentials)
@@ -388,40 +408,127 @@ class DattoSiteVariableManagementConnector:
             "Content-Type": "application/json",
         }
         base = credentials["api_url"].rstrip("/")
+        before = self._list(base=base, site_uid=site_uid, headers=headers)
 
+        if request.context.capability == DATTO_SITE_VARIABLE_CREATE:
+            if any(_variable_name(row).casefold() == name.casefold() for row in before):
+                raise DattoSiteVariableVerificationError(
+                    "a site variable with that name already exists"
+                )
+            masked = bool(request.arguments.get("masked", True))
+            path = f"/api/v2/site/{site_uid}/variable"
+            method = "PUT"
+            body = {"name": name, "value": value, "masked": masked}
+            target_variable_id = ""
+            safe_payload = {
+                "name": name,
+                "masked": masked,
+                "value_sha256": _secret_commitment(value),
+            }
+        else:
+            variable_id = _canonical_uuid(
+                request.arguments.get("variable_id"), "variable_id"
+            )
+            current = next(
+                (row for row in before if _variable_id(row) == variable_id),
+                None,
+            )
+            if current is None:
+                raise DattoSiteVariableVerificationError(
+                    "the requested site variable was not found in the site"
+                )
+            path = f"/api/v2/site/{site_uid}/variables/{variable_id}"
+            method = "POST"
+            body = {"name": name, "value": value}
+            masked = bool(current.get("masked", False))
+            target_variable_id = variable_id
+            safe_payload = {
+                "name": name,
+                "value_sha256": _secret_commitment(value),
+            }
+
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method=method,
+            resource_type="management_site_variable",
+            resource_identifier=f"{site_uid}:{target_variable_id or name}",
+            normalized_path=path,
+            payload=safe_payload,
+            parameters={
+                "site_uid": site_uid,
+                "variable_id": target_variable_id,
+                "name": name,
+                "operation": (
+                    "create"
+                    if request.context.capability == DATTO_SITE_VARIABLE_CREATE
+                    else "update"
+                ),
+            },
+            symbolic_resolutions={},
+            opaque=_PreparedDattoSiteVariableMutation(
+                request=request,
+                site_uid=site_uid,
+                name=name,
+                masked=masked,
+                target_variable_id=target_variable_id,
+                method=method,
+                path=path,
+                body=body,
+                credentials=credentials,
+                token=token,
+            ),
+        )
+
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedDattoSiteVariableMutation):
+            raise PermissionError("invalid Datto site-variable prepared execution")
+        request = opaque.request
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Datto site-variable capability changed")
+        if opaque.method.upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Datto site-variable method changed")
+        if normalize_provider_relative_path(opaque.path) != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Datto site-variable path changed")
+        expected_identifier = f"{opaque.site_uid}:{opaque.target_variable_id or opaque.name}"
+        if expected_identifier != str(prepared_execution.resource_identifier or ""):
+            raise PermissionError("prepared Datto site-variable target changed")
+
+        body_value = opaque.body.get("value")
+        if not isinstance(body_value, str):
+            raise PermissionError("prepared Datto site-variable secret value is invalid")
+        expected_safe_payload = {
+            "name": opaque.name,
+            "value_sha256": _secret_commitment(body_value),
+        }
+        if request.context.capability == DATTO_SITE_VARIABLE_CREATE:
+            expected_safe_payload["masked"] = opaque.masked
+        if expected_safe_payload != dict(prepared_execution.payload):
+            raise PermissionError("prepared Datto site-variable payload commitment changed")
+        expected_parameters = {
+            "site_uid": opaque.site_uid,
+            "variable_id": opaque.target_variable_id,
+            "name": opaque.name,
+            "operation": (
+                "create"
+                if request.context.capability == DATTO_SITE_VARIABLE_CREATE
+                else "update"
+            ),
+        }
+        if expected_parameters != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Datto site-variable parameters changed")
+
+        credentials = opaque.credentials
+        token = opaque.token
+        headers = {
+            "Authorization": f"{token.token_type} {token.access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        base = credentials["api_url"].rstrip("/")
         try:
-            before = self._list(base=base, site_uid=site_uid, headers=headers)
-            if request.context.capability == DATTO_SITE_VARIABLE_CREATE:
-                if any(_variable_name(row).casefold() == name.casefold() for row in before):
-                    raise DattoSiteVariableVerificationError(
-                        "a site variable with that name already exists"
-                    )
-                masked = bool(request.arguments.get("masked", True))
-                mutation_url = f"{base}/api/v2/site/{site_uid}/variable"
-                method = "PUT"
-                body = {"name": name, "value": value, "masked": masked}
-                target_variable_id = ""
-            else:
-                variable_id = _canonical_uuid(
-                    request.arguments.get("variable_id"),
-                    "variable_id",
-                )
-                current = next(
-                    (row for row in before if _variable_id(row) == variable_id),
-                    None,
-                )
-                if current is None:
-                    raise DattoSiteVariableVerificationError(
-                        "the requested site variable was not found in the site"
-                    )
-                mutation_url = (
-                    f"{base}/api/v2/site/{site_uid}/variables/{variable_id}"
-                )
-                method = "POST"
-                body = {"name": name, "value": value}
-                masked = bool(current.get("masked", False))
-                target_variable_id = variable_id
-
             self._audit.record(
                 "connector.mutation.requested",
                 request.context,
@@ -429,41 +536,37 @@ class DattoSiteVariableManagementConnector:
                     "provider": self.provider_name,
                     "capability": request.context.capability,
                     "site_uid_present": True,
-                    "variable_id_present": bool(target_variable_id),
+                    "variable_id_present": bool(opaque.target_variable_id),
                     "variable_name_present": True,
                     "secret_value_logged": False,
                 },
             )
             self._transport.request(
-                method=method,
-                url=mutation_url,
+                method=opaque.method,
+                url=base + opaque.path,
                 headers=headers,
                 params=None,
-                json=body,
+                json=opaque.body,
                 timeout_seconds=20.0,
             )
-            after = self._list(base=base, site_uid=site_uid, headers=headers)
+            after = self._list(base=base, site_uid=opaque.site_uid, headers=headers)
 
             if request.context.capability == DATTO_SITE_VARIABLE_CREATE:
                 match = next(
-                    (
-                        row
-                        for row in after
-                        if _variable_name(row).casefold() == name.casefold()
-                    ),
+                    (row for row in after if _variable_name(row).casefold() == opaque.name.casefold()),
                     None,
                 )
             else:
                 match = next(
-                    (row for row in after if _variable_id(row) == target_variable_id),
+                    (row for row in after if _variable_id(row) == opaque.target_variable_id),
                     None,
                 )
-            if match is None or _variable_name(match) != name:
+            if match is None or _variable_name(match) != opaque.name:
                 raise DattoSiteVariableVerificationError(
                     "post-mutation readback did not verify the site variable"
                 )
 
-            resolved_id = _variable_id(match) or target_variable_id
+            resolved_id = _variable_id(match) or opaque.target_variable_id
             self._audit.record(
                 "connector.mutation.verified",
                 request.context,
@@ -479,16 +582,16 @@ class DattoSiteVariableManagementConnector:
                 provider=self.provider_name,
                 data={
                     "status": "verified",
-                    "site_uid": site_uid,
+                    "site_uid": opaque.site_uid,
                     "variable_id": resolved_id,
-                    "name": name,
-                    "masked": masked,
+                    "name": opaque.name,
+                    "masked": opaque.masked,
                     "mutation_performed": True,
                     "readback_verified": True,
                     "value_disclosed": False,
                 },
                 evidence_ids=(
-                    f"datto-rmm:site:{site_uid}:variable:{resolved_id or name}",
+                    f"datto-rmm:site:{opaque.site_uid}:variable:{resolved_id or opaque.name}",
                 ),
             )
         except Exception as error:
@@ -505,6 +608,11 @@ class DattoSiteVariableManagementConnector:
             raise
         finally:
             token = None
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        return self.execute_governed_execution(self.prepare_governed_execution(request))
+
+
 def build_site_variable_invoker(
     *,
     openbao_url: str,

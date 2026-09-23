@@ -5,15 +5,21 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from connectors.autotask.connector import AutotaskConnector
 from connectors.autotask.impersonating_connector import TrustedPrincipalBindingResolver
-from connectors.autotask.mutation_connector import AUTOTASK_MUTATION_ENABLED_ENV
+from connectors.autotask.mutation_connector import (
+    AUTOTASK_MUTATION_ENABLED_ENV,
+    AutotaskMutationConnector,
+    autotask_mutation_execution_enabled,
+)
 from connectors.autotask.procurement_mutation_connector import (
     AutotaskProcurementMutationConnector,
 )
+from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import (
-    AuditSink, ConnectorRequest, ConnectorResult, HttpTransport,
+    AuditSink, ConnectorAuthorizationError, ConnectorRequest, ConnectorResult, HttpTransport,
 )
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService
@@ -22,7 +28,8 @@ from kernel.execution_providers import (
     ProviderFeatures, ProviderHealth, ProviderLifecycle, ProviderLimits,
     ProviderStewardship, ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_mutation_capability_catalog import (
     AUTOTASK_MUTATION_CAPABILITIES,
@@ -165,6 +172,14 @@ def _provider(now: datetime) -> ExecutionProvider:
             "activation_state": "procurement_mcp_source_only_not_activated",
         },
     )
+@dataclass(frozen=True, slots=True)
+class _PreparedAutotaskProcurement:
+    request: ConnectorRequest
+    entity: str
+    resource_id: int | None
+    prepared: PreparedRequest
+
+
 class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnector):
     logical_secret = "autotask.write"
 
@@ -201,28 +216,157 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
         item = observed.get("item")
         return item if isinstance(item, Mapping) else observed
 
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        result = super().execute(request)
-        operation = request.context.capability
+    def _normalized_request(self, request: ConnectorRequest) -> ConnectorRequest:
+        if request.context.capability not in self.capabilities:
+            raise ConnectorAuthorizationError(
+                "Capability is not registered for procurement mutation."
+            )
+        payload = self._validated_payload(
+            request.context.capability,
+            request.arguments.get("payload"),
+        )
+        arguments = {**dict(request.arguments), "payload": payload}
+        if request.context.capability == "autotask.ticket.charge.update":
+            raw_ticket_id = request.arguments.get("ticketID") or request.arguments.get("ticket_id")
+            if (
+                isinstance(raw_ticket_id, bool)
+                or not str(raw_ticket_id or "").isdigit()
+                or int(raw_ticket_id) < 1
+            ):
+                raise ValueError(
+                    "ticket charge update requires positive ticketID route selector"
+                )
+            arguments["ticketID"] = int(raw_ticket_id)
+        return ConnectorRequest(context=request.context, arguments=arguments)
+
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
+        normalized = self._normalized_request(request)
+        if normalized.context.mode != "execute":
+            raise ConnectorAuthorizationError("Autotask mutation requires explicit execute mode.")
+        if not autotask_mutation_execution_enabled():
+            raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+
+        credentials = self._secrets.resolve(self.logical_secret, normalized.context)
+        prepared = AutotaskMutationConnector.prepare_request(self, normalized, credentials)
+        operation = normalized.context.capability
         entity = PROVIDER_ENTITY[operation]
+        payload = dict(normalized.arguments.get("payload") or {})
+        resource_id = int(payload["id"]) if operation.endswith(".update") else None
+        relative_path = prepared.audit_operation or urlsplit(prepared.url).path
+        route_parameters = {}
+        if operation.startswith("autotask.ticket.charge."):
+            raw_ticket = normalized.arguments.get("ticketID") or payload.get("ticketID")
+            if raw_ticket is not None:
+                route_parameters["ticketID"] = int(raw_ticket)
+        return ProviderPreparedExecution(
+            provider_capability=operation,
+            action_method=prepared.method,
+            resource_type=f"autotask_{entity}",
+            resource_identifier=str(resource_id) if resource_id is not None else None,
+            normalized_path=relative_path,
+            payload=dict(prepared.json or {}),
+            parameters={
+                "entity": entity,
+                "operation": operation,
+                **route_parameters,
+                **dict(prepared.params or {}),
+            },
+            symbolic_resolutions={},
+            opaque=_PreparedAutotaskProcurement(
+                request=normalized,
+                entity=entity,
+                resource_id=resource_id,
+                prepared=prepared,
+            ),
+        )
+
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedAutotaskProcurement):
+            raise PermissionError("invalid Autotask procurement prepared execution")
+        request = opaque.request
+        prepared = opaque.prepared
+        operation = request.context.capability
+        if prepared_execution.provider_capability != operation:
+            raise PermissionError("prepared Autotask procurement capability changed")
+        if str(prepared.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Autotask procurement method changed")
+        observed_path = normalize_provider_relative_path(
+            prepared.audit_operation or urlsplit(prepared.url).path
+        )
+        if observed_path != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Autotask procurement path changed")
+        expected_resource = str(opaque.resource_id) if opaque.resource_id is not None else None
+        if expected_resource != prepared_execution.resource_identifier:
+            raise PermissionError("prepared Autotask procurement target changed")
+        if dict(prepared.json or {}) != dict(prepared_execution.payload):
+            raise PermissionError("prepared Autotask procurement payload changed")
+        expected_parameters = {
+            "entity": opaque.entity,
+            "operation": operation,
+        }
         payload = dict(request.arguments.get("payload") or {})
-        resource_id = self._id(result.data) if operation.endswith(".create") else int(payload["id"])
-        observed = self._readback(request, entity, resource_id)
+        if operation.startswith("autotask.ticket.charge."):
+            raw_ticket = request.arguments.get("ticketID") or payload.get("ticketID")
+            if raw_ticket is not None:
+                expected_parameters["ticketID"] = int(raw_ticket)
+        expected_parameters.update(dict(prepared.params or {}))
+        if expected_parameters != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Autotask procurement parameters changed")
+
+        self._audit_mutation_event("connector.mutation.requested", request)
+        try:
+            if not autotask_mutation_execution_enabled():
+                raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+            provider_data = self._transport.request(
+                method=prepared.method,
+                url=prepared.url,
+                headers=prepared.headers,
+                params=prepared.params,
+                json=prepared.json,
+                timeout_seconds=prepared.timeout_seconds,
+            )
+        except Exception as error:
+            self._audit_mutation_event(
+                "connector.mutation.failed", request, error_type=type(error).__name__
+            )
+            raise
+        self._audit_mutation_event("connector.mutation.completed", request)
+        result = ConnectorResult(
+            capability=operation,
+            provider=self.provider_name,
+            data=provider_data,
+        )
+
+        resource_id = (
+            self._id(result.data)
+            if operation.endswith(".create")
+            else int(payload["id"])
+        )
+        observed = self._readback(request, opaque.entity, resource_id)
         if int(observed.get("id", 0)) != resource_id:
             raise ValueError("AUTOTASK_PROCUREMENT_READBACK_ID_MISMATCH")
         data = dict(result.data)
         data["jasonVerification"] = {
             "readbackVerified": True,
             "resourceId": resource_id,
-            "entity": entity,
+            "entity": opaque.entity,
         }
         return ConnectorResult(
             capability=result.capability,
             provider=result.provider,
             data=data,
-            evidence_ids=(*result.evidence_ids, f"autotask:{entity}:{resource_id}"),
+            evidence_ids=(*result.evidence_ids, f"autotask:{opaque.entity}:{resource_id}"),
             warnings=result.warnings,
         )
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        return self.execute_governed_execution(self.prepare_governed_execution(request))
+
 
 def register_autotask_procurement_runtime_foundation(
     *, capabilities: CapabilityRegistryService,

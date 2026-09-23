@@ -147,3 +147,57 @@ def test_site_variable_management_reuses_existing_datto_execution_identity():
     assert module.SITE_VARIABLE_SECRET_ID_ENV == (
         "JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_PATH"
     )
+
+
+def test_governed_create_plan_commits_secret_without_disclosing_it(monkeypatch):
+    monkeypatch.setattr(
+        module,
+        "acquire_access_token",
+        lambda credentials: SimpleNamespace(token_type="Bearer", access_token="token"),
+    )
+    transport = Transport([{"variables": []}])
+    connector = module.DattoSiteVariableManagementConnector(
+        secrets=Secrets(), transport=transport, audit=Audit()
+    )
+    prepared = connector.prepare_governed_execution(
+        request(
+            module.DATTO_SITE_VARIABLE_CREATE,
+            {"site_uid": SITE, "name": "BackupKey", "value": "super-secret", "masked": True},
+        )
+    )
+
+    assert [call["method"] for call in transport.calls] == ["GET"]
+    assert prepared.action_method == "PUT"
+    assert prepared.resource_identifier == f"{SITE}:BackupKey"
+    assert prepared.payload["name"] == "BackupKey"
+    assert prepared.payload["masked"] is True
+    assert len(prepared.payload["value_sha256"]) == 64
+    assert "super-secret" not in repr(prepared)
+    assert "super-secret" not in repr((prepared.payload, prepared.parameters, prepared.symbolic_resolutions))
+
+
+def test_governed_site_variable_rejects_tampered_secret_commitment_before_write(monkeypatch):
+    from dataclasses import replace
+
+    monkeypatch.setattr(
+        module,
+        "acquire_access_token",
+        lambda credentials: SimpleNamespace(token_type="Bearer", access_token="token"),
+    )
+    transport = Transport([{"variables": []}])
+    connector = module.DattoSiteVariableManagementConnector(
+        secrets=Secrets(), transport=transport, audit=Audit()
+    )
+    prepared = connector.prepare_governed_execution(
+        request(
+            module.DATTO_SITE_VARIABLE_CREATE,
+            {"site_uid": SITE, "name": "BackupKey", "value": "super-secret", "masked": True},
+        )
+    )
+    tampered = replace(prepared, payload={**dict(prepared.payload), "value_sha256": "0" * 64})
+
+    import pytest
+    with pytest.raises(PermissionError, match="payload commitment changed"):
+        connector.execute_governed_execution(tampered)
+
+    assert [call["method"] for call in transport.calls] == ["GET"]

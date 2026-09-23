@@ -152,4 +152,4 @@ class PreparedExecutionPlan:
     """
 
     plan: ExecutionPlan
-    opaque: Any = None
+    opaque: Any = field(default=None, repr=False)

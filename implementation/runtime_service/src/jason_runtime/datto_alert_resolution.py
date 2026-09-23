@@ -41,7 +41,8 @@ from kernel.execution_providers import (
     ProviderStewardship,
     ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
@@ -309,6 +310,18 @@ def register_datto_alert_resolution_runtime_foundation(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedDattoAlertResolution:
+    request: ConnectorRequest
+    alert_uid: str
+    device_uid: str
+    already_resolved: bool
+    method: str
+    path: str
+    credentials: Mapping[str, str]
+    token: Any
+
+
 class DattoRmmAlertResolutionConnector:
     provider_name = "datto_rmm"
     capabilities = frozenset({DATTO_RMM_PROVIDER_CAPABILITY})
@@ -335,7 +348,9 @@ class DattoRmmAlertResolutionConnector:
     def _alert_uid(payload: Mapping[str, Any]) -> str:
         return str(payload.get("alertUid") or payload.get("uid") or "").strip()
 
-    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
         if request.context.capability != DATTO_RMM_PROVIDER_CAPABILITY:
             raise ConnectorAuthorizationError(
                 "Datto alert-resolution connector exposes only alert resolution"
@@ -353,58 +368,116 @@ class DattoRmmAlertResolutionConnector:
                 "unsupported alert-resolution arguments: " + ", ".join(sorted(unknown))
             )
 
-        credentials = self._secrets.resolve(
-            DATTO_RMM_EXECUTION_LOGICAL_SECRET,
-            request.context,
+        credentials = dict(
+            self._secrets.resolve(DATTO_RMM_EXECUTION_LOGICAL_SECRET, request.context)
         )
         require_durable_credentials(credentials)
         token = acquire_access_token(credentials=credentials)
-
         headers = {
             "Authorization": f"{token.token_type} {token.access_token}",
             "Accept": "application/json",
         }
         base = credentials["api_url"].rstrip("/")
-        alert_url = f"{base}/api/v2/alert/{alert_uid}"
-
-        try:
-            before = self._transport.request(
-                method="GET",
-                url=alert_url,
-                headers=headers,
-                params=None,
-                json=None,
-                timeout_seconds=10.0,
+        alert_path = f"/api/v2/alert/{alert_uid}"
+        before = self._transport.request(
+            method="GET",
+            url=base + alert_path,
+            headers=headers,
+            params=None,
+            json=None,
+            timeout_seconds=10.0,
+        )
+        if not isinstance(before, Mapping):
+            raise DattoRmmAlertResolutionVerificationError(
+                "alert pre-read was not an object"
             )
-            if not isinstance(before, Mapping):
-                raise DattoRmmAlertResolutionVerificationError(
-                    "alert pre-read was not an object"
-                )
-            if self._alert_uid(before) != alert_uid:
-                raise DattoRmmAlertResolutionVerificationError(
-                    "alert pre-read UID did not match requested alert"
-                )
-            if self._alert_device_uid(before) != device_uid:
-                raise DattoRmmAlertResolutionVerificationError(
-                    "alert pre-read device UID did not match requested endpoint"
-                )
+        if self._alert_uid(before) != alert_uid:
+            raise DattoRmmAlertResolutionVerificationError(
+                "alert pre-read UID did not match requested alert"
+            )
+        if self._alert_device_uid(before) != device_uid:
+            raise DattoRmmAlertResolutionVerificationError(
+                "alert pre-read device UID did not match requested endpoint"
+            )
 
-            if before.get("resolved") is True:
-                return ConnectorResult(
-                    capability=request.context.capability,
-                    provider=self.provider_name,
-                    data={
-                        "status": "verified",
-                        "alert_uid": alert_uid,
-                        "device_uid": device_uid,
-                        "resolved": True,
-                        "already_resolved": True,
-                        "mutation_performed": False,
-                        "readback_verified": True,
-                    },
-                    evidence_ids=(f"datto-rmm:alert:{alert_uid}",),
-                )
+        already_resolved = before.get("resolved") is True
+        method = "NOOP" if already_resolved else "POST"
+        path = f"{alert_path}/resolve"
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method=method,
+            resource_type="endpoint_alert",
+            resource_identifier=alert_uid,
+            normalized_path=path,
+            payload={},
+            parameters={
+                "alert_uid": alert_uid,
+                "device_uid": device_uid,
+                "already_resolved": already_resolved,
+            },
+            symbolic_resolutions={},
+            opaque=_PreparedDattoAlertResolution(
+                request=request,
+                alert_uid=alert_uid,
+                device_uid=device_uid,
+                already_resolved=already_resolved,
+                method=method,
+                path=path,
+                credentials=credentials,
+                token=token,
+            ),
+        )
 
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedDattoAlertResolution):
+            raise PermissionError("invalid Datto alert-resolution prepared execution")
+        request = opaque.request
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Datto alert capability changed")
+        if opaque.method != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Datto alert action changed")
+        if normalize_provider_relative_path(opaque.path) != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Datto alert path changed")
+        if opaque.alert_uid != str(prepared_execution.resource_identifier or ""):
+            raise PermissionError("prepared Datto alert target changed")
+        if dict(prepared_execution.payload):
+            raise PermissionError("Datto alert resolution plan must not contain a provider body")
+        expected_parameters = {
+            "alert_uid": opaque.alert_uid,
+            "device_uid": opaque.device_uid,
+            "already_resolved": opaque.already_resolved,
+        }
+        if expected_parameters != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Datto alert parameters changed")
+
+        if opaque.already_resolved:
+            return ConnectorResult(
+                capability=request.context.capability,
+                provider=self.provider_name,
+                data={
+                    "status": "verified",
+                    "alert_uid": opaque.alert_uid,
+                    "device_uid": opaque.device_uid,
+                    "resolved": True,
+                    "already_resolved": True,
+                    "mutation_performed": False,
+                    "readback_verified": True,
+                },
+                evidence_ids=(f"datto-rmm:alert:{opaque.alert_uid}",),
+            )
+
+        credentials = opaque.credentials
+        token = opaque.token
+        headers = {
+            "Authorization": f"{token.token_type} {token.access_token}",
+            "Accept": "application/json",
+        }
+        base = credentials["api_url"].rstrip("/")
+        alert_path = f"/api/v2/alert/{opaque.alert_uid}"
+        try:
             self._audit.record(
                 "connector.mutation.requested",
                 request.context,
@@ -416,16 +489,14 @@ class DattoRmmAlertResolutionConnector:
                     "device_uid_present": True,
                 },
             )
-
             self._transport.request(
                 method="POST",
-                url=f"{alert_url}/resolve",
+                url=base + opaque.path,
                 headers=headers,
                 params=None,
                 json=None,
                 timeout_seconds=20.0,
             )
-
             self._audit.record(
                 "connector.mutation.completed",
                 request.context,
@@ -435,10 +506,9 @@ class DattoRmmAlertResolutionConnector:
                     "provider_attempts": 1,
                 },
             )
-
             after = self._transport.request(
                 method="GET",
-                url=alert_url,
+                url=base + alert_path,
                 headers=headers,
                 params=None,
                 json=None,
@@ -448,11 +518,11 @@ class DattoRmmAlertResolutionConnector:
                 raise DattoRmmAlertResolutionVerificationError(
                     "alert post-read was not an object"
                 )
-            if self._alert_uid(after) != alert_uid:
+            if self._alert_uid(after) != opaque.alert_uid:
                 raise DattoRmmAlertResolutionVerificationError(
                     "alert post-read UID did not match requested alert"
                 )
-            if self._alert_device_uid(after) != device_uid:
+            if self._alert_device_uid(after) != opaque.device_uid:
                 raise DattoRmmAlertResolutionVerificationError(
                     "alert post-read device UID did not match requested endpoint"
                 )
@@ -460,7 +530,6 @@ class DattoRmmAlertResolutionConnector:
                 raise DattoRmmAlertResolutionVerificationError(
                     "alert post-read did not verify resolved=true"
                 )
-
             self._audit.record(
                 "connector.mutation.verified",
                 request.context,
@@ -476,14 +545,14 @@ class DattoRmmAlertResolutionConnector:
                 provider=self.provider_name,
                 data={
                     "status": "verified",
-                    "alert_uid": alert_uid,
-                    "device_uid": device_uid,
+                    "alert_uid": opaque.alert_uid,
+                    "device_uid": opaque.device_uid,
                     "resolved": True,
                     "already_resolved": False,
                     "mutation_performed": True,
                     "readback_verified": True,
                 },
-                evidence_ids=(f"datto-rmm:alert:{alert_uid}",),
+                evidence_ids=(f"datto-rmm:alert:{opaque.alert_uid}",),
             )
         except Exception as error:
             self._audit.record(
@@ -498,6 +567,9 @@ class DattoRmmAlertResolutionConnector:
             raise
         finally:
             token = None
+
+    def execute(self, request: ConnectorRequest) -> ConnectorResult:
+        return self.execute_governed_execution(self.prepare_governed_execution(request))
 
 
 def build_datto_alert_resolution_invoker(

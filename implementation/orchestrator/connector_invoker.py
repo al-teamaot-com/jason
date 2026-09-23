@@ -38,7 +38,7 @@ class ProviderPreparedExecution:
     payload: Mapping[str, Any] = field(default_factory=dict)
     parameters: Mapping[str, Any] = field(default_factory=dict)
     symbolic_resolutions: Mapping[str, Any] = field(default_factory=dict)
-    opaque: Any = None
+    opaque: Any = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
