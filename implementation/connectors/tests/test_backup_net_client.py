@@ -69,9 +69,12 @@ def test_client_uses_documented_oauth_flow_and_bearer_api_request():
     assert token_request.full_url == BACKUP_NET_AUTH_URL
     assert token_request.get_method() == "POST"
     token_body = token_request.data.decode("utf-8")
-    assert "client_id=client-id" in token_body
-    assert "client_secret=client-secret" in token_body
-    assert "grant_type=client_credentials" in token_body
+    assert token_body == "grant_type=client_credentials"
+    assert "client-id" not in token_body
+    assert "client-secret" not in token_body
+    assert token_request.get_header("Authorization") == (
+        "Basic Y2xpZW50LWlkOmNsaWVudC1zZWNyZXQ="
+    )
 
     assert api_request.full_url.startswith(
         BACKUP_NET_API_URL + "/api/epb/v1/assets?"
