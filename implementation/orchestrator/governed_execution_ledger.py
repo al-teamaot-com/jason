@@ -60,6 +60,11 @@ class SQLiteGovernedExecutionLedger:
             );
             CREATE INDEX IF NOT EXISTS idx_governed_action_state ON governed_action_approvals(state, expires_at);
             """)
+            columns = {row["name"] for row in c.execute("PRAGMA table_info(governed_action_approvals)")}
+            if "request_id" not in columns:
+                c.execute(
+                    "ALTER TABLE governed_action_approvals ADD COLUMN request_id TEXT NOT NULL DEFAULT ''"
+                )
 
     def reserve_approval(self, *, principal_id: str, organization_id: str, client_id: str | None, capability_name: str, arguments: Mapping[str, Any], request_id: str, ttl_seconds: int = 300) -> ApprovalReservation:
         fp = action_fingerprint(principal_id=principal_id, organization_id=organization_id, client_id=client_id, capability_name=capability_name, arguments=arguments)

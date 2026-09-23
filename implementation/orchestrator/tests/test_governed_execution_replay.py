@@ -148,3 +148,30 @@ def test_approval_cannot_be_reused_with_changed_arguments(tmp_path):
     assert changed.status is OrchestrationStatus.DENIED
     assert changed.error_code == "APPROVAL_CONSUMPTION_REJECTED"
     assert invoker.calls == 0
+
+
+def test_initialize_migrates_pre_request_id_schema(tmp_path):
+    import sqlite3
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as c:
+        c.executescript("""
+        CREATE TABLE governed_action_approvals (
+          approval_id TEXT PRIMARY KEY, action_fingerprint TEXT NOT NULL UNIQUE,
+          idempotency_key TEXT NOT NULL UNIQUE, principal_id TEXT NOT NULL,
+          organization_id TEXT NOT NULL, client_id TEXT, capability_name TEXT NOT NULL,
+          state TEXT NOT NULL, execution_id TEXT, correlation_id TEXT, result_json TEXT,
+          created_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT, completed_at TEXT
+        );
+        """)
+    ledger = SQLiteGovernedExecutionLedger(str(path))
+    ledger.initialize()
+    with sqlite3.connect(path) as c:
+        columns = {row[1] for row in c.execute("PRAGMA table_info(governed_action_approvals)")}
+    assert "request_id" in columns
+    reservation = ledger.reserve_approval(
+        principal_id="person-al", organization_id="aot", client_id=None,
+        capability_name="service.ticket.note.create",
+        arguments={"ticket_id": 1, "note": "x", "title": ""},
+        request_id="authority-request-migrated",
+    )
+    assert reservation.request_id == "authority-request-migrated"
