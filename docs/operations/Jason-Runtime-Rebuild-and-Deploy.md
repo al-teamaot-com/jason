@@ -1,7 +1,7 @@
 # Jason Runtime Rebuild and Deploy
 
 **Status:** Active operations runbook  
-**Updated:** 2026-08-14
+**Updated:** 2026-09-23
 
 ## Authoritative deployment topology
 
@@ -152,6 +152,22 @@ Historical clarification deployment:
 Reference proof:
 
 `docs/sessions/Teams-Governed-Ambiguity-Clarification-Proof-2026-08-14.md`
+
+## 2026-09-23 reproducibility warning — Docker overlay-chain failure
+
+During the approval-replay security fix rollout, Docker's local overlay chain prevented the preferred clean image-build path. The security source change remained durable in authoritative Git, but the production workaround required patching a running MCP container filesystem and committing that filesystem as an image. The production acceptance then proved the replay/idempotency behavior, but this workaround is **not** the preferred long-term deployment state.
+
+Future security-sensitive MCP/runtime rollout should therefore prefer and explicitly prove:
+
+1. a clean build directly from the intended authoritative Git commit;
+2. image/source revision identity matching that commit;
+3. a verified rollback image captured before cutover;
+4. deployment/health/source verification that performs no provider mutation; and
+5. a separately authorized bounded live provider acceptance only after the expected production revision is independently confirmed.
+
+Do not erase the historical workaround from audit/session records merely because a later clean build succeeds. The 2026-09-23 chronology is preserved in `docs/sessions/2026-09-23.md`; remediation is tracked in `TODO-SEC-006`.
+
+If Docker overlay/mount-chain failure prevents a clean build again, stop before provider acceptance, preserve the existing healthy deployment/rollback, and treat reproducibility as unresolved rather than normalizing the running-filesystem image workaround into the standard process.
 
 ## Safe deployment sequence
 

@@ -1014,6 +1014,44 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before Jason becomes materially difficult to reconstruct by reissuing credentials, before multi-host/production expansion, or during the next formal disaster-recovery review.
 
+### TODO-SEC-006 — Complete approval/execution-plan security rollout
+
+- **Priority:** P0 — high priority
+- **Status:** In progress — isolated implementation complete; production deployment and live acceptance pending
+- **Risk level:** Critical
+- **Idea:** Complete production rollout of the dual-binding approval security model so every approval-governed mutation binds both the canonical semantic intent and the concrete provider execution plan after provider selection, symbolic resolution, normalization, defaulting, and exact target resolution.
+- **Why it matters:** The 2026-09-23 security review proved two distinct issues: approval replay could create duplicate provider writes, and an unchanged approved semantic action could normalize into a materially different concrete provider mutation. Replay/idempotency is now production-fixed; execution-plan binding is source-implemented and isolated-test proven but not yet production-accepted.
+- **Confirmed evidence:** Approval replay originally created duplicate Autotask notes `30506555` and `30506556`. After the replay fix, controlled production replay created only note `30506631`; the replay was `deduplicated` and did not invoke the provider again. The execution-plan implementation is commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5` on branch `fix/execution-plan-binding-20260923`; focused isolated security suite is 49/49 PASS. Chronological record: `docs/sessions/2026-09-23.md`.
+- **Current production boundary:** At the rollout safety check, production still reported source revision `5f89f3af82081e75e97d66e523222e5564648163` with deployment purpose `approval-replay-idempotency-fix`. The planned XYZ mutation was correctly stopped before approval/provider invocation. Production execution-plan acceptance is therefore pending, not failed.
+- **High-priority work, in order:**
+  1. **Deploy execution-plan binding to production.** Deploy authoritative Git commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; preserve the current `5f89f3a` production deployment as rollback; prefer a clean reproducible image built directly from authoritative Git; verify the live production revision after deployment; perform no provider mutation during deployment verification.
+  2. **Complete bounded XYZ live acceptance.** Only after successful deployment, use `XYZ Test Company` ticket `T20211001.0014` / internal ticket ID `29860`; perform one harmless reversible `service.ticket.update`; verify intent fingerprint, execution-plan fingerprint, selected provider, exact target, normalized payload, symbolic-resolution evidence, prepare/re-prepare fingerprint stability, exactly one provider write, no execution-plan mismatch, and post-write provider state/readback matching the authorized execution plan.
+  3. **Inventory every approval-governed mutation adapter.** Classify each adapter as `adapted`, `blocked/fail-closed`, or `pending implementation`; ensure no mutation provider can silently bypass the central execution-plan boundary.
+  4. **Add execution-plan adapters for remaining mutation providers.** Implement provider-neutral plan adapters where required; do not weaken fail-closed behavior merely to keep a legacy action working.
+  5. **Bind provider identity consistently.** Require `selected_provider_id` and provider operation/capability in concrete mutation authorization. Preserve legitimate same-client diagnostic device/resource flexibility; do not confuse that flexibility with provider substitution authority.
+  6. **Add execution-plan verification to CI/security regression testing.** Required cases: changed provider, changed target, changed normalized payload, changed symbolic mapping, exact successful retry/deduplication, secrets excluded, volatile provider hostname excluded, and zero invoker calls on every denied case.
+  7. **Clean deployment/rebuild verification.** Resolve the Docker overlay-chain issue; prove a clean build from authoritative Git reproduces both replay/idempotency and execution-plan behavior; preserve and verify rollback.
+- **Acceptance condition:** Production is on a clean/verified expected revision; all approval-governed mutation adapters are explicitly classified; adapted providers pass the execution-plan regression contract; blocked adapters fail closed; the bounded XYZ live test records exactly one provider write and matching provider readback; rollback remains proven.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Immediate; this is the next security-hardening production workstream.
+
+### TODO-SEC-007 — Expand security regression/red-team coverage and observability
+
+- **Priority:** P1 — medium priority after `TODO-SEC-006` production acceptance
+- **Status:** Planned
+- **Risk level:** High
+- **Idea:** Turn the 2026-09-23 security findings into permanent multi-provider regression coverage and secret-safe operational visibility.
+- **Medium-priority work:**
+  1. **Expand red-team testing beyond Autotask:** DRMM/Datto mutation paths; future IT Glue writes; Entra/identity actions; Teams/message actions; KFS mutations if/when write support is enabled; backup/security-provider actions.
+  2. **Cross-client isolation regression suite:** preserve explicit automated tests for missing/invalid client-provider bindings; missing evidence must remain `unknown` / `evidence_unavailable` rather than broadening provider/client scope.
+  3. **Prompt-injection regression suite:** ticket notes, email-derived evidence, IT Glue documents, attachments, alert descriptions, user-provided diagnostic text, and other externally sourced content must remain evidence/content rather than execution authority.
+  4. **Approval security regression suite:** maintain coverage for replay, changed canonical arguments, changed concrete provider mutation, provider substitution, target substitution, expired approval, wrong tenant/client, wrong principal, duplicate execution, and failed-execution retry semantics.
+  5. **Security documentation and Grafana visibility:** surface useful secret-safe control state for approval failures, replay/deduplication, execution-plan mismatches, denied provider substitutions, denied target/payload changes, and fail-closed adapter gaps. Do not expose client-sensitive payloads, credentials, secret material, or raw authorization context.
+- **Why it matters:** The review demonstrated that apparently independent controls can fail at different layers. Permanent multi-provider regression and observability reduce the chance that future adapter/provider changes reintroduce replay, client-scope, post-approval-normalization, or provider-substitution defects.
+- **Prerequisites:** `TODO-SEC-006` production acceptance, provider adapter inventory, stable audit event schema, secret-safe metrics/export design.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Begin immediately after the bounded execution-plan production acceptance and adapter inventory.
+
 ### TODO-SEC-005 — Activate secure Grafana credential management
 
 - **Priority:** P1

@@ -24,6 +24,56 @@ An accepted approval is persisted as formal JKD-001 approval evidence and the or
 
 **Approval accepted does not equal execution authority.**
 
+## Dual binding for approved provider mutations
+
+Approval-governed provider mutations require two distinct content bindings with different purposes.
+
+### Intent fingerprint
+
+The intent fingerprint binds the canonical semantic Jason action approved by governance: the authenticated principal, organization/client scope, canonical capability, and canonical arguments. It answers **what Jason action was approved** before provider-specific transformation.
+
+Approval reuse with changed canonical arguments must fail before provider invocation. Approval binding, one-time approval consumption, and successful-retry idempotency remain separate controls.
+
+### Execution-plan fingerprint
+
+The execution-plan fingerprint binds **what concrete mutation is authorized to reach the selected provider** after provider selection, symbolic resolution, normalization, provider defaulting, and target resolution are complete. Where applicable it includes:
+
+- principal ID;
+- organization ID and client ID;
+- canonical capability;
+- selected provider ID;
+- provider capability/operation;
+- HTTP/action method;
+- resource type and durable resource identifier/target;
+- normalized provider-relative path;
+- normalized final provider payload;
+- material query/operation parameters; and
+- symbolic-resolution evidence preserving both the human-readable symbolic value and resolved provider value.
+
+The execution-plan binding deliberately excludes secret values, authentication/authorization headers, correlation IDs, dynamically discovered provider hostnames, and transport-only volatile data unless governance deliberately declares a specific value part of the authority boundary. Provider adapters may hold such transport state ephemerally, but it may not become persisted/audited plan fingerprint material.
+
+### Prepare, bind, independently re-prepare, verify
+
+For an approval-governed mutation, the Central Orchestrator owns the final decision immediately before provider invocation:
+
+1. validate the approved canonical intent;
+2. resolve the governed provider;
+3. have the provider adapter prepare a side-effect-free concrete execution plan, including required symbolic/provider metadata resolution;
+4. bind and consume the approval against both the intent fingerprint and execution-plan fingerprint;
+5. independently re-prepare/re-resolve the concrete execution plan immediately before provider invocation;
+6. require the independently prepared plan to match the authorized execution-plan fingerprint exactly for all material authority fields; and
+7. invoke only the verified prepared plan.
+
+A changed provider, provider operation, target, symbolic mapping, material parameter, normalized path, or normalized payload must fail closed with zero provider writes. Re-resolution is permitted only when the resolved concrete plan is unchanged; changed provider metadata must never be silently accepted as equivalent authority.
+
+A provider-specific adapter may supply normalized plan material, but it may not bypass the Central Orchestrator's final plan verification. An approval-governed mutation adapter that does not implement the required execution-plan contract must remain blocked/fail-closed rather than falling back to an unbound legacy invocation path.
+
+### Provider mutation authority versus diagnostic resource flexibility
+
+Provider selection for a mutation is part of the execution-plan authority boundary. This does not imply that an approved playbook must use one fixed device or evidence source for every diagnostic step. Read-only discovery and diagnostic resource flexibility inside an already-authorized client scope are separate from authorization to perform a concrete provider mutation.
+
+A playbook may therefore inspect different permitted devices/evidence sources as its diagnostic rules allow while still requiring any resulting provider mutation to bind the selected provider, exact target, operation, and material payload.
+
 ## Approval lifecycle
 
 1. The Central Orchestrator encounters a policy condition requiring approval.
@@ -43,13 +93,17 @@ Denied, expired, unauthorized, malformed, unbound, or cross-organization respons
 
 ## Replay and exactly-once safety
 
-Approval evidence is append-once, but immutable approval records alone do not prevent an already-approved operation from being invoked twice. Jason therefore uses a separate durable continuation-consumption claim.
+Approval evidence is append-once, but immutable approval records alone do not prevent an already-approved operation from being invoked twice. Jason therefore requires a separate durable one-time consumption boundary in addition to approval evidence.
 
-The claim is written **before** orchestration invocation. An approval ID may therefore trigger the continuation path only once. Claims survive process restart and are organization-bound.
+Continuation-based approval flows use the durable continuation-consumption guard. The generic approval-governed execution path uses the governed-execution ledger to bind the approval ID, intent fingerprint, idempotency key, consumption state, execution/correlation identity, and completed result. Exact successful retries are deduplicated from that durable result rather than invoking the provider again.
 
-If the process fails after the claim but before the execution outcome becomes known, Jason does not automatically release the claim and does not automatically repeat the operation. This is deliberate. A duplicate side effect is considered more dangerous than requiring explicit recovery.
+Consumption is committed **before** provider invocation is permitted. An approval ID may therefore authorize one concrete execution path only. Consumption state survives process restart and remains scoped to the approved principal/organization/client/capability/arguments.
 
-**Consumed continuation does not equal safe to retry.**
+Execution-plan binding is an additional control, not a replacement for replay protection: it proves that the one permitted execution is still the same concrete provider mutation immediately before invocation.
+
+If the process fails after consumption but before the provider outcome becomes known, Jason does not automatically release the approval and does not automatically repeat the operation. This is deliberate. A duplicate side effect is considered more dangerous than requiring explicit recovery.
+
+**Consumed approval does not equal safe to retry. Exact successful retry deduplication does not authorize changed intent or a changed execution plan.**
 
 ## Governed recovery
 
@@ -94,4 +148,8 @@ No component may infer authority from channel membership, message ownership, Mic
 
 ## Operational status
 
-The backend approval architecture is implemented and repository-validated. Live Microsoft/Teams deployment validation remains an operational task and requires the Jason host, OpenBao-backed credential binding, Microsoft application configuration, organization-specific Team/channel targets, and a controlled end-to-end test approval.
+The backend approval architecture and approval replay/idempotency protection are implemented. The approval-replay production acceptance on 2026-09-23 proved one provider write for one approved `service.ticket.note.create` action and deduplication of the identical replay. The durable chronological evidence is recorded in `docs/sessions/2026-09-23.md`.
+
+The execution-plan binding described above is implemented and isolated-test proven at commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5` with a focused 49/49 security suite, but it was **not yet deployed to production** at the 2026-09-23 rollout safety check. Production remained on the approval-replay deployment revision `5f89f3af82081e75e97d66e523222e5564648163`; the planned XYZ acceptance mutation was therefore correctly stopped before approval/provider invocation. This is pending production deployment and bounded live acceptance, not a claim of production verification.
+
+Live Microsoft/Teams approval-channel validation also remains an independent operational task and requires the Jason host, OpenBao-backed credential binding, Microsoft application configuration, organization-specific Team/channel targets, and a controlled end-to-end test approval.

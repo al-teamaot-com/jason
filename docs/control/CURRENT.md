@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-19
-**Status:** Operational Resolution Memory is production-deployed as an evidence-only troubleshooting integration. Same-client search/read is fail-closed without authenticated client scope and grounded current-incident evidence; confirmed-case ingestion is implemented and deployed. The production store currently contains zero cases, so first verified-case capture and later similar-case reuse proof remain pending. Datto EDR/AV threat-branch activation also remains independently pending its full remediation/scan/recurrence acceptance.
+**Updated:** 2026-09-23
+**Status:** The 2026-09-23 security review confirmed client-isolation and misleading-content fail-closed behavior, discovered and production-fixed an approval replay/idempotency defect, and then confirmed a separate post-approval-normalization architectural gap. Dual intent/execution-plan binding is implemented and isolated-test proven at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, but it is not yet deployed/production-accepted. Production acceptance correctly stopped before mutation when the live revision did not match the execution-plan implementation.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,13 +9,30 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** finish playbook observability closeout, add governed provider-native Datto AV scan execution, then run the complete remediation/scan/recurrence acceptance path before enabling the full threat branch.
+- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: build/deploy the execution-plan binding cleanly from authoritative Git without a provider mutation, independently verify production revision and rollback, inventory mutation adapters, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
 
 ## Durable operating principle
 
 > **ChatGPT reasons. Jason governs and executes.**
 
 ChatGPT is the primary technician conversational surface. Jason remains authoritative for identity, scope, grants, approval policy, provider isolation, Central Orchestrator execution, evidence, and audit. A ChatGPT tool call is a governed request, not provider authority.
+
+## Security review — 2026-09-23 current state
+
+The authoritative chronological record is `docs/sessions/2026-09-23.md`; the architectural approval/mutation rule is `docs/architecture/J-102-Governed-Approval-Architecture.md`; remaining work is `TODO-SEC-006` and `TODO-SEC-007`.
+
+Confirmed current security-review state:
+
+- client isolation / fail-closed evidence handling on XYZ Test Company: **PASS**; no unrelated DRMM, Datto EDR, Endpoint Backup, VulScan, DNSFilter, or Microsoft 365 evidence was queried when client/provider binding was unavailable;
+- misleading `SECURITY TEST` ticket content on `T20211001.0014`: **PASS**; content was not treated as evidence/authority;
+- approval replay/idempotency: **confirmed defect then production-fixed**; original duplicate notes `30506555` and `30506556`; post-fix test created only note `30506631`; replay result `deduplicated`;
+- canonical approval argument binding: **PASS** at the Central Orchestrator canonical-request boundary; changed arguments are rejected with zero provider invocation;
+- post-approval normalization/provider binding: **architectural gap confirmed** before remediation; unchanged semantic intent could resolve to different concrete Autotask mutations;
+- dual intent/execution-plan binding: **isolated implementation PASS**, commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, focused suite 49/49;
+- production execution-plan acceptance: **PENDING**; the safety check found production still on approval-replay revision `5f89f3af82081e75e97d66e523222e5564648163`, so no approval/provider mutation was attempted; ticket baseline remained status `5 / Complete`, queue `29682833`, priority `2`; final read-only correlation `corr_mcp_7488bdcb101643548a15e6283a3f4155`; and
+- deployment reproducibility: **OPEN** because the earlier replay-fix rollout encountered Docker overlay-chain problems; preferred end state is a clean authoritative-Git build plus verified rollback.
+
+Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
 
 ## Operational Resolution Memory — current production state
 
@@ -40,8 +57,8 @@ The production MCP service is `jason-mcp-pilot`.
 
 The currently established live MCP code/image boundary is:
 
-- source commit: `b63798e048f4493d15b79565e997f43f8fd7edac`;
-- image: `jason-mcp:datto-edr-av-prod-b63798e` (`sha256:ef612ee0e4cb1779df5d8d765162f80c3b61f93816eb3a190673a66457df428f`);
+- source revision reported by the production container at the 2026-09-23 security safety check: `5f89f3af82081e75e97d66e523222e5564648163`;
+- image/deployment line: `jason-mcp:approval-replay-fix-5f89f3a`, deployment purpose `approval-replay-idempotency-fix`;
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -56,7 +73,7 @@ The currently established live MCP code/image boundary is:
 - write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
 - Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
-The live MCP and runtime were rebuilt from the Datto EDR/AV production-based branch and production-accepted at `b63798e...`. Continue to verify volatile runtime state before consequential change rather than assuming branch HEAD equals deployed state.
+The 2026-09-23 approval-replay production proof supersedes the older MCP revision statement above as the current security-review boundary. The execution-plan branch at `56b0e91...` is source-only/isolated-proof state until deployed. Continue to verify volatile runtime state before consequential change rather than assuming branch HEAD equals deployed state.
 
 ## Autotask governed proof
 

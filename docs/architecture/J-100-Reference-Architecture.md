@@ -58,6 +58,10 @@ Resource discovery must preserve enough candidate results to detect ambiguity. A
 
 Once a durable resource identifier has been resolved, subsequent operations should use that identifier whenever the provider supports it. Provider-specific identifiers remain behind the Connector Framework and are carried through governed capability contracts rather than embedded in conversational assumptions or workflow-specific scripts.
 
+Approval of a provider mutation must bind both the canonical semantic intent and the concrete provider execution plan. The concrete plan must be finalized only after governed provider selection, symbolic resolution, normalization, defaulting, and exact target resolution, and it must be independently recomputed/verified immediately before invocation. Material changes in provider, provider operation, target, symbolic mapping, path, parameters, or normalized payload must fail closed before any provider write.
+
+Provider mutation authorization and diagnostic resource flexibility are separate concerns. A governed playbook may inspect different authorized resources or evidence sources within a verified client scope, but any mutation still requires an exact concrete provider/target/operation/payload binding. No connector or provider adapter may bypass the Central Orchestrator's final execution-plan verification.
+
 ## Definition of Completion
 
 This document is complete when every future architectural element can be placed within one or more of these components without changing their fundamental responsibilities.
