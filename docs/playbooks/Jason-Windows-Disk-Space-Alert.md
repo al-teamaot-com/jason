@@ -41,7 +41,8 @@ Record, when available:
 - physical disk model/media type and health/SMART summary when available;
 - filesystem/volume health and dirty-bit/CHKDSK status when available;
 - whether the device is a workstation or server;
-- current logged-on user/session context;
+- current online/offline state and evidence freshness/last-audit timestamp when available;
+- active-session evidence when available; distinguish a proven active session from DRMM `last_logged_in_user` history and never treat the latter alone as proof that a user is currently active;
 - current alert UID/timestamp and whether the reading is current or historical;
 - reboot-required state when available.
 
