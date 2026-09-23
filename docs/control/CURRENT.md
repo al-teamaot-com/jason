@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: with clean candidate images and rollback now verified, perform a separately approved controlled production deployment, verify exact live revision/image/health/governance with zero provider mutations, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
+- **Next safe actions:** `TODO-SEC-006` production rollout and bounded XYZ acceptance are complete. Next, run controlled acceptance checks for the other mutation families (Autotask note/create/procurement, Datto component/site-variable/EDR/alert, Teams send) using only explicitly safe test targets, or separately address the three pre-existing IT Glue/provider-read failures.
 
 ## Durable operating principle
 
@@ -35,6 +35,21 @@ Confirmed current security-review state:
 Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
 
 Broader orchestrator validation with the required CAP-007 source path reaches the full suite and reports exactly three failures. The same three failures reproduce at baseline `10d1e9c`: IT Glue sensitive-output handling classification, IT Glue search selector metadata mismatch, and missing `DOCUMENTATION_FLEXIBLE_ASSET_SEARCH` test symbol. They are pre-existing provider-read/IT Glue work, not regressions from the security remediation.
+
+### Production execution-plan rollout and XYZ acceptance — 2026-09-23
+
+Production MCP and runtime were promoted to source revision `6e4e4c0979f3762b8dbd3b8b277850a1899deb18` using the verified candidate images:
+
+- MCP: `jason-mcp:security-remediation-6e4e4c0`, image ID `sha256:a5f2187f451d8f2ea99481434668519dfeb376a9f339b7b860393e86f24d507c`;
+- runtime: `jason-runtime:security-remediation-6e4e4c0`, image ID `sha256:adf4c9d75f226d5968117b732b6d3cc660d712a9755914bcd02bb18a8b00639a`.
+
+Final verification: MCP container/host health HTTP 200, runtime health HTTP 200/healthy, `governed_execution=central-orchestrator`, `generic_execution_tool=true`, `direct_provider_access=false`, and 24 governed write capabilities active. Exact pre-rollout rollback containers remain preserved on the prior MCP/runtime image IDs.
+
+A bounded live acceptance was then performed on XYZ Test Company ticket `T20211001.0014` / Autotask ID `29860`. Baseline was priority `2`, queue `29682833`, status `5`. Exactly one mutation changed priority `2 -> 3`. Acceptance correlation: `corr_mcp_action_3cfdd46df8b94ed2b64d7a03439942e9`; execution ID `exec_mcp_action_feee8d8dd733424f81948228c97e3785`; approval ID `approval_mcp_1f3bb42295ca4a9cb05ad61bf3e48aba`; intent fingerprint `efd8ed5c7064403bff41897561e10c833d97cb9d03e6ae68cffde49e5b86c8af`; execution-plan fingerprint `2cb2b9977be7d7082bc84e51c5ac119d74fe409507ef6fb069f3eab1fff355ea`. The authorized plan selected provider `autotask_ticket_update`, provider capability `autotask.ticket.update`, method `PATCH`, target `service_ticket:29860`, path `/V1.0/Tickets`, payload `{"id":29860,"priority":3}`, and no symbolic resolution.
+
+The governed ledger ended `state=succeeded`; action/result fingerprint matched intent fingerprint; exactly one provider attempt was reported; exactly one `connector.mutation.requested`, one `connector.mutation.completed`, and one `connector.mutation.verified` event exist for the acceptance correlation; post-mutation readback verified field `priority`; independent governed post-read returned priority `3`; and no execution-plan mismatch event was recorded. The stable second preparation is therefore evidenced by successful passage through Central Orchestrator's exact fingerprint re-prepare gate before the single provider invocation.
+
+No compensating priority restore was performed because that would have been a second provider mutation outside the one-write acceptance boundary.
 
 ### Clean build and rollback readiness — 2026-09-23
 
