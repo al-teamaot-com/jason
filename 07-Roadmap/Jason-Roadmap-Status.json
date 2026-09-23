@@ -275,6 +275,41 @@
       "references": [
         "https://help.siem.kaseya.com/help/Content/administration-and-configuration/api-access-and-webhook-governance.htm"
       ]
+    },
+    {
+      "id": "TODO-NET-001",
+      "title": "Cloudflare Radar Internet outage intelligence integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Internet/WAN Outage Intelligence",
+      "notes": "Integrate the Cloudflare Radar API as a read-only external evidence source for ISP/ASN and geographic outage/anomaly context. Use it to corroborate suspected ISP incidents, map affected providers/ASNs, and correlate regional events across AOT clients. Do not treat Radar alone as proof of a client outage; combine with RIPE Atlas, AOT-controlled AWS probes, DRMM/Datto Networking state, and cross-client observations.",
+      "references": [
+        "https://developers.cloudflare.com/radar/",
+        "https://developers.cloudflare.com/api/resources/radar/subresources/annotations/subresources/outages/methods/get/"
+      ]
+    },
+    {
+      "id": "TODO-NET-002",
+      "title": "RIPE Atlas distributed external reachability integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Internet/WAN Outage Intelligence",
+      "notes": "Integrate RIPE Atlas as an independent multi-network measurement source for ping, traceroute, DNS, TLS, and related reachability checks. Use distributed probes to corroborate whether a client public endpoint/circuit is unreachable from multiple external networks and to support outage classification. Establish per-site expected-test profiles so intentional ICMP/service filtering is not misclassified as an outage.",
+      "references": [
+        "https://atlas.ripe.net/docs/apis/rest-api-manual/measurements/",
+        "https://atlas.ripe.net/docs/apis/rest-api-manual/measurements/status-checks/"
+      ]
+    },
+    {
+      "id": "TODO-NET-003",
+      "title": "AOT-controlled AWS WAN probe infrastructure",
+      "status": "planned",
+      "phase": "Infrastructure",
+      "related_group": "Internet/WAN Outage Intelligence",
+      "notes": "Build AOT-controlled external WAN probes in AWS for fast deterministic reachability and diagnostics. Start with Route 53 health checks where suitable and add lightweight probe instances for ICMP, TCP connect, DNS, TLS handshake, traceroute, latency, packet-loss, and route-change evidence. Use at least two AWS regions for independent perspective. Feed results into the Server/Site Offline playbook alongside Cloudflare Radar, RIPE Atlas, DRMM/Datto Networking, and Jason cross-client ISP correlation.",
+      "references": [
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/welcome-health-checks.html"
+      ]
     }
   ]
 }
