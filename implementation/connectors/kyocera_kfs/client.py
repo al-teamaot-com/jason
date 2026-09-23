@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from http.cookiejar import CookieJar
 from typing import Any, Mapping
@@ -14,6 +16,20 @@ from connectors.core.contracts import (
 
 KFS_PUBLIC_API_HOST = "api.kyods.com"
 KFS_DEFAULT_API_URL = f"https://{KFS_PUBLIC_API_HOST}"
+
+
+def _basic_authorization_pair(value: str) -> tuple[str, str] | None:
+    token = str(value or "").strip()
+    if token.lower().startswith("basic "):
+        token = token[6:].strip()
+    try:
+        decoded = base64.b64decode(token, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return None
+    if ":" not in decoded:
+        return None
+    username, password = decoded.split(":", 1)
+    return username, password
 
 
 def require_kfs_credentials(credentials: Mapping[str, str]) -> None:
@@ -44,6 +60,17 @@ def require_kfs_credentials(credentials: Mapping[str, str]) -> None:
         raise ConnectorConfigurationError(
             "Kyocera KFS api_url must be the approved HTTPS api.kyods.com endpoint."
         )
+
+    gateway_pair = _basic_authorization_pair(str(credentials["authorization"]))
+    if gateway_pair is not None:
+        manager_pair = (
+            str(credentials["kfs_username"]),
+            str(credentials["kfs_password"]),
+        )
+        if manager_pair == gateway_pair:
+            raise ConnectorConfigurationError(
+                "Kyocera KFS Manager login must be distinct from the dealer API gateway credential."
+            )
 
 
 class KyoceraKfsSessionClient:

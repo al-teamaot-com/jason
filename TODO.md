@@ -184,7 +184,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Risk level:** Moderate
 - **Idea:** Add a governed Kyocera integration so Jason can retrieve copier/MFP operational data such as total meter counts, black-and-white and color copy/print counts, model and serial number, device status, toner/supply levels, fault/error conditions, and other useful device telemetry exposed by Kyocera.
 - **Why it matters:** Gives Jason direct visibility into managed copier usage and health. This can support meter collection, billing validation, proactive service, supply management, device inventory reconciliation, and faster ticket troubleshooting without relying on manual meter reads.
-- **Why not now:** The read-only KFS connector foundation is implemented, but live activation is blocked until AOT receives Kyocera's official dealer API header/operation contract and production credentials, provisions them through OpenBao, and completes a controlled read-only validation.
+- **Why not now:** The KFS v6.2 read-only contract is available, the current KFS credentials are already governed in OpenBao, and Claw's historical KFS database has been migrated to Jason. Live activation is blocked on modifying and validating the current KFS login/session implementation: the last proven successful collection was 2026-09-08, while controlled Jason `/KFS/Login` validation on 2026-09-22 returned KFS body status 401. Treat this as an API/integration task; do not reset or replace the vaulted KFS credentials merely because of this response.
 - **Prerequisites:**
   - identify the authoritative Kyocera data source available to AOT;
   - document authentication and tenant/client isolation requirements;
@@ -205,7 +205,7 @@ Items in this document are not approved capabilities and must not be enabled mer
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Evaluate when defining Jason copier/MFP workflows or when AOT wants to automate monthly meter collection and copier billing validation.
 
-- **Implementation status:** Read-only KFS provider foundation implemented on `feature/kfs-readonly-connector-20260921`; live provider selection is fail-closed behind `JASON_KFS_ENABLED` until the dealer contract and credentials are installed.
+- **Implementation status:** Read-only KFS provider foundation implemented; v6.2 contract available; canonical OpenBao secret/AppRole active; Claw PostgreSQL history restored on Jason with matching table counts. Live provider selection remains fail-closed behind `JASON_KFS_ENABLED` until the KFS API login/session modification passes a controlled read-only collection and parity check.
 
 ---
 
