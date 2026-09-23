@@ -274,3 +274,64 @@ def test_start_fails_closed_when_multiple_exact_configurations_exist(monkeypatch
                 "device_name": "DEVICE-123",
             },
         )
+
+
+@pytest.mark.parametrize("source_queue", [8, 29682833])
+def test_start_moves_monitoring_or_helpdesk_ticket_to_jason_before_work(
+    monkeypatch, source_queue
+):
+    ticket = _ticket(title="Generic ticket")
+    ticket["queueID"] = source_queue
+
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(ticket),
+    )
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: None),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic"},
+    )
+
+    assert result["payload"]["queueID"] == "Jason"
+    assert result["payload"]["status"] == "In Progress"
+    assert result["jason_original_queue_id"] == source_queue
+
+
+def test_start_is_idempotent_for_ticket_already_claimed_by_jason(monkeypatch):
+    ticket = _ticket(title="Generic ticket")
+    ticket["queueID"] = 29683489
+    ticket["status"] = 8
+    claim = SimpleNamespace(
+        state="claimed",
+        original_queue_id=29682833,
+        original_status_id=1,
+        blocker_fingerprint="",
+    )
+
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(ticket),
+    )
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic"},
+    )
+
+    assert result["payload"]["queueID"] == "Jason"
+    assert result["payload"]["status"] == "In Progress"
+    assert result["jason_original_queue_id"] == 29682833
+    assert result["jason_original_status_id"] == 1
