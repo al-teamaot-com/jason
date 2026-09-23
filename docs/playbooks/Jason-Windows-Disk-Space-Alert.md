@@ -1,6 +1,6 @@
 # Jason Playbook: Windows Disk Space Alert
 
-Status: Pilot v0.2.1. Manual controlled acceptance only; not enabled for automatic production execution.
+Status: Pilot v0.2.2. Manual controlled acceptance only; not enabled for automatic production execution.
 
 ## 1. Section Goal
 Process a Windows disk-space monitoring ticket from exact ticket/company/device/alert identification through current-space diagnosis, bounded decision, authoritative verification, and documented completion or escalation. First acceptance is diagnostic-only.
@@ -40,13 +40,14 @@ Record, when available:
 - minimum additional free space required to return below the threshold;
 - physical disk model/media type and health/SMART summary when available;
 - filesystem/volume health and dirty-bit/CHKDSK status when available;
+- BitLocker state for the affected volume: whether encryption is enabled, protection is active/on, conversion/encryption status, encryption percentage, and encryption method when available;
 - whether the device is a workstation or server;
 - current online/offline state and evidence freshness/last-audit timestamp when available;
 - active-session evidence when available; distinguish a proven active session from DRMM `last_logged_in_user` history and never treat the latter alone as proof that a user is currently active;
 - current alert UID/timestamp and whether the reading is current or historical;
 - reboot-required state when available.
 
-Do not invent unavailable fields. Prefer current authoritative DRMM/provider evidence over values copied from an older alert. If later remediation changes capacity usage, add a verification note with the before/after values rather than overwriting the baseline.
+Do not invent unavailable fields. Prefer current authoritative DRMM/provider evidence over values copied from an older alert. For BitLocker, record protection/encryption state only; never record recovery passwords, recovery keys, key packages, or other secret key material. If later remediation changes capacity usage, add a verification note with the before/after values rather than overwriting the baseline.
 
 ### Step 2: Check prior remediation history before repeating cleanup
 Search DRMM alert/activity evidence and related Autotask ticket notes for prior disk-cleanup component runs on the same endpoint. Record the most recent cleanup timestamps and before/after free-space results when available. A prior cleanup that produced only trivial improvement is evidence that repeating the same cleanup is unlikely to resolve the condition.
