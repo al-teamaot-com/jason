@@ -72,9 +72,21 @@ Before troubleshooting:
 1. Identify the exact Autotask ticket or triggering object.
 2. Identify the client.
 3. Identify the affected asset/device/user.
-4. Resolve the object against the authoritative provider.
-5. Confirm there is no ambiguity, duplicate, stale object, or mismatched asset.
-6. Record relevant ticket/alert timestamps and external IDs.
+4. Run the **global device-association gate**:
+   - preserve and validate an existing configuration item when present;
+   - if a device is applicable but no configuration item is linked, resolve exactly one same-company active Autotask configuration through authoritative DRMM-to-Autotask evidence and associate it before substantive diagnostics;
+   - if multiple candidates exist or identity is uncertain, set `state = identification_blocked`, document the evidence/candidates, and stop rather than guessing;
+   - if no device is genuinely applicable, explicitly document `No applicable device association`.
+5. Resolve the object against the authoritative provider.
+6. Confirm there is no ambiguity, duplicate, stale object, or mismatched asset.
+7. Record relevant ticket/alert timestamps and external IDs.
+8. Immediately before the first ticket-specific diagnostic, remediation, or verification action, run the **global ticket-work-start lifecycle**:
+   - move the ticket to queue **Jason**;
+   - set status **In Progress**;
+   - set Work Type **Remote Support**;
+   - require post-mutation readback;
+   - if the ownership transition fails, do not continue substantive work as though ownership succeeded.
+9. For endpoint tickets, require authoritative current evidence that the target device is online before claiming the ticket.
 
 If the affected object cannot be identified confidently:
 
