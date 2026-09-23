@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** repository/production constitutional convergence is complete. `main` is authoritative; production is pinned to the tagged `20d2e02` main revision; only active open-PR worktrees remain locally. Remaining work is normal feature review/acceptance (for example Backup.net) and optional controlled per-provider mutation-family acceptance using explicitly safe test targets.
+- **Next safe actions:** repository/production constitutional convergence is complete. `main` is authoritative and branch-protected; production is pinned to the tagged `20d2e02` main revision; only authoritative `main` plus active Backup.net PR work remain locally. Remaining work is normal feature review/acceptance and optional controlled per-provider mutation-family acceptance using explicitly safe test targets.
 
 ## Durable operating principle
 
