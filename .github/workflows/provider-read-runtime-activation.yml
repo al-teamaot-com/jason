@@ -105,6 +105,7 @@ jobs:
               register_provider_read_foundation,
           )
           from jason_runtime.provider_read_activation import (
+              PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES,
               PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
               PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
               apply_provider_read_activation_profile,
@@ -123,10 +124,15 @@ jobs:
               profile=PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
           )
 
-          expected = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+          legacy_autotask = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+          expected = IT_GLUE_CAPABILITIES | legacy_autotask
           assert PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES == expected
           assert set(state.capability_names) == expected
           assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
+
+          for name in PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES:
+              capability = capabilities.get(capability_name=name, version='1.0')
+              assert capability.lifecycle_status is CapabilityLifecycle.PILOT
 
           for name in expected:
               capability = capabilities.get(capability_name=name, version='1.0')
