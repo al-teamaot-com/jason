@@ -35,6 +35,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
+from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
 from connectors.datto_edr.threat_correlation import (
@@ -296,6 +297,17 @@ def _runtime():
         raise RuntimeError("identity authority unavailable")
 
     return app
+
+
+@lru_cache(maxsize=1)
+def _governed_execution_ledger() -> SQLiteGovernedExecutionLedger:
+    path = os.environ.get(
+        "JASON_GOVERNED_EXECUTION_DB",
+        "/var/lib/jason/openclaw/governed-execution.sqlite3",
+    ).strip()
+    ledger = SQLiteGovernedExecutionLedger(path)
+    ledger.initialize()
+    return ledger
 
 
 def _auto_enroll_aot_member(
@@ -967,6 +979,8 @@ def _governed_internal_note_create(
     )
 
     approval_present = False
+    approval_id: str | None = None
+    idempotency_key = f"idem_mcp_write_{uuid4().hex}"
 
     if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
         imperative_approval = (
@@ -1008,27 +1022,37 @@ def _governed_internal_note_create(
                 "correlation_id": correlation_id,
             }
 
-        now = datetime.now(timezone.utc)
-        approval_id = f"approval_mcp_{uuid4().hex}"
-
-        approval_writer(
-            ApprovalRecord(
-                approval_id=approval_id,
-                request_id=execution_id,
-                capability=SERVICE_TICKET_NOTE_CREATE,
-                organization_id=organization,
-                client_id=client_id,
-                requested_by=principal,
-                status="approved",
-                decided_by=principal,
-                decided_at=now,
-                expires_at=now + timedelta(minutes=5),
-            )
+        reservation = _governed_execution_ledger().reserve_approval(
+            principal_id=principal,
+            organization_id=organization,
+            client_id=client_id,
+            capability_name=SERVICE_TICKET_NOTE_CREATE,
+            arguments=arguments,
+            request_id=execution_id,
+            ttl_seconds=300,
         )
+        approval_id = reservation.approval_id
+        idempotency_key = reservation.idempotency_key
+        if reservation.created:
+            now = datetime.now(timezone.utc)
+            approval_writer(
+                ApprovalRecord(
+                    approval_id=approval_id,
+                    request_id=execution_id,
+                    capability=SERVICE_TICKET_NOTE_CREATE,
+                    organization_id=organization,
+                    client_id=client_id,
+                    requested_by=principal,
+                    status="approved",
+                    decided_by=principal,
+                    decided_at=now,
+                    expires_at=reservation.expires_at,
+                )
+            )
 
         decision = app.identity_authority.evaluate(
             AuthorityRequest(
-                request_id=execution_id,
+                request_id=reservation.request_id,
                 correlation_id=correlation_id,
                 principal_id=principal,
                 organization_id=organization,
@@ -1107,7 +1131,8 @@ def _governed_internal_note_create(
             "mcp-autotask-internal-note-v1",
         ),
         authority_context_id=context.context_id,
-        idempotency_key=f"idem_mcp_write_{uuid4().hex}",
+        idempotency_key=idempotency_key,
+        approval_id=approval_id,
     )
 
     result = app.governed_orchestrator.execute(
@@ -2644,6 +2669,8 @@ def _governed_execute(
     )
 
     approval_present = False
+    approval_id: str | None = None
+    idempotency_key = f"idem_mcp_action_{uuid4().hex}"
 
     if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
         approval_decided_by = principal
@@ -2751,27 +2778,37 @@ def _governed_execute(
                 "correlation_id": correlation_id,
             }
 
-        now = datetime.now(timezone.utc)
-        approval_id = f"approval_mcp_{uuid4().hex}"
-
-        approval_writer(
-            ApprovalRecord(
-                approval_id=approval_id,
-                request_id=execution_id,
-                capability=capability_name,
-                organization_id=organization,
-                client_id=client_id,
-                requested_by=principal,
-                status="approved",
-                decided_by=approval_decided_by,
-                decided_at=now,
-                expires_at=now + timedelta(minutes=5),
-            )
+        reservation = _governed_execution_ledger().reserve_approval(
+            principal_id=principal,
+            organization_id=organization,
+            client_id=client_id,
+            capability_name=capability_name,
+            arguments=canonical_arguments,
+            request_id=execution_id,
+            ttl_seconds=300,
         )
+        approval_id = reservation.approval_id
+        idempotency_key = reservation.idempotency_key
+        if reservation.created:
+            now = datetime.now(timezone.utc)
+            approval_writer(
+                ApprovalRecord(
+                    approval_id=approval_id,
+                    request_id=execution_id,
+                    capability=capability_name,
+                    organization_id=organization,
+                    client_id=client_id,
+                    requested_by=principal,
+                    status="approved",
+                    decided_by=approval_decided_by,
+                    decided_at=now,
+                    expires_at=reservation.expires_at,
+                )
+            )
 
         decision = app.identity_authority.evaluate(
             AuthorityRequest(
-                request_id=execution_id,
+                request_id=reservation.request_id,
                 correlation_id=correlation_id,
                 principal_id=principal,
                 organization_id=organization,
@@ -2846,7 +2883,8 @@ def _governed_execute(
         permission_mode="execute",
         policy_ids=("mcp-governed-execution-v1",),
         authority_context_id=context.context_id,
-        idempotency_key=f"idem_mcp_action_{uuid4().hex}",
+        idempotency_key=idempotency_key,
+        approval_id=approval_id,
     )
 
     result = app.governed_orchestrator.execute(request)

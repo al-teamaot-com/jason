@@ -11,6 +11,8 @@ from kernel.resolution import (
     ResolutionOutcome,
 )
 
+from .governed_execution_ledger import SQLiteGovernedExecutionLedger
+
 from .contracts import (
     ArtifactReference,
     ExecutionStage,
@@ -99,6 +101,7 @@ class CentralOrchestrator:
         require_authority_context: bool = False,
         information_release: InformationReleaseAuthorizer | None = None,
         require_information_release_authorization: bool = False,
+        governed_execution_ledger: SQLiteGovernedExecutionLedger | None = None,
     ) -> None:
         self._resolution = resolution
         self._invoker = invoker
@@ -111,6 +114,7 @@ class CentralOrchestrator:
         self._require_information_release_authorization = (
             require_information_release_authorization
         )
+        self._governed_execution_ledger = governed_execution_ledger
         if require_authority_context and authority_context is None:
             raise ValueError("authority_context enforcer is required when enforcement is enabled")
 
@@ -203,17 +207,89 @@ class CentralOrchestrator:
             )
             return result
 
+        action_fingerprint = None
+        if request.approval_id is not None:
+            if self._governed_execution_ledger is None:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("governed_execution_ledger_required",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="GOVERNED_EXECUTION_LEDGER_REQUIRED",
+                )
+                self._record(
+                    "orchestration.approval.consumption_denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={"replay_result": "rejected", "error_code": result.error_code},
+                )
+                return result
+            try:
+                begin = self._governed_execution_ledger.begin(request)
+                action_fingerprint = begin.action_fingerprint
+            except PermissionError as exc:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("approval_consumption_rejected",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="APPROVAL_CONSUMPTION_REJECTED",
+                )
+                self._record(
+                    "orchestration.approval.consumption_denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={"replay_result": "rejected", "message": str(exc)},
+                )
+                return result
+            if begin.replay_result is not None:
+                prior = begin.replay_result
+                self._record(
+                    "orchestration.idempotency.deduplicated", request,
+                    stage=ExecutionStage.COMPLETED,
+                    details={
+                        "action_fingerprint": action_fingerprint,
+                        "replay_result": "deduplicated",
+                        "consumption_state": "succeeded",
+                        "original_execution_id": prior.execution_id,
+                        "original_correlation_id": prior.correlation_id,
+                    },
+                )
+                return prior
+            self._record(
+                "orchestration.approval.consumed", request,
+                stage=ExecutionStage.POLICY_DECIDED,
+                details={
+                    "action_fingerprint": action_fingerprint,
+                    "consumption_state": "consumed",
+                    "replay_result": "new_execution",
+                },
+            )
+
         self._record(
             "orchestration.capability.invoking",
             request,
             stage=ExecutionStage.INVOKING,
-            details={"provider_id": resolution.selected_provider_id},
+            details={
+                "provider_id": resolution.selected_provider_id,
+                "action_fingerprint": action_fingerprint,
+            },
         )
 
         invocation_started = monotonic()
         try:
             invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
+            if request.approval_id is not None and self._governed_execution_ledger is not None:
+                self._governed_execution_ledger.fail(request)
             duration_ms = round((monotonic() - invocation_started) * 1000, 3)
             safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
             result = OrchestrationResult(
@@ -330,6 +406,13 @@ class CentralOrchestrator:
         else:
             details["invocation_telemetry"] = "not_reported"
 
+        if request.approval_id is not None and self._governed_execution_ledger is not None:
+            self._governed_execution_ledger.complete(request, result)
+        details.update({
+            "action_fingerprint": action_fingerprint,
+            "replay_result": "executed",
+            "consumption_state": "succeeded" if request.approval_id is not None else "not_applicable",
+        })
         self._record(
             "orchestration.capability.completed",
             request,
@@ -392,6 +475,8 @@ class CentralOrchestrator:
             "stage": stage.value,
             "requester_kind": request.requester_kind,
             "authority_context_id": request.authority_context_id,
+            "approval_id": request.approval_id,
+            "idempotency_key": request.idempotency_key,
         }
         payload.update(details or {})
         self._audit.append(event_type, payload)

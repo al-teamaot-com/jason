@@ -123,6 +123,7 @@ from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLo
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
+from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.system_registry_resource import (
     GovernedSystemRegistryCapabilityInvoker,
     SYSTEM_REGISTRY_READ,
@@ -231,6 +232,7 @@ class RuntimeSettings:
     ollama_url: str
     ollama_model: str
     allowed_machine_identities: frozenset[str]
+    governed_execution_db: Path = Path("/var/lib/jason/openclaw/governed-execution.sqlite3")
     datto_edr_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/datto-edr/role_id"
     )
@@ -324,6 +326,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_ORCHESTRATION_EVENTS_DB",
                     "/var/lib/jason/openclaw/orchestration-events.sqlite3",
+                )
+            ),
+            governed_execution_db=Path(
+                os.getenv(
+                    "JASON_GOVERNED_EXECUTION_DB",
+                    "/var/lib/jason/openclaw/governed-execution.sqlite3",
                 )
             ),
             model_usage_db=Path(
@@ -1143,12 +1151,15 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         policy=policy,
     )
+    governed_execution_ledger = SQLiteGovernedExecutionLedger(str(settings.governed_execution_db))
+    governed_execution_ledger.initialize()
     orchestrator = CentralOrchestrator(
         resolution=resolution,
         invoker=invokers,
         audit=orchestration_events,
         authority_context=JKD001OrchestrationContextEnforcer(context_validator),
         require_authority_context=True,
+        governed_execution_ledger=governed_execution_ledger,
     )
 
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
