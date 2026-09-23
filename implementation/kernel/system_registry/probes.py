@@ -163,15 +163,28 @@ class HostObservationRunner:
             for value in security_options
         )
         networks = ",".join(sorted(str(value) for value in (network_settings.get("Networks") or {})))
+        labels = config.get("Labels") or {}
+        source_commit = str(
+            labels.get("com.teamaot.jason.source_revision")
+            or labels.get("org.opencontainers.image.revision")
+            or ""
+        )
+        tmpfs = ",".join(
+            f"{destination}:{options}"
+            for destination, options in sorted((host_config.get("Tmpfs") or {}).items())
+        )
         return {
             "container_name": str(item.get("Name", "")).lstrip("/") or container_name,
             "image": str(config.get("Image", "")),
+            "image_id": str(item.get("Image", "")),
+            "source_commit": source_commit,
             "service_state": str(state.get("Status", "unknown")),
             "health": str(health),
             "user": str(config.get("User", "")),
             "read_only": _boolean(host_config.get("ReadonlyRootfs", False)),
             "no_new_privileges": _boolean(no_new_privileges),
             "cap_drop": cap_drop,
+            "tmpfs": tmpfs,
             "networks": networks,
         }
 

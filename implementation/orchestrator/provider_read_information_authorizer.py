@@ -594,7 +594,12 @@ class ProviderReadInformationAuthorizingInvoker:
                 bindings=self.bindings,
             )
         ):
-            output = dict(invocation.output)
+            raw_output = dict(invocation.output)
+            authorization = _jason_managed_it_glue_envelope(
+                capability_name=resolution.capability_name,
+                output=raw_output,
+            )
+            output = raw_output
             if resolution.capability_name in {
                 DOCUMENTATION_ATTACHMENT_SEARCH,
                 DOCUMENTATION_ATTACHMENT_READ,
@@ -609,10 +614,6 @@ class ProviderReadInformationAuthorizingInvoker:
                 DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
             }:
                 output = _sanitize_it_glue_credential_key_fields(output)
-            authorization = _jason_managed_it_glue_envelope(
-                capability_name=resolution.capability_name,
-                output=output,
-            )
         else:
             authorization = _service_only_envelope(
                 provider_id=provider_id or "unknown",

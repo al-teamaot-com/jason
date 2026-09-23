@@ -20,11 +20,13 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_CAPABILITIES,
+    MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
     register_provider_read_foundation,
 )
 from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ENTRA_GOVERNED_CATALOG_CAPABILITIES,
+    PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES,
     PROVIDER_READ_ENTRA_GOVERNED_CATALOG_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_PROFILE,
     apply_provider_read_activation_profile,
@@ -52,7 +54,13 @@ def test_v3_does_not_silently_activate_new_microsoft_provider():
     )
 
     assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
-    assert set(state.capability_names) == IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES
+    legacy_autotask = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    assert set(state.capability_names) == IT_GLUE_CAPABILITIES | legacy_autotask
+    for capability_name in PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES:
+        assert capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        ).lifecycle_status is CapabilityLifecycle.PILOT
 
     microsoft = providers.get(MICROSOFT_GRAPH_PROVIDER)
     assert microsoft.lifecycle_status is ProviderLifecycle.PLANNED
@@ -74,7 +82,8 @@ def test_v4_explicitly_activates_itglue_autotask_and_entra_reads():
         profile=PROVIDER_READ_ENTRA_GOVERNED_CATALOG_PROFILE,
     )
 
-    expected = IT_GLUE_CAPABILITIES | AUTOTASK_CAPABILITIES | MICROSOFT_GRAPH_CAPABILITIES
+    legacy_autotask = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    expected = IT_GLUE_CAPABILITIES | legacy_autotask | MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES
     assert PROVIDER_READ_ENTRA_GOVERNED_CATALOG_CAPABILITIES == expected
     assert set(state.capability_names) == expected
     assert set(state.provider_ids) == {
@@ -96,3 +105,14 @@ def test_v4_explicitly_activates_itglue_autotask_and_entra_reads():
         )
         assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
         assert capability.metadata["read_only"] == "true"
+
+    for capability_name in PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES:
+        assert capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        ).lifecycle_status is CapabilityLifecycle.PILOT
+    for capability_name in MICROSOFT_GRAPH_CAPABILITIES - MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES:
+        assert capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        ).lifecycle_status is CapabilityLifecycle.PILOT

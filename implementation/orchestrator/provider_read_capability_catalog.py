@@ -435,7 +435,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             business_purpose="Search authorized IT Glue flexible asset records.",
             resource_types="documentation_flexible_asset,flexible_asset,structured_documentation",
             operation="search",
-            selector_keys="organization_id,name,resource_id,filters,page_number,page_size",
+            selector_keys="flexible_asset_type_id,organization_id,name,resource_id,page_number,page_size",
             fact_hints=(
                 "flexible asset,flexible assets,structured documentation,network,domain,backup,"
                 "application,vendor,internet,wan,documentation,organization"

@@ -125,6 +125,9 @@ def test_registry_matches_connector_capabilities() -> None:
         "it_glue.flexible_asset.search",
         "it_glue.document.search",
         "it_glue.document.get",
+        "it_glue.document.attachment.search",
+        "it_glue.document.attachment.get",
+        "it_glue.document.attachment.content.get",
         "it_glue.relationships.list",
     }
 

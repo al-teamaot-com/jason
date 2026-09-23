@@ -294,5 +294,5 @@ def test_flexible_asset_credential_fields_are_redacted_before_release() -> None:
     }
     envelope = invocation.information_authorization
     assert envelope is not None
-    assert envelope.handling_class is InformationHandlingClass.RELEASABLE
+    assert envelope.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
     assert envelope.require_allowed(InformationAction.RELEASE).allowed is True

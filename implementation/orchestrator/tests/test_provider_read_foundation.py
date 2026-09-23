@@ -24,6 +24,8 @@ from orchestrator.provider_read_argument_adapter import (
 from orchestrator.provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     DOCUMENTATION_CONFIGURATION_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
+    DOCUMENTATION_FLEXIBLE_ASSET_READ,
     DOCUMENTATION_CONTACT_READ,
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_PROVIDER,
@@ -180,7 +182,11 @@ def test_it_glue_adapter_injects_only_approved_noncredential_entity_families() -
     }
     flexible_search = adapt_it_glue_arguments(
         DOCUMENTATION_FLEXIBLE_ASSET_SEARCH,
-        {"organization_id": "208", "page_size": 25},
+        {
+            "flexible_asset_type_id": "77",
+            "organization_id": "208",
+            "page_size": 25,
+        },
     )
     flexible_read = adapt_it_glue_arguments(
         DOCUMENTATION_FLEXIBLE_ASSET_READ,
@@ -189,7 +195,10 @@ def test_it_glue_adapter_injects_only_approved_noncredential_entity_families() -
 
     assert flexible_search == {
         "entity": "FlexibleAssets",
-        "filters": {"organization_id": "208"},
+        "filters": {
+            "flexible-asset-type-id": "77",
+            "organization-id": "208",
+        },
         "page_size": 25,
     }
     assert flexible_read == {"entity": "FlexibleAssets", "entity_id": "9001"}

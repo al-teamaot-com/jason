@@ -128,15 +128,22 @@ def test_docker_container_probe_can_verify_runtime_security_state() -> None:
                 {
                     "Name": "/jason-runtime",
                     "State": {"Status": "running", "Health": {"Status": "healthy"}},
-                    "Config": {"Image": "jason-runtime:local", "User": "1000:1000"},
+                    "Image": "sha256:adf4c9d75f226d5968117b732b6d3cc660d712a9755914bcd02bb18a8b00639a",
+                    "Config": {
+                        "Image": "jason-runtime:production",
+                        "User": "1000:1000",
+                        "Labels": {
+                            "com.teamaot.jason.source_revision": "6e4e4c0979f3762b8dbd3b8b277850a1899deb18"
+                        },
+                    },
                     "HostConfig": {
                         "ReadonlyRootfs": True,
                         "SecurityOpt": ["no-new-privileges:true"],
                         "CapDrop": ["ALL"],
+                        "Tmpfs": {"/tmp": "rw,nosuid,nodev,noexec,size=32m"},
                     },
                     "NetworkSettings": {
                         "Networks": {
-                            "openclaw_default": {},
                             "jason-core": {},
                             "jason-observability": {},
                         }

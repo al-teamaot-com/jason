@@ -78,6 +78,7 @@ If a package README contains a material architecture, authority, security, or op
 | `implementation/connectors/datto_rmm/README.md` | Datto RMM connector mechanics | `docs/decisions/ADR-004-Datto-RMM-Managed-Device-Authority.md`; `docs/components/infrastructure/`; provider-neutral connector/JIS guidance under `docs/engineering/` |
 | `implementation/connectors/it_glue/README.md` | IT Glue connector mechanics | `docs/components/infrastructure/`; provider-neutral JIS/connector guidance under `docs/engineering/` |
 | `implementation/connectors/it_glue_adapter/README.md` | IT Glue adapter implementation details | Canonical provider-neutral contracts and IT Glue infrastructure documentation |
+| `implementation/connectors/kyocera_kfs/README.md` | Kyocera Fleet Services connector mechanics and governed read integration guidance | `docs/components/infrastructure/INF-016-Kyocera-KFS-Provider-Foundation.md`; provider-neutral connector/JIS guidance under `docs/engineering/` |
 | `implementation/connectors/openclaw/README.md` | OpenClaw connector implementation and transport mechanics | `docs/decisions/ADR-005-OpenClaw-Teams-Transport-Boundary.md`; `docs/decisions/ADR-006-Governed-Conversational-Interface-Routing.md`; `docs/components/infrastructure/INF-014-OpenClaw-Production-Ingress-and-Governance-Gates.md` |
 | `implementation/connectors/integration_sdk/README.md` | Integration SDK implementation guidance | JIS engineering architecture under `docs/engineering/jis/` |
 | `implementation/connectors/evidence_storage/README.md` | Evidence-storage connector mechanics | `docs/components/infrastructure/INF-013-Artifact-Evidence-Storage-Foundation.md`; evidence/memory architecture |
@@ -88,6 +89,7 @@ If a package README contains a material architecture, authority, security, or op
 | Implementation-local record | Supporting purpose | Governed human-facing owner / related records |
 |---|---|---|
 | `infrastructure/jason-runtime/README.md` | Docker/runtime deployment-package mechanics and required deployment inputs | System Registry, `docs/operations/`, runtime/component architecture; never use this README alone to assert current production state |
+| `infrastructure/kfs-collector/README.md` | Kyocera Fleet Services collector deployment-package mechanics | `docs/components/infrastructure/INF-016-Kyocera-KFS-Provider-Foundation.md`; KFS operational runbooks and System Registry for current deployment state |
 | `infrastructure/openclaw-jason-bridge/README.md` | OpenClaw Jason bridge deployment/plugin mechanics | ADR-005/ADR-006, INF-014, OpenClaw operational runbooks, System Registry for deployed bridge state |
 | `infrastructure/showcase/README.md` | Command Center/showcase deployment mechanics, observability components, local-model visibility, and bounded dashboard security notes | `docs/architecture/`; `docs/components/`; `docs/operations/`; governed roadmap and System Registry for authoritative current deployment/readiness state |
 

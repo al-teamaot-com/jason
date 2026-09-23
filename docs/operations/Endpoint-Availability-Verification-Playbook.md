@@ -112,6 +112,6 @@ The deterministic assessment module and unit tests implement the state/evidence 
 - Standard structure: `docs/playbooks/Jason-Standard-Playbook-Template.md`
 - Autonomous remediation framework: `implementation/autonomous_remediation/README.md`
 - Capability catalog: `docs/architecture/JASON_CAPABILITY_CATALOG.md`
-- Central Orchestrator boundary: `03-Components/Kernel/JKD-008-Central-Orchestrator.md`
-- Durable event-store boundary: `03-Components/Kernel/JKD-009-Durable-Orchestration-Event-Store.md`
-- Deferred scheduler backlog: `TODO.md#todo-ops-001--durable-deferred-work-recheck-scheduler`
+- Central Orchestrator boundary: `docs/components/kernel/JKD-008-Central-Orchestrator.md`
+- Durable event-store boundary: `docs/components/kernel/JKD-009-Durable-Orchestration-Event-Store.md`
+- Deferred scheduler backlog: `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md#todo-ops-001--durable-deferred-work-recheck-scheduler`
