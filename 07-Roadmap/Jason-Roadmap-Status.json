@@ -168,6 +168,12 @@
       "title": "Datto Networking integration using CloudTrax/Datto Network Manager and DNA APIs; implement read-only diagnostics first, then governed write actions",
       "status": "planned",
       "phase": "Capabilities"
+    },
+    {
+      "id": "TODO-FIN-001",
+      "title": "ConnectBooster / Financial Operations integration: read-only payment and A/R intelligence, BNG transaction queries and signed webhooks, ConnectBooster notification ingestion, reconciliation across gateway/ConnectBooster/accounting/Autotask, and tightly governed financial actions",
+      "status": "planned",
+      "phase": "Capabilities"
     }
   ]
 }
