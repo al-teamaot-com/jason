@@ -404,6 +404,31 @@
         "https://blog.shodan.io/introducing-the-internetdb-api/",
         "https://account.shodan.io/billing"
       ]
+    },
+    {
+      "id": "TODO-FIN-002",
+      "title": "QuickBooks Online integration with provider-native financial authorization",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Financial Operations",
+      "notes": "Implement QuickBooks Online as a governed financial-data provider. Human access must require all four gates: (1) authorized Jason user, (2) Microsoft Entra-authenticated requester identity, (3) sufficient QuickBooks Online user permission for the requested data/action, and (4) Jason governance approval/policy for the requested operation. Effective permission is the intersection of these gates; Jason Admin/Owner roles must never implicitly elevate QBO permissions. Do not use a shared QBO service identity as the source of human authority. A service credential may execute background work, but interactive disclosure/actions must be constrained by the requesting user's mapped QBO authority. First acceptance test: in the QBO sandbox, determine whether OAuth/API calls actually preserve and enforce the authorizing QBO user's native role/permissions. If QBO enforces them, use delegated provider-native authorization. If it does not, implement a fail-closed QBO permission projection/cache sourced from QBO user permissions and re-evaluated when permissions change. Start with read-only financial access; mutations such as invoice changes, vendor changes, payments, refunds, credits, voids, bank-account changes, or other movement-of-money actions require separate governed capabilities and stronger approval controls.",
+      "acceptance_criteria": [
+        "Requester must be an authorized Jason user.",
+        "Requester identity must be verified through Microsoft Entra.",
+        "Requester must map to a QuickBooks Online user/company context.",
+        "Requested object/field/action must be permitted by the requester's QBO-native permission level or a fail-closed QBO permission projection derived from it.",
+        "Jason governance policy must independently authorize the requested operation.",
+        "Effective authority must be the intersection of Jason access, Entra identity, QBO permission, and Jason governance.",
+        "Jason administrative roles must not bypass or expand QBO financial permissions.",
+        "Shared/service QBO credentials must never determine what an interactive human is allowed to see or do.",
+        "Sandbox testing must prove whether Intuit OAuth/API authorization enforces per-user QBO permissions before production implementation.",
+        "If native enforcement is absent or ambiguous, deny by default and enforce a synchronized permission projection instead."
+      ],
+      "references": [
+        "https://developer.intuit.com/app/developer/qbo/docs/get-started",
+        "https://developer.intuit.com/app/developer/qbo/docs/develop/authentication-and-authorization",
+        "https://quickbooks.intuit.com/learn-support/en-us/help-article/access-permissions/user-roles-access-rights-quickbooks-online/L66POfRrI_US_en_US"
+      ]
     }
   ]
 }
