@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Mapping, Protocol
 
+from kernel.execution_deadline import governed_execution_deadline_at
 from kernel.resolution import (
     CapabilityResolutionRequest,
     CapabilityResolutionResult,
@@ -11,7 +12,10 @@ from kernel.resolution import (
     ResolutionOutcome,
 )
 
-from .governed_execution_ledger import SQLiteGovernedExecutionLedger
+from .governed_execution_ledger import (
+    SQLiteGovernedExecutionLedger,
+    intent_fingerprint as governed_intent_fingerprint,
+)
 from .execution_plan import ExecutionPlan, PreparedExecutionPlan
 
 from .contracts import (
@@ -28,6 +32,9 @@ from .information_authorization import (
     InformationReleaseAuthorizer,
     InformationRemediation,
 )
+
+
+_PROVIDER_EXECUTION_SECONDS_METADATA = "provider_maximum_execution_seconds"
 
 
 class OrchestrationAuditSink(Protocol):
@@ -236,6 +243,7 @@ class CentralOrchestrator:
         execution_plan_fingerprint = None
         prepared_execution: PreparedExecutionPlan | None = None
         invoke_prepared = None
+        provider_deadline_monotonic: float | None = None
 
         if request.approval_id is not None:
             if self._governed_execution_ledger is None:
@@ -324,7 +332,9 @@ class CentralOrchestrator:
                 return result
 
             try:
-                authorized_prepared = prepare_plan(request=request, resolution=resolution)
+                provider_deadline_monotonic = self._provider_deadline_monotonic(resolution)
+                with governed_execution_deadline_at(provider_deadline_monotonic):
+                    authorized_prepared = prepare_plan(request=request, resolution=resolution)
                 contract_error = self._execution_plan_contract_error(
                     request=request, resolution=resolution, plan=authorized_prepared.plan
                 )
@@ -383,7 +393,8 @@ class CentralOrchestrator:
             try:
                 # Independent re-resolution immediately before provider invocation.
                 # Only this second prepared object can reach the provider.
-                prepared_execution = prepare_plan(request=request, resolution=resolution)
+                with governed_execution_deadline_at(provider_deadline_monotonic):
+                    prepared_execution = prepare_plan(request=request, resolution=resolution)
                 observed_plan_fingerprint = prepared_execution.plan.fingerprint
                 contract_error = self._execution_plan_contract_error(
                     request=request, resolution=resolution, plan=prepared_execution.plan
@@ -421,6 +432,151 @@ class CentralOrchestrator:
                 )
                 return result
 
+        elif self._external_approval_plan_binding_required(request):
+            if not request.authority_allowed or not request.authority_context_id:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("fresh_authority_required",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="AUTHORITY_CONTEXT_REQUIRED",
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "provider_invoked": False,
+                        "message": "approval continuation requires fresh authority context",
+                    },
+                )
+                return result
+
+            intent_fingerprint = governed_intent_fingerprint(
+                principal_id=request.principal_id,
+                organization_id=request.organization_id,
+                client_id=request.client_id,
+                capability_name=request.capability_name,
+                arguments=request.arguments,
+            )
+            prepare_plan = getattr(self._invoker, "prepare_execution_plan", None)
+            invoke_prepared = getattr(self._invoker, "invoke_execution_plan", None)
+            if not callable(prepare_plan) or not callable(invoke_prepared):
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_binding_required",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="EXECUTION_PLAN_BINDING_REQUIRED",
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "provider_invoked": False,
+                        "approval_binding": "external_continuation_guard",
+                        "message": "approved mutation invoker does not expose governed execution-plan binding",
+                    },
+                )
+                return result
+
+            try:
+                provider_deadline_monotonic = self._provider_deadline_monotonic(resolution)
+                with governed_execution_deadline_at(provider_deadline_monotonic):
+                    authorized_prepared = prepare_plan(request=request, resolution=resolution)
+                contract_error = self._execution_plan_contract_error(
+                    request=request, resolution=resolution, plan=authorized_prepared.plan
+                )
+                if contract_error is not None:
+                    raise PermissionError(contract_error)
+                execution_plan_fingerprint = authorized_prepared.plan.fingerprint
+            except Exception as exc:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_authorization_rejected",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code=getattr(exc, "error_code", "EXECUTION_PLAN_AUTHORIZATION_REJECTED"),
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "provider_invoked": False,
+                        "approval_binding": "external_continuation_guard",
+                        "message": str(exc),
+                    },
+                )
+                return result
+
+            self._record(
+                "orchestration.execution_plan.authorized", request,
+                stage=ExecutionStage.POLICY_DECIDED,
+                details={
+                    "intent_fingerprint": intent_fingerprint,
+                    "execution_plan_fingerprint": execution_plan_fingerprint,
+                    "execution_plan": authorized_prepared.plan.canonical_material(),
+                    "consumption_state": "external_guard_consumed",
+                    "approval_binding": "external_continuation_guard",
+                },
+            )
+
+            try:
+                with governed_execution_deadline_at(provider_deadline_monotonic):
+                    prepared_execution = prepare_plan(request=request, resolution=resolution)
+                observed_plan_fingerprint = prepared_execution.plan.fingerprint
+                contract_error = self._execution_plan_contract_error(
+                    request=request, resolution=resolution, plan=prepared_execution.plan
+                )
+                if contract_error is not None:
+                    raise PermissionError(contract_error)
+                if observed_plan_fingerprint != execution_plan_fingerprint:
+                    raise PermissionError(
+                        "concrete execution plan does not match authorized execution plan"
+                    )
+            except Exception as exc:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_mismatch",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code=getattr(exc, "error_code", "EXECUTION_PLAN_MISMATCH"),
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "authorized_execution_plan_fingerprint": execution_plan_fingerprint,
+                        "observed_execution_plan_fingerprint": locals().get("observed_plan_fingerprint"),
+                        "provider_invoked": False,
+                        "approval_binding": "external_continuation_guard",
+                        "message": str(exc),
+                    },
+                )
+                return result
+
         self._record(
             "orchestration.capability.invoking",
             request,
@@ -435,12 +591,12 @@ class CentralOrchestrator:
 
         invocation_started = monotonic()
         try:
-            if request.approval_id is not None:
-                assert prepared_execution is not None
+            if prepared_execution is not None:
                 assert callable(invoke_prepared)
-                invocation = invoke_prepared(
-                    request=request, resolution=resolution, prepared=prepared_execution
-                )
+                with governed_execution_deadline_at(provider_deadline_monotonic):
+                    invocation = invoke_prepared(
+                        request=request, resolution=resolution, prepared=prepared_execution
+                    )
             else:
                 invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
@@ -571,7 +727,15 @@ class CentralOrchestrator:
             "action_fingerprint": intent_fingerprint,
             "execution_plan_fingerprint": execution_plan_fingerprint,
             "replay_result": "executed",
-            "consumption_state": "succeeded" if request.approval_id is not None else "not_applicable",
+            "consumption_state": (
+                "succeeded"
+                if request.approval_id is not None
+                else (
+                    "external_guard_consumed"
+                    if self._external_approval_plan_binding_required(request)
+                    else "not_applicable"
+                )
+            ),
         })
         self._record(
             "orchestration.capability.completed",
@@ -580,6 +744,36 @@ class CentralOrchestrator:
             details=details,
         )
         return result
+
+    @staticmethod
+    def _external_approval_plan_binding_required(
+        request: OrchestrationRequest,
+    ) -> bool:
+        return (
+            request.approval_id is None
+            and request.approval_present
+            and request.orchestration_mode is OrchestrationMode.EXECUTE
+        )
+
+    @staticmethod
+    def _provider_deadline_monotonic(
+        resolution: CapabilityResolutionResult,
+    ) -> float | None:
+        metadata = getattr(resolution, "metadata", {}) or {}
+        declared = metadata.get(_PROVIDER_EXECUTION_SECONDS_METADATA)
+        if declared is None:
+            return None
+        try:
+            seconds = float(declared)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "provider maximum execution seconds metadata must be numeric"
+            ) from exc
+        if seconds <= 0:
+            raise ValueError(
+                "provider maximum execution seconds metadata must be positive"
+            )
+        return monotonic() + seconds
 
     @staticmethod
     def _execution_plan_contract_error(

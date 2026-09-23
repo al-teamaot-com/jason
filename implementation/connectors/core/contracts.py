@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from contextvars import ContextVar
 from dataclasses import dataclass, field
-from time import monotonic
 from typing import Any, Iterator, Mapping, Protocol
+
+from kernel.execution_deadline import (
+    GovernedExecutionDeadlineExceeded,
+    bounded_execution_timeout,
+    governed_execution_deadline,
+)
 
 
 class ConnectorError(RuntimeError):
@@ -71,40 +75,19 @@ class ConnectorExecutionDeadlineExceeded(ConnectorTransportError):
     error_code = "PROVIDER_EXECUTION_DEADLINE_EXCEEDED"
 
 
-_EXECUTION_DEADLINE_MONOTONIC: ContextVar[float | None] = ContextVar(
-    "connector_execution_deadline_monotonic",
-    default=None,
-)
-
-
 @contextmanager
 def connector_execution_deadline(maximum_execution_seconds: float | None) -> Iterator[None]:
-    """Apply one bounded deadline across every transport call in a connector invocation."""
-    if maximum_execution_seconds is None:
+    """Apply a connector deadline without extending an active governed deadline."""
+    with governed_execution_deadline(maximum_execution_seconds):
         yield
-        return
-    if maximum_execution_seconds <= 0:
-        raise ValueError("maximum_execution_seconds must be positive when provided")
-    token = _EXECUTION_DEADLINE_MONOTONIC.set(monotonic() + maximum_execution_seconds)
-    try:
-        yield
-    finally:
-        _EXECUTION_DEADLINE_MONOTONIC.reset(token)
 
 
 def bounded_transport_timeout(requested_timeout_seconds: float) -> float:
     """Clamp a transport timeout to the remaining governed connector deadline."""
-    if requested_timeout_seconds <= 0:
-        raise ValueError("requested_timeout_seconds must be positive")
-    deadline = _EXECUTION_DEADLINE_MONOTONIC.get()
-    if deadline is None:
-        return requested_timeout_seconds
-    remaining = deadline - monotonic()
-    if remaining <= 0:
-        raise ConnectorExecutionDeadlineExceeded(
-            "governed provider execution deadline exceeded"
-        )
-    return min(requested_timeout_seconds, remaining)
+    try:
+        return bounded_execution_timeout(requested_timeout_seconds)
+    except GovernedExecutionDeadlineExceeded as error:
+        raise ConnectorExecutionDeadlineExceeded(str(error)) from None
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -58,9 +59,13 @@ def request(*, organization_id: str = "org-1", authority_context_id: str = "ctx-
         authority_allowed=True,
         approval_present=True,
         risk="high",
-        data_handling=DataHandlingPolicy(),
-        budget=ExecutionBudget(),
+        data_handling=DataHandlingPolicy(
+            classification="internal",
+            hosted_processing_allowed=False,
+        ),
+        budget=ExecutionBudget(maximum_estimated_cost=Decimal("0")),
         authority_context_id=authority_context_id,
+        permission_mode="execute",
     )
 
 
@@ -144,3 +149,29 @@ def test_retry_requires_existing_recovery_record() -> None:
     with pytest.raises(PermissionError, match="not found"):
         executor.execute(recovery_id="missing", request=request())
     assert orchestrator.calls == 0
+
+
+def test_sqlite_retry_guard_survives_restart_and_rejects_reuse(tmp_path) -> None:
+    from orchestrator.approval_recovery_retry import (
+        ApprovalRecoveryRetryClaim,
+        SQLiteApprovalRecoveryRetryGuard,
+    )
+
+    path = str(tmp_path / "recovery-retry.db")
+    first = SQLiteApprovalRecoveryRetryGuard(path)
+    first.initialize()
+    claim = ApprovalRecoveryRetryClaim(
+        recovery_id="recovery-durable-1",
+        organization_id="org-1",
+        request_id="req-1",
+        correlation_id="corr-1",
+        capability="resource.write",
+        authority_context_id="ctx-fresh",
+        claimed_at=NOW,
+    )
+    first.claim(claim)
+
+    second = SQLiteApprovalRecoveryRetryGuard(path)
+    second.initialize()
+    with pytest.raises(PermissionError, match="already been consumed"):
+        second.claim(claim)

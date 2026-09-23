@@ -143,3 +143,33 @@ def test_provider_declared_deadline_can_only_tighten_the_default_bound():
 
     assert connector.observed_timeout is not None
     assert 0 < connector.observed_timeout <= 4
+
+
+def test_nested_connector_deadlines_never_extend_shared_absolute_deadline(monkeypatch):
+    import kernel.execution_deadline as deadline
+
+    clock = [100.0]
+    monkeypatch.setattr(deadline, "monotonic", lambda: clock[0])
+
+    with deadline.governed_execution_deadline_at(110.0):
+        with connector_execution_deadline(30):
+            assert bounded_transport_timeout(90) == 10.0
+
+        clock[0] = 106.0
+        with connector_execution_deadline(30):
+            assert bounded_transport_timeout(90) == 4.0
+
+
+def test_expired_shared_absolute_deadline_fails_before_new_provider_phase(monkeypatch):
+    import pytest
+    import kernel.execution_deadline as deadline
+
+    clock = [200.0]
+    monkeypatch.setattr(deadline, "monotonic", lambda: clock[0])
+
+    with pytest.raises(
+        deadline.GovernedExecutionDeadlineExceeded,
+        match="deadline exceeded",
+    ):
+        with deadline.governed_execution_deadline_at(199.0):
+            raise AssertionError("expired deadline context must not be entered")

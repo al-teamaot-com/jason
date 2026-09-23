@@ -248,3 +248,50 @@ def test_execution_plan_rejects_non_string_object_keys():
             normalized_path="/V1.0/Tickets",
             normalized_payload={1: "bad-key"},
         )
+
+
+def test_external_approval_continuation_without_ledger_still_plan_binds():
+    invoker = PlanInvoker([{}, {}])
+    audit = Audit()
+    orchestrator = CentralOrchestrator(
+        resolution=Resolution(), invoker=invoker, audit=audit
+    )
+    request = make_request(
+        execution_id="exec-external", correlation_id="corr-external",
+        approval_id="approval-unused", idempotency_key="idem-unused",
+    )
+    from dataclasses import replace
+    request = replace(request, approval_id=None, idempotency_key=None)
+
+    result = orchestrator.execute(request)
+
+    assert result.status is OrchestrationStatus.SUCCEEDED
+    assert invoker.prepare_calls == 2
+    assert invoker.provider_calls == 1
+    authorized = [p for e, p in audit.events if e == "orchestration.execution_plan.authorized"]
+    assert len(authorized) == 1
+    assert authorized[0]["approval_binding"] == "external_continuation_guard"
+    assert authorized[0]["execution_plan_fingerprint"]
+
+
+def test_external_approval_continuation_plan_change_denied_zero_writes():
+    invoker = PlanInvoker([{}, {"target": "140001", "payload": {"id": 140001, "queueID": 29682837, "status": 8}}])
+    audit = Audit()
+    orchestrator = CentralOrchestrator(
+        resolution=Resolution(), invoker=invoker, audit=audit
+    )
+    request = make_request(
+        execution_id="exec-external-mismatch", correlation_id="corr-external-mismatch",
+        approval_id="approval-unused", idempotency_key="idem-unused",
+    )
+    from dataclasses import replace
+    request = replace(request, approval_id=None, idempotency_key=None)
+
+    result = orchestrator.execute(request)
+
+    assert result.status is OrchestrationStatus.DENIED
+    assert result.error_code == "EXECUTION_PLAN_MISMATCH"
+    assert invoker.provider_calls == 0
+    denied = [p for e, p in audit.events if e == "orchestration.execution_plan.denied"]
+    assert denied[-1]["provider_invoked"] is False
+    assert denied[-1]["approval_binding"] == "external_continuation_guard"

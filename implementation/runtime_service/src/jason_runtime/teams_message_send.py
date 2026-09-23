@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 from kernel.capabilities import CapabilityApproval, CapabilityDefinition, CapabilityEvidence, CapabilityLifecycle, CapabilityRisk, CapabilityStewardship, IdempotencyBehavior
+from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import ExecutionProvider, ProviderApproval, ProviderFeatures, ProviderHealth, ProviderLifecycle, ProviderLimits, ProviderStewardship, ProviderType
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan, normalize_provider_relative_path
 from orchestrator.service import InvocationResult
@@ -100,7 +101,7 @@ class TeamsMessageSendInvoker:
                 "Content-Type": "application/json",
             },
         )
-        with urlopen(req, timeout=20) as response:
+        with urlopen(req, timeout=bounded_execution_timeout(20)) as response:
             result = json.loads(response.read().decode())
         if result.get("status") != "succeeded" or not result.get("message_id"):
             raise RuntimeError("Teams proactive send failed")
