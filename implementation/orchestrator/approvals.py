@@ -129,7 +129,7 @@ class ApprovalResumeBridge:
             expires_at=accepted.expires_at,
         ))
         try:
-            mode = PermissionMode(original_request.requested_mode)
+            mode = PermissionMode(original_request.permission_mode)
         except ValueError as exc:
             raise PermissionError("orchestration requested mode is not a JKD-001 mode") from exc
         decision = self.authority.evaluate(AuthorityRequest(

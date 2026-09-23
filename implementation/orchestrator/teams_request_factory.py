@@ -34,7 +34,29 @@ class ConversationAuthorityError(PermissionError):
 
 
 class ConversationApprovalRequired(ConversationAuthorityError):
-    pass
+    def __init__(
+        self,
+        code: str,
+        reason_codes: tuple[str, ...],
+        *,
+        approval_id: str | None = None,
+        portal_url: str | None = None,
+        notification_reference_id: str | None = None,
+    ) -> None:
+        super().__init__(code, reason_codes)
+        self.approval_id = approval_id
+        self.portal_url = portal_url
+        self.notification_reference_id = notification_reference_id
+
+    @property
+    def user_text(self) -> str:
+        if self.approval_id and self.portal_url:
+            return (
+                "Jason needs your approval before continuing. "
+                f"I sent the Teams notification for {self.approval_id}. "
+                f"Review it in Jason: {self.portal_url}"
+            )
+        return "Jason needs approval before continuing."
 
 
 class ApprovalWriter(Protocol):
@@ -60,6 +82,7 @@ class GovernedTeamsOrchestrationRequestFactory:
     authority: IdentityAuthorityService
     capabilities: CapabilityRegistryService | None = None
     approvals: ApprovalWriter | None = None
+    approval_portal: object | None = None
     data_handling: DataHandlingPolicy = DataHandlingPolicy(
         classification="internal",
         hosted_processing_allowed=False,
