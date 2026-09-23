@@ -1239,9 +1239,64 @@ def _canonical_datto_component_search_arguments(
     return normalized
 
 
+def _canonical_live_datto_variable_policies(
+    item: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """Translate live Datto input-variable metadata into bounded policies."""
+
+    raw_variables = item.get("variables")
+    if raw_variables is None:
+        return ()
+    if not isinstance(raw_variables, (list, tuple)):
+        raise ValueError("DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID")
+
+    type_map = {
+        "string": "string",
+        "boolean": "boolean",
+        "date": "date",
+        "map": "string",
+    }
+    policies: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for variable in raw_variables:
+        if not isinstance(variable, Mapping):
+            raise ValueError("DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID")
+        if variable.get("direction") is True:
+            continue
+
+        name = str(variable.get("name") or "").strip()
+        provider_type = str(variable.get("type") or "").strip().casefold()
+        if not name or provider_type not in type_map:
+            raise ValueError("DATTO_COMPONENT_VARIABLE_TYPE_UNSUPPORTED")
+
+        folded = name.casefold()
+        if folded in seen:
+            raise ValueError("DATTO_COMPONENT_VARIABLE_SCHEMA_AMBIGUOUS")
+        seen.add(folded)
+
+        variable_type = type_map[provider_type]
+        maximum_length = 20_000
+        if variable_type == "boolean":
+            maximum_length = 5
+        elif variable_type == "date":
+            maximum_length = 10
+
+        policies.append(
+            {
+                "name": name,
+                "variable_type": variable_type,
+                "required": False,
+                "maximum_length": maximum_length,
+            }
+        )
+
+    return tuple(policies)
+
+
 def _resolve_live_datto_component_name(
     component_name: object,
-) -> tuple[str, str]:
+) -> tuple[str, str, tuple[dict[str, Any], ...]]:
     """Resolve one exact component name through governed live catalog discovery."""
 
     requested_name = str(
@@ -1293,7 +1348,9 @@ def _resolve_live_datto_component_name(
             "DATTO_COMPONENT_CATALOG_LOOKUP_FAILED"
         )
 
-    exact: list[tuple[str, str]] = []
+    exact: list[
+        tuple[str, str, tuple[dict[str, Any], ...]]
+    ] = []
 
     for item in matches:
         if not isinstance(item, Mapping):
@@ -1322,6 +1379,7 @@ def _resolve_live_datto_component_name(
             (
                 live_uid,
                 live_name,
+                _canonical_live_datto_variable_policies(item),
             )
         )
 
@@ -1335,7 +1393,7 @@ def _resolve_live_datto_component_name(
             uid,
             name.casefold(),
         )
-        for uid, name in exact
+        for uid, name, _ in exact
     }
 
     if len(unique) != 1:
@@ -1345,6 +1403,45 @@ def _resolve_live_datto_component_name(
 
     return exact[0]
 
+
+def _resolve_live_datto_endpoint_target(
+    device_uid: object,
+) -> str:
+    """Reconfirm one exact managed endpoint through Jason's governed read path."""
+
+    requested_uid = str(device_uid or "").strip()
+    if not requested_uid:
+        raise ValueError("DATTO_COMPONENT_TARGET_REQUIRED")
+
+    lookup = _governed_read(
+        capability_name="endpoint.device.read",
+        arguments={"resource_id": requested_uid},
+    )
+
+    if lookup.get("status") != "succeeded":
+        raise ValueError("DATTO_COMPONENT_TARGET_REVALIDATION_FAILED")
+
+    evidence = lookup.get("evidence")
+    record = evidence.get("record") if isinstance(evidence, Mapping) else None
+    if not isinstance(record, Mapping):
+        raise ValueError("DATTO_COMPONENT_TARGET_REVALIDATION_FAILED")
+
+    observed_uid = str(record.get("resource_id") or "").strip()
+    if observed_uid != requested_uid:
+        raise ValueError("DATTO_COMPONENT_TARGET_REVALIDATION_FAILED")
+
+    device_type = record.get("device_type")
+    if isinstance(device_type, Mapping):
+        device_class = str(
+            device_type.get("category") or device_type.get("type") or ""
+        ).strip()
+    else:
+        device_class = str(device_type or "").strip()
+
+    if not device_class:
+        raise ValueError("DATTO_COMPONENT_TARGET_CLASS_UNVERIFIED")
+
+    return device_class
 
 
 def _canonicalize_governed_action_arguments(
@@ -1403,11 +1500,6 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_TARGET_REQUIRED"
         )
 
-    if requested_device != expected["device_uid"]:
-        raise ValueError(
-            "DATTO_COMPONENT_TARGET_NOT_APPROVED"
-        )
-
     supplied_allowlist = str(
         raw.get("allowlist_name") or ""
     ).strip()
@@ -1420,12 +1512,6 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
         )
 
-    # device_class is server-controlled metadata.
-    # Caller/model-provided class labels are deliberately ignored because
-    # provider terminology can differ (for example Desktop vs Workstation).
-    # Exact endpoint identity remains independently enforced above.
-    supplied_class = expected["device_class"]
-
     supplied_component_uid = str(
         raw.get("component_uid")
         or raw.get("component_id")
@@ -1435,6 +1521,7 @@ def _canonicalize_governed_action_arguments(
     supplied_component_name = str(
         raw.get("component_name") or ""
     ).strip()
+    live_variable_policies: tuple[dict[str, Any], ...] = ()
 
     # Human callers identify components by their Datto display name.
     # Jason resolves that name against the complete governed live catalog
@@ -1443,6 +1530,7 @@ def _canonicalize_governed_action_arguments(
         (
             live_component_uid,
             live_component_name,
+            live_variable_policies,
         ) = _resolve_live_datto_component_name(
             supplied_component_name
         )
@@ -1479,16 +1567,40 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_VARIABLES_INVALID"
         )
 
+    if variables and supplied_component_name:
+        allowed_variable_names = {
+            str(policy.get("name") or "").strip().casefold()
+            for policy in live_variable_policies
+        }
+        for raw_name in variables:
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                raise ValueError("DATTO_COMPONENT_VARIABLES_INVALID")
+            if raw_name.strip().casefold() not in allowed_variable_names:
+                raise ValueError("DATTO_COMPONENT_VARIABLE_NOT_DECLARED")
+
+    if requested_device == expected["device_uid"]:
+        supplied_class = expected["device_class"]
+    else:
+        supplied_class = _resolve_live_datto_endpoint_target(
+            requested_device
+        )
+
     # Only exact server-resolved component identity and provider-neutral values
     # required by the runtime are forwarded. The model cannot widen the set.
-    return {
+    canonical = {
         "allowlist_name": expected["allowlist_name"],
-        "device_uid": expected["device_uid"],
-        "device_class": expected["device_class"],
+        "device_uid": requested_device,
+        "device_class": supplied_class,
         "component_uid": selected_component.uid,
         "component_name": selected_component.name,
         "variables": dict(variables),
     }
+    if variables and live_variable_policies:
+        canonical["variable_policies"] = [
+            dict(policy)
+            for policy in live_variable_policies
+        ]
+    return canonical
 
 
 def _governed_execute(

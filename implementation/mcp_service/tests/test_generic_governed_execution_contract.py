@@ -409,6 +409,9 @@ def test_datto_action_result_exposes_governed_job_uid_for_readback():
         "completion_verified": False,
         "allowlist_name": "diagnostic",
         "job_uid": "provider-job-123",
+        "job_read_arguments": {
+            "resource_id": "provider-job-123",
+        },
         "job_reference_present": True,
     }
 
@@ -451,6 +454,24 @@ def _set_datto_action_scope(monkeypatch):
     for key, value in values.items():
         monkeypatch.setenv(key, value)
 
+    def resolve_component(name):
+        if str(name).strip().casefold() != (
+            "Get-DNS Settings AOT Ver 06042025-1".casefold()
+        ):
+            raise ValueError("DATTO_COMPONENT_NAME_MISMATCH")
+        return "component-456", "Get-DNS Settings AOT Ver 06042025-1", ()
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        resolve_component,
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_endpoint_target",
+        lambda device_uid: "Desktop",
+    )
+
 
 def _set_datto_multi_component_scope(monkeypatch):
     monkeypatch.setenv(
@@ -470,6 +491,38 @@ def _set_datto_multi_component_scope(monkeypatch):
         '[{"uid":"component-456","name":"Get-DNS Settings AOT Ver 06042025-1","approval_mode":"standing_safe"},'
         '{"uid":"component-789","name":"Check Datto EDR/AV Status AOT Ver 12122025-1","approval_mode":"standing_safe"},'
         '{"uid":"component-reboot","name":"Scheduled Reboot AOT Ver 12112025-1","approval_mode":"per_run"}]',
+    )
+
+    by_name = {
+        "get-dns settings aot ver 06042025-1": (
+            "component-456",
+            "Get-DNS Settings AOT Ver 06042025-1",
+        ),
+        "check datto edr/av status aot ver 12122025-1": (
+            "component-789",
+            "Check Datto EDR/AV Status AOT Ver 12122025-1",
+        ),
+        "scheduled reboot aot ver 12112025-1": (
+            "component-reboot",
+            "Scheduled Reboot AOT Ver 12112025-1",
+        ),
+    }
+
+    def resolve_component(name):
+        match = by_name.get(str(name).strip().casefold())
+        if match is None:
+            raise ValueError("DATTO_COMPONENT_NAME_MISMATCH")
+        return (*match, ())
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        resolve_component,
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_endpoint_target",
+        lambda device_uid: "Desktop",
     )
 
 
@@ -582,18 +635,89 @@ def test_datto_action_rejects_unknown_component_in_multi_scope(
         raise AssertionError("unknown component must fail closed")
 
 
-def test_datto_action_rejects_different_target(monkeypatch):
+def test_datto_action_revalidates_different_managed_target(monkeypatch):
     _set_datto_action_scope(monkeypatch)
+    observed = []
+
+    def resolve_target(device_uid):
+        observed.append(device_uid)
+        return "Laptop"
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_endpoint_target",
+        resolve_target,
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "managed-device-2",
+            "component_uid": "component-456",
+        },
+    )
+
+    assert observed == ["managed-device-2"]
+    assert result["device_uid"] == "managed-device-2"
+    assert result["device_class"] == "Laptop"
+
+
+def test_datto_action_target_revalidation_failure_fails_closed(monkeypatch):
+    _set_datto_action_scope(monkeypatch)
+
+    def fail_target(device_uid):
+        raise ValueError("DATTO_COMPONENT_TARGET_REVALIDATION_FAILED")
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_endpoint_target",
+        fail_target,
+    )
 
     try:
         server._canonicalize_governed_action_arguments(
             "automation.component.execute",
-            {"device_uid": "wrong-device"},
+            {
+                "device_uid": "unverified-device",
+                "component_uid": "component-456",
+            },
         )
     except ValueError as exc:
-        assert str(exc) == "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+        assert str(exc) == "DATTO_COMPONENT_TARGET_REVALIDATION_FAILED"
     else:
-        raise AssertionError("target mismatch must fail closed")
+        raise AssertionError("unverified target must fail closed")
+
+
+def test_exact_live_unlisted_component_defaults_to_per_run(monkeypatch):
+    _set_datto_multi_component_scope(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: ("component-new", "Inventory Diagnostic", ()),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_name": "Inventory Diagnostic",
+        },
+    )
+
+    selected = server.resolve_datto_component(
+        server.configured_datto_components(),
+        component_uid=result["component_uid"],
+        component_name=result["component_name"],
+        catalog_verified=True,
+    )
+    mode, reason = server.effective_datto_component_approval_mode(
+        selected,
+        result["variables"],
+    )
+
+    assert result["component_uid"] == "component-new"
+    assert mode == "per_run"
+    assert reason is None
 
 
 def test_datto_action_rejects_different_component(monkeypatch):
@@ -640,3 +764,63 @@ def test_non_datto_action_arguments_are_unchanged():
     )
 
     assert result == original
+
+
+def test_unlisted_live_component_uses_live_variable_contract(monkeypatch):
+    _set_datto_multi_component_scope(monkeypatch)
+    policy = (
+        {
+            "name": "Mode",
+            "variable_type": "string",
+            "required": False,
+            "maximum_length": 128,
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: ("component-new", "Inventory Diagnostic", policy),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_name": "Inventory Diagnostic",
+            "variables": {"Mode": "Safe"},
+        },
+    )
+    assert result["component_uid"] == "component-new"
+    assert result["variables"] == {"Mode": "Safe"}
+    assert result["variable_policies"] == [dict(policy[0])]
+
+
+def test_unlisted_live_component_rejects_undeclared_variable(monkeypatch):
+    _set_datto_multi_component_scope(monkeypatch)
+    policy = (
+        {
+            "name": "Mode",
+            "variable_type": "string",
+            "required": False,
+            "maximum_length": 128,
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: ("component-new", "Inventory Diagnostic", policy),
+    )
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+                "component_name": "Inventory Diagnostic",
+                "variables": {"NotDeclared": "value"},
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_VARIABLE_NOT_DECLARED"
+    else:
+        raise AssertionError("undeclared variable must fail closed")

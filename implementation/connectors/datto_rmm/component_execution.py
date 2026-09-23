@@ -134,12 +134,9 @@ class DattoRmmComponentExecutionPolicy:
         cls,
         entry: ComponentAllowlistEntry,
     ) -> tuple[ComponentVariablePolicy, ...]:
-        if entry.variable_policies:
-            return entry.variable_policies
-
-        # Source-controlled variable contracts remain exact and fail closed.
-        # Unknown variable names are never accepted merely because a live
-        # component exposes some variable.
+        # Source-controlled variable contracts for reviewed special cases take
+        # precedence over live catalog metadata so a provider-side metadata
+        # change cannot silently widen their accepted input surface.
         if (
             entry.display_name.casefold()
             == cls._SERVICE_DETAIL_DIAGNOSTIC_NAME.casefold()
@@ -171,6 +168,9 @@ class DattoRmmComponentExecutionPolicy:
                     maximum_length=20_000,
                 ),
             )
+
+        if entry.variable_policies:
+            return entry.variable_policies
 
         return ()
 

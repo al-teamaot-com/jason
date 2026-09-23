@@ -24,6 +24,7 @@ from connectors.datto_rmm.auth import (
 )
 from connectors.datto_rmm.component_execution import (
     ComponentAllowlistEntry,
+    ComponentVariablePolicy,
     DattoRmmComponentExecutionPolicy,
     StaticComponentAllowlist,
 )
@@ -208,8 +209,10 @@ def _capability_definition(
         display_name="Execute Approved Automation Component",
         lifecycle_status=CapabilityLifecycle.BUILDING,
         business_purpose=(
-            "Execute one explicitly approved diagnostic automation "
-            "component against one explicitly approved pilot endpoint."
+            "Execute one exact provider automation component against one "
+            "governed managed endpoint. Standing-safe diagnostics may use "
+            "policy approval; all other components require explicit per-run "
+            "approval from an authorized technician or owner."
         ),
         owner_service="Jason Governed Actions",
         architectural_capability_ids=frozenset(
@@ -231,7 +234,7 @@ def _capability_definition(
         invoking_roles=frozenset({"orchestrator"}),
         approval=CapabilityApproval(
             required=True,
-            approver_classes=("owner",),
+            approver_classes=("owner", "technician"),
         ),
         evidence=CapabilityEvidence(
             required=True,
@@ -601,6 +604,81 @@ class DattoRmmComponentExecutionConnector:
 
         return status
 
+    @staticmethod
+    def _device_record(
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        nested = payload.get("device")
+        if isinstance(nested, Mapping):
+            return nested
+        return payload
+
+    @classmethod
+    def _device_uid(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> str:
+        record = cls._device_record(payload)
+        return str(
+            record.get("uid")
+            or record.get("deviceUid")
+            or record.get("device_uid")
+            or record.get("resource_id")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _device_class(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> str:
+        record = cls._device_record(payload)
+        raw = record.get("deviceType") or record.get("device_type")
+        if isinstance(raw, Mapping):
+            return str(raw.get("category") or raw.get("type") or "").strip()
+        return str(raw or "").strip()
+
+    @staticmethod
+    def _dynamic_variable_policies(
+        arguments: Mapping[str, Any],
+    ) -> tuple[ComponentVariablePolicy, ...]:
+        raw = arguments.get("variable_policies")
+        if raw in (None, (), []):
+            return ()
+        if not isinstance(raw, (list, tuple)) or len(raw) > 32:
+            raise PermissionError("DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID")
+
+        policies: list[ComponentVariablePolicy] = []
+        expected_keys = {
+            "name",
+            "variable_type",
+            "required",
+            "maximum_length",
+        }
+        for item in raw:
+            if not isinstance(item, Mapping) or set(item) != expected_keys:
+                raise PermissionError("DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID")
+            required = item.get("required")
+            if not isinstance(required, bool):
+                raise PermissionError("DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID")
+            try:
+                policy = ComponentVariablePolicy(
+                    name=str(item.get("name") or ""),
+                    variable_type=str(item.get("variable_type") or ""),
+                    required=required,
+                    maximum_length=int(item.get("maximum_length")),
+                )
+            except (TypeError, ValueError) as error:
+                raise PermissionError(
+                    "DATTO_COMPONENT_VARIABLE_SCHEMA_INVALID"
+                ) from error
+            policies.append(policy)
+
+        names = [policy.name.casefold() for policy in policies]
+        if len(names) != len(set(names)):
+            raise PermissionError("DATTO_COMPONENT_VARIABLE_SCHEMA_AMBIGUOUS")
+        return tuple(policies)
+
     def execute(
         self,
         request: ConnectorRequest,
@@ -642,9 +720,9 @@ class DattoRmmComponentExecutionConnector:
             or ""
         ).strip()
 
-        if requested_device != pilot.device_uid:
+        if not requested_device:
             raise PermissionError(
-                "DATTO_COMPONENT_TARGET_NOT_APPROVED"
+                "DATTO_COMPONENT_TARGET_REQUIRED"
             )
 
         requested_class = str(
@@ -652,9 +730,9 @@ class DattoRmmComponentExecutionConnector:
             or ""
         ).strip()
 
-        if requested_class.casefold() != pilot.device_class.casefold():
+        if not requested_class:
             raise PermissionError(
-                "DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"
+                "DATTO_COMPONENT_TARGET_CLASS_REQUIRED"
             )
 
         selected_component = resolve_datto_component(
@@ -668,6 +746,9 @@ class DattoRmmComponentExecutionConnector:
             "variables",
             {},
         )
+        dynamic_variable_policies = self._dynamic_variable_policies(
+            request.arguments
+        )
 
         allowlist = StaticComponentAllowlist(
             entries=(
@@ -680,12 +761,10 @@ class DattoRmmComponentExecutionConnector:
                     provider_component_uid=selected_component.uid,
                     allowed_target_classes=frozenset(
                         {
-                            pilot.device_class,
+                            requested_class,
                         }
                     ),
-                    # The production pilot deliberately permits no
-                    # conversation-supplied component variables.
-                    variable_policies=(),
+                    variable_policies=dynamic_variable_policies,
                     requires_per_run_approval=(
                         selected_component.requires_explicit_approval
                     ),
@@ -700,8 +779,8 @@ class DattoRmmComponentExecutionConnector:
 
         prepared = policy.prepare(
             allowlist_name=pilot.allowlist_name,
-            device_uid=pilot.device_uid,
-            device_class=pilot.device_class,
+            device_uid=requested_device,
+            device_class=requested_class,
             component_uid=selected_component.uid,
             variables=variables,
             job_name=str(
@@ -730,6 +809,59 @@ class DattoRmmComponentExecutionConnector:
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
+
+            target_payload = self._transport.request(
+                method="GET",
+                url=(
+                    credentials["api_url"].rstrip("/")
+                    + f"/api/v2/device/{requested_device}"
+                ),
+                headers={
+                    "Authorization": headers["Authorization"],
+                    "Accept": "application/json",
+                },
+                params=None,
+                json=None,
+                timeout_seconds=10.0,
+            )
+
+            if not isinstance(target_payload, Mapping):
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target readback was not an object"
+                )
+
+            observed_uid = self._device_uid(target_payload)
+            observed_class = self._device_class(target_payload)
+            target_record = self._device_record(target_payload)
+
+            if observed_uid != requested_device:
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target readback uid did not match requested endpoint"
+                )
+
+            if (
+                not observed_class
+                or observed_class.casefold() != requested_class.casefold()
+            ):
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target readback class did not match requested endpoint"
+                )
+
+            if target_record.get("deleted") is True or target_record.get("suspended") is True:
+                raise DattoRmmComponentExecutionVerificationError(
+                    "target endpoint is not active for governed execution"
+                )
+
+            self._audit.record(
+                "connector.target.verified",
+                request.context,
+                {
+                    "provider": self.provider_name,
+                    "capability": request.context.capability,
+                    "target_uid_present": True,
+                    "target_class": requested_class,
+                },
+            )
 
             url = (
                 credentials["api_url"].rstrip("/")

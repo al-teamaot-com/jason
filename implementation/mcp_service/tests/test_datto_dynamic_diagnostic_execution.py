@@ -38,12 +38,28 @@ def set_scope(monkeypatch):
     def resolve_live_component(requested_name):
         if str(requested_name).strip().casefold() != NAME.casefold():
             raise ValueError("DATTO_COMPONENT_NAME_MISMATCH")
-        return UID, NAME
+        return (
+            UID,
+            NAME,
+            (
+                {
+                    "name": "usrInput",
+                    "variable_type": "string",
+                    "required": False,
+                    "maximum_length": 20_000,
+                },
+            ),
+        )
 
     monkeypatch.setattr(
         server,
         "_resolve_live_datto_component_name",
         resolve_live_component,
+    )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_endpoint_target",
+        lambda device_uid: "Desktop",
     )
 
 
@@ -128,7 +144,13 @@ def install_runtime(monkeypatch):
     return approvals, orchestrator_calls
 
 
-def execute(command, *, extra_arguments=None, variables=None):
+def execute(
+    command,
+    *,
+    extra_arguments=None,
+    variables=None,
+    explicit_approval=False,
+):
     arguments = {
         "device_uid": TARGET,
         "component_uid": UID,
@@ -143,6 +165,7 @@ def execute(command, *, extra_arguments=None, variables=None):
     return server._governed_execute(
         capability_name="automation.component.execute",
         arguments=arguments,
+        explicit_approval=explicit_approval,
     )
 
 
@@ -184,6 +207,14 @@ def test_dynamic_safe_diagnostics_receive_policy_standing_safe(
         "component_uid": UID,
         "component_name": NAME,
         "variables": {"usrInput": command},
+        "variable_policies": [
+            {
+                "name": "usrInput",
+                "variable_type": "string",
+                "required": False,
+                "maximum_length": 20_000,
+            },
+        ],
     }
     assert "approval_mode" not in governed_request.arguments
     assert governed_request.budget.maximum_attempts == 1
@@ -243,7 +274,9 @@ def test_unapproved_variable_cannot_receive_standing_safe(monkeypatch):
         variables={"otherInput": "Get-Service HUNTAgent"},
     )
 
-    assert result["status"] == "approval_required"
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "invalid_action_arguments"
+    assert "DATTO_COMPONENT_VARIABLE_NOT_DECLARED" in result["reason_codes"]
     assert approvals == []
     assert calls == []
 
@@ -260,12 +293,16 @@ def test_extra_variable_cannot_receive_standing_safe(monkeypatch):
         },
     )
 
-    assert result["status"] == "approval_required"
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "invalid_action_arguments"
+    assert "DATTO_COMPONENT_VARIABLE_NOT_DECLARED" in result["reason_codes"]
     assert approvals == []
     assert calls == []
 
 
-def test_target_mismatch_fails_before_authority_or_provider(monkeypatch):
+def test_standing_safe_diagnostic_can_target_revalidated_managed_endpoint(
+    monkeypatch,
+):
     set_scope(monkeypatch)
     approvals, calls = install_runtime(monkeypatch)
 
@@ -274,11 +311,39 @@ def test_target_mismatch_fails_before_authority_or_provider(monkeypatch):
         extra_arguments={"device_uid": "different-device"},
     )
 
-    assert result["status"] == "rejected"
-    assert result["error_code"] == "invalid_action_arguments"
-    assert "DATTO_COMPONENT_TARGET_NOT_APPROVED" in result["reason_codes"]
+    assert result["status"] == "succeeded"
+    assert len(approvals) == 1
+    assert approvals[0].decided_by == "policy:datto-powershell-readonly"
+    assert len(calls) == 1
+    assert calls[0].arguments["device_uid"] == "different-device"
+    assert calls[0].arguments["device_class"] == "Desktop"
+
+
+def test_per_run_component_on_revalidated_target_requires_and_accepts_approval(
+    monkeypatch,
+):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
+
+    first = execute(
+        "Restart-Service HUNTAgent",
+        extra_arguments={"device_uid": "different-device"},
+    )
+    assert first["status"] == "approval_required"
+    assert "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED" in first["reason_codes"]
     assert approvals == []
     assert calls == []
+
+    second = execute(
+        "Restart-Service HUNTAgent",
+        extra_arguments={"device_uid": "different-device"},
+        explicit_approval=True,
+    )
+    assert second["status"] == "succeeded"
+    assert len(approvals) == 1
+    assert approvals[0].decided_by == "person-al"
+    assert len(calls) == 1
+    assert calls[0].arguments["device_uid"] == "different-device"
 
 
 def test_altered_component_uid_fails_before_authority_or_provider(monkeypatch):

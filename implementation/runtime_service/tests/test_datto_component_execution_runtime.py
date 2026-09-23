@@ -272,10 +272,18 @@ class Transport:
         *,
         get_status="completed",
         get_uid="job-uid-1",
+        target_uid="device-uid-1",
+        target_class="workstation",
+        target_deleted=False,
+        target_suspended=False,
     ):
         self.calls = []
         self.get_status = get_status
         self.get_uid = get_uid
+        self.target_uid = target_uid
+        self.target_class = target_class
+        self.target_deleted = target_deleted
+        self.target_suspended = target_suspended
 
     def request(
         self,
@@ -301,6 +309,17 @@ class Transport:
         if method == "PUT":
             return {
                 "uid": "job-uid-1",
+            }
+
+        if method == "GET" and "/api/v2/device/" in url:
+            return {
+                "uid": self.target_uid,
+                "deviceType": {
+                    "category": self.target_class,
+                    "type": self.target_class,
+                },
+                "deleted": self.target_deleted,
+                "suspended": self.target_suspended,
             }
 
         if method == "GET":
@@ -344,10 +363,18 @@ def connector(
     *,
     get_status="completed",
     get_uid="job-uid-1",
+    target_uid="device-uid-1",
+    target_class="workstation",
+    target_deleted=False,
+    target_suspended=False,
 ):
     transport = Transport(
         get_status=get_status,
         get_uid=get_uid,
+        target_uid=target_uid,
+        target_class=target_class,
+        target_deleted=target_deleted,
+        target_suspended=target_suspended,
     )
     audit = Audit()
 
@@ -409,12 +436,13 @@ def test_live_connector_issues_one_quickjob_and_verifies_job(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
 
     assert (
-        transport.calls[0]["json"]["jobComponent"][
+        transport.calls[1]["json"]["jobComponent"][
             "componentUid"
         ]
         == "component-uid-1"
@@ -443,7 +471,7 @@ def test_second_allowlisted_component_uses_exact_provider_uid(
 
     assert result.data["readback_verified"] is True
     assert (
-        transport.calls[0]["json"]["jobComponent"][
+        transport.calls[1]["json"]["jobComponent"][
             "componentUid"
         ]
         == "component-uid-2"
@@ -479,6 +507,7 @@ def test_async_quickjob_returns_durable_accepted_job_reference(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -511,6 +540,7 @@ def test_quickjob_readback_uid_mismatch_fails_closed(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -542,6 +572,7 @@ def test_quickjob_terminal_failure_fails_closed(
         call["method"]
         for call in transport.calls
     ] == [
+        "GET",
         "PUT",
         "GET",
     ]
@@ -557,13 +588,7 @@ def test_quickjob_terminal_failure_fails_closed(
     "override",
     [
         {
-            "device_uid": "other-device",
-        },
-        {
             "allowlist_name": "other-component",
-        },
-        {
-            "device_class": "server",
         },
         {
             "variables": {
@@ -572,7 +597,7 @@ def test_quickjob_terminal_failure_fails_closed(
         },
     ],
 )
-def test_execution_fails_closed_outside_exact_pilot(
+def test_execution_fails_closed_on_invalid_component_scope(
     monkeypatch,
     override,
 ):
@@ -589,6 +614,162 @@ def test_execution_fails_closed_outside_exact_pilot(
         value.execute(
             execution_request(
                 **override
+            )
+        )
+
+    assert transport.calls == []
+
+
+def test_managed_target_outside_original_pilot_is_revalidated_and_executes(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        target_uid="other-device",
+        target_class="workstation",
+    )
+
+    result = value.execute(
+        execution_request(
+            device_uid="other-device",
+            device_class="workstation",
+        )
+    )
+
+    assert result.data["readback_verified"] is True
+    assert [call["method"] for call in transport.calls] == [
+        "GET",
+        "PUT",
+        "GET",
+    ]
+    assert transport.calls[0]["url"].endswith(
+        "/api/v2/device/other-device"
+    )
+    assert transport.calls[1]["url"].endswith(
+        "/api/v2/device/other-device/quickjob"
+    )
+    assert any(
+        event[0] == "connector.target.verified"
+        for event in audit.events
+    )
+
+
+def test_target_revalidation_uid_mismatch_fails_before_mutation(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        target_uid="different-device",
+    )
+
+    with pytest.raises(
+        DattoRmmComponentExecutionVerificationError
+    ):
+        value.execute(
+            execution_request(device_uid="other-device")
+        )
+    assert [call["method"] for call in transport.calls] == [
+        "GET",
+    ]
+    assert not any(
+        event[0] == "connector.mutation.requested"
+        for event in audit.events
+    )
+
+
+def test_target_revalidation_class_mismatch_fails_before_mutation(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        target_uid="other-device",
+        target_class="workstation",
+    )
+
+    with pytest.raises(
+        DattoRmmComponentExecutionVerificationError
+    ):
+        value.execute(
+            execution_request(
+                device_uid="other-device",
+                device_class="server",
+            )
+        )
+    assert [call["method"] for call in transport.calls] == [
+        "GET",
+    ]
+    assert not any(
+        event[0] == "connector.mutation.requested"
+        for event in audit.events
+    )
+
+
+def test_inactive_target_fails_before_mutation(monkeypatch):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector(
+        target_uid="other-device",
+        target_class="workstation",
+        target_suspended=True,
+    )
+
+    with pytest.raises(
+        DattoRmmComponentExecutionVerificationError
+    ):
+        value.execute(
+            execution_request(device_uid="other-device")
+        )
+
+    assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_dynamic_catalog_variable_contract_is_enforced(monkeypatch):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector()
+
+    result = value.execute(
+        execution_request(
+            variables={"Mode": "Safe"},
+            variable_policies=[
+                {
+                    "name": "Mode",
+                    "variable_type": "string",
+                    "required": False,
+                    "maximum_length": 64,
+                },
+            ],
+        )
+    )
+
+    assert result.data["readback_verified"] is True
+    assert transport.calls[1]["json"]["jobComponent"]["variables"] == [
+        {"name": "Mode", "value": "Safe"},
+    ]
+
+
+def test_dynamic_catalog_variable_contract_rejects_undeclared_input(
+    monkeypatch,
+):
+    mock_access_token(monkeypatch)
+
+    value, transport, audit = connector()
+
+    with pytest.raises(PermissionError):
+        value.execute(
+            execution_request(
+                variables={"Other": "value"},
+                variable_policies=[
+                    {
+                        "name": "Mode",
+                        "variable_type": "string",
+                        "required": False,
+                        "maximum_length": 64,
+                    },
+                ],
             )
         )
 
