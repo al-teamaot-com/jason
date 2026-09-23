@@ -47,6 +47,7 @@ def _settings(tmp_path: Path, *, dynamic: bool) -> RuntimeSettings:
         bindings_db=tmp_path / "bindings.sqlite3",
         continuation_db=tmp_path / "continuation.sqlite3",
         replay_db=tmp_path / "replay.sqlite3",
+        governed_execution_db=tmp_path / "governed-execution.sqlite3",
         security_audit_db=tmp_path / "security.sqlite3",
         orchestration_events_db=tmp_path / "events.sqlite3",
         model_usage_db=tmp_path / "model-usage.sqlite3",
