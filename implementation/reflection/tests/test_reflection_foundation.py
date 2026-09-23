@@ -7,6 +7,7 @@ import pytest
 
 from orchestrator.event_store import OrchestrationEvent
 from reflection import (
+    CandidateActorKind,
     CandidateLifecycle,
     ReflectionRecord,
     ReflectionService,
@@ -171,7 +172,8 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
                 observed.candidate_key,
                 organization_id="aot",
                 new_state=CandidateLifecycle.APPROVED,
-                actor_id="person-al",
+                actor_id="system:reflection-detector",
+                actor_kind=CandidateActorKind.SYSTEM,
                 reason="skip review",
             )
 
@@ -180,6 +182,7 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
             organization_id="aot",
             new_state=CandidateLifecycle.PROPOSED,
             actor_id="person-al",
+            actor_kind=CandidateActorKind.HUMAN,
             reason="review candidate",
         )
         assert proposed.state is CandidateLifecycle.PROPOSED
@@ -188,6 +191,7 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
             organization_id="aot",
             new_state=CandidateLifecycle.TESTED,
             actor_id="ci:reflection-regression",
+            actor_kind=CandidateActorKind.CI,
             reason="regression cases passed",
         )
         approved = store.transition_candidate(
@@ -195,6 +199,7 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
             organization_id="aot",
             new_state=CandidateLifecycle.APPROVED,
             actor_id="person-al",
+            actor_kind=CandidateActorKind.HUMAN,
             reason="governance approval",
         )
         promoted = store.transition_candidate(
@@ -202,6 +207,7 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
             organization_id="aot",
             new_state=CandidateLifecycle.PROMOTED,
             actor_id="release:controlled",
+            actor_kind=CandidateActorKind.RELEASE,
             reason="merged reviewed implementation",
         )
         assert tested.state is CandidateLifecycle.TESTED
@@ -223,6 +229,7 @@ def test_candidate_scope_cannot_cross_organization() -> None:
                 organization_id="other",
                 new_state=CandidateLifecycle.PROPOSED,
                 actor_id="person-x",
+                actor_kind=CandidateActorKind.HUMAN,
                 reason="cross-org attempt",
             )
     finally:
