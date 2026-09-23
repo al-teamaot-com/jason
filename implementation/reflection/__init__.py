@@ -2,6 +2,7 @@
 
 from .collector import reflection_record_from_events
 from .contracts import (
+    CandidateActorKind,
     CandidateLifecycle,
     ImprovementCandidate,
     ImprovementCandidateDraft,
@@ -13,6 +14,7 @@ from .service import ReflectionObservationResult, ReflectionService
 from .store import SQLiteReflectionStore
 
 __all__ = [
+    "CandidateActorKind",
     "CandidateLifecycle",
     "ImprovementCandidate",
     "ImprovementCandidateDraft",
