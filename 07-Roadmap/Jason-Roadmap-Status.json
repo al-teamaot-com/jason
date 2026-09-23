@@ -391,6 +391,19 @@
         "https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/",
         "https://www.maxmind.com/en/geolite2/signup"
       ]
+    },
+    {
+      "id": "TODO-DATA-008",
+      "title": "Shodan InternetDB external exposure intelligence integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "related_group": "Threat Reputation Intelligence",
+      "notes": "Integrate Shodan InternetDB as a read-only enrichment source for public IP exposure, open ports, hostnames, CPEs, tags, and reported vulnerabilities. Use during investigations and external-exposure reviews to correlate Internet-facing services with client assets and tickets. Confirm Shodan licensing/commercial-use terms for AOT/MSP production use before implementation and budget for a paid plan if required.",
+      "references": [
+        "https://internetdb.shodan.io/",
+        "https://blog.shodan.io/introducing-the-internetdb-api/",
+        "https://account.shodan.io/billing"
+      ]
     }
   ]
 }
