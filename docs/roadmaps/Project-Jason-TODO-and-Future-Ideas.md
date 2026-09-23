@@ -962,6 +962,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Finance/Operations Owner
 - **Review trigger:** Implement before declaring TODO-OPS-007 end-to-end complete.
 
+### TODO-FIN-002 — QuickBooks Online integration with provider-native financial authorization
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Critical
+- **Idea:** Implement QuickBooks Online as a governed financial-data provider. Human access must require all four gates: authorized Jason user, Microsoft Entra-authenticated requester identity, sufficient QuickBooks Online user permission for the requested data/action, and independent Jason governance approval/policy for the requested operation.
+- **Authority rule:** Effective permission is the intersection of Jason access, verified Entra identity, QuickBooks Online permission, and Jason governance. Jason Admin/Owner roles must never implicitly elevate QBO permissions, and a shared/service QBO credential must never become the source of interactive human authority.
+- **First acceptance test:** In the QBO sandbox, determine whether OAuth/API calls actually preserve and enforce the authorizing QBO user's native role/permissions. If native enforcement is absent or ambiguous, fail closed and use a synchronized permission projection/cache derived from QBO user permissions instead.
+- **Initial scope:** Read-only financial data. Mutations such as invoice changes, vendor changes, payments, refunds, credits, voids, bank-account changes, or other movement-of-money actions require separate governed capabilities and stronger approval controls.
+- **Acceptance criteria:** requester is an authorized Jason user; requester identity is Entra-verified; requester maps to a QBO user/company context; requested object/field/action is permitted by QBO-native permission or a fail-closed projection derived from it; Jason governance independently authorizes the operation; shared/service credentials do not broaden disclosure/action authority.
+- **Decision owner:** Jason Governance Authority / Finance Owner
+- **Review trigger:** Begin with sandbox authorization-behavior proof before any production credential or financial-data activation.
+
 ---
 
 ## Governance and operational maturity
