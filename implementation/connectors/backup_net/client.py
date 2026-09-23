@@ -10,6 +10,7 @@ from urllib.request import Request, build_opener
 from connectors.core.contracts import (
     ConnectorConfigurationError,
     ConnectorTransportError,
+    bounded_transport_timeout,
 )
 
 BACKUP_NET_AUTH_URL = "https://login.backup.net/connect/token"
@@ -130,7 +131,7 @@ class BackupNetClient:
         try:
             with self._opener.open(
                 request,
-                timeout=self._timeout_seconds,
+                timeout=bounded_transport_timeout(self._timeout_seconds),
             ) as response:
                 raw = response.read()
         except HTTPError as exc:

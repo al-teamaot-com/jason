@@ -10,7 +10,10 @@ from connectors.backup_net.client import (
     BACKUP_NET_AUTH_URL,
     BackupNetClient,
 )
-from connectors.core.contracts import ConnectorTransportError
+from connectors.core.contracts import (
+    ConnectorTransportError,
+    connector_execution_deadline,
+)
 
 
 CUSTOMER_ID = "d28a556c-d8de-48f9-8a64-90fdf03ec4d0"
@@ -32,9 +35,11 @@ class FakeResponse:
 class FakeOpener:
     def __init__(self):
         self.requests = []
+        self.timeouts = []
 
     def open(self, request, timeout):
         self.requests.append(request)
+        self.timeouts.append(timeout)
         if len(self.requests) == 1:
             return FakeResponse(
                 {
@@ -107,3 +112,20 @@ def test_http_failure_is_redacted_and_does_not_echo_credentials():
     assert "401" in message
     assert "very-secret-value" not in message
     assert "secret-response-body" not in message
+
+
+def test_client_honors_shared_governed_execution_deadline():
+    opener = FakeOpener()
+    client = BackupNetClient(
+        {"client_id": "client-id", "client_secret": "client-secret"},
+        opener=opener,
+    )
+
+    with connector_execution_deadline(0.5):
+        client.get(
+            "/api/epb/v1/assets",
+            {"customer_id": CUSTOMER_ID, "name": "DGV-50859"},
+        )
+
+    assert len(opener.timeouts) == 2
+    assert all(0 < value <= 0.5 for value in opener.timeouts)
