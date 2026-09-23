@@ -174,6 +174,107 @@
       "title": "ConnectBooster / Financial Operations integration: read-only payment and A/R intelligence, BNG transaction queries and signed webhooks, ConnectBooster notification ingestion, reconciliation across gateway/ConnectBooster/accounting/Autotask, and tightly governed financial actions",
       "status": "planned",
       "phase": "Capabilities"
+    },
+    {
+      "id": "TODO-CONN-015",
+      "title": "Dark Web ID integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Investigate and implement supported Dark Web ID API access for organization/domain provisioning, organization/domain inventory, utilization, live-search or exposure data as supported. Favor read-only evidence first; use for onboarding assurance, monitored-domain coverage, and security-ticket correlation.",
+      "references": [
+        "https://help.darkwebid.kaseya.com/help/Content/how-to/how-can-i-enable-api-access-for-id-agent.html",
+        "https://help.darkwebid.kaseya.com/help/Content/release-notes/2026/09-10-2026-dark-web-id-v2.93.00.htm"
+      ]
+    },
+    {
+      "id": "TODO-CONN-016",
+      "title": "Quote Manager integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Implement the documented read-only Quote Manager API for quotes, sales orders, suppliers, warehouses, and other supported commerce data. Target correlation with Autotask, vendor-cost reconciliation, ConnectBooster, and client profitability workflows.",
+      "references": [
+        "https://commerce.datto.com/help/Content/2-integrate/api.htm"
+      ]
+    },
+    {
+      "id": "TODO-CONN-017",
+      "title": "Datto SaaS Protection integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Implement supported Datto SaaS Protection REST API access for customer/domain, seat/license, and backup-status intelligence. Read-only backup assurance first; any seat License/Unlicense/Pause operations must be separate governed actions.",
+      "references": [
+        "https://saasprotection.datto.com/help/M365/Content/Other_Administrative_Tasks/using-rest-api-saas-protection.htm"
+      ]
+    },
+    {
+      "id": "TODO-CONN-018",
+      "title": "BullPhish ID integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Investigate supported BullPhish ID API/integration surfaces. A Graphus API-key integration is documented, but a general-purpose public BullPhish API has not yet been confirmed. Do not build against undocumented endpoints; first obtain an official supported API contract or use supported downstream integration data.",
+      "references": [
+        "https://help.bullphishid.kaseya.com/help/Content/11_Integrations/bullphish-id-integration-with-graphus.html"
+      ]
+    },
+    {
+      "id": "TODO-CONN-019",
+      "title": "UniView integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Review and implement the UniView Public API using OAuth 2.0 client credentials. Evaluate UniView as a canonical backup-provider surface across supported Unitrends/Datto/Spanning services before creating product-specific duplicate integrations.",
+      "references": [
+        "https://help.unitrends.kaseya.com/uniview-help/Content/MSP/public-api.htm"
+      ]
+    },
+    {
+      "id": "TODO-CONN-020",
+      "title": "INKY integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Investigate INKY's supported integration surfaces, prioritizing the documented KSIEM/SaaS Alerts integration and its API-key/webhook event stream. Prefer consuming supported SaaS Alerts/KSIEM telemetry where it avoids a separate polling connector.",
+      "references": [
+        "https://help.inky.com/en/articles/1456498-ksiem-saas-alerts-integration"
+      ]
+    },
+    {
+      "id": "TODO-CONN-021",
+      "title": "Spanning Backup integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Implement the documented Spanning API for supported user/license, shared-drive, backup, and export/recovery-related operations. Start with read-only protection/license assurance; recovery/export or license mutations require governed execution.",
+      "references": [
+        "https://api.spanningbackup.com/index.html"
+      ]
+    },
+    {
+      "id": "TODO-CONN-022",
+      "title": "myITprocess integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Review and implement the documented myITprocess REST API/Swagger surface. Target strategic/alignment data, recommendations, organizations/sites, and correlation with Autotask, IT Glue, Compliance Manager, and Jason management workflows as the API supports.",
+      "references": [
+        "https://help.myitprocess.kaseya.com/help-wip/Content/setup-admin/myitprocess-api.html"
+      ]
+    },
+    {
+      "id": "TODO-CONN-023",
+      "title": "Kaseya MDR integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Investigate Kaseya MDR API and outbound webhook integration. Settings > API provides API identity/key, Partner ID, and approved webhook-domain governance, but endpoint, payload, subscription, and event schemas were not found in the governance page. Obtain the official supported API/webhook contract before implementation.",
+      "references": [
+        "https://help.mdr.kaseya.com/help/Content/account-access-governance/api-access-and-webhook-governance.htm"
+      ]
+    },
+    {
+      "id": "TODO-CONN-024",
+      "title": "Kaseya SIEM integration",
+      "status": "planned",
+      "phase": "Capabilities",
+      "notes": "Investigate Kaseya SIEM API and outbound webhook integration. Settings > API provides API identity/key, Partner ID, and approved webhook-domain governance, but endpoint, payload, subscription, and event schemas must be obtained from supported product documentation before implementation.",
+      "references": [
+        "https://help.siem.kaseya.com/help/Content/administration-and-configuration/api-access-and-webhook-governance.htm"
+      ]
     }
   ]
 }
