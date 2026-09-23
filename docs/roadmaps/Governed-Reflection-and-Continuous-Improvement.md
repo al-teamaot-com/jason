@@ -1,7 +1,7 @@
 # Governed Reflection and Continuous Improvement
 
 **Roadmap ID:** REFLECT-001  
-**Status:** Planned  
+**Status:** Active — foundation implementation in review  
 **Priority:** P1  
 **Risk level:** Moderate  
 **Tracking issue:** GitHub issue #172 — Governed reflection and continuous-improvement loop for Jason
@@ -147,6 +147,34 @@ Resolution Memory should eventually prove at least the following:
 - contradictory outcomes lower confidence and are visible to the technician;
 - client-specific exceptions remain client-scoped;
 - repeated verified outcomes can be proposed for playbook promotion but cannot promote themselves.
+
+## Current implementation slice — 2026-09-23
+
+The first bounded REFLECT-001 foundation is implemented in source on branch `feature/reflect-001-foundation-20260923`.
+
+Implemented:
+- provider-neutral `ReflectionRecord` with bounded correlation-linked execution-quality telemetry;
+- append-only SQLite reflection storage with organization/client query boundaries;
+- deterministic candidate detectors for exact-search miss followed by broader-search success, excessive pagination, excessive provider-call count, repeated fallbacks, and explicit user-correction categories;
+- reusable candidate deduplication that accumulates source reflection records instead of rewriting history;
+- append-only candidate lifecycle events;
+- lifecycle `observed -> proposed -> tested -> approved -> promoted/rejected`;
+- explicit actor classes for human, system, CI, and controlled release activity;
+- human-only candidate approval enforcement;
+- Central Orchestrator `InvocationTelemetry` fields for bounded reflection metrics;
+- conversion from durable orchestration terminal events to reflection records without copying raw request arguments or provider response bodies;
+- CI/regression coverage for bounded telemetry, organization isolation, append-only behavior, candidate deduplication, human approval boundaries, and deterministic detectors.
+
+Deliberately not implemented in this slice:
+- autonomous code or policy editing;
+- autonomous authority, provider-access, or permission changes;
+- automatic promotion of candidates into production;
+- raw-prompt or raw-provider-record capture;
+- live provider-specific telemetry population across every connector;
+- Grafana candidate dashboards;
+- model-assisted reflection analysis.
+
+The next implementation increment should instrument selected provider-read/search paths with the bounded telemetry fields, add an authenticated user-correction ingestion path, and expose observed/proposed candidates for human governance review.
 
 ## Near-term construction direction
 
