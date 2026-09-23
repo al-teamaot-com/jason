@@ -167,13 +167,22 @@ def test_candidate_cannot_skip_review_lifecycle() -> None:
     service = ReflectionService(store)
     try:
         observed = service.observe(record()).candidates[0]
-        with pytest.raises(ValueError, match="invalid candidate transition"):
+        with pytest.raises(PermissionError, match="human governance actor"):
             store.transition_candidate(
                 observed.candidate_key,
                 organization_id="aot",
                 new_state=CandidateLifecycle.APPROVED,
                 actor_id="system:reflection-detector",
                 actor_kind=CandidateActorKind.SYSTEM,
+                reason="self approval attempt",
+            )
+        with pytest.raises(ValueError, match="invalid candidate transition"):
+            store.transition_candidate(
+                observed.candidate_key,
+                organization_id="aot",
+                new_state=CandidateLifecycle.APPROVED,
+                actor_id="person-al",
+                actor_kind=CandidateActorKind.HUMAN,
                 reason="skip review",
             )
 
