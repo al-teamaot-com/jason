@@ -23,6 +23,7 @@ Examples include:
 - `INF-010-Microsoft-Cloud-Deployment-Checklist.md`;
 - `INF-015-AWS-Provider-Deployment-Checklist.md`;
 - `IT-Glue-Datto-Resource-Convergence-Checklist.md`;
+- `Governed-Mutation-Indeterminate-Recovery.md`;
 - `Jason-Bootstrap-and-Secrets-Runbook.md`;
 - `OpenClaw-Ed25519-Key-Rotation.md`;
 - `OpenClaw-JKD001-Operational-Hardening.md`;

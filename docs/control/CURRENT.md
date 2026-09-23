@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently activated approval-governed action surface. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; hardening and Autotask create/note adaptation were checkpointed at `0ed6911`, and all remaining identified action adapters plus Teams message send were adapted at `e41e572`. The combined focused regression set is 141/141 PASS. No production deployment or provider mutation has occurred from this remediation branch; production acceptance remains pending.
+**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently identified approval-governed action surface and shared security framework. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; adapter hardening is checkpointed at `0ed6911` and `e41e572`; shared absolute provider deadlines plus continuation/recovery dual-plan binding and durable recovery retry controls are checkpointed at `bf072af`. The consolidated security regression set is 186/186 PASS. A full orchestrator-suite comparison shows only the same three pre-existing IT Glue/provider-read failures present at baseline `10d1e9c`, with no new failures introduced by `bf072af`. No production deployment or provider mutation has occurred from this remediation branch; production acceptance remains pending.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: finish shared-framework hardening/regression review, produce a clean reproducible build from the authoritative remediation branch, verify production revision and rollback without a provider mutation, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
+- **Next safe actions:** treat `TODO-SEC-006` as the immediate security workstream: produce a clean reproducible build from authoritative remediation commit `bf072af` (or a later documentation-only descendant), preserve and verify the current production rollback, verify the deployed revision without a provider mutation, then perform the separately approved bounded XYZ acceptance on `T20211001.0014`.
 
 ## Durable operating principle
 
@@ -28,11 +28,13 @@ Confirmed current security-review state:
 - approval replay/idempotency: **confirmed defect then production-fixed**; original duplicate notes `30506555` and `30506556`; post-fix test created only note `30506631`; replay result `deduplicated`;
 - canonical approval argument binding: **PASS** at the Central Orchestrator canonical-request boundary; changed arguments are rejected with zero provider invocation;
 - post-approval normalization/provider binding: **architectural gap confirmed** before remediation; unchanged semantic intent could resolve to different concrete Autotask mutations;
-- dual intent/execution-plan binding: **source remediation PASS**, core commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, adapter-hardening commits `0ed6911` and `e41e572`, combined focused suite 141/141;
+- dual intent/execution-plan binding: **source remediation PASS**, core commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, adapter-hardening commits `0ed6911` and `e41e572`, shared framework/recovery commit `bf072af`, consolidated security suite 186/186;
 - production execution-plan acceptance: **PENDING**; the safety check found production still on approval-replay revision `5f89f3af82081e75e97d66e523222e5564648163`, so no approval/provider mutation was attempted; ticket baseline remained status `5 / Complete`, queue `29682833`, priority `2`; final read-only correlation `corr_mcp_7488bdcb101643548a15e6283a3f4155`; and
 - deployment reproducibility: **OPEN** because the earlier replay-fix rollout encountered Docker overlay-chain problems; preferred end state is a clean authoritative-Git build plus verified rollback.
 
 Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
+
+Broader orchestrator validation with the required CAP-007 source path reaches the full suite and reports exactly three failures. The same three failures reproduce at baseline `10d1e9c`: IT Glue sensitive-output handling classification, IT Glue search selector metadata mismatch, and missing `DOCUMENTATION_FLEXIBLE_ASSET_SEARCH` test symbol. They are pre-existing provider-read/IT Glue work, not regressions from the security remediation.
 
 ### Execution-plan remediation compatibility state
 
@@ -50,7 +52,7 @@ Current isolated remediation status on `fix/security-remediation-20260923`:
 | Datto alert resolution | **ADAPTED** | Binds exact alert and endpoint plus resolve path/action. Already-resolved state is represented as a deterministic NOOP plan; state changes between preparations cause plan mismatch and zero writes. |
 | Microsoft Teams proactive message send | **ADAPTED** | Direct invoker now implements the plan contract and binds tenant, AAD target, message/card content, and send path while keeping proactive token and internal gateway hostname ephemeral. |
 
-The shared execution-plan material now rejects non-JSON objects rather than stringifying them, rejects non-finite numbers, requires string object keys, and expands transport-secret key rejection including normalized proxy authorization, cookies, API-key headers, bearer tokens, and private-key fields. Opaque provider-private state is now suppressed from dataclass `repr()` at the shared prepared-plan boundaries to reduce incidental credential/secret leakage during debugging. These are source/test changes only; no provider write or production deployment was performed by this remediation pass.
+The shared execution-plan material now rejects non-JSON objects rather than stringifying them, rejects non-finite numbers, requires string object keys, and expands transport-secret key rejection including normalized proxy authorization, cookies, API-key headers, bearer tokens, and private-key fields. Opaque provider-private state is suppressed from dataclass `repr()` at the shared prepared-plan boundaries to reduce incidental credential/secret leakage during debugging. The provider `maximum_execution_seconds` is enforced as one absolute deadline across first preparation, independent re-preparation, and invocation; nested connector deadlines may only tighten it. Continuation/recovery approvals that do not use an MCP `approval_id` are still dual-plan-bound by Central Orchestrator after their own durable one-time guard is consumed. Indeterminate outcomes use `docs/operations/Governed-Mutation-Indeterminate-Recovery.md`; recovery retry authorization is one-time and requires fresh JKD-001 authority. These are source/test changes only; no provider write or production deployment was performed by this remediation pass.
 
 ## Operational Resolution Memory — current production state
 

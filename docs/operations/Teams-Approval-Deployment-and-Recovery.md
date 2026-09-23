@@ -107,6 +107,8 @@ Before enabling a side-effecting capability, verify fail-closed behavior for at 
 
 ## Interrupted execution
 
+The provider-neutral operating procedure is `docs/operations/Governed-Mutation-Indeterminate-Recovery.md`. The rules below remain the Teams-specific summary and must not be used to bypass that shared recovery boundary.
+
 If an approval continuation has been consumed but the execution outcome is unknown, do **not** delete the replay claim, modify the approval record, or simply rerun the request.
 
 Treat the operation as indeterminate until evidence establishes what occurred.
