@@ -289,7 +289,7 @@ Provision with the normal lifecycle command:
 
 `python3 tools/provider_secret.py create backup_net`
 
-The credential is created in UniView under **Settings -> Public APIs -> New** and is used only with the OAuth 2.0 client-credentials flow. The connector fixes authentication to `https://login.backup.net/connect/token` and API reads to `https://public-api.backup.net`; those hosts are not secret-configurable.
+The credential is created in UniView under **Settings -> Public APIs -> New** and is used only with the OAuth 2.0 client-credentials flow. Per Kaseya's documented request contract, the token call sends `Authorization: Basic <base64(client_id:client_secret)>` and the form body contains only `grant_type=client_credentials`. The connector fixes authentication to `https://login.backup.net/connect/token` and API reads to `https://public-api.backup.net`; those hosts are not secret-configurable.
 
 Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jason client-boundary record mapping the exact Autotask company ID to the Backup.net customer UUID. Provider `customer_id` is never accepted from the caller. The connector injects the mapped UUID and verifies every returned record proves the same customer.
 

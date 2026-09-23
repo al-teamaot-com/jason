@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
@@ -19,6 +20,7 @@ _ALLOWED_PATHS = frozenset(
         "/api/epb/v1/assets",
         "/v1/backups",
         "/v1/backupiq/alerts",
+        "/v1/customers",
     }
 )
 
@@ -96,21 +98,22 @@ class BackupNetClient:
 
     def _access_token(self) -> str:
         payload = urlencode(
-            {
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "grant_type": "client_credentials",
-            }
+            {"grant_type": "client_credentials"}
         ).encode("utf-8")
+        basic = base64.b64encode(
+            f"{self._client_id}:{self._client_secret}".encode("utf-8")
+        ).decode("ascii")
         request = Request(
             BACKUP_NET_AUTH_URL,
             data=payload,
             headers={
-                "Accept": "application/json",
+                "Accept": "*/*",
+                "Authorization": f"Basic {basic}",
                 "Content-Type": "application/x-www-form-urlencoded",
             },
             method="POST",
         )
+        basic = ""
         decoded = self._send_json(request)
         if not isinstance(decoded, Mapping):
             raise ConnectorTransportError(
