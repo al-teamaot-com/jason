@@ -130,7 +130,11 @@ def test_rotation_reasserts_policy_before_new_identity(monkeypatch, tmp_path):
         "_revoke_secret_id_accessor",
         lambda **kwargs: order.append("revoke-old"),
     )
-    monkeypatch.setattr(lifecycle, "_atomic_private_file", lambda *args: order.append("install"))
+    monkeypatch.setattr(
+        lifecycle,
+        "_atomic_private_file",
+        lambda *args, **kwargs: order.append("install"),
+    )
 
     result = lifecycle.rotate_identity(
         address="http://openbao.invalid",

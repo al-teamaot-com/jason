@@ -83,8 +83,8 @@ services:
       - ${JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/secret_id:ro
       - ${JASON_KFS_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/role-id}:/run/jason-secrets/openbao/kyocera-kfs/role_id:ro
       - ${JASON_KFS_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/secret-id}:/run/jason-secrets/openbao/kyocera-kfs/secret_id:ro
-      - ${JASON_BACKUP_NET_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle/role-id}:/run/jason-secrets/openbao/backup-net/role_id:ro
-      - ${JASON_BACKUP_NET_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle/secret-id}:/run/jason-secrets/openbao/backup-net/secret_id:ro
+      - ${JASON_BACKUP_NET_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/role-id}:/run/jason-secrets/openbao/backup-net/role_id:ro
+      - ${JASON_BACKUP_NET_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/secret-id}:/run/jason-secrets/openbao/backup-net/secret_id:ro
     networks:
       - openclaw
       - core

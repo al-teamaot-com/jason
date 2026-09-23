@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -41,6 +42,27 @@ def _container_exists(name: str) -> bool:
     ).returncode == 0
 
 
+_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _parse_env_assignment(value: str) -> tuple[str, str]:
+    key, separator, assigned = value.partition("=")
+    if not separator or not _ENV_NAME.fullmatch(key):
+        raise ValueError("set-env must use NAME=VALUE with an uppercase environment name")
+    if key == "JASON_SOURCE_REVISION":
+        raise ValueError("JASON_SOURCE_REVISION is controlled by --source-revision")
+    return key, assigned
+
+
+def _parse_readonly_bind(value: str) -> tuple[str, str]:
+    source, separator, destination = value.partition(":")
+    if not separator or not os.path.isabs(source) or not os.path.isabs(destination):
+        raise ValueError("add-readonly-bind must use absolute SOURCE:DESTINATION paths")
+    if not os.path.exists(source):
+        raise ValueError(f"read-only bind source does not exist: {source}")
+    return source, destination
+
+
 def _health(name: str, url: str, attempts: int, interval: float) -> None:
     script = (
         "import urllib.request; "
@@ -62,7 +84,15 @@ def _health(name: str, url: str, attempts: int, interval: float) -> None:
     raise RuntimeError("replacement container did not pass health verification")
 
 
-def _build_create_command(*, live: str, image: str, source_revision: str, harden: bool):
+def _build_create_command(
+    *,
+    live: str,
+    image: str,
+    source_revision: str,
+    harden: bool,
+    set_env: tuple[str, ...] = (),
+    additional_readonly_binds: tuple[str, ...] = (),
+):
     src = _inspect(live)
     config = src["Config"]
     host = src["HostConfig"]
@@ -77,6 +107,12 @@ def _build_create_command(*, live: str, image: str, source_revision: str, harden
             value = source_revision
         env_map[key] = value
         env_keys.append(key)
+
+    for assignment in set_env:
+        key, value = _parse_env_assignment(assignment)
+        env_map[key] = value
+        if key not in env_keys:
+            env_keys.append(key)
 
     args = ["docker", "create", "--name", live]
     if config.get("User"):
@@ -114,14 +150,38 @@ def _build_create_command(*, live: str, image: str, source_revision: str, harden
     for key in env_keys:
         args += ["--env", key]
 
+    existing_mounts: dict[str, tuple[str, bool]] = {}
     for mount in src.get("Mounts") or []:
         mount_type = mount.get("Type")
         if mount_type not in {"bind", "volume"}:
             raise RuntimeError(f"unsupported mount type for exact clone: {mount_type}")
-        spec = f"type={mount_type},src={mount['Source']},dst={mount['Destination']}"
-        if not mount.get("RW", False):
+        source = str(mount["Source"])
+        destination = str(mount["Destination"])
+        writable = bool(mount.get("RW", False))
+        existing_mounts[destination] = (source, writable)
+        spec = f"type={mount_type},src={source},dst={destination}"
+        if not writable:
             spec += ",readonly"
         args += ["--mount", spec]
+
+    additional_destinations: set[str] = set()
+    for raw_bind in additional_readonly_binds:
+        source, destination = _parse_readonly_bind(raw_bind)
+        if destination in additional_destinations:
+            raise ValueError(f"duplicate additional bind destination: {destination}")
+        additional_destinations.add(destination)
+        existing = existing_mounts.get(destination)
+        if existing is not None:
+            existing_source, existing_writable = existing
+            if existing_source == source and existing_writable is False:
+                continue
+            raise ValueError(
+                f"additional bind conflicts with existing mount destination: {destination}"
+            )
+        args += [
+            "--mount",
+            f"type=bind,src={source},dst={destination},readonly",
+        ]
 
     for container_port, bindings in (host.get("PortBindings") or {}).items():
         for binding in bindings or []:
@@ -183,6 +243,18 @@ def main() -> int:
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--harden", action="store_true")
+    parser.add_argument(
+        "--set-env",
+        action="append",
+        default=[],
+        help="Set or add one non-secret container environment entry as NAME=VALUE.",
+    )
+    parser.add_argument(
+        "--add-readonly-bind",
+        action="append",
+        default=[],
+        help="Add one read-only bind mount as absolute SOURCE:DESTINATION.",
+    )
     args = parser.parse_args()
 
     if not _container_exists(args.live):
@@ -195,6 +267,8 @@ def main() -> int:
         image=args.image,
         source_revision=args.source_revision,
         harden=args.harden,
+        set_env=tuple(args.set_env),
+        additional_readonly_binds=tuple(args.add_readonly_bind),
     )
 
     print("PREFLIGHT=PASS")
@@ -208,6 +282,8 @@ def main() -> int:
     print(f"MOUNT_COUNT={len(source.get('Mounts') or [])}")
     print(f"ENV_COUNT={len(source['Config'].get('Env') or [])}")
     print(f"HARDENING_REQUESTED={args.harden}")
+    print(f"SET_ENV_COUNT={len(args.set_env)}")
+    print(f"ADDITIONAL_READONLY_BIND_COUNT={len(args.add_readonly_bind)}")
     if args.preflight:
         return 0
 

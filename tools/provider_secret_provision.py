@@ -142,8 +142,12 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "role_name": "jason-backup-net-read",
         "connector_identity": "backup-net-read",
         "credential_dir": Path(
-            "/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle"
+            "/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle"
         ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
     },
 }
 
@@ -266,19 +270,36 @@ def collect_values(provider: str) -> dict[str, str]:
     return values
 
 
-def write_private_file(path: Path, value: str) -> None:
+def credential_permissions(provider: str) -> tuple[int, int, int, int]:
+    spec = PROVIDERS[provider]
+    return (
+        int(spec.get("credential_uid", 0)),
+        int(spec.get("credential_gid", 0)),
+        int(spec.get("credential_dir_mode", 0o700)),
+        int(spec.get("credential_file_mode", 0o600)),
+    )
+
+
+def write_private_file(
+    path: Path,
+    value: str,
+    *,
+    uid: int = 0,
+    gid: int = 0,
+    mode: int = 0o600,
+) -> None:
     descriptor = os.open(
         path,
         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
+        mode,
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(value)
             handle.write("\n")
     finally:
-        os.chmod(path, 0o600)
-        os.chown(path, 0, 0)
+        os.chmod(path, mode)
+        os.chown(path, uid, gid)
 
 
 def admin_login(address: str, username: str, password: str) -> str:
@@ -381,11 +402,26 @@ def configure_read_approle(
         "the SecretID accessor",
     )
 
-    credential_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
-    os.chown(credential_dir, 0, 0)
-    os.chmod(credential_dir, 0o700)
-    write_private_file(credential_dir / "role-id", role_id)
-    write_private_file(credential_dir / "secret-id", secret_id)
+    credential_uid, credential_gid, directory_mode, file_mode = (
+        credential_permissions(provider)
+    )
+    credential_dir.mkdir(parents=True, exist_ok=False, mode=directory_mode)
+    os.chown(credential_dir, credential_uid, credential_gid)
+    os.chmod(credential_dir, directory_mode)
+    write_private_file(
+        credential_dir / "role-id",
+        role_id,
+        uid=credential_uid,
+        gid=credential_gid,
+        mode=file_mode,
+    )
+    write_private_file(
+        credential_dir / "secret-id",
+        secret_id,
+        uid=credential_uid,
+        gid=credential_gid,
+        mode=file_mode,
+    )
 
     now = datetime.now(timezone.utc)
     metadata = {
@@ -405,6 +441,9 @@ def configure_read_approle(
     write_private_file(
         credential_dir / "credential-metadata.json",
         json.dumps(metadata, indent=2, sort_keys=True),
+        uid=credential_uid,
+        gid=credential_gid,
+        mode=file_mode,
     )
     return {
         "credential_dir": str(credential_dir),

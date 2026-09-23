@@ -67,15 +67,21 @@ def _credential_state(provider: str) -> dict[str, Any]:
     }
 
 
-def _atomic_private_file(path: Path, value: str) -> None:
+def _atomic_private_file(
+    path: Path,
+    value: str,
+    *,
+    provider: str,
+) -> None:
+    uid, gid, _, file_mode = base.credential_permissions(provider)
     tmp = path.with_name(path.name + ".new")
-    descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, file_mode)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(value)
             handle.write("\n")
-        os.chown(tmp, 0, 0)
-        os.chmod(tmp, 0o600)
+        os.chown(tmp, uid, gid)
+        os.chmod(tmp, file_mode)
         os.replace(tmp, path)
     finally:
         if tmp.exists():
@@ -143,6 +149,7 @@ def _write_rotation_metadata(provider: str, accessor: str) -> None:
     _atomic_private_file(
         directory / "credential-metadata.json",
         json.dumps(metadata, indent=2, sort_keys=True),
+        provider=provider,
     )
 
 
@@ -167,7 +174,11 @@ def rotate_identity(*, address: str, admin_token: str, provider: str) -> dict[st
         provider=provider,
     )
     directory = Path(spec["credential_dir"])
-    _atomic_private_file(directory / "secret-id", new_secret_id)
+    _atomic_private_file(
+        directory / "secret-id",
+        new_secret_id,
+        provider=provider,
+    )
     _write_rotation_metadata(provider, new_accessor)
     new_secret_id = ""
     _revoke_secret_id_accessor(

@@ -128,8 +128,12 @@ def test_backup_net_contract_uses_canonical_connector_path_and_fields() -> None:
     assert spec["policy_name"] == "jason-backup-net-read"
     assert spec["role_name"] == "jason-backup-net-read"
     assert Path(spec["credential_dir"]) == Path(
-        "/opt/jason/bootstrap/secrets/openbao/backup-net-read-approle"
+        "/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle"
     )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
 
 
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
