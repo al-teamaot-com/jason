@@ -92,6 +92,24 @@ The foundation emits events for:
 
 Failure responses are sanitized. Provider details and protected values belong only in approved correlated evidence stores, never in user-facing errors.
 
+## Deferred-work coordination boundary
+
+Operational playbooks may return persisted deferred states containing a `next_recheck_at` value. The Endpoint Availability Verification playbook is the first documented consumer of this pattern.
+
+The Central Orchestrator remains the authority boundary for any future recheck execution. A scheduler may wake a workflow, but it must not create new authority. Before resumed work invokes a capability, Jason must rehydrate and validate the original execution/correlation identity, principal, organization/client, target, capability, policy, and terminal-state status.
+
+Required scheduler properties include:
+
+- durable storage across service restart;
+- idempotent/deduplicated recheck identity;
+- no execution before the requested time;
+- cancellation/suppression after completion, escalation, retirement, or other terminal state;
+- bounded retry/aging behavior defined by the calling playbook;
+- lifecycle audit events;
+- no cross-client or target substitution.
+
+The scheduler remains separate from ORCH-001 and is tracked as `TODO-OPS-001`.
+
 ## Explicit exclusions
 
 ORCH-001 does not yet provide:

@@ -51,6 +51,26 @@ Preferred implementation sequence:
 
 This slice should remain read-only until its identity, tenant, evidence, relationship, event, audit, and policy boundaries are proven.
 
+## Operational Continuity and Deferred Work
+
+A reusable **Endpoint Availability Verification** playbook has been added as common operational infrastructure for any workflow that encounters a DRMM endpoint reported offline.
+
+Current implemented behavior:
+
+1. read DRMM online state and Last Seen;
+2. persist a recheck when the offline age is below the configured threshold (default two hours);
+3. once the threshold is exceeded, request best-effort same-client/site peer verification;
+4. distinguish `reachable_outside_drmm`, `offline_likely`, `peer_unavailable`, `inconclusive`, and related states rather than collapsing everything to "offline";
+5. preserve `next_recheck_at` and other resume evidence so deferred work does not depend on technician memory;
+6. treat peer ping failure as non-conclusive evidence.
+
+Remaining production dependencies:
+
+- governed same-site peer discovery/probe execution by hostname and last-known IP;
+- durable scheduled recheck execution with deduplication, cancellation, authority/context rehydration, and restart recovery.
+
+The deferred-work scheduler is tracked as **TODO-OPS-001**. The current JKD-009 durable event store remains append-only evidence storage and does not silently expand into a scheduler.
+
 ## Queued Follow-ons
 
 After the first IT Glue + Datto RMM convergence slice:
@@ -59,6 +79,25 @@ After the first IT Glue + Datto RMM convergence slice:
 - additional Kaseya/security provider adapters only where verified APIs exist;
 - first approved physical artifact/evidence store binding for INF-013;
 - broader cross-provider relationship and event normalization.
+
+### Governed Technician Access / RBAC — accepted design, queued
+
+Implement exactly four human access levels for Jason:
+
+- **Owner** — full authority. May read, write, execute, approve, administer, and modify Jason's Constitution, governance/security policies, authorization model, role definitions, approval rules, and provider/configuration boundaries.
+- **Admin** — full operational administration. May investigate and perform authorized operational remediation, but may not modify the Constitution, governance/security policies, role definitions, approval rules, Owner authority, or elevate their own authority.
+- **Tech** — may read anything within their authorized scope and may ask Jason to run approved Datto RMM components/scripts on positively identified devices. No governance, authorization, role, or unrestricted provider-administration changes. Higher-risk actions remain subject to policy and approval.
+- **RO (ReadOnly)** — limited allowlisted read-only access. No writes, execution, approval authority, or information release outside the user's permitted scope.
+
+Authorization design requirements:
+
+- Keep **role** separate from **scope**. Role controls what classes of action a person may perform; scope controls which clients, tenants, providers, resources, or devices they may access.
+- Compute effective authorization from **role + scope + action risk** through the Central Orchestrator; model discretion must never bypass the authorization decision.
+- Govern Tech component execution through an approved component/action catalog and risk classification. Routine diagnostic/remediation components may be Tech-executable; destructive actions, security-agent removal, broad/mass deployment, identity/security-control changes, and similar high-risk actions require elevated authority or approval.
+- Only **Owner** may change the authorization model itself, Owner membership/authority, constitutional controls, or the policy that defines the four access levels.
+- Prevent self-elevation and privilege escalation by Admin, Tech, or RO users.
+- Require positive target resolution before any device execution; ambiguous or incomplete endpoint resolution must fail closed.
+- Make effective permissions explainable and auditable so Jason can answer what a user is allowed to do and record both permitted and denied authorization decisions.
 
 ## Phase Principle
 

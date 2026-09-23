@@ -1,7 +1,45 @@
 # Project Jason — Current Session Checkpoint
 
-**Updated:** 2026-08-11  
+**Updated:** 2026-09-21
 **Purpose:** Canonical human-readable resume point for a future Jason work session. Host/runtime facts remain independently verified by `tools/catch_me_up.py` and the applicable host-proof records.
+
+## 2026-09-21 Continuation — Endpoint Availability and Deferred Work
+
+The authoritative repository branch for the current work is `main`.
+
+A reusable Endpoint Availability Verification playbook and deterministic evaluator were added so workflows do not treat DRMM "offline" as conclusive device power state and do not rely on a technician remembering to "check later."
+
+Implemented behavior:
+
+- read DRMM online state and Last Seen;
+- default peer-verification threshold: two hours offline;
+- before threshold: persist `recently_offline` with the threshold-based next recheck;
+- after threshold: request best-effort same-client/site peer verification when an authorized online peer is available;
+- probe design covers hostname resolution, ping by hostname, and ping by last-known IP;
+- successful peer reachability while DRMM is offline produces `reachable_outside_drmm` and directs diagnosis toward the DRMM agent/service/path;
+- failed pings produce `offline_likely`, not "confirmed offline";
+- no peer produces `peer_unavailable` and another persisted recheck;
+- unknown Last Seen does not allow indefinite waiting;
+- persisted output includes `next_recheck_at` and evidence needed to resume.
+
+Implementation files:
+
+- `implementation/autonomous_remediation/availability.py`
+- `implementation/autonomous_remediation/test_availability.py`
+- `07-Operations/Endpoint-Availability-Verification-Playbook.md`
+
+Initial implementation commit:
+
+`ce4737c7d98b3caca606b8c30f4abffb9f16ad24` — `Add durable offline endpoint verification gate`
+
+Production dependencies remain open and explicit:
+
+1. a governed same-site read-only peer network probe;
+2. a durable deferred-work scheduler that actually resumes work at `next_recheck_at`.
+
+The scheduler is tracked as `TODO-OPS-001`. JKD-009 remains an append-only event store and does not provide scheduled retries.
+
+The older 2026-08-11 checkpoint sections below are retained as historical evidence for the earlier Teams/CAP-007 workstream; where they describe the then-active feature branch, they should not override the current authoritative `main` branch state.
 
 ## Resume Here
 
@@ -282,3 +320,27 @@ For RMM-managed devices, Datto RMM remains the authoritative external provider f
 - Agents never invoke or communicate with other agents directly; all coordination goes through the Central Orchestrator.
 - Preserve identity-first authorization, policy-as-data, versioned workflows/prompts/policies, provider-neutral capability boundaries, centralized evidence by reference, event-based auditability, and integrate-before-innovate.
 - Never expose OpenBao tokens, unseal shares, passwords, API keys, bootstrap credentials, RoleIDs, SecretIDs, OAuth bearer tokens, Microsoft access tokens, private signing keys, private certificate keys, or secret values in chat, repository content, logs, or evidence.
+
+
+## Governance and capability reconciliation — 2026-09-22
+
+### Playbook autonomy
+
+Autonomous authority is now explicitly treated as a property of an approved playbook/version, not as a consequence of a global autonomy switch. The canonical playbook template requires explicit autonomous eligibility, approval provenance, allowed scope/actions, revocation behavior, and fail-closed handling for version mismatch or missing authority.
+
+User-disruptive actions remain per-run approval-bound even inside an otherwise autonomous playbook.
+
+### Datto RMM site variables
+
+The live governed registry currently exposes `management.site.variable.list` for site-variable reads. Site-variable values are treated as potentially sensitive configuration and must not be disclosed to non-administrative requesters. Create/update are not currently active in the live registry; delete remains intentionally unexposed by default. See `07-Operations/Datto-RMM-Site-Variable-Governance.md`.
+
+### Revalidated production capabilities
+
+Live governed verification on 2026-09-22 confirmed:
+
+- Autotask ticket search/read/notes are functioning through Jason with `direct_provider_access=false`.
+- Datto EDR detection detail and quarantine evidence are available through governed endpoint-security reads.
+- `endpoint.alert.resolve` is active as an approval-required governed action.
+- The MCP is operating in `governed-read-plus-actions` mode through Central Orchestrator.
+
+The support and TODO backlogs were reconciled to reflect these current capabilities; unresolved mutation gaps remain tracked rather than inferred resolved.
