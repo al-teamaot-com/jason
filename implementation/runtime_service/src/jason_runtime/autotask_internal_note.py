@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from connectors.autotask.connector import AutotaskConnector
 from connectors.autotask.impersonating_connector import (
@@ -13,7 +14,9 @@ from connectors.autotask.impersonating_connector import (
 from connectors.autotask.mutation_connector import (
     AUTOTASK_MUTATION_ENABLED_ENV,
     AutotaskMutationConnector,
+    autotask_mutation_execution_enabled,
 )
+from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import (
     AuditSink,
     ConnectorAuthorizationError,
@@ -41,7 +44,9 @@ from kernel.execution_providers import (
 )
 from orchestrator.connector_invoker import (
     GovernedConnectorCapabilityInvoker,
+    ProviderPreparedExecution,
 )
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_TICKET_NOTE_CREATE,
@@ -274,6 +279,13 @@ def _positive_int(
         )
 
     return result
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedAutotaskInternalNote:
+    request: ConnectorRequest
+    expected: Mapping[str, Any]
+    prepared: PreparedRequest
 
 
 class AutotaskInternalNoteConnector(
@@ -563,6 +575,101 @@ class AutotaskInternalNoteConnector(
             "creatorResourceId": resource_id,
             "impersonatorRecorded": True,
         }
+
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
+        if request.context.capability != "autotask.ticket.note.create":
+            raise ConnectorAuthorizationError(
+                "internal-note connector exposes only TicketNote create"
+            )
+        expected = self._expected_payload(request)
+        normalized_request = ConnectorRequest(
+            context=request.context,
+            arguments={**dict(request.arguments), "payload": dict(expected)},
+        )
+        if normalized_request.context.mode != "execute":
+            raise ConnectorAuthorizationError("Autotask mutation requires explicit execute mode.")
+        if not autotask_mutation_execution_enabled():
+            raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+        credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
+        prepared = AutotaskMutationConnector.prepare_request(self, normalized_request, credentials)
+        relative_path = prepared.audit_operation or urlsplit(prepared.url).path
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method=prepared.method,
+            resource_type="service_ticket_note",
+            resource_identifier=str(expected["ticketID"]),
+            normalized_path=relative_path,
+            payload=dict(prepared.json or {}),
+            parameters=dict(prepared.params or {}),
+            symbolic_resolutions={},
+            opaque=_PreparedAutotaskInternalNote(
+                request=normalized_request, expected=dict(expected), prepared=prepared
+            ),
+        )
+
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedAutotaskInternalNote):
+            raise PermissionError("invalid Autotask internal-note prepared execution")
+        request = opaque.request
+        expected = dict(opaque.expected)
+        prepared = opaque.prepared
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Autotask provider capability no longer matches authorized execution plan")
+        if str(prepared.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Autotask method no longer matches authorized execution plan")
+        observed_path = normalize_provider_relative_path(prepared.audit_operation or urlsplit(prepared.url).path)
+        if observed_path != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Autotask path no longer matches authorized execution plan")
+        if str(expected["ticketID"]) != str(prepared_execution.resource_identifier):
+            raise PermissionError("prepared Autotask ticket-note target no longer matches authorized execution plan")
+        if dict(prepared.json or {}) != dict(prepared_execution.payload):
+            raise PermissionError("prepared Autotask payload no longer matches authorized execution plan")
+        if dict(prepared.params or {}) != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Autotask parameters no longer match authorized execution plan")
+        self._audit_mutation_event("connector.mutation.requested", request)
+        try:
+            if not autotask_mutation_execution_enabled():
+                raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+            payload = self._transport.request(
+                method=prepared.method, url=prepared.url, headers=prepared.headers,
+                params=prepared.params, json=prepared.json, timeout_seconds=prepared.timeout_seconds,
+            )
+        except Exception as error:
+            self._audit_mutation_event("connector.mutation.failed", request, error_type=type(error).__name__)
+            raise
+        self._audit_mutation_event("connector.mutation.completed", request)
+        result = ConnectorResult(capability=request.context.capability, provider=self.provider_name, data=payload)
+        note_id = self._created_note_id(result.data)
+        try:
+            verification = self._verify_created_note(
+                request=request, expected=expected, note_id=note_id
+            )
+        except Exception as error:
+            self._audit.record(
+                "connector.mutation.verification_failed", request.context,
+                {"provider": self.provider_name, "capability": request.context.capability, "error_type": type(error).__name__},
+            )
+            if isinstance(error, AutotaskInternalNoteVerificationError):
+                raise
+            raise AutotaskInternalNoteVerificationError(
+                "internal note post-mutation verification failed"
+            ) from error
+        self._audit.record(
+            "connector.mutation.verified", request.context,
+            {"provider": self.provider_name, "capability": request.context.capability, "ticket_note_id": note_id},
+        )
+        data = dict(result.data)
+        data["jasonVerification"] = dict(verification)
+        return ConnectorResult(
+            capability=result.capability, provider=result.provider, data=data,
+            evidence_ids=(*result.evidence_ids, f"autotask:ticket-note:{note_id}"),
+            warnings=result.warnings,
+        )
 
     def execute(
         self,

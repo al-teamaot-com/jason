@@ -206,3 +206,45 @@ def test_execution_plan_rejects_secret_material_and_absolute_provider_host():
             normalized_path="https://dynamic-zone.example/V1.0/Tickets",
             normalized_payload={"id": 140000, "status": 8},
         )
+
+
+def test_execution_plan_rejects_proxy_auth_cookie_and_private_key_material():
+    import pytest
+    for key in ("Proxy-Authorization", "Cookie", "Set-Cookie", "X-API-Key", "private-key"):
+        with pytest.raises(ValueError, match="secret material"):
+            ExecutionPlan(
+                principal_id="person-al", organization_id="aot", client_id=None,
+                canonical_capability="service.ticket.update", selected_provider_id="provider-1",
+                provider_capability="autotask.ticket.update", action_method="PATCH",
+                resource_type="service_ticket", resource_identifier="140000",
+                normalized_path="/V1.0/Tickets",
+                normalized_payload={"id": 140000, key: "secret"},
+            )
+
+
+def test_execution_plan_rejects_non_json_and_non_finite_material():
+    import pytest
+    from decimal import Decimal
+    for bad in (Decimal("1.0"), {"not", "json"}, float("nan"), float("inf")):
+        with pytest.raises(TypeError):
+            ExecutionPlan(
+                principal_id="person-al", organization_id="aot", client_id=None,
+                canonical_capability="service.ticket.update", selected_provider_id="provider-1",
+                provider_capability="autotask.ticket.update", action_method="PATCH",
+                resource_type="service_ticket", resource_identifier="140000",
+                normalized_path="/V1.0/Tickets",
+                normalized_payload={"id": 140000, "bad": bad},
+            )
+
+
+def test_execution_plan_rejects_non_string_object_keys():
+    import pytest
+    with pytest.raises(TypeError, match="keys must be strings"):
+        ExecutionPlan(
+            principal_id="person-al", organization_id="aot", client_id=None,
+            canonical_capability="service.ticket.update", selected_provider_id="provider-1",
+            provider_capability="autotask.ticket.update", action_method="PATCH",
+            resource_type="service_ticket", resource_identifier="140000",
+            normalized_path="/V1.0/Tickets",
+            normalized_payload={1: "bad-key"},
+        )

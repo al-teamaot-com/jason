@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** The 2026-09-23 security review confirmed client-isolation and misleading-content fail-closed behavior, discovered and production-fixed an approval replay/idempotency defect, and then confirmed a separate post-approval-normalization architectural gap. Dual intent/execution-plan binding is implemented and isolated-test proven at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, but it is not yet deployed/production-accepted. Production acceptance correctly stopped before mutation when the live revision did not match the execution-plan implementation.
+**Status:** The 2026-09-23 security review confirmed client-isolation and misleading-content fail-closed behavior, discovered and production-fixed an approval replay/idempotency defect, and then confirmed a separate post-approval-normalization architectural gap. Dual intent/execution-plan binding was implemented at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; follow-on remediation is in isolated branch `fix/security-remediation-20260923` based on `92bd3b0ccdda435840737a7d542893915f8bef07`. The remediation hardens secret-safe deterministic plan material and exact Autotask method/path/target validation, and adds the execution-plan contract to Autotask ticket create and internal-note create. Focused regression state is 36/36 PASS. The control is still not deployed/production-accepted, and remaining active mutation adapters must be converted before rollout.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -33,6 +33,23 @@ Confirmed current security-review state:
 - deployment reproducibility: **OPEN** because the earlier replay-fix rollout encountered Docker overlay-chain problems; preferred end state is a clean authoritative-Git build plus verified rollback.
 
 Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
+
+### Execution-plan remediation compatibility state
+
+Current isolated remediation status on `fix/security-remediation-20260923`:
+
+| Mutation path | Execution-plan status | Current rule |
+| --- | --- | --- |
+| `service.ticket.update` / Autotask ticket update | **ADAPTED + HARDENED** | Binds provider capability, method, target ticket, normalized path, payload, parameters, and symbolic resolutions; executor revalidates the opaque prepared request against the authorized plan before provider invocation. |
+| `service.ticket.create` / Autotask ticket create | **ADAPTED** | Binds concrete create method/path/payload/parameters and symbolic resolutions; provider-created ticket ID is intentionally absent before the create and durable ID is verified by readback after the write. |
+| `service.ticket.note.create` / Autotask internal note | **ADAPTED** | Binds the target parent ticket, method/path/payload/parameters; durable created note ID and requester attribution remain post-write readback requirements. |
+| Autotask procurement mutation path | **PENDING / FAIL-CLOSED** | Connector does not yet expose the governed prepare/invoke execution-plan contract. |
+| Datto RMM component execution | **PENDING / FAIL-CLOSED** | Approval-governed component execution must be adapted before the execution-plan branch can be promoted without operational regression. |
+| Datto RMM site-variable create/update | **PENDING / FAIL-CLOSED** | Secret-bearing variable handling requires a dedicated secret-safe plan design; values must not enter persisted plan/audit material. |
+| Datto EDR scan execution | **PENDING / FAIL-CLOSED** | Provider action/target/material parameters still require plan adaptation. |
+| Datto alert resolution | **PENDING / FAIL-CLOSED** | Provider action/target/material parameters still require plan adaptation. |
+
+The shared execution-plan material now rejects non-JSON objects rather than stringifying them, rejects non-finite numbers, requires string object keys, and expands transport-secret key rejection including normalized proxy authorization, cookies, API-key headers, bearer tokens, and private-key fields. These are source/test changes only; no provider write or production deployment was performed by this remediation pass.
 
 ## Operational Resolution Memory — current production state
 

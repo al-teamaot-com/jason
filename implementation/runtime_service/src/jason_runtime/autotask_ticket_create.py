@@ -5,12 +5,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 from connectors.autotask.mutation_connector import (
     AUTOTASK_MUTATION_ENABLED_ENV,
     AutotaskMutationConnector,
+    autotask_mutation_execution_enabled,
 )
 from connectors.autotask.impersonating_connector import TrustedPrincipalBindingResolver
+from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import (
     AuditSink,
     ConnectorAuthorizationError,
@@ -32,7 +35,8 @@ from kernel.execution_providers import (
     ProviderStewardship,
     ProviderType,
 )
-from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker, ProviderPreparedExecution
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_TICKET_CREATE,
@@ -200,6 +204,13 @@ def _ticket_create_provider(*, now: datetime) -> ExecutionProvider:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedAutotaskTicketCreate:
+    request: ConnectorRequest
+    expected: Mapping[str, Any]
+    prepared: PreparedRequest
+
+
 class AutotaskTicketCreateConnector(AutotaskTicketUpdateConnector):
     capabilities = frozenset({"autotask.ticket.create"})
 
@@ -250,6 +261,120 @@ class AutotaskTicketCreateConnector(AutotaskTicketUpdateConnector):
         if isinstance(item, Mapping) and "id" in item:
             return _positive_int(item.get("id"), field="created ticket id")
         raise AutotaskTicketCreateVerificationError("provider create response did not contain a durable ticket id")
+
+    def prepare_governed_execution(
+        self, request: ConnectorRequest
+    ) -> ProviderPreparedExecution:
+        if request.context.capability != "autotask.ticket.create":
+            raise ConnectorAuthorizationError("ticket-create connector exposes only Ticket create")
+        raw = request.arguments.get("payload")
+        if not isinstance(raw, Mapping):
+            raise ValueError("ticket create requires a structured payload")
+        raw_payload = dict(raw)
+        resolved_payload = self._resolve_symbolic_payload(request)
+        normalized_input = ConnectorRequest(
+            context=request.context,
+            arguments={**dict(request.arguments), "payload": resolved_payload},
+        )
+        expected = self.validated_payload(normalized_input)
+        normalized_request = ConnectorRequest(
+            context=request.context,
+            arguments={**dict(request.arguments), "payload": expected},
+        )
+        symbolic_resolutions: dict[str, Any] = {}
+        for field in ("status", "queueID", "ticketType", "issueType", "subIssueType", "billingCodeID"):
+            if field not in raw_payload or not self._label_requires_resolution(raw_payload[field]):
+                continue
+            symbolic_resolutions[field] = {
+                "symbolic": str(raw_payload[field]).strip(),
+                "resolved": expected[field],
+            }
+        if normalized_request.context.mode != "execute":
+            raise ConnectorAuthorizationError("Autotask mutation requires explicit execute mode.")
+        if not autotask_mutation_execution_enabled():
+            raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+        credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
+        prepared = AutotaskMutationConnector.prepare_request(self, normalized_request, credentials)
+        relative_path = prepared.audit_operation or urlsplit(prepared.url).path
+        return ProviderPreparedExecution(
+            provider_capability=request.context.capability,
+            action_method=prepared.method,
+            resource_type="service_ticket",
+            resource_identifier=None,
+            normalized_path=relative_path,
+            payload=dict(prepared.json or {}),
+            parameters=dict(prepared.params or {}),
+            symbolic_resolutions=symbolic_resolutions,
+            opaque=_PreparedAutotaskTicketCreate(
+                request=normalized_request, expected=dict(expected), prepared=prepared
+            ),
+        )
+
+    def execute_governed_execution(
+        self, prepared_execution: ProviderPreparedExecution
+    ) -> ConnectorResult:
+        opaque = prepared_execution.opaque
+        if not isinstance(opaque, _PreparedAutotaskTicketCreate):
+            raise PermissionError("invalid Autotask ticket-create prepared execution")
+        request = opaque.request
+        expected = dict(opaque.expected)
+        prepared = opaque.prepared
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Autotask provider capability no longer matches authorized execution plan")
+        if str(prepared.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Autotask method no longer matches authorized execution plan")
+        observed_path = normalize_provider_relative_path(prepared.audit_operation or urlsplit(prepared.url).path)
+        if observed_path != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Autotask path no longer matches authorized execution plan")
+        if prepared_execution.resource_identifier is not None:
+            raise PermissionError("ticket-create execution plan must not pre-authorize a provider-created ticket id")
+        if dict(prepared.json or {}) != dict(prepared_execution.payload):
+            raise PermissionError("prepared Autotask payload no longer matches authorized execution plan")
+        if dict(prepared.params or {}) != dict(prepared_execution.parameters):
+            raise PermissionError("prepared Autotask parameters no longer match authorized execution plan")
+        self._audit_mutation_event("connector.mutation.requested", request)
+        try:
+            if not autotask_mutation_execution_enabled():
+                raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+            payload = self._transport.request(
+                method=prepared.method, url=prepared.url, headers=prepared.headers,
+                params=prepared.params, json=prepared.json, timeout_seconds=prepared.timeout_seconds,
+            )
+        except Exception as error:
+            self._audit_mutation_event("connector.mutation.failed", request, error_type=type(error).__name__)
+            raise
+        self._audit_mutation_event("connector.mutation.completed", request)
+        result = ConnectorResult(capability=request.context.capability, provider=self.provider_name, data=payload)
+        ticket_id = self._created_ticket_id(result.data)
+        try:
+            observed = self._readback(request=request, ticket_id=ticket_id)
+            observed_id = _positive_int(observed.get("id"), field="observed id")
+            if observed_id != ticket_id:
+                raise AutotaskTicketCreateVerificationError("ticket id failed readback")
+            if int(observed.get("companyID")) != expected["companyID"]:
+                raise AutotaskTicketCreateVerificationError("companyID failed readback")
+            if str(observed.get("title") or "").strip() != expected["title"]:
+                raise AutotaskTicketCreateVerificationError("title failed readback")
+        except Exception as error:
+            self._audit.record(
+                "connector.mutation.verification_failed", request.context,
+                {"provider": self.provider_name, "capability": request.context.capability, "error_type": type(error).__name__},
+            )
+            if isinstance(error, AutotaskTicketCreateVerificationError):
+                raise
+            raise AutotaskTicketCreateVerificationError("ticket create post-mutation verification failed") from error
+        self._audit.record(
+            "connector.mutation.verified", request.context,
+            {"provider": self.provider_name, "capability": request.context.capability, "ticket_id": ticket_id},
+        )
+        data = dict(result.data)
+        data["jasonVerification"] = {
+            "readbackVerified": True, "ticketId": ticket_id, "verifiedFields": ["companyID", "title"]
+        }
+        return ConnectorResult(
+            capability=result.capability, provider=result.provider, data=data,
+            evidence_ids=(*result.evidence_ids, f"autotask:ticket:{ticket_id}"), warnings=result.warnings,
+        )
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         if request.context.capability != "autotask.ticket.create":

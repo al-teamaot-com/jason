@@ -48,6 +48,7 @@ from orchestrator.connector_invoker import (
     GovernedConnectorCapabilityInvoker,
     ProviderPreparedExecution,
 )
+from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_TICKET_UPDATE,
@@ -783,6 +784,17 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
         request = opaque.request
         expected = dict(opaque.expected)
         prepared = opaque.prepared
+        if prepared_execution.provider_capability != request.context.capability:
+            raise PermissionError("prepared Autotask provider capability no longer matches authorized execution plan")
+        if str(prepared.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
+            raise PermissionError("prepared Autotask method no longer matches authorized execution plan")
+        observed_path = normalize_provider_relative_path(
+            prepared.audit_operation or urlsplit(prepared.url).path
+        )
+        if observed_path != normalize_provider_relative_path(prepared_execution.normalized_path):
+            raise PermissionError("prepared Autotask path no longer matches authorized execution plan")
+        if str(expected["id"]) != str(prepared_execution.resource_identifier):
+            raise PermissionError("prepared Autotask target no longer matches authorized execution plan")
         if dict(prepared.json or {}) != dict(prepared_execution.payload):
             raise PermissionError("prepared Autotask payload no longer matches authorized execution plan")
         if dict(prepared.params or {}) != dict(prepared_execution.parameters):

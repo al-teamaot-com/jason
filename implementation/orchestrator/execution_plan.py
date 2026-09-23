@@ -8,19 +8,43 @@ from urllib.parse import urlsplit
 
 
 _FORBIDDEN_SECRET_KEYS = {
-    "authorization", "proxy-authorization", "secret", "password", "passwd",
-    "access_token", "refresh_token", "api_key", "apikey", "client_secret",
+    "authorization",
+    "proxy_authorization",
+    "secret",
+    "password",
+    "passwd",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "apikey",
+    "client_secret",
+    "cookie",
+    "set_cookie",
+    "x_api_key",
+    "bearer_token",
+    "private_key",
 }
 
 
-def _json_safe(value: Any) -> Any:
+def _json_safe(value: Any, *, path: str = "execution_plan") -> Any:
     if isinstance(value, Mapping):
-        return {str(k): _json_safe(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+        normalized: dict[str, Any] = {}
+        for raw_key, child in value.items():
+            if not isinstance(raw_key, str):
+                raise TypeError(f"execution plan object keys must be strings: {path}")
+            normalized[raw_key] = _json_safe(child, path=f"{path}.{raw_key}")
+        return {key: normalized[key] for key in sorted(normalized)}
     if isinstance(value, (list, tuple)):
-        return [_json_safe(v) for v in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
+        return [_json_safe(child, path=f"{path}[{index}]") for index, child in enumerate(value)]
+    if isinstance(value, bool) or value is None or isinstance(value, (str, int)):
         return value
-    return str(value)
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise TypeError(f"execution plan contains non-finite numeric material: {path}")
+        return value
+    raise TypeError(
+        f"execution plan contains unsupported non-JSON material at {path}: {type(value).__name__}"
+    )
 
 
 def _reject_secret_material(value: Any, *, path: str = "") -> None:
@@ -92,6 +116,7 @@ class ExecutionPlan:
             raise ValueError("resource_identifier must be non-empty when provided")
         for material in (self.normalized_payload, self.material_parameters, self.symbolic_resolutions):
             _reject_secret_material(material)
+            _json_safe(material)
 
     def canonical_material(self) -> dict[str, Any]:
         return {
