@@ -8,6 +8,7 @@ import sqlite3
 from uuid import uuid4
 
 from .contracts import (
+    CandidateActorKind,
     CandidateLifecycle,
     ImprovementCandidate,
     ImprovementCandidateDraft,
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS improvement_candidate_events (
     candidate_key TEXT NOT NULL,
     state TEXT NOT NULL,
     actor_id TEXT NOT NULL,
+    actor_kind TEXT NOT NULL,
     reason TEXT NOT NULL,
     occurred_at TEXT NOT NULL,
     FOREIGN KEY(candidate_key) REFERENCES improvement_candidates(candidate_key) ON DELETE RESTRICT
@@ -270,14 +272,15 @@ class SQLiteReflectionStore:
                 self._connection.execute(
                     """
                     INSERT INTO improvement_candidate_events (
-                        event_id, candidate_key, state, actor_id, reason, occurred_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        event_id, candidate_key, state, actor_id, actor_kind, reason, occurred_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(uuid4()),
                         key,
                         CandidateLifecycle.OBSERVED.value,
                         actor_id,
+                        CandidateActorKind.SYSTEM.value,
                         "deterministic reflection signal observed",
                         now,
                     ),
@@ -315,11 +318,19 @@ class SQLiteReflectionStore:
         organization_id: str,
         new_state: CandidateLifecycle,
         actor_id: str,
+        actor_kind: CandidateActorKind,
         reason: str,
     ) -> ImprovementCandidate:
         self._require_scope(organization_id)
         if not actor_id.strip() or not reason.strip():
             raise ValueError("candidate transition requires actor_id and reason")
+        if new_state is CandidateLifecycle.APPROVED and actor_kind is not CandidateActorKind.HUMAN:
+            raise PermissionError("candidate approval requires a human governance actor")
+        if new_state is CandidateLifecycle.PROMOTED and actor_kind not in {
+            CandidateActorKind.HUMAN,
+            CandidateActorKind.RELEASE,
+        }:
+            raise PermissionError("candidate promotion requires human or controlled release actor")
         candidate = self.get_candidate(candidate_key, organization_id=organization_id)
         if candidate is None:
             raise ValueError("candidate not found in organization scope")
@@ -331,14 +342,15 @@ class SQLiteReflectionStore:
             self._connection.execute(
                 """
                 INSERT INTO improvement_candidate_events(
-                    event_id, candidate_key, state, actor_id, reason, occurred_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    event_id, candidate_key, state, actor_id, actor_kind, reason, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(uuid4()),
                     candidate_key,
                     new_state.value,
                     actor_id,
+                    actor_kind.value,
                     reason,
                     datetime.now(timezone.utc).isoformat(),
                 ),
