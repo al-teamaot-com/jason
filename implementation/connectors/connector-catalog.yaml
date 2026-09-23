@@ -183,6 +183,32 @@ connectors:
     notes:
       - Exact provider headers and paths are configuration-driven and fail closed until the official dealer API contract is supplied.
       - No KFS remote-management, firmware, configuration, or other write capability is enabled.
+  backup_net:
+    status: foundation_built_credentials_pending
+    priority: 10
+    mode: read_only
+    secret: backup_net.readonly
+    api_host: https://public-api.backup.net
+    auth_host: https://login.backup.net
+    capabilities:
+      - backup_net.endpoint_asset.search
+      - backup_net.endpoint_asset.read
+      - backup_net.backup.search
+      - backup_net.backupiq_alert.search
+    canonical_mappings:
+      backup.endpoint.asset.search: backup_net.endpoint_asset.search
+      backup.endpoint.asset.read: backup_net.endpoint_asset.read
+      backup.endpoint.backup.search: backup_net.backup.search
+      backup.backupiq.alert.search: backup_net.backupiq_alert.search
+    live_enablement_gate:
+      - uniview_public_api_client_id_and_secret
+      - openbao_secret_provisioning
+      - validated_autotask_company_to_backup_net_customer_boundary
+      - controlled_read_only_acceptance
+    notes:
+      - Provider customer_id is derived only from a validated Jason boundary and may not be supplied by callers.
+      - Every returned asset, backup, or alert must prove the same customer UUID or the read fails closed.
+      - No Backup.net write or remediation capability is registered.
   teams_approvals:
     status: planned
     priority: 10

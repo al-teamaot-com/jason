@@ -19,6 +19,7 @@ from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
+from connectors.backup_net.connector import BackupNetConnector
 from jason_cap_007.kernel_registration import register_email_send
 from jason_cap_007.service import CAPABILITY_NAME as EMAIL_CAPABILITY_NAME
 from jason_cap_007.service import EmailSendPolicy, GovernedEmailSendInvoker
@@ -32,6 +33,10 @@ from kernel.execution_policy import CostEstimator, ExecutionPolicyEngine, InMemo
 from kernel.execution_providers import (
     ExecutionProviderRegistryService,
     InMemoryExecutionProviderRegistry,
+)
+from kernel.client_boundaries import (
+    SQLiteClientBoundaryRepository,
+    SQLiteClientBoundaryStore,
 )
 from kernel.identity_authority import (
     ExecutionContextValidator,
@@ -106,6 +111,14 @@ from orchestrator.resource_capability_catalog import (
 from orchestrator.resource_evidence import (
     GovernedResourceEvidenceInterpreter,
     GovernedTeamsResourceResponseRenderer,
+)
+from orchestrator.backup_capability_catalog import (
+    BACKUP_BACKUPIQ_ALERT_SEARCH,
+    BACKUP_ENDPOINT_ASSET_READ,
+    BACKUP_ENDPOINT_ASSET_SEARCH,
+    BACKUP_ENDPOINT_BACKUP_SEARCH,
+    BACKUP_NET_PROVIDER,
+    register_backup_resource_foundation,
 )
 from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
@@ -265,6 +278,13 @@ class RuntimeSettings:
     )
     kfs_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/kyocera-kfs/secret_id"
+    )
+    backup_net_enabled: bool = False
+    backup_net_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/backup-net/role_id"
+    )
+    backup_net_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/backup-net/secret_id"
     )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -431,6 +451,21 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_KFS_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/kyocera-kfs/secret_id",
+                )
+            ),
+            backup_net_enabled=os.getenv(
+                "JASON_BACKUP_NET_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            backup_net_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_BACKUP_NET_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/backup-net/role_id",
+                )
+            ),
+            backup_net_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_BACKUP_NET_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/backup-net/secret_id",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -727,6 +762,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=datetime.now(timezone.utc),
         enabled=settings.kfs_enabled,
+    )
+    register_backup_resource_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+        enabled=settings.backup_net_enabled,
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
@@ -1062,6 +1103,29 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         },
     )
 
+    backup_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
+    backup_boundaries = SQLiteClientBoundaryRepository(backup_boundary_store)
+    backup_net_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.backup_net_openbao_role_id_path,
+        secret_id_path=settings.backup_net_openbao_secret_id_path,
+    )
+    backup_net = BackupNetConnector(
+        secrets=backup_net_openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        boundaries=backup_boundaries,
+    )
+    backup_net_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={BACKUP_NET_PROVIDER: backup_net},
+        provider_capability_map={
+            (BACKUP_NET_PROVIDER, BACKUP_ENDPOINT_ASSET_SEARCH): "backup_net.endpoint_asset.search",
+            (BACKUP_NET_PROVIDER, BACKUP_ENDPOINT_ASSET_READ): "backup_net.endpoint_asset.read",
+            (BACKUP_NET_PROVIDER, BACKUP_ENDPOINT_BACKUP_SEARCH): "backup_net.backup.search",
+            (BACKUP_NET_PROVIDER, BACKUP_BACKUPIQ_ALERT_SEARCH): "backup_net.backupiq_alert.search",
+        },
+    )
+
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
         role_id_path=settings.ses_openbao_role_id_path,
@@ -1143,6 +1207,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(PRINT_METER_READ, kfs_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
+    invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
+    invokers.register(BACKUP_ENDPOINT_ASSET_READ, backup_net_invoker)
+    invokers.register(BACKUP_ENDPOINT_BACKUP_SEARCH, backup_net_invoker)
+    invokers.register(BACKUP_BACKUPIQ_ALERT_SEARCH, backup_net_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
