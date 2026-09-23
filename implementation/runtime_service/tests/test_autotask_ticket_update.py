@@ -342,3 +342,78 @@ def test_ticket_update_readback_rejects_mismatch():
                 "status": 2,
             },
         )
+
+
+def test_governed_plan_resolves_symbolic_queue_and_status_before_authorization(monkeypatch):
+    from connectors.core.connector_base import PreparedRequest
+    from connectors.autotask.mutation_connector import AutotaskMutationConnector
+
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {"username": "u", "integration_code": "i", "secret": "s"}
+
+    class Transport:
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+            if url.endswith("/Tickets/entityInformation/fields"):
+                return {
+                    "fields": [
+                        {"name": "queueID", "picklistValues": [
+                            {"value": "29682837", "label": "Jason", "isActive": True}
+                        ]},
+                        {"name": "status", "picklistValues": [
+                            {"value": "8", "label": "In Progress", "isActive": True}
+                        ]},
+                    ]
+                }
+            raise AssertionError(f"unexpected planning transport request: {method} {url}")
+
+    class Audit:
+        def record(self, *args, **kwargs):
+            pass
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(), transport=Transport(), audit=Audit(), bindings=None
+    )
+    resolution_prepared = PreparedRequest(
+        method="PATCH",
+        url="https://zone.example/atservicesrest/V1.0/Tickets",
+        headers={},
+        params=None,
+        json=None,
+        audit_operation="/V1.0/Tickets",
+    )
+    monkeypatch.setattr(
+        connector,
+        "_provider_resolution_context",
+        lambda request: (resolution_prepared, {"ImpersonationResourceId": "1"}),
+    )
+    monkeypatch.setattr(
+        AutotaskMutationConnector,
+        "prepare_request",
+        lambda self, request, credentials: PreparedRequest(
+            method="PATCH",
+            url="https://dynamic-zone.example/atservicesrest/V1.0/Tickets",
+            headers={"Authorization": "not-fingerprinted"},
+            params=None,
+            json=dict(request.arguments["payload"]),
+            audit_operation="/V1.0/Tickets",
+        ),
+    )
+
+    prepared = connector.prepare_governed_execution(
+        request({"id": 12345, "queueID": "Jason", "status": "In Progress"})
+    )
+
+    assert prepared.payload == {"id": 12345, "queueID": 29682837, "status": 8}
+    assert prepared.symbolic_resolutions == {
+        "queueID": {"symbolic": "Jason", "resolved": 29682837},
+        "status": {"symbolic": "In Progress", "resolved": 8},
+    }
+    assert prepared.resource_type == "service_ticket"
+    assert prepared.resource_identifier == "12345"
+    assert prepared.action_method == "PATCH"
+    assert prepared.normalized_path == "/V1.0/Tickets"
+    assert "Authorization" not in prepared.payload
+    assert "dynamic-zone.example" not in prepared.normalized_path

@@ -6,6 +6,7 @@ from typing import Mapping
 from kernel.resolution import CapabilityResolutionResult
 
 from .contracts import OrchestrationRequest
+from .execution_plan import PreparedExecutionPlan
 from .service import CapabilityInvoker, InvocationResult
 
 
@@ -43,3 +44,38 @@ class CanonicalCapabilityRoutingInvoker:
             request=request,
             resolution=resolution,
         )
+    def prepare_execution_plan(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+    ) -> PreparedExecutionPlan:
+        delegate = self._delegate(request=request, resolution=resolution)
+        prepare = getattr(delegate, "prepare_execution_plan", None)
+        if not callable(prepare):
+            raise PermissionError("governed route does not expose execution-plan preparation")
+        return prepare(request=request, resolution=resolution)
+
+    def invoke_execution_plan(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+        prepared: PreparedExecutionPlan,
+    ) -> InvocationResult:
+        delegate = self._delegate(request=request, resolution=resolution)
+        invoke = getattr(delegate, "invoke_execution_plan", None)
+        if not callable(invoke):
+            raise PermissionError("governed route does not expose execution-plan invocation")
+        return invoke(request=request, resolution=resolution, prepared=prepared)
+
+    def _delegate(self, *, request: OrchestrationRequest, resolution: CapabilityResolutionResult) -> CapabilityInvoker:
+        if resolution.capability_name != request.capability_name:
+            raise PermissionError("resolved capability does not match orchestration request")
+        delegate = self.routes.get(request.capability_name)
+        if delegate is None:
+            raise LookupError(
+                "no governed invoker route is registered for canonical capability: "
+                f"{request.capability_name}"
+            )
+        return delegate

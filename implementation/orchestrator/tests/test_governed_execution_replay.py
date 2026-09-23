@@ -4,6 +4,7 @@ from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.resolution import CapabilityResolutionResult, CapabilityResolutionStatus, ResolutionOutcome
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest, OrchestrationStatus
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
+from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan
 from orchestrator.service import CentralOrchestrator, InvocationResult
 
 
@@ -26,9 +27,29 @@ class Invoker:
     def __init__(self):
         self.calls = 0
 
-    def invoke(self, *, request, resolution):
+    def _prepared(self, *, request, resolution):
+        ticket_id = request.arguments.get("ticket_id") or request.arguments.get("payload", {}).get("id") or 1
+        payload = dict(request.arguments.get("payload") or request.arguments)
+        return PreparedExecutionPlan(
+            ExecutionPlan(
+                principal_id=request.principal_id, organization_id=request.organization_id,
+                client_id=request.client_id, canonical_capability=request.capability_name,
+                selected_provider_id=resolution.selected_provider_id,
+                provider_capability="autotask.ticket.note.create", action_method="POST",
+                resource_type="service_ticket_note", resource_identifier=f"ticket:{ticket_id}",
+                normalized_path="/V1.0/TicketNotes", normalized_payload=payload,
+            )
+        )
+
+    def prepare_execution_plan(self, *, request, resolution):
+        return self._prepared(request=request, resolution=resolution)
+
+    def invoke_execution_plan(self, *, request, resolution, prepared):
         self.calls += 1
         return InvocationResult(output={"data": {"itemId": 30509999}}, attempts=1)
+
+    def invoke(self, *, request, resolution):
+        raise AssertionError("approval-governed mutation bypassed execution-plan invocation")
 
 
 class Audit:
@@ -167,7 +188,10 @@ def test_initialize_migrates_pre_request_id_schema(tmp_path):
     ledger.initialize()
     with sqlite3.connect(path) as c:
         columns = {row[1] for row in c.execute("PRAGMA table_info(governed_action_approvals)")}
-    assert "request_id" in columns
+    assert {
+        "request_id", "intent_fingerprint", "execution_plan_fingerprint",
+        "execution_plan_json", "failure_reason",
+    } <= columns
     reservation = ledger.reserve_approval(
         principal_id="person-al", organization_id="aot", client_id=None,
         capability_name="service.ticket.note.create",

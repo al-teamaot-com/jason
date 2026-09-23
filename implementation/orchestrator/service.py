@@ -12,6 +12,7 @@ from kernel.resolution import (
 )
 
 from .governed_execution_ledger import SQLiteGovernedExecutionLedger
+from .execution_plan import ExecutionPlan, PreparedExecutionPlan
 
 from .contracts import (
     ArtifactReference,
@@ -79,6 +80,30 @@ class CapabilityInvoker(Protocol):
         *,
         request: OrchestrationRequest,
         resolution: CapabilityResolutionResult,
+    ) -> InvocationResult: ...
+
+
+class GovernedExecutionPlanInvoker(Protocol):
+    """Invoker contract for approval-governed provider mutations.
+
+    Preparation must be side-effect-free with respect to provider mutation. It may
+    perform bounded metadata/identity reads needed to resolve symbolic values. The
+    second prepared plan is the only object eligible for provider invocation.
+    """
+
+    def prepare_execution_plan(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+    ) -> PreparedExecutionPlan: ...
+
+    def invoke_execution_plan(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+        prepared: PreparedExecutionPlan,
     ) -> InvocationResult: ...
 
 
@@ -207,7 +232,11 @@ class CentralOrchestrator:
             )
             return result
 
-        action_fingerprint = None
+        intent_fingerprint = None
+        execution_plan_fingerprint = None
+        prepared_execution: PreparedExecutionPlan | None = None
+        invoke_prepared = None
+
         if request.approval_id is not None:
             if self._governed_execution_ledger is None:
                 result = OrchestrationResult(
@@ -229,8 +258,8 @@ class CentralOrchestrator:
                 )
                 return result
             try:
-                begin = self._governed_execution_ledger.begin(request)
-                action_fingerprint = begin.action_fingerprint
+                intent = self._governed_execution_ledger.check_intent(request)
+                intent_fingerprint = intent.intent_fingerprint
             except PermissionError as exc:
                 result = OrchestrationResult(
                     execution_id=request.execution_id,
@@ -250,13 +279,16 @@ class CentralOrchestrator:
                     details={"replay_result": "rejected", "message": str(exc)},
                 )
                 return result
-            if begin.replay_result is not None:
-                prior = begin.replay_result
+            if intent.replay_result is not None:
+                prior = intent.replay_result
+                evidence = self._governed_execution_ledger.evidence(request.approval_id) or {}
                 self._record(
                     "orchestration.idempotency.deduplicated", request,
                     stage=ExecutionStage.COMPLETED,
                     details={
-                        "action_fingerprint": action_fingerprint,
+                        "intent_fingerprint": intent_fingerprint,
+                        "action_fingerprint": intent_fingerprint,
+                        "execution_plan_fingerprint": evidence.get("execution_plan_fingerprint"),
                         "replay_result": "deduplicated",
                         "consumption_state": "succeeded",
                         "original_execution_id": prior.execution_id,
@@ -264,15 +296,130 @@ class CentralOrchestrator:
                     },
                 )
                 return prior
+
+            prepare_plan = getattr(self._invoker, "prepare_execution_plan", None)
+            invoke_prepared = getattr(self._invoker, "invoke_execution_plan", None)
+            if not callable(prepare_plan) or not callable(invoke_prepared):
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_binding_required",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="EXECUTION_PLAN_BINDING_REQUIRED",
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "provider_invoked": False,
+                        "message": "approved mutation invoker does not expose governed execution-plan binding",
+                    },
+                )
+                return result
+
+            try:
+                authorized_prepared = prepare_plan(request=request, resolution=resolution)
+                contract_error = self._execution_plan_contract_error(
+                    request=request, resolution=resolution, plan=authorized_prepared.plan
+                )
+                if contract_error is not None:
+                    raise PermissionError(contract_error)
+                binding = self._governed_execution_ledger.authorize_execution_plan(
+                    request, authorized_prepared.plan
+                )
+                execution_plan_fingerprint = binding.execution_plan_fingerprint
+            except Exception as exc:
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_authorization_rejected",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="EXECUTION_PLAN_AUTHORIZATION_REJECTED",
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "provider_invoked": False,
+                        "message": str(exc),
+                    },
+                )
+                return result
+
+            self._record(
+                "orchestration.execution_plan.authorized", request,
+                stage=ExecutionStage.POLICY_DECIDED,
+                details={
+                    "intent_fingerprint": intent_fingerprint,
+                    "execution_plan_fingerprint": execution_plan_fingerprint,
+                    "execution_plan": authorized_prepared.plan.canonical_material(),
+                    "consumption_state": "consumed",
+                },
+            )
             self._record(
                 "orchestration.approval.consumed", request,
                 stage=ExecutionStage.POLICY_DECIDED,
                 details={
-                    "action_fingerprint": action_fingerprint,
+                    "intent_fingerprint": intent_fingerprint,
+                    "action_fingerprint": intent_fingerprint,
+                    "execution_plan_fingerprint": execution_plan_fingerprint,
                     "consumption_state": "consumed",
                     "replay_result": "new_execution",
                 },
             )
+
+            try:
+                # Independent re-resolution immediately before provider invocation.
+                # Only this second prepared object can reach the provider.
+                prepared_execution = prepare_plan(request=request, resolution=resolution)
+                observed_plan_fingerprint = prepared_execution.plan.fingerprint
+                contract_error = self._execution_plan_contract_error(
+                    request=request, resolution=resolution, plan=prepared_execution.plan
+                )
+                if contract_error is not None:
+                    raise PermissionError(contract_error)
+                self._governed_execution_ledger.verify_execution_plan(
+                    request, prepared_execution.plan
+                )
+            except Exception as exc:
+                if self._governed_execution_ledger is not None:
+                    self._governed_execution_ledger.fail(request, reason="execution_plan_mismatch")
+                result = OrchestrationResult(
+                    execution_id=request.execution_id,
+                    correlation_id=request.correlation_id,
+                    capability_name=resolution.capability_name,
+                    status=OrchestrationStatus.DENIED,
+                    stage=ExecutionStage.DENIED,
+                    reason_codes=("execution_plan_mismatch",),
+                    resolution=resolution,
+                    attempts=0,
+                    provider_id=resolution.selected_provider_id,
+                    error_code="EXECUTION_PLAN_MISMATCH",
+                )
+                self._record(
+                    "orchestration.execution_plan.denied", request,
+                    stage=ExecutionStage.DENIED,
+                    details={
+                        "intent_fingerprint": intent_fingerprint,
+                        "authorized_execution_plan_fingerprint": execution_plan_fingerprint,
+                        "observed_execution_plan_fingerprint": locals().get("observed_plan_fingerprint"),
+                        "provider_invoked": False,
+                        "message": str(exc),
+                    },
+                )
+                return result
 
         self._record(
             "orchestration.capability.invoking",
@@ -280,16 +427,25 @@ class CentralOrchestrator:
             stage=ExecutionStage.INVOKING,
             details={
                 "provider_id": resolution.selected_provider_id,
-                "action_fingerprint": action_fingerprint,
+                "intent_fingerprint": intent_fingerprint,
+                "action_fingerprint": intent_fingerprint,
+                "execution_plan_fingerprint": execution_plan_fingerprint,
             },
         )
 
         invocation_started = monotonic()
         try:
-            invocation = self._invoker.invoke(request=request, resolution=resolution)
+            if request.approval_id is not None:
+                assert prepared_execution is not None
+                assert callable(invoke_prepared)
+                invocation = invoke_prepared(
+                    request=request, resolution=resolution, prepared=prepared_execution
+                )
+            else:
+                invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
             if request.approval_id is not None and self._governed_execution_ledger is not None:
-                self._governed_execution_ledger.fail(request)
+                self._governed_execution_ledger.fail(request, reason="provider_invocation_failed")
             duration_ms = round((monotonic() - invocation_started) * 1000, 3)
             safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
             result = OrchestrationResult(
@@ -314,6 +470,8 @@ class CentralOrchestrator:
                     "provider_id": resolution.selected_provider_id,
                     "duration_ms": duration_ms,
                     "status": result.status.value,
+                    "intent_fingerprint": intent_fingerprint,
+                    "execution_plan_fingerprint": execution_plan_fingerprint,
                 },
             )
             return result
@@ -409,7 +567,9 @@ class CentralOrchestrator:
         if request.approval_id is not None and self._governed_execution_ledger is not None:
             self._governed_execution_ledger.complete(request, result)
         details.update({
-            "action_fingerprint": action_fingerprint,
+            "intent_fingerprint": intent_fingerprint,
+            "action_fingerprint": intent_fingerprint,
+            "execution_plan_fingerprint": execution_plan_fingerprint,
             "replay_result": "executed",
             "consumption_state": "succeeded" if request.approval_id is not None else "not_applicable",
         })
@@ -420,6 +580,26 @@ class CentralOrchestrator:
             details=details,
         )
         return result
+
+    @staticmethod
+    def _execution_plan_contract_error(
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+        plan: ExecutionPlan,
+    ) -> str | None:
+        expected_provider = str(resolution.selected_provider_id or "").strip()
+        checks = (
+            (plan.principal_id, request.principal_id, "principal_id"),
+            (plan.organization_id, request.organization_id, "organization_id"),
+            (plan.client_id, request.client_id, "client_id"),
+            (plan.canonical_capability, resolution.capability_name, "canonical_capability"),
+            (plan.selected_provider_id, expected_provider, "selected_provider_id"),
+        )
+        for actual, expected, name in checks:
+            if actual != expected:
+                return f"execution plan {name} does not match governed resolution"
+        return None
 
     def _authority_failure(self, request: OrchestrationRequest) -> str | None:
         if not self._require_authority_context:
