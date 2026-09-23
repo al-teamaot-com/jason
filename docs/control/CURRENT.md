@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-23
-**Status:** The 2026-09-23 approval/execution-plan remediation is source-complete for the currently identified approval-governed action surface and shared security framework. Core binding began at `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`; adapter hardening is checkpointed at `0ed6911` and `e41e572`; shared absolute provider deadlines plus continuation/recovery dual-plan binding and durable recovery retry controls are checkpointed at `bf072af`. The consolidated security regression set is 186/186 PASS. A full orchestrator-suite comparison shows only the same three pre-existing IT Glue/provider-read failures present at baseline `10d1e9c`, with no new failures introduced by `bf072af`. Clean no-cache MCP and runtime candidate builds from authoritative source `6e4e4c0979f3762b8dbd3b8b277850a1899deb18` are now verified, and exact current production MCP/runtime rollback images are pinned and isolated-runnability tested. No production container, provider state, or approval state was changed; production deployment and live acceptance remain pending.
+**Status:** Production is live on reconciled release source `bbe7d7ee87e0b6a4e338e84cf5ca8fead2061683`. The execution-plan security remediation, shared deadline/recovery hardening, IT Glue information-release fix, provider-read selector corrections, Microsoft cloud foundation repair, deployment hardening, System Registry reconciliation, and CI-isolation fixes are deployed. Runtime image `sha256:23dd4b28f347dc3b716dd6c0542f7e7afad1e0d2a27fb541a966bdc02af279ed` and MCP image `sha256:7103de2eb406ead2c79bb6f4c9abfd906541d9cd25d7dbcf6ea59cf68e9ee609` are running hardened (`read_only=true`, `cap_drop=ALL`, `no-new-privileges`, hardened `/tmp`). GitHub push gates for the final source commit passed. The Microsoft repair remains read-first/fail-closed, preserves `User.Read.All` for directory lookup and scoped Exchange Application RBAC for `mail-read`, and introduced no Microsoft tenant permission change. No provider mutation occurred during this deployment.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** `TODO-SEC-006` production rollout and bounded XYZ acceptance are complete. Next, run controlled acceptance checks for the other mutation families (Autotask note/create/procurement, Datto component/site-variable/EDR/alert, Teams send) using only explicitly safe test targets, or separately address the three pre-existing IT Glue/provider-read failures.
+- **Next safe actions:** production security/Microsoft reconciliation is complete. Remaining optional acceptance work is controlled per-provider mutation-family testing (Autotask note/create/procurement, Datto component/site-variable/EDR/alert, Teams send) using explicitly safe test targets. The previously recorded IT Glue/provider-read failures have been resolved in the reconciled production line.
 
 ## Durable operating principle
 
@@ -29,12 +29,12 @@ Confirmed current security-review state:
 - canonical approval argument binding: **PASS** at the Central Orchestrator canonical-request boundary; changed arguments are rejected with zero provider invocation;
 - post-approval normalization/provider binding: **architectural gap confirmed** before remediation; unchanged semantic intent could resolve to different concrete Autotask mutations;
 - dual intent/execution-plan binding: **source remediation PASS**, core commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`, adapter-hardening commits `0ed6911` and `e41e572`, shared framework/recovery commit `bf072af`, consolidated security suite 186/186;
-- production execution-plan acceptance: **PENDING**; the safety check found production still on approval-replay revision `5f89f3af82081e75e97d66e523222e5564648163`, so no approval/provider mutation was attempted; ticket baseline remained status `5 / Complete`, queue `29682833`, priority `2`; final read-only correlation `corr_mcp_7488bdcb101643548a15e6283a3f4155`; and
-- deployment reproducibility: **OPEN** because the earlier replay-fix rollout encountered Docker overlay-chain problems; preferred end state is a clean authoritative-Git build plus verified rollback.
+- production execution-plan acceptance: **PASS**; the bounded XYZ acceptance on `T20211001.0014` completed with exactly one provider attempt, exact intent/execution-plan binding, no plan mismatch, and successful post-write readback; and
+- deployment reproducibility: **PASS**; clean no-cache builds, exact revision labels, hardened production deployment, rollback preservation, and live health/governance verification are established.
 
-Do not represent the execution-plan control as production-verified until the expected revision is deployed and the bounded live acceptance completes. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
+The execution-plan control is production-verified. Do not weaken the fail-closed adapter requirement to preserve legacy mutation behavior.
 
-Broader orchestrator validation with the required CAP-007 source path reaches the full suite and reports exactly three failures. The same three failures reproduce at baseline `10d1e9c`: IT Glue sensitive-output handling classification, IT Glue search selector metadata mismatch, and missing `DOCUMENTATION_FLEXIBLE_ASSET_SEARCH` test symbol. They are pre-existing provider-read/IT Glue work, not regressions from the security remediation.
+The three previously recorded IT Glue/provider-read failures were resolved during the production reconciliation work: sensitive raw evidence is classified before sanitization, flexible-asset discovery advertises the required selector contract, and the stale provider-read test imports/expectations were corrected. Full orchestrator, runtime, connector, kernel, and top-level implementation suites passed in the reconciled line before final production promotion.
 
 ### Production execution-plan rollout and XYZ acceptance — 2026-09-23
 
