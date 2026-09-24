@@ -1,0 +1,22 @@
+[Unit]
+Description=Jason single-host boot recovery
+Documentation=https://github.com/al-teamaot-com/jason
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/jason-boot-recovery
+TimeoutStartSec=240
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Jason recovery readiness check
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+Unit=jason-boot-recovery.service
+
+[Install]
+WantedBy=timers.target
