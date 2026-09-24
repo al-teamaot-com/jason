@@ -52,6 +52,7 @@ def boundary(*, status=BoundaryStatus.VALIDATED):
         consent_transaction_id="owner-approved-dnsfilter-read",
         created_at=now,
         validated_at=now if status is BoundaryStatus.VALIDATED else None,
+        external_scope_ids=("77",),
     )
 
 
@@ -99,6 +100,7 @@ def test_query_search_injects_exact_mapped_organization(tmp_path):
     tool, arguments = FakeClient.calls[-1]
     assert tool == "search_query_logs"
     assert arguments["organization_id"] == 9001
+    assert arguments["network_ids"] == [77]
     assert arguments["fqdn"] == "example.com"
     assert result.provider == "dnsfilter_mcp"
     assert audit.events[0][1]["organization_boundary_validated"] is True
@@ -110,6 +112,8 @@ def test_caller_cannot_supply_provider_scope_or_confirmation(tmp_path):
         {"organization_id": 9999},
         {"organization_ids": [9999]},
         {"msp_id": 10},
+        {"network_id": 999},
+        {"network_ids": [999]},
         {"confirm": True},
     ):
         with pytest.raises(ConnectorAuthorizationError, match="server-derived"):
@@ -133,8 +137,8 @@ def test_response_with_wrong_organization_fails_closed(tmp_path):
     with pytest.raises(ConnectorAuthorizationError, match="crossed"):
         connector.execute(
             ConnectorRequest(
-                context("dnsfilter_mcp.stale_agents.search"),
-                {"company_id": 333, "days": 30},
+                context("dnsfilter_mcp.query_logs.search"),
+                {"company_id": 333, "from": "2026-09-23", "to": "2026-09-24"},
             )
         )
 
@@ -179,6 +183,7 @@ def test_autotask_self_company_zero_is_valid_mcp_boundary(tmp_path):
         consent_transaction_id=record.consent_transaction_id,
         created_at=record.created_at,
         validated_at=record.validated_at,
+        external_scope_ids=(),
     )
     connector, _ = build(tmp_path, record=record)
     FakeClient.response = {"organization_id": ORG_ID, "data": []}
@@ -200,3 +205,72 @@ def test_client_context_must_match_selected_company(tmp_path):
                 {"company_id": 333},
             )
         )
+
+
+def test_client_organization_only_tool_fails_before_provider_call(tmp_path):
+    connector, _ = build(tmp_path)
+    with pytest.raises(ConnectorAuthorizationError, match="cannot prove client-network isolation"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter_mcp.stale_agents.search"),
+                {"company_id": 333, "days": 30},
+            )
+        )
+    assert FakeClient.calls == []
+
+
+def test_single_network_tool_injects_server_derived_network(tmp_path):
+    connector, _ = build(tmp_path)
+    FakeClient.response = {"organization_id": ORG_ID, "network_id": 77, "data": []}
+    connector.execute(
+        ConnectorRequest(
+            context("dnsfilter_mcp.traffic_anomalies.search"),
+            {"company_id": 333, "from": "2026-09-23", "to": "2026-09-24"},
+        )
+    )
+    tool, arguments = FakeClient.calls[-1]
+    assert tool == "detect_traffic_anomalies"
+    assert arguments["network_id"] == 77
+
+
+def test_client_response_outside_authorized_network_fails_closed(tmp_path):
+    connector, _ = build(tmp_path)
+    FakeClient.response = {"organization_id": ORG_ID, "network_id": 999, "data": []}
+    with pytest.raises(ConnectorAuthorizationError, match="client network"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter_mcp.query_logs.search"),
+                {"company_id": 333, "from": "2026-09-23", "to": "2026-09-24"},
+            )
+        )
+
+
+def test_client_boundary_requires_network_scope_before_provider_call(tmp_path):
+    record = boundary()
+    record = record.__class__(
+        id=record.id,
+        client_id=record.client_id,
+        provider=record.provider,
+        external_tenant_id=record.external_tenant_id,
+        primary_domain=record.primary_domain,
+        profile=record.profile,
+        application_id=record.application_id,
+        status=record.status,
+        consent_transaction_id=record.consent_transaction_id,
+        created_at=record.created_at,
+        consented_at=record.consented_at,
+        validated_at=record.validated_at,
+        service_principal_id=record.service_principal_id,
+        last_error_code=record.last_error_code,
+        offboarded_at=record.offboarded_at,
+        external_scope_ids=(),
+    )
+    connector, _ = build(tmp_path, record=record)
+    with pytest.raises(ConnectorAuthorizationError, match="network boundary"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter_mcp.query_logs.search"),
+                {"company_id": 333, "from": "2026-09-23", "to": "2026-09-24"},
+            )
+        )
+    assert FakeClient.calls == []
