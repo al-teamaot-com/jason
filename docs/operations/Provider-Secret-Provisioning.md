@@ -266,6 +266,43 @@ Runtime identity:
 
 The production API host is restricted to `https://api.kyods.com`. KFS is read-only in this foundation and live selection also requires `JASON_KFS_ENABLED=true`.
 
+## UniView / Backup.net Public API contract
+
+Logical secret: `backup_net.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/backup-net/production/read-only`
+
+Durable OpenBao fields:
+
+- `client_id`
+- `client_secret`
+
+Runtime identity:
+
+- policy: `jason-backup-net-read`
+- AppRole: `jason-backup-net-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Provision with the normal lifecycle command:
+
+`python3 tools/provider_secret.py create backup_net`
+
+If the OpenBao KV secret already exists but the hardened runtime AppRole files are absent, restore only the runtime identity with:
+
+`sudo python3 tools/provider_secret.py reactivate backup_net`
+
+`reactivate` does not ask for or rewrite the provider Client ID/Secret. It creates fresh AppRole artifacts in the hardened runtime-secret directory.
+
+The credential is created in UniView under **Settings -> Public APIs -> New** and is used only with the OAuth 2.0 client-credentials flow. Per Kaseya's documented request contract, the token call sends `Authorization: Basic <base64(client_id:client_secret)>` and the form body contains only `grant_type=client_credentials`. The connector fixes authentication to `https://login.backup.net/connect/token` and API reads to `https://public-api.backup.net`; those hosts are not secret-configurable.
+
+Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jason client-boundary record mapping the exact Autotask company ID to the Backup.net customer UUID. Provider `customer_id` is never accepted from the caller. The connector injects the mapped UUID and verifies every returned record proves the same customer.
+
+For the controlled acceptance case, Autotask company search independently resolved **Deborah Gittens Virtuol Designs LLC** to company ID **1627**. Ticket `T20260922.0063` itself currently reports `companyID=0`, so the ticket field must not be used as the Backup.net boundary source.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.

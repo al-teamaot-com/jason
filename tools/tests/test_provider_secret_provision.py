@@ -118,6 +118,24 @@ def test_kyocera_kfs_contract_uses_canonical_connector_path_and_fields() -> None
     )
 
 
+def test_backup_net_contract_uses_canonical_connector_path_and_fields() -> None:
+    spec = PROVIDERS["backup_net"]
+    assert spec["logical_name"] == "backup_net.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/backup-net/production/read-only"
+    )
+    assert spec["fields"] == ("client_id", "client_secret")
+    assert spec["policy_name"] == "jason-backup-net-read"
+    assert spec["role_name"] == "jason-backup-net-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
@@ -220,6 +238,7 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert '"datto_edr.readonly"' in source
     assert '"it_glue.readonly"' in source
     assert '"kyocera_kfs.readonly"' in source
+    assert '"backup_net.readonly"' in source
     assert '"aws_ses.sendmail"' in source
 
 
