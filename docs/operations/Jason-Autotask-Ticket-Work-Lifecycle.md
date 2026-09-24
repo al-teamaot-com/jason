@@ -19,6 +19,12 @@ For an endpoint-related ticket, Jason must have affirmative current evidence tha
 
 A failed capability/eligibility check before the first substantive diagnostic does not claim the ticket. Missing capabilities are routed through Support/TODO intake as appropriate.
 
+## Global enforcement rule
+
+This lifecycle is not optional playbook prose. Every Jason path that starts ticket-specific diagnostics, remediation, or technical verification must cross this gate first. A playbook/runtime binding may perform read-only intake and eligibility checks before ownership, but it must not dispatch a substantive diagnostic action until the ticket-work-start transition has succeeded and readback confirms the intended state.
+
+If the transition fails, the run records an ownership-stage defect and stops before substantive work. Bounded retry is permitted only under the normal mutation/recovery policy; failure must never be silently treated as successful ownership.
+
 ## Default start-work transition
 
 For the exact resolved Autotask ticket, immediately before the first substantive diagnostic/remediation/verification action, Jason must:
@@ -63,7 +69,11 @@ Jason may associate a configuration item only when all of the following are true
 - its company ID matches the ticket company; and
 - exactly one configuration satisfies the complete relationship.
 
-Hostname-only matching, first-match selection, inactive configurations, cross-company matches, and ambiguous candidates are not sufficient for an Autotask write. If deterministic correlation is unavailable, Jason leaves the configuration association unchanged and continues only when the playbook can safely proceed without inventing device identity.
+Hostname-only matching, first-match selection, inactive configurations, cross-company matches, and ambiguous candidates are not sufficient for an Autotask write.
+
+For a ticket that is clearly device-specific, device association is a **pre-diagnostic identity gate**. If exactly one authoritative configuration cannot be resolved, Jason sets/records `identification_blocked`, documents the candidates/evidence, and does not enter substantive diagnostics under a guessed or missing asset identity. If the ticket is genuinely non-device work, Jason explicitly records `No applicable device association` and may proceed under the applicable non-device workflow.
+
+Before handoff or completion, Jason re-validates that the expected configuration association is still present and consistent with the authoritative endpoint identity.
 
 ## Classification rule
 
