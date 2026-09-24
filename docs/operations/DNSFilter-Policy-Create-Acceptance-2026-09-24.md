@@ -116,3 +116,21 @@ After the write acceptance, ordinary DNSFilter reads remained healthy:
 - policy inventory returned `40` policies;
 - policy `1506474` was present;
 - no client/network/device assignment was introduced by the test.
+
+## Post-cleanup production verification
+
+Cleanup was completed successfully on production revision `7a74946637077edf69df34a555429c5fa873e086`.
+
+Both `jason-runtime` and `jason-mcp-pilot` are healthy with:
+
+- `JASON_DNSFILTER_MCP_MUTATION_PROFILE=policy_create_acceptance_v1` retained for provenance;
+- `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false`;
+- all 25 DNSFilter mutation definitions at `BUILDING`;
+- `dnsfilter_mcp_mutation` at `PLANNED / UNKNOWN / BLOCKED`;
+- zero DNSFilter mutation invokers registered;
+- the exact acceptance authority grant `grant_person_al_dns_protection_policy_create_acceptance_20260924` at `inactive`;
+- `dns.protection.policy.create` absent from the live governed write-capability list and absent from exact `dns_policy / create` discovery.
+
+Ordinary DNSFilter reads remain healthy. A post-cleanup policy search returned 40 policies when global policies were included: 38 regular policies plus 2 global policies. Policy `1506474` remains present under organization `1110483` with zero networks, zero user agents, zero local users, and zero collections.
+
+This closes the first policy-create write acceptance. The test policy remains intentionally undeleted for a future separately governed deletion acceptance.

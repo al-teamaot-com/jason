@@ -235,3 +235,7 @@ The bounded production policy-create acceptance subsequently passed with exactly
 The acceptance also established that DNSFilter mutation execution plans must use provider-relative paths such as `/tools/create_policy`, not `mcp://dnsfilter/tools/create_policy`.
 
 Post-test cleanup semantics are fail-safe: `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` or unset leaves the mutation foundation healthy and dormant even if the acceptance profile string remains present. A true execution gate with no valid profile still fails closed.
+
+## Current post-acceptance production state
+
+As of the completed cleanup deployment on revision `7a74946637077edf69df34a555429c5fa873e086`, DNSFilter writes are fully dormant again: execution gate `false`, all 25 mutations `BUILDING`, provider `PLANNED / UNKNOWN / BLOCKED`, zero DNSFilter mutation invokers, and the policy-create acceptance grant inactive. `dns.protection.policy.create` is no longer present in Jason's live write-capability catalog. DNSFilter reads remain healthy, and the intentionally retained acceptance policy `1506474` is still unassigned.
