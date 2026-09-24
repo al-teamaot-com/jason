@@ -370,3 +370,42 @@ def test_shared_external_tenant_rejects_overlapping_provider_child_scopes() -> N
             consented_at=NOW,
             external_scope_ids=("1002",),
         )
+
+
+def test_master_company_zero_can_share_tenant_with_scoped_clients() -> None:
+    from kernel.client_boundaries import ClientBoundary
+
+    _, boundaries, _ = build_service()
+    master = ClientBoundary(
+        id="boundary-master",
+        client_id="0",
+        provider="dnsfilter",
+        external_tenant_id="1110483",
+        primary_domain="teamaot.com",
+        profile="dnsfilter-organization-read",
+        application_id="dnsfilter-management-api",
+        status=BoundaryStatus.VALIDATED,
+        consent_transaction_id="tx-master",
+        created_at=NOW,
+        validated_at=NOW,
+        external_scope_ids=(),
+    )
+    client = ClientBoundary(
+        id="boundary-client",
+        client_id="1179",
+        provider="dnsfilter",
+        external_tenant_id="1110483",
+        primary_domain="avmac.example",
+        profile="dnsfilter-organization-read",
+        application_id="dnsfilter-management-api",
+        status=BoundaryStatus.VALIDATED,
+        consent_transaction_id="tx-client",
+        created_at=NOW,
+        validated_at=NOW,
+        external_scope_ids=("1197210",),
+    )
+    boundaries.add(master)
+    boundaries.add(client)
+    assert boundaries.find_active_for_client(
+        client_id="1179", provider="dnsfilter"
+    ) == client

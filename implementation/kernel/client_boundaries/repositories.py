@@ -125,6 +125,11 @@ class InMemoryClientBoundaryRepository:
             ):
                 current_scopes = frozenset(current.external_scope_ids)
                 new_scopes = frozenset(boundary.external_scope_ids)
+                master_pair = (
+                    current.client_id == "0" or boundary.client_id == "0"
+                )
+                if master_pair and (current_scopes or new_scopes):
+                    continue
                 if (
                     not current_scopes
                     or not new_scopes
