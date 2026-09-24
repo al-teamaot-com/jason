@@ -16,4 +16,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ROLLBACK="jason-runtime-rollback-$STAMP"
 
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+  --promote-image-tag jason-runtime:production \
+  --promote-image-tag jason-runtime:local \
+  --rollback-image-tag jason-runtime:rollback-current \
   --health-url http://127.0.0.1:8080/healthz   "$@"
