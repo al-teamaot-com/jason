@@ -311,3 +311,62 @@ def test_rejects_short_signing_key() -> None:
                 InMemoryOnboardingTransactionRepository()
             ),
         )
+
+
+def test_shared_external_tenant_allows_disjoint_provider_child_scopes() -> None:
+    service, boundaries, _ = build_service()
+
+    _, first_state = begin(service)
+    first = service.complete_onboarding(
+        state=first_state.value,
+        external_tenant_id="tenant-shared",
+        consented_at=NOW,
+        external_scope_ids=("1001",),
+    )
+    service.mark_validated(boundary_id=first.id, validated_at=NOW)
+
+    _, second_state = service.begin_onboarding(
+        client_id="client_other",
+        provider="microsoft_graph",
+        primary_domain="other.example",
+        profile="directory-read",
+        application_id="app_directory_read",
+        correlation_id="corr_002",
+    )
+    second = service.complete_onboarding(
+        state=second_state.value,
+        external_tenant_id="tenant-shared",
+        consented_at=NOW,
+        external_scope_ids=("1002",),
+    )
+
+    assert second.external_scope_ids == ("1002",)
+    assert boundaries.get(second.id) == second
+
+
+def test_shared_external_tenant_rejects_overlapping_provider_child_scopes() -> None:
+    service, _, _ = build_service()
+
+    _, first_state = begin(service)
+    service.complete_onboarding(
+        state=first_state.value,
+        external_tenant_id="tenant-shared",
+        consented_at=NOW,
+        external_scope_ids=("1001", "1002"),
+    )
+
+    _, second_state = service.begin_onboarding(
+        client_id="client_other",
+        provider="microsoft_graph",
+        primary_domain="other.example",
+        profile="directory-read",
+        application_id="app_directory_read",
+        correlation_id="corr_002",
+    )
+    with pytest.raises(BoundaryConflictError, match="External tenant"):
+        service.complete_onboarding(
+            state=second_state.value,
+            external_tenant_id="tenant-shared",
+            consented_at=NOW,
+            external_scope_ids=("1002",),
+        )
