@@ -1,0 +1,469 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "Security & Learning Control Plane",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Evidence, not authority\\nThis dashboard combines **Resolution Memory** and **security playbook** telemetry. Historical resolutions and Grafana state never grant execution authority. Client isolation, Central Orchestrator authorization, exact approvals, disruption controls, and provider readback remain authoritative.\\n\\n**Current milestone:** Resolution Memory has its first verified production case; Datto EDR/AV playbook v1.3 is production-enabled with terminal/sticky security escalation."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Resolution Memory Exporter",
+      "description": "1 = Prometheus can scrape the Resolution Memory exporter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"jason-resolution-memory\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Resolution Cases",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_resolution_memory_cases{status=\"all\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Verified Cases",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_resolution_memory_cases{status=\"verified\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Client Scopes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_resolution_memory_client_scopes",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "EDR/AV Playbook Enabled",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_enabled{playbook_id=\"datto_edr_av\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Global Playbook Autonomy",
+      "description": "Separate durable autonomy gate; 0 does not mean the playbook is unavailable for governed supervised execution.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_autonomy_global_enabled",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "EDR/AV Source Lifecycle",
+      "description": "Current source/runtime playbook metadata.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_info{playbook_id=\"datto_edr_av\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Durable Autonomy State",
+      "description": "Durable autonomy approval state is deliberately separate from source lifecycle/enabled state.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_playbook_autonomy_info{playbook_id=\"datto_edr_av\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Security Dispositions \u2014 30d",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (playbook_id, disposition) (increase(jason_playbook_security_disposition_total[30d]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Compromise Signals \u2014 30d",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (playbook_id, signal) (increase(jason_playbook_compromise_signal_total[30d]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Verification Results \u2014 30d",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (playbook_id, result) (increase(jason_playbook_verification_total[30d]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "Playbook Outcomes \u2014 30d",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (playbook_id, outcome) (increase(jason_playbook_runs_total[30d]))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "options": {
+        "showHeader": true
+      }
+    }
+  ],
+  "preload": false,
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": [
+    "jason",
+    "security",
+    "resolution-memory",
+    "learning",
+    "playbooks"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Jason Security & Learning",
+  "uid": "jason-security-learning",
+  "version": 1
+}
