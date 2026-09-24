@@ -161,12 +161,14 @@ These generic standing-safe components may be used immediately under existing po
 
 Create:
 
-`DNSFilter / DNS Agent Diagnostic [WIN] AOT`
+`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`
 
-Standing classification after acceptance:
+Production classification (accepted 2026-09-24):
 - read-only;
 - non-disruptive;
-- eligible for unsupervised approval.
+- `standing_safe` in Jason's durable Datto component approval registry;
+- exact component UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`;
+- live metadata fingerprint `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`.
 
 The component must collect only:
 
@@ -536,7 +538,16 @@ Known baseline:
 - native DRMM software search did not return a DNSFilter product;
 - generic PowerShell diagnostic correctly stopped at the per-run approval gate.
 
-Acceptance must prove:
+Accepted diagnostic evidence — 2026-09-24:
+- corrected script SHA-256: `e499cfbeedc16dc3f2cb2fd4accc40c6e2704f4ac5e77f03b1f8f1065a4ba9ad`;
+- AOT-50282 controlled acceptance proved the clean agent-absent path;
+- AVMAC-1077 / ticket `T20260924.0021` proved the partial/inconsistent-install path and correctly stopped without blind reinstall;
+- after live Description correction, owner standing-safe approval succeeded for exact UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`;
+- durable metadata fingerprint: `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`;
+- standing-safe execution proof on AOT-50282 used job `d951ae82-37e4-406f-bdab-dd192c626d64`, action correlation `corr_mcp_action_f91a337e7e5e4cedb3824ed2b52795f2`, exactly one provider attempt, terminal `completed` readback, and governed stdout correlation `corr_mcp_5b18eccd8dc14cb182f2d7870d7679e6`;
+- stdout confirmed Windows 11 Pro, .NET Desktop 8 present, `INSTALL_STATE=Absent`, no DNS Agent/Service Manager services, normal DNS resolution successful, DNSFilter diagnostic TXT successful, no modifying action performed.
+
+Acceptance requirements for the remaining installer path:
 1. exact identity;
 2. dedicated component runs without per-run approval under standing-safe policy;
 3. no modifying/disruptive action occurs;
@@ -564,4 +575,4 @@ Close only after:
 - limitations/TODOs are documented;
 - Project Jason/Grafana tracking is updated.
 
-Until then, the playbook design is owner-approved, but autonomous diagnostic execution remains capability-blocked.
+The dedicated diagnostic portion is production-ready and no longer capability-blocked. The remaining Section Goal gap is the separately governed missing-agent installer acceptance/standing-authority decision; partial/corrupt installations continue to stop at `remediation_required`, and service restart/reinstall/uninstall/DNS changes/reboot remain outside autonomous diagnostic authority.
