@@ -54,7 +54,7 @@ jobs:
             implementation/usage_ledger/runtime_context.py
       - name: Test showcase exporters and attribution context
         env:
-          PYTHONPATH: implementation
+          PYTHONPATH: infrastructure/showcase:implementation
         run: |
           python -m pytest -q \
             infrastructure/showcase/tests/test_status_exporter.py \
