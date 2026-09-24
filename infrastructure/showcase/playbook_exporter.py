@@ -37,15 +37,48 @@ def _escape(value: object) -> str:
     )
 
 
-def _load_registry(path: Path | None = None) -> dict:
-    selected = path or REGISTRY_PATH
-    if not selected.exists():
-        selected = SOURCE_REGISTRY
+def _read_registry(path: Path) -> dict:
     try:
-        payload = json.loads(selected.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
         return {"playbooks": []}
     return payload if isinstance(payload, dict) else {"playbooks": []}
+
+
+def _merge_registry_state(durable: dict, source: dict) -> dict:
+    """Overlay source lifecycle metadata without weakening durable autonomy state."""
+    durable_items = {
+        str(item.get("id", "")): dict(item)
+        for item in durable.get("playbooks", [])
+        if isinstance(item, dict) and str(item.get("id", "")).strip()
+    }
+    operational_keys = ("name", "version", "lifecycle", "enabled", "review_status", "source")
+    for item in source.get("playbooks", []):
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("id", "")).strip()
+        if not pid:
+            continue
+        merged = durable_items.get(pid, {"id": pid})
+        for key in operational_keys:
+            if key in item:
+                merged[key] = item[key]
+        durable_items[pid] = merged
+    return {
+        "schema_version": max(int(durable.get("schema_version", 0) or 0), int(source.get("schema_version", 0) or 0)),
+        "playbooks": list(durable_items.values()),
+        "autonomy": durable.get("autonomy", {}),
+    }
+
+
+def _load_registry(path: Path | None = None) -> dict:
+    if path is not None:
+        return _read_registry(path)
+    durable = _read_registry(REGISTRY_PATH) if REGISTRY_PATH.exists() else {"playbooks": []}
+    source = _read_registry(SOURCE_REGISTRY) if SOURCE_REGISTRY.exists() else {"playbooks": []}
+    if durable.get("playbooks") and source.get("playbooks"):
+        return _merge_registry_state(durable, source)
+    return source if source.get("playbooks") else durable
 
 
 def _load_events(path: Path | None = None) -> list[dict]:
@@ -112,6 +145,15 @@ def render_metrics(
         "# HELP jason_playbook_enabled Whether the registered playbook is enabled for runtime use.",
         "# TYPE jason_playbook_enabled gauge",
     ]
+    autonomy = registry.get("autonomy", {}) if isinstance(registry.get("autonomy", {}), dict) else {}
+    lines.extend([
+        "# HELP jason_playbook_autonomy_global_enabled Whether playbook-level autonomous execution is globally enabled.",
+        "# TYPE jason_playbook_autonomy_global_enabled gauge",
+        f"jason_playbook_autonomy_global_enabled {1 if autonomy.get('global_enabled') is True else 0}",
+        "# HELP jason_playbook_autonomy_info Durable per-playbook autonomy approval state; operational lifecycle is reported separately.",
+        "# TYPE jason_playbook_autonomy_info gauge",
+    ])
+
     for item in playbooks:
         playbook_id = str(item.get("id", "unknown"))
         labels = {
@@ -128,6 +170,14 @@ def render_metrics(
         lines.append(
             f'jason_playbook_enabled{{playbook_id="{_escape(playbook_id)}"}} '
             f'{1 if item.get("enabled") is True else 0}'
+        )
+        item_autonomy = item.get("autonomy", {}) if isinstance(item.get("autonomy", {}), dict) else {}
+        lines.append(
+            'jason_playbook_autonomy_info{'
+            f'playbook_id="{_escape(playbook_id)}",'
+            f'mode="{_escape(item_autonomy.get("mode", "not_configured"))}",'
+            f'approval_status="{_escape(item_autonomy.get("approval_status", "not_configured"))}"'
+            '} 1'
         )
 
     outcomes: Counter[tuple[str, ...]] = Counter()

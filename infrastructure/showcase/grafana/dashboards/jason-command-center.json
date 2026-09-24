@@ -1356,7 +1356,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Live capability state\n- Autotask search/read/notes: **verified live**\n- Datto EDR detection/quarantine detail: **verified live**\n- Datto alert resolve: **active / approval required**\n- Datto site-variable read: **active**\n- Datto site-variable create/update: **not active**\n\nExecution counts, denies, and autonomous-run totals require audit-event metrics and should not be represented as live numbers until exporter wiring exists."
+        "content": "### Live capability state\n- Autotask search/read/notes: **verified live**\n- Datto EDR detection/quarantine detail: **verified live**\n- Datto alert resolve: **active / approval required**\n- Datto site-variable read: **active**\n- Datto site-variable create/update: **active / approval required**\n\nExecution counts, denies, and autonomous-run totals require audit-event metrics and should not be represented as live numbers until exporter wiring exists."
       }
     }
   ],

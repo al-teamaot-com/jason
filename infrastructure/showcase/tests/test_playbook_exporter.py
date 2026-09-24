@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from playbook_exporter import render_metrics
+from playbook_exporter import _merge_registry_state, render_metrics
 
 
 def test_playbook_metrics_are_aggregated_without_ticket_or_device_labels(tmp_path: Path):
@@ -68,3 +68,35 @@ def test_playbook_metrics_are_aggregated_without_ticket_or_device_labels(tmp_pat
     assert 'jason_playbook_verification_total{playbook_id="datto_edr_av",result="pass"} 1' in metrics
     assert "TSECRET" not in metrics
     assert "DEVICESECRET" not in metrics
+
+
+def test_source_metadata_overlays_durable_state_without_changing_autonomy():
+    durable = {
+        "schema_version": 2,
+        "autonomy": {"global_enabled": False},
+        "playbooks": [{
+            "id": "datto_edr_av",
+            "version": "1.2.0",
+            "lifecycle": "pilot",
+            "enabled": False,
+            "autonomy": {"mode": "recommend_only", "approval_status": "not_approved"},
+        }],
+    }
+    source = {
+        "schema_version": 1,
+        "playbooks": [{
+            "id": "datto_edr_av",
+            "name": "Jason - Datto EDR/AV Diagnose & Repair",
+            "version": "1.3.0",
+            "lifecycle": "production",
+            "enabled": True,
+            "review_status": "full_threat_branch_accepted_terminal_escalation",
+        }],
+    }
+    merged = _merge_registry_state(durable, source)
+    item = merged["playbooks"][0]
+    assert item["version"] == "1.3.0"
+    assert item["lifecycle"] == "production"
+    assert item["enabled"] is True
+    assert item["autonomy"] == durable["playbooks"][0]["autonomy"]
+    assert merged["autonomy"] == {"global_enabled": False}

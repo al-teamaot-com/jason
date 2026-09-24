@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=simple
 User=al
-WorkingDirectory=/home/al/jason-worktrees/support-autotask-auth-split-20260918
+WorkingDirectory=/home/al/projects/jason
 Environment=JASON_RESOLUTION_MEMORY_DB=/var/lib/jason/openclaw/resolution-memory.sqlite3
-ExecStart=/usr/bin/python3 /home/al/jason-worktrees/support-autotask-auth-split-20260918/infrastructure/showcase/resolution_memory_exporter.py
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/resolution_memory_exporter.py
 Restart=on-failure
 RestartSec=5
 
