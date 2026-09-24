@@ -1109,7 +1109,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-SEC-007 — Expand security regression/red-team coverage and observability
 
 - **Priority:** P1 — medium priority after `TODO-SEC-006` production acceptance
-- **Status:** Planned
+- **Status:** In progress — permanent cross-client and execution-plan substitution CI gate implemented 2026-09-24
 - **Risk level:** High
 - **Idea:** Turn the 2026-09-23 security findings into permanent multi-provider regression coverage and secret-safe operational visibility.
 - **Medium-priority work:**
@@ -1119,6 +1119,7 @@ When complete, document the implementation, tests, capability changes, and remai
   4. **Approval security regression suite:** maintain coverage for replay, changed canonical arguments, changed concrete provider mutation, provider substitution, target substitution, expired approval, wrong tenant/client, wrong principal, duplicate execution, and failed-execution retry semantics.
   5. **Security documentation and Grafana visibility:** surface useful secret-safe control state for approval failures, replay/deduplication, execution-plan mismatches, denied provider substitutions, denied target/payload changes, and fail-closed adapter gaps. Do not expose client-sensitive payloads, credentials, secret material, or raw authorization context.
 - **Why it matters:** The review demonstrated that apparently independent controls can fail at different layers. Permanent multi-provider regression and observability reduce the chance that future adapter/provider changes reintroduce replay, client-scope, post-approval-normalization, or provider-substitution defects.
+- **2026-09-24 checkpoint:** Added dedicated `SEC-007 Security Regressions` CI coverage for client-boundary persistence, governed approval replay/recovery, execution-plan binding, Teams approval ingress/delivery, and the active Autotask, Datto RMM/EDR, DNSFilter, and Teams write adapters. Provider-neutral execution-plan tests now explicitly require fail-closed zero-provider-write behavior for principal, organization, client, canonical capability, provider, target, symbolic mapping, and normalized payload substitution. This is the first SEC-007 slice; prompt-injection regression and broader security observability remain pending.
 - **Prerequisites:** `TODO-SEC-006` production acceptance, provider adapter inventory, stable audit event schema, secret-safe metrics/export design.
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Begin immediately after the bounded execution-plan production acceptance and adapter inventory.
