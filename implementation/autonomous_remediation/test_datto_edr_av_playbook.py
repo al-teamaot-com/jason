@@ -1,3 +1,9 @@
+from .datto_edr_av_security import (
+    ScanObservation,
+    ScanResultStatus,
+    SecurityTrigger,
+    ThreatObservation,
+)
 from .datto_edr_av_playbook import (
     ApprovalClass,
     ExecutionObservation,
@@ -176,6 +182,42 @@ def test_notes_are_concise_and_metrics_are_stable():
     metrics = metrics_payload(r)
     assert metrics["healthy"] is True
     assert metrics["playbook"].startswith("Jason - Datto EDR/AV")
+
+
+def test_security_escalation_is_terminal_across_later_evidence():
+    r = run()
+    r.security_trigger = SecurityTrigger.THREAT_ONLY
+    assessment = r.record_security_evidence(
+        (
+            ThreatObservation(
+                alert_id="A1",
+                detected=True,
+                compromised=True,
+                evidence_refs=("edr:A1",),
+            ),
+        )
+    )
+    assert assessment.compromise_signal.value == "provider_indicated"
+    assert r.state == PlaybookState.ESCALATION_REQUIRED
+
+    r.record_health(HealthObservation(status="Healthy"))
+    assert r.state == PlaybookState.ESCALATION_REQUIRED
+
+    r.record_recurrence_check(clear=True, evidence_refs=("recurrence:clear",))
+    assert r.state == PlaybookState.ESCALATION_REQUIRED
+
+    r.record_scan(
+        ScanObservation(
+            scan_type="Full scan",
+            status=ScanResultStatus.CLEAN,
+            unresolved_malicious_findings=0,
+            result_read=True,
+            post_scan_detection_check_clear=True,
+            evidence_refs=("scan:clean",),
+        )
+    )
+    assert r.state == PlaybookState.ESCALATION_REQUIRED
+    assert r.completion_ready is False
 
 
 def test_escalation_payload_contains_required_evidence_fields():

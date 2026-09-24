@@ -40,7 +40,7 @@ from .datto_edr_av_security import (
 PLAYBOOK_ID = "datto_edr_av"
 PLAYBOOK_ID = "datto_edr_av"
 PLAYBOOK_NAME = "Jason - Datto EDR/AV Diagnose & Repair"
-PLAYBOOK_VERSION = "1.2.0"
+PLAYBOOK_VERSION = "1.3.0"
 HEALTHY_STATUS = "Healthy"
 
 HEALTH_CHECK_COMPONENT = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -247,6 +247,11 @@ class PlaybookRun:
     def record_health(self, observation: HealthObservation) -> None:
         self.last_health = observation
         self.evidence_refs.extend(observation.evidence_refs)
+        # Security escalation is terminal for this playbook run. Later healthy
+        # product state is useful evidence, but it must never downgrade an
+        # already-established security escalation.
+        if self.state == PlaybookState.ESCALATION_REQUIRED:
+            return
         if observation.is_authoritatively_healthy:
             self.force_update_pending_reboot = False
             if self.security_resolution_required:
@@ -301,6 +306,11 @@ class PlaybookRun:
     ) -> None:
         self.evidence_refs.extend(evidence_refs)
         self.recurrence_verified = bool(clear)
+        # Preserve an established security escalation. Recurrence evidence may
+        # refine the incident record, but cannot return the run to investigation
+        # or ordinary verification after escalation.
+        if self.state == PlaybookState.ESCALATION_REQUIRED:
+            return
         if not clear:
             self.state = PlaybookState.THREAT_INVESTIGATION
             return
@@ -314,6 +324,10 @@ class PlaybookRun:
     def record_scan(self, scan: ScanObservation) -> SecurityAssessment | None:
         self.last_scan = scan
         self.evidence_refs.extend(scan.evidence_refs)
+        # A later clean scan is valuable containment evidence, but it cannot
+        # erase an already-established security escalation.
+        if self.state == PlaybookState.ESCALATION_REQUIRED:
+            return self.last_security
         if self.last_threats:
             return self.record_security_evidence(self.last_threats, scan=scan)
         if self.security_resolution_required:

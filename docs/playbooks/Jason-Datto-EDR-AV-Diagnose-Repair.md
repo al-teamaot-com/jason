@@ -1,8 +1,8 @@
 # Jason Playbook: Datto EDR/AV Diagnose & Repair
 
-Version: 1.2.0
+Version: 1.3.0
 Playbook ID: `datto_edr_av`
-Status: v1.2 governed read backend and playbook observability are deployed and production-accepted through Jason. All six `endpoint.security.*` reads are live and proven against AOT-50282; Prometheus and Grafana expose the pilot state and acceptance telemetry. The playbook remains in supervised pilot/read-ready state; full threat-branch activation remains fail-closed pending governed provider-native scan execution and a complete remediation/scan/recurrence acceptance run.
+Status: v1.3 production-enabled under normal Jason governance. Governed endpoint-security reads and Datto AV scan execution are production-proven. The controlled AOT-50282 / T20260918.0005 threat acceptance proved completed Full and Quick scan evidence, post-scan detection review, recurrence handling, duplicate-scan suppression, ticket documentation, and terminal escalation when provider evidence remains `compromised=true` or a recurring source remains unresolved. Security escalation is terminal/sticky and cannot be downgraded by later healthy product state.
 
 ## 1. Section Goal
 
@@ -101,7 +101,7 @@ Persisted playbook states include:
 - `awaiting_security_verification`
 - `threat_investigation`, `threat_contained`
 - `false_positive_review`
-- `healthy`, `escalation_required`
+- `healthy`, `escalation_required` (terminal/sticky)
 
 Security disposition is separately persisted:
 - `not_applicable`
@@ -231,7 +231,7 @@ For waits/reboots:
 - threat recurrence window must be explicit by severity/policy;
 - prevent duplicate scheduled jobs.
 
-Threat runs re-read the originating detection after remediation and at the configured recurrence boundary.
+Threat runs re-read the originating detection after remediation and at the configured recurrence boundary. Once `escalation_required` is established, later healthy stack evidence, a clean scan, or a clear recurrence check may enrich the incident record but must not downgrade the terminal escalation state.
 
 ## 12. Aging / Stale Condition
 
@@ -351,7 +351,7 @@ Controlled target pattern:
 
 Prove exact association, trigger classification, health check, API evidence, health/threat separation, no compromise inference from misconfiguration, no threat closure from `Status=Healthy` alone, bounded remediation, scan execution/read, threat reread/recurrence, ticket documentation, terminal disposition, telemetry event, Grafana metrics, and duplicate-job prevention.
 
-No live acceptance execution is authorized by this document alone.
+Controlled production acceptance completed on AOT-50282 / T20260918.0005. The originating high-severity Datto AV detection remained quarantined/remediated, Datto provider evidence continued to report `compromised=true`, and the exact SHA-256 showed repeated weekly detections. A Full scan completed on 2026-09-19, later Quick scans including 2026-09-24 completed, and the post-scan detection search showed no newer matching detection. The correct terminal outcome was `security_incident_escalation`, not ticket closure. No duplicate scan, restore, exclusion, isolation, reboot, or other disruptive action was performed as part of this acceptance.
 
 ## 22. Section Goal Closure
 
