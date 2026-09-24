@@ -164,6 +164,21 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "dnsfilter": {
+        "logical_name": "dnsfilter.readonly",
+        "secret_path": "secret/data/connectors/dnsfilter/production/read-only",
+        "fields": ("api_key",),
+        "policy_name": "jason-dnsfilter-read",
+        "role_name": "jason-dnsfilter-read",
+        "connector_identity": "dnsfilter-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

@@ -18,6 +18,9 @@ from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
+from connectors.dnsfilter.connector import DnsFilterConnector
+from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
+from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
 from connectors.backup_net.connector import (
     BACKUP_NET_FULL_ACCESS_SECRET,
@@ -123,6 +126,27 @@ from orchestrator.backup_capability_catalog import (
     BACKUP_ENDPOINT_BACKUP_SEARCH,
     BACKUP_NET_PROVIDER,
     register_backup_resource_foundation,
+)
+from orchestrator.dns_protection_capability_catalog import (
+    DNSFILTER_MCP_PROVIDER,
+    DNSFILTER_PROVIDER,
+    DNS_INVESTIGATION_ANOMALY_SEARCH,
+    DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+    DNS_INVESTIGATION_QUERY_EXPLAIN,
+    DNS_INVESTIGATION_QUERY_SEARCH,
+    DNS_PROTECTION_AGENT_COUNTS_READ,
+    DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
+    DNS_PROTECTION_AGENT_SEARCH,
+    DNS_PROTECTION_AGENT_STALE_SEARCH,
+    DNS_PROTECTION_AGENT_VERSION_REPORT,
+    DNS_PROTECTION_ORGANIZATION_READ,
+    DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
+    DNS_PROTECTION_POLICY_SEARCH,
+    DNS_PROTECTION_SITE_DRIFT_SEARCH,
+    DNS_PROTECTION_SITE_SEARCH,
+    DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
+    DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
+    register_dns_protection_foundation,
 )
 from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
@@ -296,6 +320,17 @@ class RuntimeSettings:
     )
     backup_net_full_access_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/backup-net-full-access/secret_id"
+    )
+    dnsfilter_enabled: bool = False
+    dnsfilter_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/dnsfilter/role_id"
+    )
+    dnsfilter_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/dnsfilter/secret_id"
+    )
+    dnsfilter_mcp_enabled: bool = False
+    dnsfilter_mcp_oauth_db: Path = Path(
+        "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
     )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -492,6 +527,30 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_BACKUP_NET_FULL_ACCESS_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/backup-net-full-access/secret_id",
+                )
+            ),
+            dnsfilter_enabled=os.getenv(
+                "JASON_DNSFILTER_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            dnsfilter_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_DNSFILTER_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/dnsfilter/role_id",
+                )
+            ),
+            dnsfilter_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_DNSFILTER_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/dnsfilter/secret_id",
+                )
+            ),
+            dnsfilter_mcp_enabled=os.getenv(
+                "JASON_DNSFILTER_MCP_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            dnsfilter_mcp_oauth_db=Path(
+                os.getenv(
+                    "JASON_DNSFILTER_MCP_OAUTH_DB",
+                    "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -798,6 +857,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
         enabled=settings.backup_net_enabled,
+    )
+    register_dns_protection_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+        enabled=settings.dnsfilter_enabled,
+        mcp_enabled=settings.dnsfilter_mcp_enabled,
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
@@ -1133,8 +1199,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         },
     )
 
-    backup_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
-    backup_boundaries = SQLiteClientBoundaryRepository(backup_boundary_store)
+    provider_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
+    provider_boundaries = SQLiteClientBoundaryRepository(provider_boundary_store)
     if settings.backup_net_access_profile == "full_access":
         backup_net_role_id_path = (
             settings.backup_net_full_access_openbao_role_id_path
@@ -1156,7 +1222,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         secrets=backup_net_openbao,
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
-        boundaries=backup_boundaries,
+        boundaries=provider_boundaries,
         logical_secret=backup_net_logical_secret,
     )
     backup_net_invoker = GovernedConnectorCapabilityInvoker(
@@ -1166,6 +1232,53 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (BACKUP_NET_PROVIDER, BACKUP_ENDPOINT_ASSET_READ): "backup_net.endpoint_asset.read",
             (BACKUP_NET_PROVIDER, BACKUP_ENDPOINT_BACKUP_SEARCH): "backup_net.backup.search",
             (BACKUP_NET_PROVIDER, BACKUP_BACKUPIQ_ALERT_SEARCH): "backup_net.backupiq_alert.search",
+        },
+    )
+
+    dnsfilter_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.dnsfilter_openbao_role_id_path,
+        secret_id_path=settings.dnsfilter_openbao_secret_id_path,
+    )
+    dnsfilter = DnsFilterConnector(
+        secrets=dnsfilter_openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        boundaries=provider_boundaries,
+    )
+    dnsfilter_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={DNSFILTER_PROVIDER: dnsfilter},
+        provider_capability_map={
+            (DNSFILTER_PROVIDER, DNS_PROTECTION_ORGANIZATION_READ): "dnsfilter.organization.read",
+            (DNSFILTER_PROVIDER, DNS_PROTECTION_SITE_SEARCH): "dnsfilter.network.search",
+            (DNSFILTER_PROVIDER, DNS_PROTECTION_POLICY_SEARCH): "dnsfilter.policy.search",
+            (DNSFILTER_PROVIDER, DNS_PROTECTION_AGENT_SEARCH): "dnsfilter.user_agent.search",
+            (DNSFILTER_PROVIDER, DNS_PROTECTION_AGENT_COUNTS_READ): "dnsfilter.user_agent.counts",
+        },
+    )
+
+    dnsfilter_mcp_oauth = DnsFilterMcpOAuthStore(
+        settings.dnsfilter_mcp_oauth_db
+    )
+    dnsfilter_mcp = DnsFilterMcpConnector(
+        oauth_store=dnsfilter_mcp_oauth,
+        audit=ConnectorEventAudit(orchestration_events),
+        boundaries=provider_boundaries,
+    )
+    dnsfilter_mcp_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={DNSFILTER_MCP_PROVIDER: dnsfilter_mcp},
+        provider_capability_map={
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_QUERY_SEARCH): "dnsfilter_mcp.query_logs.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_QUERY_EXPLAIN): "dnsfilter_mcp.query_decision.explain",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH): "dnsfilter_mcp.blocked_traffic.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_ANOMALY_SEARCH): "dnsfilter_mcp.traffic_anomalies.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_STALE_SEARCH): "dnsfilter_mcp.stale_agents.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_VERSION_REPORT): "dnsfilter_mcp.agent_version.report",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_DUPLICATE_SEARCH): "dnsfilter_mcp.duplicate_agents.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_SITE_DRIFT_SEARCH): "dnsfilter_mcp.site_policy_drift.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_POLICY_CATEGORY_SEARCH): "dnsfilter_mcp.policy_category.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH): "dnsfilter_mcp.unblock_requests.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ): "dnsfilter_mcp.unblock_requests.count",
         },
     )
 
@@ -1254,6 +1367,22 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(BACKUP_ENDPOINT_ASSET_READ, backup_net_invoker)
     invokers.register(BACKUP_ENDPOINT_BACKUP_SEARCH, backup_net_invoker)
     invokers.register(BACKUP_BACKUPIQ_ALERT_SEARCH, backup_net_invoker)
+    invokers.register(DNS_PROTECTION_ORGANIZATION_READ, dnsfilter_invoker)
+    invokers.register(DNS_PROTECTION_SITE_SEARCH, dnsfilter_invoker)
+    invokers.register(DNS_PROTECTION_POLICY_SEARCH, dnsfilter_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_SEARCH, dnsfilter_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_COUNTS_READ, dnsfilter_invoker)
+    invokers.register(DNS_INVESTIGATION_QUERY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_QUERY_EXPLAIN, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_ANOMALY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_STALE_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_VERSION_REPORT, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_DUPLICATE_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_SITE_DRIFT_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_POLICY_CATEGORY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ, dnsfilter_mcp_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))

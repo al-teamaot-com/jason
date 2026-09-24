@@ -334,10 +334,62 @@ Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jas
 
 For the controlled acceptance case, Autotask company search independently resolved **Deborah Gittens Virtuol Designs LLC** to company ID **1627**. Ticket `T20260922.0063` itself currently reports `companyID=0`, so the ticket field must not be used as the Backup.net boundary source.
 
+## DNSFilter read-only API contract
+
+Logical secret: `dnsfilter.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/dnsfilter/production/read-only`
+
+Durable OpenBao field:
+
+- `api_key`
+
+Runtime identity:
+
+- policy: `jason-dnsfilter-read`
+- AppRole: `jason-dnsfilter-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+The connector fixes API access to `https://api.dnsfilter.com` and sends the provider-issued API key in the documented `Authorization` header. The API host is not credential-configurable.
+
+Live selection requires `JASON_DNSFILTER_ENABLED=true` plus a validated client-boundary record mapping the exact Autotask company ID to the DNSFilter organization ID under profile `dnsfilter-organization-read`. Organization/MSP identifiers are never accepted from the caller.
+
+This first foundation is read-only. It uses organization-scoped network, policy, and roaming-agent collection endpoints plus the exact server-derived organization read. Direct network/policy/agent-by-ID reads and every DNSFilter mutation remain unregistered until their request can preserve the same exact client boundary.
+
+Source review is complete. Production REST activation remains gated on the dedicated provider API key, OpenBao provisioning, exact client-boundary records, explicit read authority, and controlled provider-backed acceptance.
+
+## DNSFilter MCP OAuth session
+
+DNSFilter MCP does not reuse the REST API key. It uses the provider-supported per-user OAuth flow for `https://mcp.dnsfilter.com/mcp`.
+
+OAuth state/token database:
+
+`/var/lib/jason/openclaw/dnsfilter-mcp-oauth.sqlite3`
+
+The database is created mode `0600`. It is not an OpenBao provider secret because the OAuth client must rotate access/refresh tokens during the provider session. The file is stored only on Jason's existing protected durable runtime volume and is never projected through tools, logs, or normal status output.
+
+Start or renew the connection with:
+
+`python3 tools/dnsfilter_mcp_oauth.py start`
+
+Check status without printing tokens:
+
+`python3 tools/dnsfilter_mcp_oauth.py status`
+
+Verify the authenticated session:
+
+`python3 tools/dnsfilter_mcp_oauth.py verify`
+
+DNSFilter requires periodic user re-authentication. If refresh/re-authentication fails, the MCP provider must fail closed; there is no service-account fallback.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
-- Never create a persistent shared provider runtime token.
+- Never create a persistent unmanaged/shared static provider runtime token. Provider-required rotating OAuth tokens may persist only in an explicitly governed provider-specific token store with restrictive filesystem permissions.
 - Never use the historical contract-test token as a provider identity.
 - Never give a provider runtime policy write access to provider KV data.
 - Never expose another provider credential's secret path through the same AppRole policy.

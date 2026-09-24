@@ -38,6 +38,12 @@ from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
+from connectors.dnsfilter.mcp_oauth import (
+    DNSFILTER_MCP_OAUTH_DB_DEFAULT,
+    DnsFilterMcpOAuthError,
+    DnsFilterMcpOAuthStore,
+    complete_dnsfilter_oauth,
+)
 from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
     ThreatCorrelationError,
@@ -97,6 +103,13 @@ JASON_OAUTH_REQUEST_SCOPE = os.environ.get(
     "JASON_MCP_OAUTH_REQUEST_SCOPE",
     JASON_RESOURCE_URL.rstrip("/") + "/" + JASON_REQUIRED_SCOPE,
 ).strip()
+
+JASON_DNSFILTER_MCP_OAUTH_DB = Path(
+    os.environ.get(
+        "JASON_DNSFILTER_MCP_OAUTH_DB",
+        str(DNSFILTER_MCP_OAUTH_DB_DEFAULT),
+    )
+)
 
 JASON_AUTOENROLL_DOMAINS = frozenset(
     item.strip().casefold()
@@ -4797,6 +4810,59 @@ transport_security = TransportSecuritySettings(
 )
 
 
+async def dnsfilter_oauth_callback(request: StarletteRequest):
+    """Complete DNSFilter OAuth authorization-code + PKCE callback."""
+
+    error = str(request.query_params.get("error") or "").strip()
+    if error:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "DNSFilter authorization was not completed.",
+            },
+            status_code=400,
+        )
+    code = str(request.query_params.get("code") or "").strip()
+    state = str(request.query_params.get("state") or "").strip()
+    iss = str(request.query_params.get("iss") or "").strip() or None
+    if not code or not state:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "DNSFilter OAuth callback is missing required parameters.",
+            },
+            status_code=400,
+        )
+    try:
+        status = await asyncio.to_thread(
+            complete_dnsfilter_oauth,
+            DnsFilterMcpOAuthStore(JASON_DNSFILTER_MCP_OAUTH_DB),
+            code=code,
+            state=state,
+            iss=iss,
+        )
+    except DnsFilterMcpOAuthError:
+        logger.exception("DNSFilter OAuth callback failed without token disclosure")
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": (
+                    "DNSFilter authorization could not be completed. "
+                    "Restart the governed connection flow."
+                ),
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        {
+            "status": "connected",
+            "provider": "dnsfilter_mcp",
+            "connected": status.connected,
+            "reauthentication": "DNSFilter requires periodic user re-authentication.",
+        }
+    )
+
+
 class JasonMcpOuterTransportGuard:
     """Enforce MCP Host/Origin policy before authentication.
 
@@ -4878,6 +4944,12 @@ app.add_route(
 app.add_route(
     "/oauth/entra-openid-configuration",
     entra_oidc_configuration,
+    methods=["GET"],
+)
+
+app.add_route(
+    "/oauth/dnsfilter/callback",
+    dnsfilter_oauth_callback,
     methods=["GET"],
 )
 
