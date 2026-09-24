@@ -305,18 +305,19 @@ def register_dnsfilter_mcp_mutation_runtime_foundation(
     profile = os.getenv(
         DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
     ).strip().casefold()
-    if not profile:
+    execution_enabled = dnsfilter_mcp_mutation_execution_enabled()
+    if not execution_enabled:
         return DnsFilterMcpMutationActivationState(
-            profile="",
+            profile=profile,
             enabled=False,
             provider_ids=(),
             capability_names=(),
         )
-    capability_names = _mutation_capabilities_for_profile(profile)
-    if not dnsfilter_mcp_mutation_execution_enabled():
+    if not profile:
         raise DnsFilterMcpMutationActivationError(
-            "DNSFilter MCP mutation profile requires mutation execution gate"
+            "DNSFilter MCP mutation execution gate requires an activation profile"
         )
+    capability_names = _mutation_capabilities_for_profile(profile)
 
     for capability_name in capability_names:
         capabilities.set_lifecycle(
@@ -589,7 +590,7 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             action_method="MCP_TOOL_CALL",
             resource_type=resource_type,
             resource_identifier=resource_identifier,
-            normalized_path=f"mcp://dnsfilter/tools/{tool_name}",
+            normalized_path=f"/tools/{tool_name}",
             payload=dict(provider_arguments),
             parameters={},
             symbolic_resolutions={
@@ -626,7 +627,7 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             raise PermissionError("DNSFilter provider capability binding changed.")
         if prepared_execution.action_method != "MCP_TOOL_CALL":
             raise PermissionError("DNSFilter mutation method binding changed.")
-        if prepared_execution.normalized_path != f"mcp://dnsfilter/tools/{opaque.tool_name}":
+        if prepared_execution.normalized_path != f"/tools/{opaque.tool_name}":
             raise PermissionError("DNSFilter mutation tool binding changed.")
         if prepared_execution.resource_type != opaque.resource_type:
             raise PermissionError("DNSFilter mutation resource type changed.")
@@ -655,27 +656,57 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                 opaque.tool_name, opaque.provider_arguments
             )
         except ConnectorTransportError as exc:
-            readback_matched = False
-            try:
-                self._verify(
-                    client,
-                    opaque.tool_name,
-                    opaque.provider_arguments,
-                    opaque.organization_id,
-                    {},
-                    network_scope_ids=opaque.network_scope_ids,
-                    client_scoped=opaque.client_scoped,
-                )
-                readback_matched = True
-            except Exception:
-                pass
+            if (
+                opaque.tool_name == "create_policy"
+                and opaque.preflight.get("policy_name_unique_before_write") is True
+            ):
+                try:
+                    verification = self._verify(
+                        client,
+                        opaque.tool_name,
+                        opaque.provider_arguments,
+                        opaque.organization_id,
+                        {},
+                        network_scope_ids=opaque.network_scope_ids,
+                        client_scoped=opaque.client_scoped,
+                    )
+                except Exception:
+                    verification = None
+                if verification is not None:
+                    recovered = {
+                        **dict(verification),
+                        "providerErrorRecoveredByReadback": True,
+                    }
+                    self._audit.record(
+                        "connector.mutation.recovered_by_readback",
+                        opaque.request.context,
+                        {
+                            "provider": self.provider_name,
+                            "tool": opaque.tool_name,
+                            "company_id": opaque.company_id,
+                            "organization_id": opaque.organization_id,
+                        },
+                    )
+                    return ConnectorResult(
+                        capability=opaque.request.context.capability,
+                        provider=self.provider_name,
+                        data={
+                            "providerOutcome": "error_recovered_by_readback",
+                            "jasonVerification": recovered,
+                        },
+                        evidence_ids=(
+                            f"dnsfilter:organization:{opaque.organization_id}",
+                            f"dnsfilter:tool:{opaque.tool_name}",
+                        ),
+                    )
+
             self._audit.record(
                 "connector.mutation.unknown_outcome",
                 opaque.request.context,
                 {
                     "provider": self.provider_name,
                     "tool": opaque.tool_name,
-                    "readback_matched": readback_matched,
+                    "readback_matched": False,
                 },
             )
             raise DnsFilterMutationUnknownOutcomeError(
@@ -865,6 +896,21 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             self._require_scope(payload, organization_id, "network")
         if network_ids:
             resolved["network_ids"] = [str(item) for item in network_ids]
+
+        if tool == "create_policy":
+            requested_name = str(args["name"])
+            exact_matches = [
+                policy
+                for policy in self._policy_pages(client, organization_id)
+                if str(
+                    (policy.get("attributes") or {}).get("name") or ""
+                ) == requested_name
+            ]
+            if exact_matches:
+                raise ConnectorConfigurationError(
+                    "DNSFilter policy with the exact requested name already exists."
+                )
+            resolved["policy_name_unique_before_write"] = True
 
         if "block_page_id" in args:
             payload = client.call_tool(
@@ -1138,18 +1184,36 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                     "get_policy",
                     {"policy_id": policy_id, "include_relationships": True},
                 )
-            else:
-                name = args.get("name") or args.get("new_name")
-                if not name:
-                    raise DnsFilterMutationVerificationError(
-                        "DNSFilter created policy could not be resolved for readback."
-                    )
-                payload = client.call_tool(
-                    "find_policy",
-                    {"organization_id": organization_id, "name": name},
+                self._require_scope(payload, organization_id, "policy")
+                return {
+                    "readbackVerified": True,
+                    "tool": "get_policy",
+                    "policy_id": str(policy_id),
+                }
+
+            name = args.get("name") or args.get("new_name")
+            if not name:
+                raise DnsFilterMutationVerificationError(
+                    "DNSFilter created policy could not be resolved for readback."
                 )
+            exact_matches = [
+                policy
+                for policy in self._policy_pages(client, organization_id)
+                if str(
+                    (policy.get("attributes") or {}).get("name") or ""
+                ) == str(name)
+            ]
+            if len(exact_matches) != 1:
+                raise DnsFilterMutationVerificationError(
+                    "DNSFilter created policy readback did not resolve exactly one approved name."
+                )
+            payload = exact_matches[0]
             self._require_scope(payload, organization_id, "policy")
-            return {"readbackVerified": True, "tool": "get_policy/find_policy"}
+            return {
+                "readbackVerified": True,
+                "tool": "list_policies",
+                "policy_id": str(payload.get("id") or ""),
+            }
 
         if tool == "update_policy":
             payload = client.call_tool(
