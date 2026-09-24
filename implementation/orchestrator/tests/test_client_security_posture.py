@@ -38,3 +38,22 @@ def test_mapped_provider_does_not_claim_control_good_without_observation():
  assert by["ENDPOINT-AV"].state is PostureState.UNKNOWN
  assert by["DOCUMENTATION"].state is PostureState.UNKNOWN
  assert by["BACKUP-SUCCESS"].state is PostureState.EVIDENCE_UNAVAILABLE
+
+
+def test_dnsfilter_control_requires_dnsfilter_mapping_and_api_availability():
+ b=ClientEvidenceBinding(
+  "333",
+  "Atomic Plumbing & Drain Cleaning",
+  drmm_site_uid="site-1",
+  dnsfilter_organization_id="9001",
+ )
+ unavailable=set(unavailable_controls_for_binding(b,dnsfilter_api_available=True))
+ assert "DNS-PROTECTION" not in unavailable
+ unavailable=set(unavailable_controls_for_binding(b,dnsfilter_api_available=False))
+ assert "DNS-PROTECTION" in unavailable
+
+
+def test_drmm_mapping_does_not_substitute_for_dnsfilter_authority():
+ b=ClientEvidenceBinding("333","Atomic Plumbing & Drain Cleaning",drmm_site_uid="site-1")
+ unavailable=set(unavailable_controls_for_binding(b))
+ assert "DNS-PROTECTION" in unavailable

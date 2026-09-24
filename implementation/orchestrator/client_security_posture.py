@@ -87,20 +87,23 @@ class ClientEvidenceBinding:
     autotask_company_name: str
     drmm_site_uid: str | None = None
     it_glue_organization_id: str | None = None
+    dnsfilter_organization_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.autotask_company_id.strip() or not self.autotask_company_name.strip():
             raise ValueError("an exact Autotask company id and name are required")
 
 
-def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint_backup_api_available: bool=False, microsoft_security_reads_available: bool=False) -> tuple[str,...]:
+def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint_backup_api_available: bool=False, microsoft_security_reads_available: bool=False, dnsfilter_api_available: bool=False) -> tuple[str,...]:
     unavailable={"BACKUP-SUCCESS"}
     if not endpoint_backup_api_available:
         unavailable.add("BACKUP-COVERAGE")
     if not microsoft_security_reads_available:
         unavailable.update({"IDENTITY-MFA","IDENTITY-CA"})
     if binding.drmm_site_uid is None:
-        unavailable.update({"ENDPOINT-ENCRYPTION","ENDPOINT-AV","ENDPOINT-EDR","ENDPOINT-OS","ENDPOINT-MONITORING","VULNERABILITY","DNS-PROTECTION"})
+        unavailable.update({"ENDPOINT-ENCRYPTION","ENDPOINT-AV","ENDPOINT-EDR","ENDPOINT-OS","ENDPOINT-MONITORING","VULNERABILITY"})
+    if not dnsfilter_api_available or binding.dnsfilter_organization_id is None:
+        unavailable.add("DNS-PROTECTION")
     if binding.it_glue_organization_id is None:
         unavailable.add("DOCUMENTATION")
     return tuple(sorted(unavailable))

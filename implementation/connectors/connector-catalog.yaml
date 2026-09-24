@@ -209,6 +209,35 @@ connectors:
       - Provider customer_id is derived only from a validated Jason boundary and may not be supplied by callers.
       - Every returned asset, backup, or alert must prove the same customer UUID or the read fails closed.
       - No Backup.net write or remediation capability is registered.
+  dnsfilter:
+    status: foundation_built_credentials_pending
+    priority: 11
+    mode: read_only
+    secret: dnsfilter.readonly
+    api_host: https://api.dnsfilter.com
+    capabilities:
+      - dnsfilter.organization.read
+      - dnsfilter.network.search
+      - dnsfilter.policy.search
+      - dnsfilter.user_agent.search
+      - dnsfilter.user_agent.counts
+    canonical_mappings:
+      dns.protection.organization.read: dnsfilter.organization.read
+      dns.protection.site.search: dnsfilter.network.search
+      dns.protection.policy.search: dnsfilter.policy.search
+      dns.protection.agent.search: dnsfilter.user_agent.search
+      dns.protection.agent.counts.read: dnsfilter.user_agent.counts
+    live_enablement_gate:
+      - dnsfilter_api_key
+      - openbao_secret_provisioning
+      - validated_autotask_company_to_dnsfilter_organization_boundary
+      - controlled_read_only_acceptance
+    notes:
+      - Caller-supplied DNSFilter organization and MSP identifiers are rejected; organization scope is derived from the validated client boundary.
+      - Network and policy reads must prove the mapped organization relationship where the provider response exposes it.
+      - Roaming-agent reads are organization-filtered collections; direct agent-by-ID reads remain unregistered until response scope can be independently proven.
+      - No DNSFilter mutation capability is registered.
+
   teams_approvals:
     status: planned
     priority: 10

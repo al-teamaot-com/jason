@@ -154,6 +154,24 @@ def test_backup_net_full_access_contract_is_isolated_from_readonly_identity() ->
     assert spec["credential_file_mode"] == 0o640
 
 
+def test_dnsfilter_contract_uses_canonical_readonly_path_and_fields() -> None:
+    spec = PROVIDERS["dnsfilter"]
+    assert spec["logical_name"] == "dnsfilter.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/dnsfilter/production/read-only"
+    )
+    assert spec["fields"] == ("api_key",)
+    assert spec["policy_name"] == "jason-dnsfilter-read"
+    assert spec["role_name"] == "jason-dnsfilter-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)

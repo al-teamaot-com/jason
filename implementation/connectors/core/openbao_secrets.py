@@ -87,6 +87,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "backup_net.fullaccess": (
         "secret/data/connectors/backup-net/production/full-access"
     ),
+    "dnsfilter.readonly": (
+        "secret/data/connectors/dnsfilter/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -127,6 +130,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     ),
     "backup_net.readonly": frozenset({"client_id", "client_secret"}),
     "backup_net.fullaccess": frozenset({"client_id", "client_secret"}),
+    "dnsfilter.readonly": frozenset({"api_key"}),
 }
 
 

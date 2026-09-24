@@ -15,6 +15,13 @@ from orchestrator.backup_capability_catalog import (
     BACKUP_ENDPOINT_ASSET_SEARCH,
     BACKUP_ENDPOINT_BACKUP_SEARCH,
 )
+from orchestrator.dns_protection_capability_catalog import (
+    DNS_PROTECTION_AGENT_COUNTS_READ,
+    DNS_PROTECTION_AGENT_SEARCH,
+    DNS_PROTECTION_ORGANIZATION_READ,
+    DNS_PROTECTION_POLICY_SEARCH,
+    DNS_PROTECTION_SITE_SEARCH,
+)
 from orchestrator.conversation_action_intent import GovernedActionConversationIntentResolver
 from orchestrator.conversation_resource_intent import (
     GovernedResourceConversationIntentResolver,
@@ -110,6 +117,45 @@ def test_backup_capabilities_are_composed_but_provider_stays_gated_by_default(tm
         assert capability.metadata["client_partition_enforced_by"] == (
             "validated_backup_net_customer_boundary"
         )
+
+
+def test_dnsfilter_capabilities_are_composed_but_stay_pilot_and_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr("jason_runtime.datto_component_execution.configured_pilot", lambda: None)
+    application = build_runtime_application(_settings(tmp_path))
+    expected = {
+        DNS_PROTECTION_ORGANIZATION_READ,
+        DNS_PROTECTION_SITE_SEARCH,
+        DNS_PROTECTION_POLICY_SEARCH,
+        DNS_PROTECTION_AGENT_SEARCH,
+        DNS_PROTECTION_AGENT_COUNTS_READ,
+    }
+    for capability_name in expected:
+        capability = application.capabilities.get_current(
+            capability_name=capability_name,
+            allow_pilot=True,
+        )
+        assert capability is not None
+        assert capability.lifecycle_status.value == "pilot"
+        assert capability.metadata["read_only"] == "true"
+        assert capability.metadata["client_partition_enforced_by"] == (
+            "validated_dnsfilter_organization_boundary"
+        )
+
+
+def test_dnsfilter_runtime_enablement_is_explicit(tmp_path, monkeypatch):
+    monkeypatch.setattr("jason_runtime.datto_component_execution.configured_pilot", lambda: None)
+    settings = replace(
+        _settings(tmp_path),
+        dnsfilter_enabled=True,
+        dnsfilter_openbao_role_id_path=tmp_path / "dnsfilter-role",
+        dnsfilter_openbao_secret_id_path=tmp_path / "dnsfilter-secret",
+    )
+    settings.validate()
+    application = build_runtime_application(settings)
+    assert application.capabilities.get_current(
+        capability_name=DNS_PROTECTION_AGENT_SEARCH,
+        allow_pilot=True,
+    ) is not None
 
 
 def test_production_conversation_planning_is_resource_first_and_metadata_driven(tmp_path):
