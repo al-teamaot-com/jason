@@ -2338,6 +2338,115 @@ def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
         "jason_blocker_fingerprint": blocker_fingerprint,
     }
 
+def _authoritative_ticket_id_for_update(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED")
+    try:
+        requested = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED") from error
+    if requested < 1:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED")
+
+    result = _governed_read(
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": requested},
+    )
+    if result.get("status") != "succeeded":
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_READ_FAILED")
+    evidence = result.get("evidence")
+    data = evidence.get("data") if isinstance(evidence, Mapping) else None
+    items = data.get("items") if isinstance(data, Mapping) else None
+    if not isinstance(items, list) or len(items) != 1:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_IDENTITY_NOT_UNIQUE")
+    record = items[0]
+    if not isinstance(record, Mapping):
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_READ_FAILED")
+    try:
+        observed = int(record.get("id"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_READ_FAILED") from error
+    if observed < 1 or observed != requested:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_IDENTITY_MISMATCH")
+    return observed
+
+
+def _direct_ticket_update_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
+    mutable_fields = {
+        "status",
+        "priority",
+        "queueID",
+        "assignedResourceID",
+        "dueDateTime",
+        "configurationItemID",
+        "billingCodeID",
+        "issueType",
+        "subIssueType",
+        "ticketType",
+    }
+    selectors = {"ticket_id", "ticketID", "id"}
+
+    payload_raw = raw.get("payload")
+    if payload_raw is not None:
+        if not isinstance(payload_raw, Mapping):
+            raise ValueError("AUTOTASK_TICKET_UPDATE_STRUCTURED_PAYLOAD_REQUIRED")
+        unknown_top = set(raw) - {"payload", "ticket_id", "ticketID", "id"}
+        if unknown_top:
+            raise ValueError(
+                "AUTOTASK_TICKET_UPDATE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown_top))
+            )
+        payload_input = dict(payload_raw)
+        unknown_payload = set(payload_input) - mutable_fields - selectors
+        if unknown_payload:
+            raise ValueError(
+                "AUTOTASK_TICKET_UPDATE_FIELD_NOT_ALLOWED:"
+                + ",".join(sorted(unknown_payload))
+            )
+    else:
+        unknown = set(raw) - mutable_fields - selectors
+        if unknown:
+            raise ValueError(
+                "AUTOTASK_TICKET_UPDATE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        payload_input = {
+            key: value
+            for key, value in raw.items()
+            if key in mutable_fields
+        }
+
+    identity_values = []
+    for container in (raw, payload_input):
+        for key in ("ticket_id", "ticketID", "id"):
+            if key in container and container[key] is not None:
+                value = container[key]
+                if isinstance(value, bool):
+                    raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED")
+                try:
+                    identity_values.append(int(value))
+                except (TypeError, ValueError) as error:
+                    raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED") from error
+
+    if not identity_values:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED")
+    if any(value < 1 for value in identity_values):
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_ID_REQUIRED")
+    if len(set(identity_values)) != 1:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_TICKET_IDENTITY_AMBIGUOUS")
+
+    ticket_id = _authoritative_ticket_id_for_update(identity_values[0])
+    payload = {
+        key: value
+        for key, value in payload_input.items()
+        if key in mutable_fields
+    }
+    if not payload:
+        raise ValueError("AUTOTASK_TICKET_UPDATE_MUTABLE_FIELD_REQUIRED")
+
+    return {"payload": {"id": ticket_id, **payload}}
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -2397,7 +2506,7 @@ def _canonicalize_governed_action_arguments(
             return _ticket_work_start_arguments(raw)
         if raw.get("return_work") is True:
             return _ticket_work_handoff_arguments(raw)
-        return raw
+        return _direct_ticket_update_arguments(raw)
 
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
         if "payload" in raw:

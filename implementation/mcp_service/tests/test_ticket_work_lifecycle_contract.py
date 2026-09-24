@@ -406,3 +406,90 @@ def test_internal_company_zero_allows_existing_configuration(monkeypatch):
     )
     assert result["id"] == 1001
     assert result["companyID"] == 0
+
+
+def test_direct_ticket_update_canonicalizes_numeric_ticket_id(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(_ticket(ticket_id=123)),
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 123, "status": "Complete"},
+    )
+    assert result == {"payload": {"id": 123, "status": "Complete"}}
+
+
+def test_direct_ticket_update_accepts_ticket_id_alias(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(_ticket(ticket_id=456)),
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticketID": "456", "priority": 2},
+    )
+    assert result == {"payload": {"id": 456, "priority": 2}}
+
+
+def test_direct_ticket_update_preserves_only_requested_mutable_fields(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(_ticket(ticket_id=789)),
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {"ticket_id": 789, "queueID": "Jason"},
+    )
+    assert result == {"payload": {"id": 789, "queueID": "Jason"}}
+
+
+@pytest.mark.parametrize("ticket_id", [None, 0, -1, "not-a-ticket", True])
+def test_direct_ticket_update_rejects_invalid_ticket_id(monkeypatch, ticket_id):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: pytest.fail("invalid identity must fail before read"),
+    )
+    with pytest.raises(ValueError, match="TICKET_ID_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {"ticket_id": ticket_id, "status": "Complete"},
+        )
+
+
+def test_direct_ticket_update_rejects_missing_ticket_id():
+    with pytest.raises(ValueError, match="TICKET_ID_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {"status": "Complete"},
+        )
+
+
+def test_direct_ticket_update_rejects_ambiguous_ticket_identity(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: pytest.fail("ambiguous identity must fail before read"),
+    )
+    with pytest.raises(ValueError, match="IDENTITY_AMBIGUOUS"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {"ticket_id": 123, "ticketID": 456, "status": "Complete"},
+        )
+
+
+def test_direct_ticket_update_rejects_non_authoritative_readback(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(_ticket(ticket_id=124)),
+    )
+    with pytest.raises(ValueError, match="IDENTITY_MISMATCH"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {"ticket_id": 123, "status": "Complete"},
+        )

@@ -696,6 +696,11 @@ def test_datto_action_requires_component_identity(monkeypatch):
 
 def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch):
     calls = []
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: None),
+    )
 
     def governed_read(*, capability_name, arguments):
         calls.append((capability_name, dict(arguments)))
@@ -912,15 +917,20 @@ def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
     assert result["payload"]["subIssueType"] == "Workstation"
 
 
-def test_non_datto_action_arguments_are_unchanged():
-    original = {"payload": {"ticketID": 123}}
+def test_direct_ticket_update_existing_payload_is_canonicalized(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read({"id": 123}),
+    )
+    original = {"payload": {"ticketID": 123, "status": "Complete"}}
 
     result = server._canonicalize_governed_action_arguments(
         "service.ticket.update",
         original,
     )
 
-    assert result == original
+    assert result == {"payload": {"id": 123, "status": "Complete"}}
 
 
 def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
