@@ -125,6 +125,22 @@ jobs:
       - name: Test governed runtime composition
         run: python -m pytest implementation/runtime_service/tests -q
 
+  reflect-001:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install reflection test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile governed reflection foundation
+        run: python -m compileall -q implementation/reflection implementation/orchestrator
+      - name: Test governed reflection foundation
+        run: python -m pytest implementation/reflection/tests implementation/orchestrator/tests/test_service.py -q
+
   documentation:
     runs-on: ubuntu-latest
     steps:
