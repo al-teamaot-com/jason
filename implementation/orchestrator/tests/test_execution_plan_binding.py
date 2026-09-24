@@ -42,10 +42,10 @@ class PlanInvoker:
         spec = dict(self.plans[index])
         self.prepare_calls += 1
         plan = ExecutionPlan(
-            principal_id=request.principal_id,
-            organization_id=request.organization_id,
-            client_id=request.client_id,
-            canonical_capability=request.capability_name,
+            principal_id=spec.get("principal_id", request.principal_id),
+            organization_id=spec.get("organization_id", request.organization_id),
+            client_id=spec.get("client_id", request.client_id),
+            canonical_capability=spec.get("canonical_capability", request.capability_name),
             selected_provider_id=spec.get("provider", resolution.selected_provider_id),
             provider_capability=spec.get("provider_capability", "autotask.ticket.update"),
             action_method=spec.get("method", "PATCH"),
@@ -158,6 +158,22 @@ def test_same_intent_changed_symbolic_mapping_denied_zero_provider_writes(tmp_pa
 
 def test_same_intent_changed_provider_denied_zero_provider_writes(tmp_path):
     _assert_denied_zero_writes(tmp_path, {}, {"provider":"provider-2"})
+
+
+def test_same_intent_changed_principal_denied_zero_provider_writes(tmp_path):
+    _assert_denied_zero_writes(tmp_path, {}, {"principal_id": "person-other"})
+
+
+def test_same_intent_changed_organization_denied_zero_provider_writes(tmp_path):
+    _assert_denied_zero_writes(tmp_path, {}, {"organization_id": "other-org"})
+
+
+def test_same_intent_changed_client_denied_zero_provider_writes(tmp_path):
+    _assert_denied_zero_writes(tmp_path, {}, {"client_id": "client-other"})
+
+
+def test_same_intent_changed_capability_denied_zero_provider_writes(tmp_path):
+    _assert_denied_zero_writes(tmp_path, {}, {"canonical_capability": "service.ticket.note.create"})
 
 
 def test_same_intent_changed_target_resource_denied_zero_provider_writes(tmp_path):
