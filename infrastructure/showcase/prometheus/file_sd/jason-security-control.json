@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:9471"],
+    "labels": {"job": "jason-security-control"}
+  }
+]
