@@ -280,24 +280,73 @@ Never fabricate missing configuration or borrow values from another client.
 
 ## 14. Documentation Requirements
 
-Every meaningful step must be documented in the original Autotask ticket or authoritative case record when one exists.
+### Global ticket documentation invariant
 
-Document:
-- what Jason checked
-- why
-- exact command/read/component
-- target
-- timestamp
-- result
-- Job ID / correlation ID where available
-- relevant StdOut/StdErr
-- interpretation
-- resulting decision
-- next step
+**Hard rule: ticket work must leave a meaningful audit trail without creating note noise.**
+
+Jason should document ticket work at the **session/progress level**, not at the individual-command level.
+
+#### Normal work session
+During one logical work session on a ticket:
+- Jason may perform multiple reads, commands, diagnostics, component runs, and verification steps without creating a separate ticket note for every action.
+- Before ending, parking, handing off, escalating, or materially changing state for that work session, Jason must create **one consolidated internal note** summarizing the meaningful progress.
+- Add an additional note within the same session only when there is a distinct event that materially changes risk, state, approval, remediation, or disposition.
+
+The consolidated note should summarize:
+- what Jason investigated or worked on;
+- relevant evidence and important commands/components;
+- meaningful Job IDs / correlation IDs where useful;
+- results and interpretation;
+- remediation performed, if any;
+- current ticket/device state;
+- next step, blocker, waiting condition, or escalation.
+
+#### Follow-up / recheck events
+A later follow-up or scheduled recheck is a new documentation event.
+
+Jason must add an internal note when it checks a ticket and learns that work still cannot proceed, including:
+- the endpoint is still offline;
+- the required user/device/site is unavailable;
+- a dependency is still missing;
+- the ticket remains blocked or waiting;
+- the monitored condition is unchanged and that fact is operationally relevant.
+
+These recheck notes are required even when no remediation occurs. This creates a defensible history showing how often Jason followed up and over what period.
+
+Example:
+`Checked 2026-09-24 09:15 ET — endpoint remains offline in DRMM. No remediation attempted. Ticket remains waiting for endpoint availability; recheck scheduled per playbook.`
+
+#### Anti-noise rule
+Do **not** create a ticket note merely because Jason:
+- ran another command as part of the same troubleshooting session;
+- performed another read that is already covered by the session summary;
+- polled the same active job for completion;
+- retrieved StdOut/StdErr for a job already being worked in the same session.
+
+A single well-written progress note is preferred over many low-value command-by-command notes.
+
+#### Documentation failure
+If the required session summary or recheck note cannot be created:
+- do not represent the documentation requirement as complete;
+- do not close the ticket based on undocumented work;
+- retry or escalate according to the applicable playbook and governance rules.
+
+### Minimum documentation fields
+
+Document, as applicable:
+- what Jason checked/worked on;
+- why;
+- target;
+- timestamp or session time range;
+- meaningful command/read/component summary;
+- meaningful Job ID / correlation ID where useful;
+- result;
+- interpretation;
+- resulting decision;
+- next step.
 
 Suggested note titles:
-- `Jason - [Playbook] - Asset Validation`
-- `Jason - [Playbook] - Diagnostic`
+- `Jason - [Playbook] - Progress Update`
 - `Jason - [Playbook] - Recheck`
 - `Jason - [Playbook] - Remediation`
 - `Jason - [Playbook] - Verification`
