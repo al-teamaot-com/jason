@@ -9,11 +9,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from jason_runtime.dnsfilter_mcp_mutation import (
+    DNSFILTER_MCP_MUTATION_ENABLED_ENV,
+    DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+    DNSFILTER_MCP_MUTATION_PROVIDER,
+)
 from orchestrator.backup_capability_catalog import (
     BACKUP_BACKUPIQ_ALERT_SEARCH,
     BACKUP_ENDPOINT_ASSET_READ,
     BACKUP_ENDPOINT_ASSET_SEARCH,
     BACKUP_ENDPOINT_BACKUP_SEARCH,
+)
+from orchestrator.dnsfilter_mcp_mutation_capability_catalog import (
+    DNSFILTER_MCP_MUTATION_TOOLS,
 )
 from orchestrator.dns_protection_capability_catalog import (
     DNS_INVESTIGATION_ANOMALY_SEARCH,
@@ -361,3 +369,38 @@ def test_backup_net_unknown_access_profile_fails_closed(tmp_path):
         assert "JASON_BACKUP_NET_ACCESS_PROFILE" in str(error)
     else:
         raise AssertionError("unknown Backup.net access profile must fail closed")
+
+def test_dnsfilter_mutation_surface_is_dormant_in_default_composition(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_PROFILE_ENV, raising=False)
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, raising=False)
+    monkeypatch.setattr(
+        "jason_runtime.datto_component_execution.configured_pilot",
+        lambda: None,
+    )
+    application = build_runtime_application(_settings(tmp_path))
+
+    for capability_name in DNSFILTER_MCP_MUTATION_TOOLS:
+        definition = application.capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        assert definition.lifecycle_status.value == "building"
+
+    provider = (
+        application.governed_orchestrator
+        ._resolution
+        ._providers
+        .get(DNSFILTER_MCP_MUTATION_PROVIDER)
+    )
+    assert provider.lifecycle_status.value == "planned"
+    assert provider.health_status.value == "unknown"
+    assert provider.approval_status.value == "blocked"
+
+    registered = set(
+        application.governed_orchestrator
+        ._invoker
+        .registered_capabilities()
+    )
+    assert set(DNSFILTER_MCP_MUTATION_TOOLS).isdisjoint(registered)

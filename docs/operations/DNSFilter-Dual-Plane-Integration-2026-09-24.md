@@ -209,6 +209,6 @@ The read-only integration is accepted and live.
 - sixteen `observe` grants exist for the authenticated AOT owner identity; there are no DNSFilter execute/administer grants.
 - REST acceptance succeeded after adding `User-Agent: Mozilla/5.0 Project-Jason-DNSFilter-REST/1.0`; without it DNSFilter's Cloudflare edge returned Error 1010 / browser-signature blocked.
 - MCP OAuth verification succeeded and provider reads were accepted against organization `1110483`.
-- DNSFilter writes remain unregistered and unavailable.
+- DNSFilter writes remain unavailable. The deployable write foundation may register them only as dormant `BUILDING` definitions behind a `PLANNED / BLOCKED` mutation provider; no write invoker, authority grant, or active write provider exists unless the separate mutation gates are explicitly enabled.
 
-The next-stage local-only design is documented in `DNSFilter-Full-Read-Write-Design-2026-09-24.md`.
+The deployable dormant read/write design and its separate activation/acceptance gates are documented in `DNSFilter-Full-Read-Write-Design-2026-09-24.md`.

@@ -71,8 +71,9 @@ def dnsfilter_mcp_mutation_capabilities(
 ) -> tuple[CapabilityDefinition, ...]:
     """Return dormant provider-neutral definitions for DNSFilter MCP writes.
 
-    These definitions are source-only. They are deliberately not registered by
-    runtime composition and therefore cannot be discovered or executed. Each
+    Runtime composition registers these definitions as BUILDING together with
+    a PLANNED/BLOCKED mutation provider. They cannot resolve or execute unless
+    the dedicated mutation profile and execution gate are both enabled. Each
     provider tool independently requires confirm=true; Jason additionally
     requires explicit approval and exact target/boundary verification.
     """
@@ -111,8 +112,8 @@ def dnsfilter_mcp_mutation_capabilities(
                     required=True,
                     requirements=(
                         "authenticated DNSFilter OAuth user",
-                        "validated Autotask-company-to-DNSFilter-organization boundary",
-                        "resolved provider target",
+                        "validated Autotask-company-to-DNSFilter organization/network boundary",
+                        "resolved provider target and blast radius",
                         "bound execution plan",
                         "explicit Jason approval",
                         "provider confirm=true requirement",
@@ -121,7 +122,7 @@ def dnsfilter_mcp_mutation_capabilities(
                     ),
                     verification_requirements=(
                         "provider tool is the exact allowlisted DNSFilter MCP tool",
-                        "target belongs to the mapped organization",
+                        "target belongs to the mapped organization and authorized client network scope",
                         "normalized payload matches the approved execution plan",
                         "exactly one provider mutation invocation occurs",
                         "post-write state matches the approved target state",
@@ -167,8 +168,8 @@ def dnsfilter_mcp_mutation_capabilities(
                     "provider_neutral": "true",
                     "read_only": "false",
                     "write_capability": "true",
-                    "activation_state": "source_only_not_registered",
-                    "pilot_provider": "dnsfilter_mcp",
+                    "activation_state": "registered_dormant_not_activated",
+                    "pilot_provider": "dnsfilter_mcp_mutation",
                     "provider_tool": tool_name,
                     "provider_confirmation_required": "true",
                     "explicit_human_approval_required": "true",

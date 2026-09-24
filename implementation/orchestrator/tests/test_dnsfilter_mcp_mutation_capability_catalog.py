@@ -38,4 +38,4 @@ def test_all_public_confirm_gated_writes_have_dormant_capability_contracts():
         assert item.approval.required is True
         assert item.maximum_attempts == 1
         assert item.metadata["provider_confirmation_required"] == "true"
-        assert item.metadata["activation_state"] == "source_only_not_registered"
+        assert item.metadata["activation_state"] == "registered_dormant_not_activated"

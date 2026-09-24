@@ -2,9 +2,9 @@
 
 ## Status
 
-**LOCAL DESIGN / SOURCE ONLY — DO NOT PUBLISH OR DEPLOY**
+**DEPLOYABLE SOURCE — PRODUCTION WRITES REMAIN DISABLED UNTIL SEPARATE ACTIVATION/ACCEPTANCE**
 
-This document defines the next DNSFilter stage after the accepted read-only production integration. It does not authorize or enable any DNSFilter mutation.
+This document defines the deployable DNSFilter governed read/write implementation after the accepted read-only production integration. Deploying this source does not authorize or enable any DNSFilter mutation.
 
 Current production read state is separately documented in `DNSFilter-Dual-Plane-Integration-2026-09-24.md`.
 
@@ -14,7 +14,7 @@ Extend the existing provider-supported DNSFilter MCP integration from governed r
 
 - Central Orchestrator remains authoritative.
 - DNSFilter OAuth role and provider `confirm=true` do not create Jason authority.
-- Every mutation is bound to an exact Autotask company -> DNSFilter organization boundary.
+- Every mutation is bound to an exact Autotask company -> DNSFilter organization/network boundary.
 - Callers never supply provider organization/MSP scope or `confirm`.
 - Every write requires a bound execution plan, explicit approval, exactly one provider mutation attempt, and provider-native readback.
 - Unknown write outcome is never blindly retried.
@@ -23,7 +23,9 @@ Extend the existing provider-supported DNSFilter MCP integration from governed r
 
 ## Provider contract reviewed
 
-DNSFilter's current MCP documentation states that Admin capability writes require explicit confirmation, reads/writes are attributable to the authenticated user, privacy settings are enforced, and an MSP session is scoped to one organization.The 2026-09-24 provider catalog snapshot contains 107 tools. Twenty-five administrative tools require `confirm=true`; those are the governed write scope for this design.
+DNSFilter's current MCP documentation states that Admin capability writes require explicit confirmation, reads/writes are attributable to the authenticated user, privacy settings are enforced, and an MSP session is scoped to one organization.
+
+The 2026-09-24 provider catalog snapshot contains 107 tools. Twenty-five administrative tools require `confirm=true`; those are the governed write scope for this design.
 
 Authentication lifecycle (`authenticate`, `logout`) remains outside operational capability authority. `suggest_threat` is provider feedback rather than client configuration and remains excluded from this administrative write surface.
 
@@ -52,7 +54,9 @@ Readback:
 
 Scope:
 - organization ID is injected from the validated boundary;
-- caller-supplied `organization_id`, `msp_id`, and `confirm` are rejected.Readback:
+- caller-supplied `organization_id`, `msp_id`, and `confirm` are rejected.
+
+Readback:
 - `get_global_lists` for global-list state;
 - `policies_with_category` / bounded policy reads for category state.
 
@@ -86,7 +90,9 @@ Preflight:
 
 Readback:
 - `site_policy_status` for policy assignment;
-- `site_dns_config` for forwarder changes.### Portal users
+- `site_dns_config` for forwarder changes.
+
+### Portal users
 
 - invite user
 - change user role
@@ -118,7 +124,9 @@ Readback:
 
 ### Block page
 
-- update block pagePreflight:
+- update block page
+
+Preflight:
 - `get_block_page` and organization relationship must match boundary.
 
 Readback:
@@ -150,7 +158,9 @@ The prepared plan is secret-free and binds:
 - exact resource identifier(s);
 - normalized mutation payload excluding credentials;
 - server-injected `confirm=true`;
-- symbolic/preflight resolutions used to prove target ownership.At invocation the connector re-checks provider capability, tool name, target, normalized payload, and parameters against the approved execution plan before making the provider call.
+- symbolic/preflight resolutions used to prove target ownership.
+
+At invocation the connector re-checks provider capability, tool name, target, normalized payload, and parameters against the approved execution plan before making the provider call.
 
 ## Confirmation model
 
@@ -178,16 +188,19 @@ If the provider request times out or returns an ambiguous transport result after
 - classify success only when readback proves the approved target state;
 - otherwise return unknown/verification failure and escalate.
 
-## Local source activation modelThe read/write connector can exist in source while remaining non-executable.
+## Production deployment and activation model
+
+The read/write connector can be deployed while remaining non-executable.
 
 Until separately approved:
 
 - mutation capability lifecycle remains `BUILDING`;
-- mutation definitions are not registered in runtime composition;
-- no provider capability map includes DNSFilter writes;
+- mutation definitions are registered as `BUILDING` only;
+- the dedicated `dnsfilter_mcp_mutation` provider is registered as `PLANNED / UNKNOWN / BLOCKED`;
+- the mutation invoker is not constructed or registered unless both `JASON_DNSFILTER_MCP_MUTATION_PROFILE=governed_v1` and `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true` are set;
 - no mutation authority grant exists;
-- no MCP action surface exposes DNSFilter writes;
-- production environment contains no DNSFilter mutation enablement flag.
+- no MCP action surface exposes DNSFilter writes while the write gates are absent;
+- production deployment leaves both DNSFilter mutation gates unset.
 
 ## Future acceptance sequence
 
@@ -200,4 +213,4 @@ Until separately approved:
 7. provider-native readback;
 8. rollback/compensation test where supported;
 9. separate review for user-disruptive families;
-10. only then consider PR, merge, deployment, authority grants, or production registration.
+10. source may be merged/deployed dormant after review; only after the controlled acceptance should production write gates, authority grants, and active write registration be considered.

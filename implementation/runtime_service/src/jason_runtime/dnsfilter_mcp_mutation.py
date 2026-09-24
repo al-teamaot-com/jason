@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import os
 import re
 from typing import Any, Mapping, Sequence
@@ -13,13 +14,34 @@ from connectors.core.contracts import (
     ConnectorTransportError,
 )
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
-from orchestrator.connector_invoker import ProviderPreparedExecution
+from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService
+from kernel.execution_providers import (
+    ExecutionProvider,
+    ExecutionProviderRegistryService,
+    ProviderApproval,
+    ProviderFeatures,
+    ProviderHealth,
+    ProviderLifecycle,
+    ProviderLimits,
+    ProviderStewardship,
+    ProviderType,
+)
+from orchestrator.connector_invoker import (
+    GovernedConnectorCapabilityInvoker,
+    ProviderPreparedExecution,
+)
 from orchestrator.dnsfilter_mcp_mutation_capability_catalog import (
     DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES,
     DNSFILTER_MCP_MUTATION_TOOLS,
+    dnsfilter_mcp_mutation_capabilities,
 )
+from orchestrator.invokers import CapabilityInvokerRegistry
 
 DNSFILTER_MCP_MUTATION_ENABLED_ENV = "JASON_DNSFILTER_MCP_MUTATION_ENABLED"
+DNSFILTER_MCP_MUTATION_PROFILE_ENV = "JASON_DNSFILTER_MCP_MUTATION_PROFILE"
+DNSFILTER_MCP_MUTATION_PROFILE = "governed_v1"
+DNSFILTER_MCP_MUTATION_PROVIDER = "dnsfilter_mcp_mutation"
 
 
 class DnsFilterMutationVerificationError(RuntimeError):
@@ -121,6 +143,21 @@ _ORG_INJECT = {
     "send_password_reset": "organization_id",
     "bulk_remove_agents": "organization_id",
 }
+
+# Child Autotask companies can share the AOT DNSFilter organization. Only
+# mutations whose complete blast radius can be proven from the child's exact
+# network boundary are eligible at child scope. All other administrative
+# mutations are master-scope only (Autotask company 0).
+_CLIENT_SCOPED_MUTATION_TOOLS = frozenset(
+    {
+        "apply_policy_to_sites",
+        "reassign_agent_policy",
+        "uninstall_agent",
+        "bulk_remove_agents",
+        "update_site_forwarders",
+    }
+)
+
 _ENUMS = {
     "list_type": {"allow", "block"},
     "action": {"block", "unblock"},
@@ -146,6 +183,8 @@ class _PreparedDnsFilterMutation:
     tool_name: str
     company_id: str
     organization_id: int
+    network_scope_ids: tuple[int, ...]
+    client_scoped: bool
     provider_arguments: Mapping[str, Any]
     resource_type: str
     resource_identifier: str
@@ -162,6 +201,169 @@ def dnsfilter_mcp_mutation_execution_enabled() -> bool:
     if value == "false":
         return False
     raise RuntimeError("DNSFILTER_MCP_MUTATION_ENABLEMENT_INVALID")
+@dataclass(frozen=True, slots=True)
+class DnsFilterMcpMutationActivationState:
+    profile: str
+    enabled: bool
+    provider_ids: tuple[str, ...]
+    capability_names: tuple[str, ...]
+
+
+class DnsFilterMcpMutationActivationError(RuntimeError):
+    pass
+
+
+def dnsfilter_mcp_mutation_surface_enabled() -> bool:
+    profile = os.getenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
+    ).strip().casefold()
+    return (
+        profile == DNSFILTER_MCP_MUTATION_PROFILE
+        and dnsfilter_mcp_mutation_execution_enabled()
+    )
+
+
+def _dnsfilter_mcp_mutation_provider(*, now: datetime) -> ExecutionProvider:
+    return ExecutionProvider(
+        provider_id=DNSFILTER_MCP_MUTATION_PROVIDER,
+        display_name="DNSFilter MCP Governed Administration",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=ProviderLifecycle.PLANNED,
+        health_status=ProviderHealth.UNKNOWN,
+        approval_status=ProviderApproval.BLOCKED,
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=frozenset(DNSFILTER_MCP_MUTATION_TOOLS),
+        supported_classifications=frozenset({"internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(
+            maximum_concurrent_executions=1,
+            maximum_requests_per_minute=10,
+            maximum_execution_seconds=90,
+        ),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="zero-cost-foundation",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification=(
+                "Permit explicitly approved DNSFilter administrative actions "
+                "through the provider-supported OAuth MCP surface."
+            ),
+            review_interval_days=30,
+            last_reviewed_at=now,
+            retirement_criteria=(
+                "DNSFilter removes or materially changes the mapped MCP tools.",
+                "A safer provider-supported administrative surface replaces MCP.",
+            ),
+            vendor_change_sources=(
+                "DNSFilter MCP connector documentation",
+                "DNSFilter MCP public tool catalog",
+            ),
+            operational_owner="AOT Managed Services",
+            approval_owner="AOT Owner",
+        ),
+        created_at=now,
+        metadata={
+            "connector_id": "dnsfilter_mcp",
+            "resource_authority": "dns_protection",
+            "write_capability": "true",
+            "provider_confirmation_required": "true",
+            "activation_state": "source_present_not_activated",
+        },
+    )
+
+
+def register_dnsfilter_mcp_mutation_runtime_foundation(
+    *,
+    capabilities: CapabilityRegistryService,
+    providers: ExecutionProviderRegistryService,
+    now: datetime,
+) -> DnsFilterMcpMutationActivationState:
+    definitions = dnsfilter_mcp_mutation_capabilities(now)
+    for definition in definitions:
+        capabilities.register(definition)
+    providers.register(_dnsfilter_mcp_mutation_provider(now=now))
+
+    profile = os.getenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
+    ).strip().casefold()
+    if not profile:
+        return DnsFilterMcpMutationActivationState(
+            profile="",
+            enabled=False,
+            provider_ids=(),
+            capability_names=(),
+        )
+    if profile != DNSFILTER_MCP_MUTATION_PROFILE:
+        raise DnsFilterMcpMutationActivationError(
+            "unsupported DNSFilter MCP mutation profile"
+        )
+    if not dnsfilter_mcp_mutation_execution_enabled():
+        raise DnsFilterMcpMutationActivationError(
+            "DNSFilter MCP mutation profile requires mutation execution gate"
+        )
+
+    capability_names = tuple(
+        sorted(DNSFILTER_MCP_MUTATION_TOOLS)
+    )
+    for capability_name in capability_names:
+        capabilities.set_lifecycle(
+            capability_name=capability_name,
+            version="1.0",
+            lifecycle_status=CapabilityLifecycle.ACTIVE,
+        )
+    providers.set_approval(
+        provider_id=DNSFILTER_MCP_MUTATION_PROVIDER,
+        approval_status=ProviderApproval.APPROVED,
+    )
+    providers.set_health(
+        provider_id=DNSFILTER_MCP_MUTATION_PROVIDER,
+        health_status=ProviderHealth.HEALTHY,
+    )
+    providers.set_lifecycle(
+        provider_id=DNSFILTER_MCP_MUTATION_PROVIDER,
+        lifecycle_status=ProviderLifecycle.AVAILABLE,
+    )
+    return DnsFilterMcpMutationActivationState(
+        profile=profile,
+        enabled=True,
+        provider_ids=(DNSFILTER_MCP_MUTATION_PROVIDER,),
+        capability_names=capability_names,
+    )
+
+
+def build_dnsfilter_mcp_mutation_invoker(
+    *,
+    oauth_store: DnsFilterMcpOAuthStore,
+    audit: Any,
+    boundaries: Any,
+) -> GovernedConnectorCapabilityInvoker:
+    connector = DnsFilterMcpGovernedConnector(
+        oauth_store=oauth_store,
+        audit=audit,
+        boundaries=boundaries,
+    )
+    return GovernedConnectorCapabilityInvoker(
+        connectors={DNSFILTER_MCP_MUTATION_PROVIDER: connector},
+        provider_capability_map={
+            (
+                DNSFILTER_MCP_MUTATION_PROVIDER,
+                canonical,
+            ): provider_capability
+            for canonical, provider_capability
+            in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES.items()
+        },
+    )
+
+
+def register_dnsfilter_mcp_mutation_invokers(
+    *,
+    invokers: CapabilityInvokerRegistry,
+    invoker: GovernedConnectorCapabilityInvoker,
+) -> None:
+    for capability_name in sorted(DNSFILTER_MCP_MUTATION_TOOLS):
+        invokers.register(capability_name, invoker)
+
+
 def _positive_int(value: Any, name: str) -> int:
     if isinstance(value, bool):
         raise ConnectorConfigurationError(f"{name} must be a positive integer.")
@@ -283,22 +485,21 @@ def _string_set(value: Any) -> set[str]:
             result.add(str(candidate).strip().lower().rstrip("."))
     return result
 class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
-    """Full read/write DNSFilter MCP adapter; mutation path remains dormant.
+    """Governed DNSFilter MCP mutation adapter.
 
-    Runtime composition does not register the mutation capabilities in this
-    local design. Even if instantiated manually, mutation preparation fails
-    closed unless JASON_DNSFILTER_MCP_MUTATION_ENABLED=true.
+    Reads remain on the existing dnsfilter_mcp connector. This adapter exposes
+    mutation provider capabilities only, and direct execute() is never allowed;
+    every write must travel through the execution-plan path.
     """
 
+    provider_name = DNSFILTER_MCP_MUTATION_PROVIDER
     mutation_capabilities = frozenset(_TOOL_BY_PROVIDER)
-    capabilities = DnsFilterMcpConnector.capabilities | mutation_capabilities
+    capabilities = mutation_capabilities
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
-        if request.context.capability in self.mutation_capabilities:
-            raise ConnectorAuthorizationError(
-                "DNSFilter mutations require the governed execution-plan path."
-            )
-        return super().execute(request)
+        raise ConnectorAuthorizationError(
+            "DNSFilter mutations require the governed execution-plan path."
+        )
 
     def prepare_governed_execution(
         self,
@@ -318,9 +519,15 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
         tool_name = _TOOL_BY_PROVIDER[request.context.capability]
         raw = dict(request.arguments)
         normalized = self._normalize_arguments(tool_name, raw)
-        company_id, organization_id = self._resolve_boundary(
+        company_id, organization_id, network_scope_ids = self._resolve_boundary(
             request.context, {"company_id": raw.get("company_id")}
         )
+        client_scoped = company_id != "0"
+        if client_scoped and tool_name not in _CLIENT_SCOPED_MUTATION_TOOLS:
+            raise ConnectorAuthorizationError(
+                f"DNSFilter mutation {tool_name} is master-scope only because "
+                "its complete blast radius cannot be proven from a client network boundary."
+            )
         provider_arguments = {
             key: value for key, value in normalized.items()
             if key != "company_id"
@@ -331,7 +538,12 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
 
         client = self._client_factory(self._oauth_store)
         preflight = self._preflight(
-            client, tool_name, provider_arguments, organization_id
+            client,
+            tool_name,
+            provider_arguments,
+            organization_id,
+            network_scope_ids=network_scope_ids,
+            client_scoped=client_scoped,
         )
         provider_arguments["confirm"] = True
         resource_type, resource_identifier = self._target(
@@ -363,6 +575,8 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             symbolic_resolutions={
                 "company_id": company_id,
                 "organization_id": organization_id,
+                "network_scope_ids": list(network_scope_ids),
+                "client_scoped": client_scoped,
                 **dict(preflight),
             },
             opaque=_PreparedDnsFilterMutation(
@@ -370,6 +584,8 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                 tool_name=tool_name,
                 company_id=company_id,
                 organization_id=organization_id,
+                network_scope_ids=network_scope_ids,
+                client_scoped=client_scoped,
                 provider_arguments=dict(provider_arguments),
                 resource_type=resource_type,
                 resource_identifier=resource_identifier,
@@ -422,8 +638,13 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             readback_matched = False
             try:
                 self._verify(
-                    client, opaque.tool_name, opaque.provider_arguments,
-                    opaque.organization_id, {},
+                    client,
+                    opaque.tool_name,
+                    opaque.provider_arguments,
+                    opaque.organization_id,
+                    {},
+                    network_scope_ids=opaque.network_scope_ids,
+                    client_scoped=opaque.client_scoped,
                 )
                 readback_matched = True
             except Exception:
@@ -447,6 +668,8 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             opaque.provider_arguments,
             opaque.organization_id,
             result,
+            network_scope_ids=opaque.network_scope_ids,
+            client_scoped=opaque.client_scoped,
         )
         self._audit.record(
             "connector.mutation.verified",
@@ -584,6 +807,9 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
         tool: str,
         args: Mapping[str, Any],
         organization_id: int,
+        *,
+        network_scope_ids: tuple[int, ...],
+        client_scoped: bool,
     ) -> Mapping[str, Any]:
         resolved: dict[str, Any] = {}
         policy_ids: list[int | str] = []
@@ -603,6 +829,14 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
         if "network_id" in args:
             network_ids.append(args["network_id"])
         network_ids.extend(args.get("network_ids") or [])
+        authorized_networks = frozenset(network_scope_ids)
+        if client_scoped and any(
+            int(network_id) not in authorized_networks
+            for network_id in network_ids
+        ):
+            raise ConnectorAuthorizationError(
+                "DNSFilter mutation target crossed the authorized client network boundary."
+            )
         for network_id in network_ids:
             payload = client.call_tool(
                 "get_network",
@@ -652,7 +886,11 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             agent_ids.append(str(args["user_agent_id"]))
         agent_ids.extend(str(item) for item in args.get("user_agent_ids") or [])
         if agent_ids:
-            agents = self._agent_index(client, organization_id)
+            agents = self._agent_index(
+                client,
+                organization_id,
+                network_scope_ids=network_scope_ids if client_scoped else (),
+            )
             missing = sorted(set(agent_ids) - set(agents))
             if missing:
                 raise ConnectorAuthorizationError(
@@ -724,17 +962,24 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
         )
 
     def _agent_index(
-        self, client: Any, organization_id: int
+        self,
+        client: Any,
+        organization_id: int,
+        *,
+        network_scope_ids: tuple[int, ...] = (),
     ) -> dict[str, Mapping[str, Any]]:
         items: dict[str, Mapping[str, Any]] = {}
         for page in range(1, 11):
+            arguments: dict[str, Any] = {
+                "organization_ids": [organization_id],
+                "page": page,
+                "per_page": 100,
+            }
+            if network_scope_ids:
+                arguments["network_ids"] = list(network_scope_ids)
             payload = client.call_tool(
                 "list_user_agents",
-                {
-                    "organization_ids": [organization_id],
-                    "page": page,
-                    "per_page": 100,
-                },
+                arguments,
             )
             data = payload.get("data")
             if isinstance(data, list):
@@ -774,6 +1019,9 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
         args: Mapping[str, Any],
         organization_id: int,
         mutation_result: Mapping[str, Any],
+        *,
+        network_scope_ids: tuple[int, ...],
+        client_scoped: bool,
     ) -> Mapping[str, Any]:
         if tool in {
             "add_blocklist_domain", "remove_blocklist_domain",
@@ -959,9 +1207,11 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             }
 
         if tool == "reassign_agent_policy":
-            agent = self._agent_index(client, organization_id).get(
-                str(args["user_agent_id"])
-            )
+            agent = self._agent_index(
+                client,
+                organization_id,
+                network_scope_ids=network_scope_ids if client_scoped else (),
+            ).get(str(args["user_agent_id"]))
             if agent is None:
                 raise DnsFilterMutationVerificationError(
                     "DNSFilter agent was not found during readback."
@@ -973,9 +1223,11 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                 )
             return {"readbackVerified": True, "tool": "list_user_agents"}
         if tool == "uninstall_agent":
-            agent = self._agent_index(client, organization_id).get(
-                str(args["user_agent_id"])
-            )
+            agent = self._agent_index(
+                client,
+                organization_id,
+                network_scope_ids=network_scope_ids if client_scoped else (),
+            ).get(str(args["user_agent_id"]))
             state = (
                 str(_attributes(agent).get("agent_state") or "").casefold()
                 if agent is not None else "removed"
@@ -987,7 +1239,11 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             return {"readbackVerified": True, "tool": "list_user_agents"}
 
         if tool == "bulk_remove_agents":
-            agents = self._agent_index(client, organization_id)
+            agents = self._agent_index(
+                client,
+                organization_id,
+                network_scope_ids=network_scope_ids if client_scoped else (),
+            )
             for agent_id in args["user_agent_ids"]:
                 agent = agents.get(str(agent_id))
                 state = (

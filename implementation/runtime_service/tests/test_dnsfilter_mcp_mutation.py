@@ -12,19 +12,37 @@ from connectors.core.contracts import (
     ConnectorTransportError,
 )
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from kernel.capabilities import (
+    CapabilityLifecycle,
+    CapabilityRegistryService,
+    InMemoryCapabilityRegistry,
+)
 from kernel.client_boundaries import (
     BoundaryStatus,
     ClientBoundary,
     InMemoryClientBoundaryRepository,
 )
+from kernel.execution_providers import (
+    ExecutionProviderRegistryService,
+    InMemoryExecutionProviderRegistry,
+    ProviderApproval,
+    ProviderHealth,
+    ProviderLifecycle,
+)
 from orchestrator.dnsfilter_mcp_mutation_capability_catalog import (
     DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES,
 )
 from jason_runtime.dnsfilter_mcp_mutation import (
+    DNSFILTER_MCP_MUTATION_ENABLED_ENV,
+    DNSFILTER_MCP_MUTATION_PROFILE,
+    DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+    DNSFILTER_MCP_MUTATION_PROVIDER,
     DnsFilterMcpGovernedConnector,
+    DnsFilterMcpMutationActivationError,
     DnsFilterMutationUnknownOutcomeError,
     _ALLOWED,
     _REQUIRED,
+    register_dnsfilter_mcp_mutation_runtime_foundation,
 )
 
 ORG_ID = 1110483
@@ -35,6 +53,18 @@ BLOCK_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
 CREATE_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
     "dns.protection.policy.create"
 ]
+SITE_FORWARDER_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
+    "dns.protection.site.forwarders.update"
+]
+AGENT_UNINSTALL_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
+    "dns.protection.agent.uninstall"
+]
+NETWORK_ID = 1524093
+OTHER_NETWORK_ID = 1524094
+AGENT_ID = "agent-in-scope"
+OTHER_AGENT_ID = "agent-out-of-scope"
+
+
 class FakeAudit:
     def __init__(self):
         self.events = []
@@ -78,6 +108,50 @@ class FakeClient:
                     },
                 }
             }
+        if tool == "get_network":
+            org = 999999 if self.cross_org else ORG_ID
+            return {
+                "data": {
+                    "id": str(args["network_id"]),
+                    "attributes": {
+                        "organization_id": org,
+                        "local_resolvers": ["10.0.0.10"],
+                        "local_domains": ["example.local"],
+                    },
+                    "relationships": {
+                        "organization": {"data": {"id": str(org)}},
+                    },
+                }
+            }
+        if tool == "list_user_agents":
+            network_ids = set(args.get("network_ids") or [])
+            data = []
+            if not network_ids or NETWORK_ID in network_ids:
+                data.append(
+                    {
+                        "id": AGENT_ID,
+                        "attributes": {"agent_state": "protected"},
+                        "relationships": {
+                            "organization": {"data": {"id": str(ORG_ID)}},
+                            "network": {"data": {"id": str(NETWORK_ID)}},
+                        },
+                    }
+                )
+            if not network_ids or OTHER_NETWORK_ID in network_ids:
+                data.append(
+                    {
+                        "id": OTHER_AGENT_ID,
+                        "attributes": {"agent_state": "protected"},
+                        "relationships": {
+                            "organization": {"data": {"id": str(ORG_ID)}},
+                            "network": {"data": {"id": str(OTHER_NETWORK_ID)}},
+                        },
+                    }
+                )
+            return {
+                "data": data,
+                "pagination": {"has_more": False},
+            }
         if tool == "add_blocklist_domain":
             if self.fail_mutation:
                 raise ConnectorTransportError("synthetic transport failure")
@@ -101,11 +175,16 @@ class FakeClient:
         raise AssertionError(f"unexpected fake tool call: {tool}")
 
 
-def boundary(*, org_id=ORG_ID):
+def boundary(
+    *,
+    org_id=ORG_ID,
+    client_id="0",
+    network_ids=(),
+):
     now = datetime(2026, 9, 24, tzinfo=timezone.utc)
     return ClientBoundary(
-        id="dnsfilter-aot-boundary",
-        client_id="0",
+        id=f"dnsfilter-boundary-{client_id}",
+        client_id=str(client_id),
         provider="dnsfilter",
         external_tenant_id=str(org_id),
         primary_domain="teamaot.com",
@@ -116,13 +195,16 @@ def boundary(*, org_id=ORG_ID):
         created_at=now,
         consented_at=now,
         validated_at=now,
+        external_scope_ids=tuple(str(item) for item in network_ids),
     )
-def context(capability):
+
+
+def context(capability, *, client_id="0"):
     return ConnectorContext(
         correlation_id="corr-dnsfilter-write-local",
         principal_id="person-al",
         organization_id="aot",
-        client_id="0",
+        client_id=str(client_id),
         capability=capability,
         mode="execute",
     )
@@ -365,3 +447,226 @@ def test_all_25_argument_contracts_match_provider_snapshot():
         expected_required = set(schema.get("required") or ()) - provider_derived
         assert _ALLOWED[tool_name] == expected_allowed
         assert _REQUIRED[tool_name] == expected_required
+
+def test_child_scope_rejects_shared_policy_mutation_before_provider_call(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JASON_DNSFILTER_MCP_MUTATION_ENABLED", "true")
+    connector, _ = build(
+        tmp_path,
+        record=boundary(client_id="507", network_ids=(NETWORK_ID,)),
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="master-scope only"):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(BLOCK_CAP, client_id="507"),
+                {
+                    "company_id": 507,
+                    "policy_id": POLICY_ID,
+                    "domain": "example.com",
+                },
+            )
+        )
+    assert FakeClient.calls == []
+
+
+def test_child_site_forwarder_target_must_be_inside_network_boundary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JASON_DNSFILTER_MCP_MUTATION_ENABLED", "true")
+    connector, _ = build(
+        tmp_path,
+        record=boundary(client_id="507", network_ids=(NETWORK_ID,)),
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="network boundary"):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(SITE_FORWARDER_CAP, client_id="507"),
+                {
+                    "company_id": 507,
+                    "network_id": OTHER_NETWORK_ID,
+                    "local_resolvers": ["10.0.0.20"],
+                },
+            )
+        )
+    assert FakeClient.calls == []
+
+
+def test_child_site_forwarder_target_can_prepare_inside_network_boundary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JASON_DNSFILTER_MCP_MUTATION_ENABLED", "true")
+    connector, _ = build(
+        tmp_path,
+        record=boundary(client_id="507", network_ids=(NETWORK_ID,)),
+    )
+    prepared = connector.prepare_governed_execution(
+        ConnectorRequest(
+            context(SITE_FORWARDER_CAP, client_id="507"),
+            {
+                "company_id": 507,
+                "network_id": NETWORK_ID,
+                "local_resolvers": ["10.0.0.20"],
+            },
+        )
+    )
+    assert prepared.resource_identifier == str(NETWORK_ID)
+    assert prepared.symbolic_resolutions["network_scope_ids"] == [NETWORK_ID]
+    assert prepared.symbolic_resolutions["client_scoped"] is True
+    assert FakeClient.calls == [
+        (
+            "get_network",
+            {
+                "network_id": NETWORK_ID,
+                "count_network_ips": False,
+            },
+        )
+    ]
+
+
+def test_child_agent_target_is_resolved_only_inside_network_boundary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JASON_DNSFILTER_MCP_MUTATION_ENABLED", "true")
+    connector, _ = build(
+        tmp_path,
+        record=boundary(client_id="507", network_ids=(NETWORK_ID,)),
+    )
+    prepared = connector.prepare_governed_execution(
+        ConnectorRequest(
+            context(AGENT_UNINSTALL_CAP, client_id="507"),
+            {
+                "company_id": 507,
+                "user_agent_id": AGENT_ID,
+            },
+        )
+    )
+    assert prepared.resource_identifier == AGENT_ID
+    list_calls = [
+        args
+        for tool, args in FakeClient.calls
+        if tool == "list_user_agents"
+    ]
+    assert list_calls == [
+        {
+            "organization_ids": [ORG_ID],
+            "network_ids": [NETWORK_ID],
+            "page": 1,
+            "per_page": 100,
+        }
+    ]
+
+
+def test_child_agent_outside_network_boundary_is_rejected(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("JASON_DNSFILTER_MCP_MUTATION_ENABLED", "true")
+    connector, _ = build(
+        tmp_path,
+        record=boundary(client_id="507", network_ids=(NETWORK_ID,)),
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="does not belong"):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(AGENT_UNINSTALL_CAP, client_id="507"),
+                {
+                    "company_id": 507,
+                    "user_agent_id": OTHER_AGENT_ID,
+                },
+            )
+        )
+    assert not any(
+        tool == "uninstall_agent"
+        for tool, _ in FakeClient.calls
+    )
+
+def test_mutation_runtime_foundation_is_dormant_by_default(monkeypatch):
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_PROFILE_ENV, raising=False)
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, raising=False)
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+    now = datetime(2026, 9, 24, tzinfo=timezone.utc)
+
+    state = register_dnsfilter_mcp_mutation_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
+
+    assert state.enabled is False
+    assert state.capability_names == ()
+    assert state.provider_ids == ()
+    for capability_name in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES:
+        definition = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        assert definition.lifecycle_status is CapabilityLifecycle.BUILDING
+    provider = providers.get(DNSFILTER_MCP_MUTATION_PROVIDER)
+    assert provider.lifecycle_status is ProviderLifecycle.PLANNED
+    assert provider.health_status is ProviderHealth.UNKNOWN
+    assert provider.approval_status is ProviderApproval.BLOCKED
+
+
+def test_mutation_profile_without_execution_gate_fails_closed(monkeypatch):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_PROFILE,
+    )
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, raising=False)
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    with pytest.raises(
+        DnsFilterMcpMutationActivationError,
+        match="requires mutation execution gate",
+    ):
+        register_dnsfilter_mcp_mutation_runtime_foundation(
+            capabilities=capabilities,
+            providers=providers,
+            now=datetime(2026, 9, 24, tzinfo=timezone.utc),
+        )
+
+
+def test_mutation_activation_requires_both_explicit_gates(monkeypatch):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    state = register_dnsfilter_mcp_mutation_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+
+    assert state.enabled is True
+    assert set(state.capability_names) == set(
+        DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES
+    )
+    assert state.provider_ids == (DNSFILTER_MCP_MUTATION_PROVIDER,)
+    for capability_name in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES:
+        definition = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        assert definition.lifecycle_status is CapabilityLifecycle.ACTIVE
+    provider = providers.get(DNSFILTER_MCP_MUTATION_PROVIDER)
+    assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert provider.health_status is ProviderHealth.HEALTHY
+    assert provider.approval_status is ProviderApproval.APPROVED
