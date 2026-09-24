@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-23
-**Status:** Production is live on authoritative `main` source `20d2e027443769af723af6bef069afad7cc58d7c` (tag `prod-2026-09-23-20d2e02`). Runtime image `sha256:71f7774fef39c5044da64903049aa30cac145b79fdd0742824ff47482549d816` and MCP image `sha256:3cd7cd9072521d9561c18d8f522e6c795229d297b88dff1c33d6bfef1b645fa3` are running from canonical `jason-runtime:production` / `jason-mcp:production` aliases with hardened controls (`read_only=true`, `cap_drop=ALL`, `no-new-privileges`, hardened `/tmp`). PR #219 merged the fully validated production reconciliation into `main`; the final `main` tree is identical to the PR head that passed the full GitHub validation matrix. The immediately previous `bbe7d7e` runtime/MCP images are retained as `:rollback-current` and as stopped rollback containers. Central Orchestrator remains authoritative, `direct_provider_access=false`, 24 governed write capabilities remain active, and no provider mutation occurred during the final constitutional convergence deployment.
+**Updated:** 2026-09-24
+**Status:** Production runtime and MCP are healthy on deployed source `699bf0a836888ca0565369ba7a8db8f0c115caf0`. Runtime image `sha256:11201164eac42df7405bc08c5eb6cf9a909af74e5ed6232a819ed9f95054bfb9` and MCP image `sha256:7c4b082fa0b0b8aa992d04b3935d5711893e503ae7c1685303194551cd552ca5` are the live images and now also back the canonical `jason-runtime:production`, `jason-runtime:local`, and `jason-mcp:production` aliases. The immediate previous deployed release `3cb1c4e6829a595cf76207163c4bbe658c6f7cb0` is retained as `jason-runtime:rollback-current` and `jason-mcp:rollback-current`. Runtime remains hardened (`read_only=true`, `cap_drop=ALL`, `no-new-privileges`, hardened `/tmp`), Central Orchestrator remains authoritative, `direct_provider_access=false`, and 24 governed write capabilities remain active. A 2026-09-24 integrity audit found no Git object corruption; only normal unreachable objects from prior squash/rebase cleanup were reported. The production deployment helper now transactionally promotes verified live images to canonical aliases and rotates the actual pre-deployment live image to `:rollback-current`, with alias restoration included in the fail-closed rollback path.
 **Canonical purpose:** Human-readable resume point. Volatile production facts still require fresh runtime evidence before consequential change.
 
 ## Continuity control anchors
@@ -9,7 +9,7 @@
 - **Extension construction control:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** preserved in the governed production proof and observability sections below.
 - **Production/runtime boundary:** use the recorded boundary below only as durable history; verify volatile production facts before consequential change.
-- **Next safe actions:** repository/production constitutional convergence is complete. `main` is authoritative and branch-protected; production is pinned to the tagged `20d2e02` main revision; only authoritative `main` plus active Backup.net PR work remain locally. Remaining work is normal feature review/acceptance and optional controlled per-provider mutation-family acceptance using explicitly safe test targets.
+- **Next safe actions:** `main` remains authoritative and branch-protected. Local worktrees are reduced to clean `main` plus the active Backup.net worktree. Current open feature PRs are #218 Backup.net, #222 REFLECT-001, #226 global ticket-check notes, and #227 patch-reliability intelligence; all had passing CI/security checks at the 2026-09-24 integrity audit. Continue normal feature review/acceptance and controlled provider-specific acceptance only on explicitly safe targets.
 
 ## Durable operating principle
 
@@ -200,6 +200,40 @@ Do not issue a second provider mutation because the first job is still active. U
 - `per_run` requires explicit technician approval for the exact execution;
 - unknown, missing, or invalid component classification fails closed;
 - user-disruptive actions require explicit technician approval for the exact disruptive action.
+
+## Host reboot recovery — production control installed 2026-09-24
+
+A 2026-09-23/24 power outage exposed that Jason's host boot path was not self-recovering even though individual containers were durable:
+
+- OpenBao restarted initialized but sealed;
+- the intentionally ephemeral IT Glue/Autotask runtime AppRole files under `/run/jason-runtime-credentials/openbao` were absent after reboot;
+- `jason-runtime` therefore failed closed during OpenBao/AppRole initialization;
+- `jason-mcp-pilot` had `restart=no`;
+- Prometheus still referenced a disposable worktree that had been cleaned during build/worktree cleanup.
+
+PR #223, merged as `4e3b7a4ad26c70650b78ce7b61e9408d439ed743`, added the repository-controlled boot-recovery controller, systemd service, timer, and runbook.
+
+Current verified state:
+
+- `jason-boot-recovery.service`: enabled; successful installed run;
+- `jason-boot-recovery.timer`: enabled and active with a two-minute idempotent check;
+- OpenBao: initialized, unsealed;
+- IT Glue/Autotask ephemeral AppRole staging: restored with expected runtime ownership/mode;
+- `jason-runtime`: running/healthy, `restart=unless-stopped`;
+- `jason-mcp-pilot`: running, internal health HTTP 200, `restart=unless-stopped`;
+- recovery service journal secret-pattern check: PASS;
+- Prometheus: rebound to durable main-repository source and HTTP 200;
+- Grafana: HTTP 200.
+
+Security boundary: the root-only automatic unseal uses the already-retained protected initialization artifact on the same single-host pilot. This is an explicit AOT Owner pilot exception and must not be described as host-root-resistant split custody or production-grade KMS/HSM auto-unseal.
+
+A complete host reboot after installation has **not** been performed because reboot is disruptive and requires separate explicit approval. Do not claim reboot-cycle acceptance until that test is actually performed.
+
+Authoritative records:
+
+- `docs/operations/Jason-Boot-Recovery.md`;
+- `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`;
+- `docs/sessions/Jason-Boot-Recovery-Production-Acceptance-2026-09-24.md`.
 
 ## Grafana / production observability — current release accepted
 

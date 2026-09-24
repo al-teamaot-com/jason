@@ -1931,19 +1931,27 @@ def _exact_configuration_for_ticket_device(
     *,
     ticket: Mapping[str, Any],
     device_name: str,
-) -> int | None:
+) -> int:
+    """Resolve exactly one active Autotask configuration for one DRMM endpoint.
+
+    This is a fail-closed identity gate. A known endpoint without exactly one
+    same-company active Autotask configuration is an identification defect, not
+    permission to continue ticket ownership without an asset association.
+    """
+
     endpoint = _governed_read(
         capability_name="endpoint.device.search",
         arguments={"name": device_name},
     )
     if endpoint.get("status") != "succeeded":
-        return None
+        raise ValueError("AUTOTASK_TICKET_DEVICE_SEARCH_FAILED")
     evidence = endpoint.get("evidence")
     if not isinstance(evidence, Mapping):
-        return None
+        raise ValueError("AUTOTASK_TICKET_DEVICE_SEARCH_FAILED")
     matches = evidence.get("resource_matches")
     if not isinstance(matches, list):
-        return None
+        raise ValueError("AUTOTASK_TICKET_DEVICE_SEARCH_FAILED")
+
     exact_endpoints = [
         item
         for item in matches
@@ -1952,16 +1960,18 @@ def _exact_configuration_for_ticket_device(
         == device_name.casefold()
         and str(item.get("resource_id") or "").strip()
     ]
+    if not exact_endpoints:
+        raise ValueError("AUTOTASK_TICKET_DEVICE_NOT_FOUND")
     if len(exact_endpoints) != 1:
-        return None
+        raise ValueError("AUTOTASK_TICKET_DEVICE_IDENTITY_NOT_UNIQUE")
     device_uid = str(exact_endpoints[0]["resource_id"]).strip()
 
     try:
         company_id = int(ticket.get("companyID"))
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError) as error:
+        raise ValueError("AUTOTASK_TICKET_COMPANY_REQUIRED") from error
     if company_id < 0:
-        return None
+        raise ValueError("AUTOTASK_TICKET_COMPANY_REQUIRED")
 
     configuration = _governed_read(
         capability_name="service.configuration.search",
@@ -1972,16 +1982,16 @@ def _exact_configuration_for_ticket_device(
         },
     )
     if configuration.get("status") != "succeeded":
-        return None
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_SEARCH_FAILED")
     config_evidence = configuration.get("evidence")
     if not isinstance(config_evidence, Mapping):
-        return None
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_SEARCH_FAILED")
     data = config_evidence.get("data")
     if not isinstance(data, Mapping):
-        return None
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_SEARCH_FAILED")
     items = data.get("items")
     if not isinstance(items, list):
-        return None
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_SEARCH_FAILED")
 
     exact_configs: list[int] = []
     for item in items:
@@ -2003,17 +2013,18 @@ def _exact_configuration_for_ticket_device(
         exact_configs.append(config_id)
 
     unique = sorted(set(exact_configs))
+    if not unique:
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_NOT_FOUND")
     if len(unique) != 1:
-        return None
+        raise ValueError("AUTOTASK_TICKET_CONFIGURATION_NOT_UNIQUE")
     return unique[0]
-
 
 def _validate_existing_ticket_configuration(*, ticket: Mapping[str, Any], configuration_id: int) -> Mapping[str, Any]:
     try:
         ticket_company_id = int(ticket.get("companyID"))
     except (TypeError, ValueError) as error:
         raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED") from error
-    if ticket_company_id < 1:
+    if ticket_company_id < 0:
         raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED")
 
     result = _governed_read(
@@ -2182,16 +2193,38 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
         device_uid = str(configuration.get("referenceNumber") or "").strip()
         if device_uid:
             endpoint = _verified_online_endpoint_by_uid(device_uid)
+            endpoint_name = str(endpoint.get("hostname") or "").strip()
+            configuration_name = str(
+                configuration.get("referenceTitle") or ""
+            ).strip()
+            if (
+                configuration_name
+                and endpoint_name
+                and configuration_name.casefold() != endpoint_name.casefold()
+            ):
+                raise ValueError(
+                    "AUTOTASK_TICKET_WORK_START_CONFIGURATION_DEVICE_MISMATCH"
+                )
             if (
                 candidate
-                and str(endpoint.get("hostname") or "").strip().casefold()
-                != candidate.casefold()
+                and endpoint_name.casefold() != candidate.casefold()
             ):
                 raise ValueError(
                     "AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_MISMATCH"
                 )
         elif candidate:
-            _verified_online_endpoint_by_name(candidate)
+            endpoint = _verified_online_endpoint_by_name(candidate)
+            configuration_name = str(
+                configuration.get("referenceTitle") or ""
+            ).strip()
+            endpoint_name = str(endpoint.get("hostname") or "").strip()
+            if (
+                not configuration_name
+                or configuration_name.casefold() != endpoint_name.casefold()
+            ):
+                raise ValueError(
+                    "AUTOTASK_TICKET_WORK_START_CONFIGURATION_DEVICE_MISMATCH"
+                )
         else:
             raise ValueError(
                 "AUTOTASK_TICKET_WORK_START_DEVICE_IDENTITY_REQUIRED"
@@ -2202,8 +2235,7 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
             ticket=ticket,
             device_name=candidate,
         )
-        if configuration_id is not None:
-            payload["configurationItemID"] = configuration_id
+        payload["configurationItemID"] = configuration_id
 
     issue_type = str(raw.get("issue_type") or "").strip()
     sub_issue_type = str(raw.get("sub_issue_type") or "").strip()
