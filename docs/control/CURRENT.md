@@ -244,12 +244,16 @@ The production-health unit now expects the exact live MCP boundary:
 - `JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-26704f0600bb`;
 - `JASON_EXPECTED_MCP_SOURCE_REVISION=26704f0600bbc6c48c790c9b9ff501a3b5ec3aad`.
 
-The active Datto production scope contains exactly two server-classified `standing_safe` components:
+The active Datto production scope currently contains four `standing_safe` components:
 
-- `Get-DNS Settings AOT Ver 06042025-1` — `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
-- `Check Datto EDR/AV Status AOT Ver 12122025-1` — `8cb0f063-5875-452e-88ad-2e1748ed0fd0`.
+- `Get-DNS Settings AOT Ver 06042025-1` — `afb858ae-e0d5-4c7b-b0da-8617a22b60d4` — server configuration;
+- `Check Datto EDR/AV Status AOT Ver 12122025-1` — `8cb0f063-5875-452e-88ad-2e1748ed0fd0` — server configuration;
+- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` — `2b49d490-bcae-4825-b31e-c4f1be881ae5` — server configuration;
+- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` — `c3340a58-48d5-457b-bc30-5fd79e5ad8b1` — durable registry, metadata fingerprint `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`.
 
-No reboot component is included in the production component scope.
+The DNSFilter diagnostic standing-safe acceptance was completed on 2026-09-24 after the live Datto Description was corrected to classifier-safe wording. A no-per-run governed execution on AOT-50282 used job `d951ae82-37e4-406f-bdab-dd192c626d64`, made exactly one provider attempt, reached terminal `completed`, and returned governed stdout through correlation `corr_mcp_5b18eccd8dc14cb182f2d7870d7679e6`.
+
+No reboot component is included in the production component scope. The separate `Install DNSFilter AOT Ver 08262024` component is not standing-approved by this acceptance.
 
 The latest rollback-protected monitoring-only deployment used repository head `cefa32e9b14db97fb8c6e703ad467a9eda33c32b` and reconciled production observability to the `26704f...` MCP release.
 
