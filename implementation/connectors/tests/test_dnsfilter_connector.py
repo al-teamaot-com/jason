@@ -42,11 +42,12 @@ class FakeAudit:
 class FakeClient:
     calls = []
     response = {"data": []}
+    responses = {}
     def __init__(self, credentials):
         assert credentials["api_key"] == "provider-key"
     def get(self, path, params=None):
         self.calls.append((path, dict(params or {})))
-        return dict(self.response)
+        return dict(self.responses.get(path, self.response))
 
 
 def boundary(*, status=BoundaryStatus.VALIDATED, profile="dnsfilter-organization-read"):
@@ -86,6 +87,7 @@ def build(*, record=None):
     audit = FakeAudit()
     FakeClient.calls.clear()
     FakeClient.response = {"data": []}
+    FakeClient.responses = {}
     connector = DnsFilterConnector(
         secrets=secrets,
         transport=FakeTransport(),
@@ -120,29 +122,28 @@ def test_agent_search_derives_organization_scope_from_boundary():
     assert audit.events[0][1]["organization_boundary_validated"] is True
 
 
-def test_network_search_requires_returned_organization_relationship():
+def test_network_search_uses_only_exact_authorized_network_resource():
     connector, _, _ = build()
-    FakeClient.response = {
-        "data": [{
+    FakeClient.responses["/v1/networks/77"] = {
+        "data": {
             "id": "77",
             "relationships": {"organization": {"data": {"id": DNSFILTER_ORG_ID}}},
-        }]
+        }
     }
-    connector.execute(
+    result = connector.execute(
         ConnectorRequest(context("dnsfilter.network.search"), {"company_id": 333})
     )
-    path, params = FakeClient.calls[-1]
-    assert path == "/v1/networks/msp"
-    assert params["organization_id"] == 9001
+    assert [item["id"] for item in result.data["data"]] == ["77"]
+    assert FakeClient.calls == [("/v1/networks/77", {})]
 
 
 def test_cross_client_network_response_fails_closed():
     connector, _, _ = build()
-    FakeClient.response = {
-        "data": [{
+    FakeClient.responses["/v1/networks/77"] = {
+        "data": {
             "id": "77",
             "relationships": {"organization": {"data": {"id": "9999"}}},
-        }]
+        }
     }
     with pytest.raises(ConnectorAuthorizationError, match="crossed"):
         connector.execute(
@@ -293,6 +294,81 @@ def test_client_global_policy_view_is_rejected_before_secret_resolution():
             ConnectorRequest(
                 context("dnsfilter.policy.search"),
                 {"company_id": 333, "include_global_policies": True},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeClient.calls == []
+
+
+def test_client_policy_search_derives_exact_policy_from_authorized_network():
+    connector, _, _ = build()
+    FakeClient.responses["/v1/networks/77"] = {
+        "data": {
+            "id": "77",
+            "relationships": {
+                "organization": {"data": {"id": DNSFILTER_ORG_ID}},
+                "policy": {"data": {"id": "88"}},
+            },
+        }
+    }
+    FakeClient.responses["/v1/policies/88"] = {
+        "data": {
+            "id": "88",
+            "relationships": {
+                "organization": {"data": {"id": DNSFILTER_ORG_ID}},
+                "networks": {"data": [{"id": "77"}]},
+            },
+        }
+    }
+    result = connector.execute(
+        ConnectorRequest(
+            context("dnsfilter.policy.search"),
+            {"company_id": 333, "include_global_policies": False},
+        )
+    )
+    assert [item["id"] for item in result.data["data"]] == ["88"]
+    assert FakeClient.calls == [
+        ("/v1/networks/77", {}),
+        ("/v1/policies/88", {}),
+    ]
+
+
+def test_client_policy_response_crossing_network_boundary_fails_closed():
+    connector, _, _ = build()
+    FakeClient.responses["/v1/networks/77"] = {
+        "data": {
+            "id": "77",
+            "relationships": {
+                "organization": {"data": {"id": DNSFILTER_ORG_ID}},
+                "policy": {"data": {"id": "88"}},
+            },
+        }
+    }
+    FakeClient.responses["/v1/policies/88"] = {
+        "data": {
+            "id": "88",
+            "relationships": {
+                "organization": {"data": {"id": DNSFILTER_ORG_ID}},
+                "networks": {"data": [{"id": "77"}, {"id": "999"}]},
+            },
+        }
+    }
+    with pytest.raises(ConnectorAuthorizationError, match="client network"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter.policy.search"),
+                {"company_id": 333, "include_global_policies": False},
+            )
+        )
+
+
+def test_client_site_collection_filters_fail_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorConfigurationError, match="do not support"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter.network.search"),
+                {"company_id": 333, "protected": True},
             )
         )
     assert secrets.calls == []
