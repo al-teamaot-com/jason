@@ -58,11 +58,16 @@ class FakeClient:
         self.calls.append((path, dict(params)))
         return dict(self.response)
 
-def boundary(*, status=BoundaryStatus.VALIDATED, profile="endpoint-backup-read"):
+def boundary(
+    *,
+    status=BoundaryStatus.VALIDATED,
+    profile="endpoint-backup-read",
+    company_id=COMPANY_ID,
+):
     now = datetime(2026, 9, 23, tzinfo=timezone.utc)
     return ClientBoundary(
-        id="boundary-backup-1627",
-        client_id=COMPANY_ID,
+        id=f"boundary-backup-{company_id}",
+        client_id=company_id,
         provider="backup_net",
         external_tenant_id=CUSTOMER_ID,
         primary_domain="virtuoldesigns.com",
@@ -124,6 +129,38 @@ def test_asset_search_derives_customer_id_from_validated_boundary():
     assert params["page_size"] == 50
     assert secrets.calls == ["backup_net.readonly"]
     assert audit.events[0][1]["customer_boundary_validated"] is True
+
+
+def test_asset_search_accepts_valid_autotask_company_zero():
+    connector, secrets, _ = build(record=boundary(company_id="0"))
+    FakeClient.response = {
+        "items": [{"id": "asset-aot", "name": "AOT-50282", "customerId": CUSTOMER_ID}]
+    }
+    result = connector.execute(
+        ConnectorRequest(
+            context("backup_net.endpoint_asset.search", client_id="0"),
+            {"company_id": 0, "name": "AOT-50282"},
+        )
+    )
+    assert result.data["items"][0]["name"] == "AOT-50282"
+    path, params = FakeClient.calls[-1]
+    assert path == "/api/epb/v1/assets"
+    assert params["customer_id"] == CUSTOMER_ID
+    assert params["name"] == "AOT-50282"
+    assert secrets.calls == ["backup_net.readonly"]
+
+
+def test_negative_company_id_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="company_id"):
+        connector.execute(
+            ConnectorRequest(
+                context("backup_net.endpoint_asset.search"),
+                {"company_id": -1, "name": "AOT-50282"},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeClient.calls == []
 
 
 def test_provider_customer_id_cannot_be_supplied_by_caller():
@@ -197,13 +234,27 @@ def test_response_without_customer_proof_is_rejected():
             )
         )
 
-def test_backupiq_type_is_required_and_bounded():
+def test_backupiq_search_defaults_to_alert_type_when_omitted():
+    connector, secrets, _ = build()
+    connector.execute(
+        ConnectorRequest(
+            context("backup_net.backupiq_alert.search"),
+            {"company_id": 1627},
+        )
+    )
+    path, params = FakeClient.calls[-1]
+    assert path == "/v1/backupiq/alerts"
+    assert params["type"] == "alert"
+    assert secrets.calls == ["backup_net.readonly"]
+
+
+def test_backupiq_explicit_type_is_bounded():
     connector, secrets, _ = build()
     with pytest.raises(ConnectorConfigurationError, match="alert type"):
         connector.execute(
             ConnectorRequest(
                 context("backup_net.backupiq_alert.search"),
-                {"company_id": 1627},
+                {"company_id": 1627, "type": "invalid"},
             )
         )
     assert secrets.calls == []

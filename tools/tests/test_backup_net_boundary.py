@@ -9,6 +9,7 @@ from tools.backup_net_boundary import (
     _exact_asset,
     _exact_customer,
     _persist_boundary,
+    _prove_empty_asset_inventory,
 )
 
 CUSTOMER_ID = "d28a556c-d8de-48f9-8a64-90fdf03ec4d0"
@@ -64,6 +65,35 @@ def test_exact_asset_must_prove_same_customer():
     ])
     with pytest.raises(BoundaryDiscoveryError, match="does not match"):
         _exact_asset(client, customer_id=CUSTOMER_ID, asset_name="DGV-50859")
+
+
+def test_empty_asset_inventory_proves_zero_asset_customer():
+    client = FakeClient([{"items": []}])
+    proof = _prove_empty_asset_inventory(client, customer_id=CUSTOMER_ID)
+    assert proof == {"inventory_empty": True}
+    path, params = client.calls[0]
+    assert path == "/api/epb/v1/assets"
+    assert params["customer_id"] == CUSTOMER_ID
+    assert params["page_number"] == 1
+    assert params["page_size"] == 1
+
+
+def test_empty_asset_inventory_rejects_customer_with_assets():
+    client = FakeClient([{"items": [{"id": "asset-1"}]}])
+    with pytest.raises(BoundaryDiscoveryError, match="exact asset proof"):
+        _prove_empty_asset_inventory(client, customer_id=CUSTOMER_ID)
+
+
+def test_persist_boundary_accepts_autotask_company_zero(tmp_path: Path):
+    db = tmp_path / "boundaries-zero.sqlite3"
+    boundary_id, created = _persist_boundary(
+        db_path=db,
+        company_id="0",
+        customer_id=CUSTOMER_ID,
+        primary_domain="teamaot.com",
+    )
+    assert boundary_id
+    assert created is True
 
 
 def test_persist_boundary_is_idempotent_for_same_mapping(tmp_path: Path):
