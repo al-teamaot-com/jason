@@ -172,3 +172,34 @@ def test_shared_external_tenant_allows_disjoint_scopes_but_rejects_overlap(tmp_p
     with pytest.raises(BoundaryConflictError):
         repository.add(overlapping)
     store.close()
+
+
+def test_sqlite_master_company_zero_can_share_tenant_with_scoped_clients(tmp_path):
+    store = SQLiteClientBoundaryStore(tmp_path / "master-shared.sqlite3")
+    repository = SQLiteClientBoundaryRepository(store)
+    master = replace(
+        boundary(
+            boundary_id="boundary-master",
+            client_id="0",
+            tenant_id="tenant-shared",
+        ),
+        provider="dnsfilter",
+        profile="dnsfilter-organization-read",
+        external_scope_ids=(),
+    )
+    client = replace(
+        boundary(
+            boundary_id="boundary-client",
+            client_id="1179",
+            tenant_id="tenant-shared",
+        ),
+        provider="dnsfilter",
+        profile="dnsfilter-organization-read",
+        external_scope_ids=("1197210",),
+    )
+    repository.add(master)
+    repository.add(client)
+    assert repository.find_active_for_client(
+        client_id="1179", provider="dnsfilter"
+    ) == client
+    store.close()
