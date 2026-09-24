@@ -335,3 +335,74 @@ def test_start_is_idempotent_for_ticket_already_claimed_by_jason(monkeypatch):
     assert result["payload"]["status"] == "In Progress"
     assert result["jason_original_queue_id"] == 29682833
     assert result["jason_original_status_id"] == 1
+
+
+def test_internal_company_zero_allows_exact_configuration(monkeypatch):
+    ticket = _ticket(configuration_id=None)
+    ticket["companyID"] = 0
+
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "endpoint.device.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "resource_matches": [{
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                    }]
+                },
+            }
+        if capability_name == "service.configuration.search":
+            assert arguments["company_id"] == 0
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [{
+                            "id": 1001,
+                            "isActive": True,
+                            "referenceTitle": "DEVICE-123",
+                            "referenceNumber": "device-uid-123",
+                            "companyID": 0,
+                        }]
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    assert server._exact_configuration_for_ticket_device(
+        ticket=ticket,
+        device_name="DEVICE-123",
+    ) == 1001
+
+
+def test_internal_company_zero_allows_existing_configuration(monkeypatch):
+    ticket = _ticket(configuration_id=1001)
+    ticket["companyID"] = 0
+
+    def governed_read(*, capability_name, arguments):
+        assert capability_name == "service.configuration.read"
+        assert arguments == {"resource_id": 1001}
+        return {
+            "status": "succeeded",
+            "evidence": {
+                "data": {
+                    "item": {
+                        "id": 1001,
+                        "isActive": True,
+                        "referenceTitle": "DEVICE-123",
+                        "referenceNumber": "device-uid-123",
+                        "companyID": 0,
+                    }
+                }
+            },
+        }
+
+    monkeypatch.setattr(server, "_governed_read", governed_read)
+    result = server._validate_existing_ticket_configuration(
+        ticket=ticket,
+        configuration_id=1001,
+    )
+    assert result["id"] == 1001
+    assert result["companyID"] == 0

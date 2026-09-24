@@ -1970,7 +1970,7 @@ def _exact_configuration_for_ticket_device(
         company_id = int(ticket.get("companyID"))
     except (TypeError, ValueError) as error:
         raise ValueError("AUTOTASK_TICKET_COMPANY_REQUIRED") from error
-    if company_id < 1:
+    if company_id < 0:
         raise ValueError("AUTOTASK_TICKET_COMPANY_REQUIRED")
 
     configuration = _governed_read(
@@ -2024,7 +2024,7 @@ def _validate_existing_ticket_configuration(*, ticket: Mapping[str, Any], config
         ticket_company_id = int(ticket.get("companyID"))
     except (TypeError, ValueError) as error:
         raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED") from error
-    if ticket_company_id < 1:
+    if ticket_company_id < 0:
         raise ValueError("AUTOTASK_TICKET_WORK_START_COMPANY_REQUIRED")
 
     result = _governed_read(
