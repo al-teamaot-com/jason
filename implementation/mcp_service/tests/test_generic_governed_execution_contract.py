@@ -3,6 +3,13 @@ from types import SimpleNamespace
 from jason_mcp import server
 
 
+def _ticket_read(record):
+    return {
+        "status": "succeeded",
+        "evidence": {"data": {"items": [record]}},
+    }
+
+
 def test_discovery_includes_active_reads_and_explicit_actions(monkeypatch):
     def capability(
         name,
@@ -410,6 +417,7 @@ def test_datto_action_result_exposes_governed_job_uid_for_readback():
         "allowlist_name": "diagnostic",
         "job_uid": "provider-job-123",
         "job_reference_present": True,
+        "job_read_arguments": {"resource_id": "provider-job-123"},
     }
 
     assert "unexpected" not in result
@@ -699,6 +707,8 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
                         "items": [
                             {
                                 "id": 140629,
+                                "queueID": 29682833,
+                                "status": 1,
                                 "companyID": 0,
                                 "configurationItemID": None,
                                 "issueType": None,
@@ -718,6 +728,19 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
                             "hostname": "AOT-50282",
                         }
                     ]
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-1",
+                        "hostname": "AOT-50282",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
                 },
             }
         if capability_name == "service.configuration.search":
@@ -746,52 +769,80 @@ def test_ticket_work_start_builds_fixed_claim_and_exact_device_link(monkeypatch)
         {
             "ticket_id": 140629,
             "begin_work": True,
+            "work_kind": "diagnostic",
             "issue_type": "Endpoint Security",
             "sub_issue_type": "Antivirus",
         },
     )
 
-    assert result == {
-        "payload": {
-            "id": 140629,
-            "queueID": "Jason",
-            "status": "In Progress",
-            "billingCodeID": "Remote Support",
-            "configurationItemID": 1120,
-            "issueType": "Endpoint Security",
-            "subIssueType": "Antivirus",
-        },
-        "jason_policy_class": "ticket_work_start",
+    assert result["payload"] == {
+        "id": 140629,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+        "configurationItemID": 1120,
+        "issueType": "Endpoint Security",
+        "subIssueType": "Antivirus",
     }
-    assert calls[0][0] == "service.ticket.read"
-    assert calls[1][0] == "endpoint.device.search"
-    assert calls[2][0] == "service.configuration.search"
+    assert result["jason_policy_class"] == "ticket_work_start"
+    assert result["jason_original_queue_id"] == 29682833
+    assert result["jason_original_status_id"] == 1
+    assert result["jason_work_kind"] == "diagnostic"
+    assert [name for name, _ in calls] == [
+        "service.ticket.read",
+        "endpoint.device.search",
+        "endpoint.device.read",
+        "endpoint.device.search",
+        "service.configuration.search",
+    ]
 
 
 def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
     def governed_read(*, capability_name, arguments):
-        assert capability_name == "service.ticket.read"
-        return {
-            "status": "succeeded",
-            "evidence": {
-                "data": {
-                    "items": [
-                        {
-                            "id": 123,
+        if capability_name == "service.ticket.read":
+            return _ticket_read({
+                "id": 123,
+                "queueID": 29682833,
+                "status": 1,
+                "companyID": 99,
+                "configurationItemID": 456,
+                "issueType": 10,
+                "title": "Alert for DEVICE-123",
+            })
+        if capability_name == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": 456,
                             "companyID": 99,
-                            "configurationItemID": 456,
-                            "issueType": 10,
-                            "title": "Alert for DEVICE-123",
+                            "isActive": True,
+                            "referenceTitle": "DEVICE-123",
+                            "referenceNumber": "device-uid-123",
                         }
-                    ]
-                }
-            },
-        }
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
 
     monkeypatch.setattr(server, "_governed_read", governed_read)
     result = server._canonicalize_governed_action_arguments(
         "service.ticket.update",
-        {"ticket_id": 123, "begin_work": True},
+        {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic"},
     )
 
     assert result["payload"] == {
@@ -800,35 +851,59 @@ def test_ticket_work_start_preserves_existing_configuration(monkeypatch):
         "status": "In Progress",
         "billingCodeID": "Remote Support",
     }
+    assert result["jason_original_queue_id"] == 29682833
+    assert result["jason_original_status_id"] == 1
 
 
 def test_ticket_work_start_subissue_uses_existing_issue(monkeypatch):
-    monkeypatch.setattr(
-        server,
-        "_governed_read",
-        lambda **kwargs: {
-            "status": "succeeded",
-            "evidence": {
-                "data": {
-                    "items": [
-                        {
-                            "id": 123,
+    def governed_read(*, capability_name, arguments):
+        if capability_name == "service.ticket.read":
+            return _ticket_read({
+                "id": 123,
+                "queueID": 29682833,
+                "status": 1,
+                "companyID": 99,
+                "configurationItemID": 456,
+                "issueType": 10,
+                "title": "Generic ticket",
+            })
+        if capability_name == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": 456,
                             "companyID": 99,
-                            "configurationItemID": 456,
-                            "issueType": 10,
-                            "title": "Generic ticket",
+                            "isActive": True,
+                            "referenceTitle": "DEVICE-123",
+                            "referenceNumber": "device-uid-123",
                         }
-                    ]
-                }
-            },
-        },
-    )
+                    }
+                },
+            }
+        if capability_name == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-123",
+                        "hostname": "DEVICE-123",
+                        "online": True,
+                        "suspended": False,
+                        "deleted": False,
+                    }
+                },
+            }
+        raise AssertionError(capability_name)
 
+    monkeypatch.setattr(server, "_governed_read", governed_read)
     result = server._canonicalize_governed_action_arguments(
         "service.ticket.update",
         {
             "ticket_id": 123,
             "begin_work": True,
+            "work_kind": "diagnostic",
             "sub_issue_type": "Workstation",
         },
     )
