@@ -39,3 +39,16 @@ def test_all_public_confirm_gated_writes_have_dormant_capability_contracts():
         assert item.maximum_attempts == 1
         assert item.metadata["provider_confirmation_required"] == "true"
         assert item.metadata["activation_state"] == "registered_dormant_not_activated"
+        assert item.metadata["mcp_action_enabled"] == "true"
+        assert item.metadata["mcp_tool_name"] == "execute_governed_capability"
+        assert item.metadata["resource_types"]
+        assert item.metadata["operation"]
+        expected_imperative = (
+            "true"
+            if item.capability_name == "dns.protection.policy.create"
+            else "false"
+        )
+        assert (
+            item.metadata["conversation_authenticated_imperative_is_approval"]
+            == expected_imperative
+        )

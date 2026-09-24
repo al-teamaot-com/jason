@@ -66,6 +66,44 @@ _USER_DISRUPTIVE = frozenset(
 )
 
 
+_MCP_DISCOVERY_METADATA: dict[str, tuple[str, str]] = {
+    "dns.protection.policy.domain.block.add": ("dns_policy,dns_domain", "update"),
+    "dns.protection.policy.domain.allow.add": ("dns_policy,dns_domain", "update"),
+    "dns.protection.policy.domain.block.remove": ("dns_policy,dns_domain", "update"),
+    "dns.protection.policy.domain.allow.remove": ("dns_policy,dns_domain", "update"),
+    "dns.protection.policy.category.block.add": ("dns_policy,dns_category", "update"),
+    "dns.protection.policy.category.block.remove": ("dns_policy,dns_category", "update"),
+    "dns.protection.policy.domain.block.bulk.add": ("dns_policy,dns_domain", "update"),
+    "dns.protection.policy.domain.allow.bulk.add": ("dns_policy,dns_domain", "update"),
+    "dns.protection.global.list.domain.add": (
+        "dns_global_list,dns_domain,dns_protection_tenant",
+        "update",
+    ),
+    "dns.protection.global.list.domain.remove": (
+        "dns_global_list,dns_domain,dns_protection_tenant",
+        "update",
+    ),
+    "dns.protection.policy.category.set.across.org": (
+        "dns_policy,dns_category,dns_protection_tenant",
+        "update",
+    ),
+    "dns.protection.policy.clone": ("dns_policy", "create"),
+    "dns.protection.policy.create": ("dns_policy", "create"),
+    "dns.protection.policy.update": ("dns_policy", "update"),
+    "dns.protection.policy.delete": ("dns_policy", "delete"),
+    "dns.protection.site.policy.assign": ("dns_site,dns_policy", "update"),
+    "dns.protection.portal.user.invite": ("dns_portal_user", "create"),
+    "dns.protection.portal.user.role.update": ("dns_portal_user", "update"),
+    "dns.protection.portal.user.password.reset.send": ("dns_portal_user", "send"),
+    "dns.protection.agent.policy.reassign": ("dns_agent,dns_policy", "update"),
+    "dns.protection.agent.uninstall": ("dns_agent", "delete"),
+    "dns.protection.agent.bulk.remove": ("dns_agent", "delete"),
+    "dns.protection.site.forwarders.update": ("dns_site,dns_forwarder", "update"),
+    "dns.protection.block.page.update": ("dns_block_page", "update"),
+    "dns.protection.unblock.request.decide": ("dns_unblock_request", "update"),
+}
+
+
 def dnsfilter_mcp_mutation_capabilities(
     now: datetime,
 ) -> tuple[CapabilityDefinition, ...]:
@@ -80,6 +118,7 @@ def dnsfilter_mcp_mutation_capabilities(
 
     definitions: list[CapabilityDefinition] = []
     for capability_name, tool_name in DNSFILTER_MCP_MUTATION_TOOLS.items():
+        resource_types, operation = _MCP_DISCOVERY_METADATA[capability_name]
         definitions.append(
             CapabilityDefinition(
                 capability_name=capability_name,
@@ -168,6 +207,15 @@ def dnsfilter_mcp_mutation_capabilities(
                     "provider_neutral": "true",
                     "read_only": "false",
                     "write_capability": "true",
+                    "resource_types": resource_types,
+                    "operation": operation,
+                    "mcp_action_enabled": "true",
+                    "mcp_tool_name": "execute_governed_capability",
+                    "conversation_authenticated_imperative_is_approval": (
+                        "true"
+                        if capability_name == "dns.protection.policy.create"
+                        else "false"
+                    ),
                     "activation_state": "registered_dormant_not_activated",
                     "pilot_provider": "dnsfilter_mcp_mutation",
                     "provider_tool": tool_name,

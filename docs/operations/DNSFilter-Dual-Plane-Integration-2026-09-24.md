@@ -193,7 +193,7 @@ For the first controlled production write acceptance, use the narrow profile:
 - `JASON_DNSFILTER_MCP_MUTATION_PROFILE=policy_create_acceptance_v1`
 - `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`
 
-That profile activates and registers only `dns.protection.policy.create`. The other 24 DNSFilter mutation capabilities remain `BUILDING` and have no invoker registration. The authenticated owner must also have a narrow `execute` authority grant for `dns.protection.policy.create` with `approval_required=true`.
+That profile activates and registers only `dns.protection.policy.create`. The other 24 DNSFilter mutation capabilities remain `BUILDING` and have no invoker registration. For MCP discovery/execution, each mutation definition publishes bounded resource/operation metadata plus `mcp_action_enabled=true`; lifecycle remains the controlling exposure gate, so only an `ACTIVE` capability appears. The policy-create capability additionally allows the authenticated owner’s exact conversational imperative to satisfy the approval signal. The authenticated owner must also have a narrow `execute` authority grant for `dns.protection.policy.create` with `approval_required=true`.
 
 The broader `governed_v1` profile exists for a future separately approved full-write activation and must not be used for the first acceptance test.
 
