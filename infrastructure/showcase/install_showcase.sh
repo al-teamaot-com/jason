@@ -15,6 +15,8 @@ PLAYBOOK_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-playbook-exporter.service"
 PLAYBOOK_SERVICE_DST="/etc/systemd/system/jason-playbook-exporter.service"
 RESOLUTION_MEMORY_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-resolution-memory-exporter.service"
 RESOLUTION_MEMORY_SERVICE_DST="/etc/systemd/system/jason-resolution-memory-exporter.service"
+SECURITY_CONTROL_SERVICE_SRC="$SHOWCASE_DIR/systemd/jason-security-control-exporter.service"
+SECURITY_CONTROL_SERVICE_DST="/etc/systemd/system/jason-security-control-exporter.service"
 ENV_FILE="$SHOWCASE_DIR/.env"
 DEFAULT_OLLAMA_MODEL="qwen3:1.7b"
 
@@ -69,6 +71,7 @@ install_service "$USAGE_SERVICE_SRC" "$USAGE_SERVICE_DST"
 install_service "$ATTRIBUTION_SERVICE_SRC" "$ATTRIBUTION_SERVICE_DST"
 install_service "$PLAYBOOK_SERVICE_SRC" "$PLAYBOOK_SERVICE_DST"
 install_service "$RESOLUTION_MEMORY_SERVICE_SRC" "$RESOLUTION_MEMORY_SERVICE_DST"
+install_service "$SECURITY_CONTROL_SERVICE_SRC" "$SECURITY_CONTROL_SERVICE_DST"
 sudo systemctl daemon-reload
 sudo systemctl enable --now jason-status-exporter.service
 sudo systemctl enable --now jason-production-health-exporter.service
@@ -76,6 +79,7 @@ sudo systemctl enable --now jason-usage-exporter.service
 sudo systemctl enable --now jason-usage-attribution-exporter.service
 sudo systemctl enable --now jason-playbook-exporter.service
 sudo systemctl enable --now jason-resolution-memory-exporter.service
+sudo systemctl enable --now jason-security-control-exporter.service
 
 for endpoint in \
   "http://127.0.0.1:9464/metrics" \
@@ -83,7 +87,8 @@ for endpoint in \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics" \
   "http://127.0.0.1:9468/metrics" \
-  "http://127.0.0.1:9470/metrics"; do
+  "http://127.0.0.1:9470/metrics" \
+  "http://127.0.0.1:9471/metrics"; do
   for attempt in $(seq 1 20); do
     if curl -fsS "$endpoint" >/dev/null 2>&1; then
       break
@@ -153,7 +158,8 @@ sudo systemctl restart \
   jason-usage-exporter.service \
   jason-usage-attribution-exporter.service \
   jason-playbook-exporter.service \
-  jason-resolution-memory-exporter.service
+  jason-resolution-memory-exporter.service \
+  jason-security-control-exporter.service
 
 for endpoint in \
   "http://127.0.0.1:9464/metrics" \
@@ -161,7 +167,8 @@ for endpoint in \
   "http://127.0.0.1:9465/metrics" \
   "http://127.0.0.1:9466/metrics" \
   "http://127.0.0.1:9468/metrics" \
-  "http://127.0.0.1:9470/metrics"; do
+  "http://127.0.0.1:9470/metrics" \
+  "http://127.0.0.1:9471/metrics"; do
   curl -fsS "$endpoint" >/dev/null
 done
 
@@ -177,6 +184,7 @@ echo "Usage exporter: http://127.0.0.1:9465/metrics"
 echo "Usage attribution exporter: http://127.0.0.1:9466/metrics"
 echo "Playbook exporter: http://127.0.0.1:9468/metrics"
 echo "Resolution Memory exporter: http://127.0.0.1:9470/metrics"
+echo "Security Control exporter: http://127.0.0.1:9471/metrics"
 echo "Prometheus: http://127.0.0.1:9090"
 echo "Ollama: http://127.0.0.1:11434"
 echo "Local model: $OLLAMA_MODEL"

@@ -1,0 +1,22 @@
+[Unit]
+Description=Jason Security Control Prometheus Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=al
+WorkingDirectory=/home/al/projects/jason
+Environment=JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/openclaw/orchestration-events.sqlite3
+Environment=JASON_SECURITY_CONTROL_EXPORTER_HOST=0.0.0.0
+Environment=JASON_SECURITY_CONTROL_EXPORTER_PORT=9471
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/security_control_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadOnlyPaths=-/var/lib/jason/openclaw/orchestration-events.sqlite3
+
+[Install]
+WantedBy=multi-user.target
