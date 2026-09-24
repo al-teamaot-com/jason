@@ -131,7 +131,7 @@ def test_backup_capabilities_are_composed_but_provider_stays_gated_by_default(tm
         )
 
 
-def test_dnsfilter_capabilities_are_composed_but_stay_pilot_and_disabled(tmp_path, monkeypatch):
+def test_dnsfilter_capabilities_are_composed_active_but_providers_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr("jason_runtime.datto_component_execution.configured_pilot", lambda: None)
     application = build_runtime_application(_settings(tmp_path))
     expected = {
@@ -158,7 +158,7 @@ def test_dnsfilter_capabilities_are_composed_but_stay_pilot_and_disabled(tmp_pat
             allow_pilot=True,
         )
         assert capability is not None
-        assert capability.lifecycle_status.value == "pilot"
+        assert capability.lifecycle_status.value == "active"
         assert capability.metadata["read_only"] == "true"
         assert capability.metadata["client_partition_enforced_by"] == (
             "validated_dnsfilter_organization_boundary"
