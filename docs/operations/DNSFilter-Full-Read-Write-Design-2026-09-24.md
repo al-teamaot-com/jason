@@ -181,12 +181,14 @@ The caller cannot provide `confirm`.
 
 All mutation definitions use `maximum_attempts=1`.
 
-If the provider request times out or returns an ambiguous transport result after the request may have reached DNSFilter:
+If the provider request times out or returns an ambiguous execution result after the request may have reached DNSFilter:
 
 - do not retry;
-- perform only readback;
-- classify success only when readback proves the approved target state;
+- perform only provider-native readback;
+- classify success only when the mutation family has a strong pre-state invariant and readback proves the approved target state;
 - otherwise return unknown/verification failure and escalate.
+
+For policy creation, the strong invariant is zero exact-name matches before provider invocation. Recovery after a provider error is permitted only when post-write inventory resolves exactly one policy with the approved name under the approved organization. Other mutation families remain unknown-on-error until they have an equally strong pre-state invariant.
 
 ## Production deployment and activation model
 
@@ -200,7 +202,9 @@ Until separately approved:
 - the mutation invoker is not constructed or registered while the mutation profile/gate are absent;
 - `policy_create_acceptance_v1` activates and registers only `dns.protection.policy.create` for the first controlled acceptance;
 - `governed_v1` activates the full 25-capability mutation surface and is reserved for a later separately approved stage;
-- every activation profile also requires `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
+- every active mutation profile also requires `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
+- `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` or unset is a healthy kill switch that keeps the mutation foundation dormant even if a profile string remains configured;
+- `gate=true` without a valid profile fails closed;
 - authority remains a separate gate; the first acceptance uses only an `execute` grant for `dns.protection.policy.create` with `approval_required=true`;
 - no generic arbitrary MCP action surface is exposed.
 
@@ -239,4 +243,8 @@ Effect:
 
 The first attempt before this profile existed failed closed with zero provider mutations because normal discovery excludes dormant `BUILDING` capabilities. That failure is accepted safety evidence, not a provider failure.
 
-After the controlled create-policy acceptance and readback, return both mutation environment gates to unset unless a subsequent write test has separately approved scope.
+After the controlled create-policy acceptance and readback, set `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` (or unset it) unless a subsequent write test has separately approved scope. The profile value may remain configured but is inert while the execution gate is off.
+
+## First successful production mutation acceptance
+
+The first bounded production write acceptance passed and is recorded in `DNSFilter-Policy-Create-Acceptance-2026-09-24.md`. It created policy `1506474` with exactly one provider mutation attempt and no assignment to a site, network, roaming client, local user, or collection. The test also drove two durable corrections: provider-relative `/tools/<tool_name>` execution-plan paths and a healthy execution-gate-off cleanup path.

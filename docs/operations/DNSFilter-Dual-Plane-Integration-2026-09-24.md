@@ -227,3 +227,11 @@ The deployable dormant read/write design and its separate activation/acceptance 
 The first production policy-create acceptance attempt correctly stopped before provider mutation because the write foundation was deployed dormant: `dns.protection.policy.create` was `BUILDING`, `dnsfilter_mcp_mutation` was not available to normal governed-action discovery, and no mutation invoker was registered. The pre-read successfully validated Autotask company `0` -> DNSFilter organization `1110483`, returned the current policy inventory, and found no exact match for the requested test-policy name. Provider mutation invocation count was `0`, ordinary DNSFilter reads remained available, and no configuration or assignment changed.
 
 The corrective control-plane design is the narrow `policy_create_acceptance_v1` profile described above. This avoids activating all 25 administrative writes merely to perform the first controlled create-policy acceptance.
+
+## Successful policy-create acceptance
+
+The bounded production policy-create acceptance subsequently passed with exactly one provider mutation attempt. DNSFilter policy `1506474` (`Jason DNSFilter Governed Write Test 2026-09-24`) was created under organization `1110483` with no network, agent, local-user, or collection assignment. The provider returned an error after the mutation, so Jason did not retry; provider-native readback proved the policy inventory increased from 39 to 40 and resolved the exact created policy. The full acceptance evidence is recorded in `DNSFilter-Policy-Create-Acceptance-2026-09-24.md`.
+
+The acceptance also established that DNSFilter mutation execution plans must use provider-relative paths such as `/tools/create_policy`, not `mcp://dnsfilter/tools/create_policy`.
+
+Post-test cleanup semantics are fail-safe: `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` or unset leaves the mutation foundation healthy and dormant even if the acceptance profile string remains present. A true execution gate with no valid profile still fails closed.
