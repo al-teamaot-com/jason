@@ -30,6 +30,11 @@ jobs:
             implementation/runtime_service/tests \
             implementation/mcp_service/src \
             implementation/mcp_service/tests
+      - name: Prompt-injection evidence boundary regressions
+        run: |
+          python -m pytest -q \
+            implementation/cap-001/tests/test_provider_evidence.py \
+            implementation/cap-003/tests/test_local_llm.py
       - name: Cross-client and execution-plan binding regressions
         run: |
           python -m pytest -q \
