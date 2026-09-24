@@ -14,6 +14,7 @@ from connectors.core.contracts import (
 )
 
 DNSFILTER_API_URL = "https://api.dnsfilter.com"
+_USER_AGENT = "Mozilla/5.0 Project-Jason-DNSFilter-REST/1.0"
 
 _STATIC_PATHS = frozenset(
     {
@@ -79,6 +80,7 @@ class DnsFilterClient:
             headers={
                 "Accept": "application/json",
                 "Authorization": self._api_key,
+                "User-Agent": _USER_AGENT,
             },
             method="GET",
         )
