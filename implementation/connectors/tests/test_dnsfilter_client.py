@@ -40,6 +40,7 @@ def test_client_uses_documented_api_key_header_and_scoped_get():
     assert request.full_url.startswith(DNSFILTER_API_URL + "/v1/user_agents?")
     assert "organization_ids=123" in request.full_url
     assert request.get_header("Authorization") == "secret-key"
+    assert request.get_header("User-agent") == "Mozilla/5.0 Project-Jason-DNSFilter-REST/1.0"
     assert result == {"data": []}
 
 
