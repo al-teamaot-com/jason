@@ -32,6 +32,62 @@ def _image_id(image: str) -> str:
     return _output(["docker", "image", "inspect", image, "--format", "{{.Id}}"])
 
 
+def _optional_image_id(image: str) -> str | None:
+    completed = subprocess.run(
+        ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def _snapshot_image_aliases(tags: list[str]) -> dict[str, str | None]:
+    return {tag: _optional_image_id(tag) for tag in tags}
+
+
+def _promote_image_aliases(
+    *,
+    candidate_id: str,
+    previous_live_image_id: str,
+    promote_tags: list[str],
+    rollback_tag: str | None,
+) -> None:
+    if rollback_tag and previous_live_image_id != candidate_id:
+        _run(["docker", "tag", previous_live_image_id, rollback_tag], quiet=True)
+    for tag in promote_tags:
+        _run(["docker", "tag", candidate_id, tag], quiet=True)
+
+    for tag in promote_tags:
+        if _image_id(tag) != candidate_id:
+            raise RuntimeError(f"promoted image alias mismatch: {tag}")
+    if rollback_tag and previous_live_image_id != candidate_id:
+        if _image_id(rollback_tag) != previous_live_image_id:
+            raise RuntimeError(f"rollback image alias mismatch: {rollback_tag}")
+
+
+def _restore_image_aliases(snapshot: dict[str, str | None]) -> None:
+    for tag, image_id in snapshot.items():
+        if image_id:
+            subprocess.run(
+                ["docker", "tag", image_id, tag],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            subprocess.run(
+                ["docker", "image", "rm", tag],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+
 def _container_exists(name: str) -> bool:
     return subprocess.run(
         ["docker", "inspect", name],
@@ -183,7 +239,28 @@ def main() -> int:
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--harden", action="store_true")
+    parser.add_argument(
+        "--promote-image-tag",
+        action="append",
+        default=[],
+        help="Canonical image tag to retarget to the verified candidate after health checks. May be repeated.",
+    )
+    parser.add_argument(
+        "--rollback-image-tag",
+        help="Image tag to retarget to the actual pre-deployment live image after successful verification.",
+    )
     args = parser.parse_args()
+
+    promote_tags = list(dict.fromkeys(tag.strip() for tag in args.promote_image_tag if tag.strip()))
+    rollback_image_tag = str(args.rollback_image_tag or "").strip() or None
+    if rollback_image_tag and not promote_tags:
+        parser.error("--rollback-image-tag requires at least one --promote-image-tag")
+    if rollback_image_tag and rollback_image_tag in promote_tags:
+        parser.error("rollback image tag must be distinct from promoted image tags")
+    alias_tags = list(promote_tags)
+    if rollback_image_tag:
+        alias_tags.append(rollback_image_tag)
+    alias_snapshot = _snapshot_image_aliases(alias_tags)
 
     if not _container_exists(args.live):
         raise SystemExit(f"live container not found: {args.live}")
@@ -208,10 +285,13 @@ def main() -> int:
     print(f"MOUNT_COUNT={len(source.get('Mounts') or [])}")
     print(f"ENV_COUNT={len(source['Config'].get('Env') or [])}")
     print(f"HARDENING_REQUESTED={args.harden}")
+    print(f"PROMOTE_IMAGE_TAG_COUNT={len(promote_tags)}")
+    print(f"ROLLBACK_IMAGE_TAG={rollback_image_tag or ''}")
     if args.preflight:
         return 0
 
     old_renamed = False
+    aliases_mutated = False
     try:
         _run(["docker", "stop", args.live], quiet=True)
         _run(["docker", "rename", args.live, args.rollback], quiet=True)
@@ -251,6 +331,15 @@ def main() -> int:
             print("HARDENING_VERIFICATION=PASS")
 
         _health(args.live, args.health_url, args.health_attempts, args.health_interval)
+        if promote_tags:
+            aliases_mutated = True
+            _promote_image_aliases(
+                candidate_id=candidate_id,
+                previous_live_image_id=source["Image"],
+                promote_tags=promote_tags,
+                rollback_tag=rollback_image_tag,
+            )
+            print("IMAGE_ALIAS_PROMOTION=PASS")
         print("DEPLOYMENT=PASS")
         print(f"NEW_CONTAINER_ID={replacement['Id']}")
         print(f"NEW_IMAGE_ID={replacement['Image']}")
@@ -258,6 +347,9 @@ def main() -> int:
         return 0
     except Exception as error:
         print(f"DEPLOYMENT=FAIL ERROR={type(error).__name__}")
+        if aliases_mutated:
+            _restore_image_aliases(alias_snapshot)
+            print("IMAGE_ALIAS_ROLLBACK=ATTEMPTED")
         subprocess.run(
             ["docker", "rm", "-f", args.live],
             stdout=subprocess.DEVNULL,
