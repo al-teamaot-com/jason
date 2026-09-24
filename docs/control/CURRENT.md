@@ -112,12 +112,11 @@ Authoritative implementation/session record: `docs/sessions/Jason-Operational-Re
 
 The production MCP service is `jason-mcp-pilot`.
 
-As of the 2026-09-24 SUPPORT-CAP-019 promotion, the live MCP production image is `sha256:785279fe3ea25145dea7e55bd4256656999adc4bd7fc2f838cbf66877f7ba901`, built from source `5244e9e41ac86a366fc475b37be0559919fdc968`. The matching production runtime remains separately pinned to source `fe75d15304a294fe20193c5c837f9f99be74e4ee`. These facts supersede older MCP revision statements below where they conflict.
+The currently established live MCP code/image boundary after SUPPORT-CONN-020 production acceptance is:
 
-The currently established live MCP code/image boundary is:
-
-- source revision reported by the production container at the 2026-09-23 security safety check: `5f89f3af82081e75e97d66e523222e5564648163`;
-- image/deployment line: `jason-mcp:approval-replay-fix-5f89f3a`, deployment purpose `approval-replay-idempotency-fix`;
+- source revision: `87f9ecd60676db46fff5b815857b62a42f6b8320`;
+- MCP image ID: `sha256:f4cf7ae385a3457ff3dfce7865b3615187ac7615cd037badf4dd867c5df431e1`;
+- matching runtime image ID: `sha256:207f0aa1f03b8d3f97360bcd27d0273a516247579bc34838293ac46fbf171cb1`;
 - mode: `governed-read-plus-actions`;
 - phase: `governed-action-pilot`;
 - governed execution: Central Orchestrator;
@@ -127,12 +126,12 @@ The currently established live MCP code/image boundary is:
 - active write/action capabilities include `automation.component.execute`, `service.ticket.note.create`, and `service.ticket.update`;
 - Datto follow-up reads include `automation.job.read` and `automation.job.output.read`;
 - Datto EDR/AV governed reads include `endpoint.security.status.read`, `endpoint.security.detection.search`, `endpoint.security.detection.read`, `endpoint.security.policy.read`, `endpoint.security.scan.history.search`, and `endpoint.security.quarantine.search`;
-- all six endpoint-security reads were production-accepted against AOT-50282 on 2026-09-18;
-- matching `jason-runtime` is healthy on image ID `sha256:6342f0b38abcbfdbe7545f5d5947a0c683b2a40b193c28de5b8864da68d73680`;
+- Backup.net governed reads include `backup.endpoint.asset.search`, `backup.endpoint.asset.read`, `backup.endpoint.backup.search`, and `backup.backupiq.alert.search`;
+- SUPPORT-CONN-020 live AOT acceptance proved successful empty asset, BackupIQ-alert, and backup-history reads for validated company `0`;
 - write authority: `jason_exact_grant_plus_server_governed_approval_policy`;
 - Datto component approval policy: `server_classified_standing_safe_or_per_run`.
 
-The 2026-09-23 approval-replay production proof supersedes the older MCP revision statement above as the current security-review boundary. The execution-plan branch at `56b0e91...` is source-only/isolated-proof state until deployed. Continue to verify volatile runtime state before consequential change rather than assuming branch HEAD equals deployed state.
+Immediate rollback aliases preserve the pre-fix runtime and MCP images recorded in the top-level Status section. Continue to verify volatile runtime state before consequential change rather than assuming repository HEAD equals deployed state.
 
 ## Autotask governed proof
 
