@@ -45,7 +45,10 @@ def test_all_public_confirm_gated_writes_have_dormant_capability_contracts():
         assert item.metadata["operation"]
         expected_imperative = (
             "true"
-            if item.capability_name == "dns.protection.policy.create"
+            if item.capability_name in {
+                "dns.protection.policy.create",
+                "dns.protection.policy.delete",
+            }
             else "false"
         )
         assert (
