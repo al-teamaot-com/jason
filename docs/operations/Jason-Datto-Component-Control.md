@@ -50,3 +50,19 @@ Grafana is connected to both `jason-observability` and the external `jason-core`
 - Shadow registry test changed `Detect Boot Type (BIOS/UEFI) [WIN]` from per-run to autonomous and back to per-run without touching production policy.
 - Production MCP component-control endpoint returned 556 components, 3 autonomous, and 435 eligible at cutover.
 - Grafana dashboard `jason-component-control` is provisioned with the live catalog table and Business Forms approval panel.
+
+## DNSFilter diagnostic production acceptance — 2026-09-24
+
+The exact live Datto component `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is now durably approved for standing-safe autonomous diagnostic use.
+
+- UID: `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`
+- approval mode: `standing_safe`
+- approval source: `durable_registry`
+- approving identity: `person-al`
+- metadata fingerprint: `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`
+- live Description was re-read from the authoritative Datto catalog before approval and contained no blocked disruptive/destructive keywords
+- the global safety classifier was not weakened or bypassed
+
+Production proof used AOT-50282, device UID `69571572-83f7-1e33-9cdf-01717d4e74a4`. Jason selected the exact component without a per-run approval flag, made exactly one provider attempt, received job `d951ae82-37e4-406f-bdab-dd192c626d64`, verified terminal `completed`, and retrieved governed stdout with correlation `corr_mcp_5b18eccd8dc14cb182f2d7870d7679e6`.
+
+This approval applies only to the read-only diagnostic. It does not approve `Install DNSFilter AOT Ver 08262024`, service start/restart, repair/reinstall, uninstall, DNS/NIC changes, or reboot.
