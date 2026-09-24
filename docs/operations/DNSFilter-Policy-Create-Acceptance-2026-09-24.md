@@ -134,3 +134,8 @@ Both `jason-runtime` and `jason-mcp-pilot` are healthy with:
 Ordinary DNSFilter reads remain healthy. A post-cleanup policy search returned 40 policies when global policies were included: 38 regular policies plus 2 global policies. Policy `1506474` remains present under organization `1110483` with zero networks, zero user agents, zero local users, and zero collections.
 
 This closes the first policy-create write acceptance. The test policy remains intentionally undeleted for a future separately governed deletion acceptance.
+
+
+## Follow-up deletion acceptance
+
+The next separately governed acceptance is deletion of this exact unassigned test policy using the narrow `policy_delete_acceptance_v1` profile. The plan is documented in `DNSFilter-Policy-Delete-Acceptance-Plan-2026-09-24.md`. The deletion profile authorizes no other policy target and does not use conversational imperative auto-approval; an explicit governed approval is required before the single provider mutation attempt.

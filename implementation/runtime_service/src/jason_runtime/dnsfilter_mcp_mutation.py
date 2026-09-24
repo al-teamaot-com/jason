@@ -47,6 +47,16 @@ DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE = (
 DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY = (
     "dns.protection.policy.create"
 )
+DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE = (
+    "policy_delete_acceptance_v1"
+)
+DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY = (
+    "dns.protection.policy.delete"
+)
+DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID = "1506474"
+DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME = (
+    "Jason DNSFilter Governed Write Test 2026-09-24"
+)
 DNSFILTER_MCP_MUTATION_PROVIDER = "dnsfilter_mcp_mutation"
 
 
@@ -224,6 +234,8 @@ def _mutation_capabilities_for_profile(profile: str) -> tuple[str, ...]:
         return tuple(sorted(DNSFILTER_MCP_MUTATION_TOOLS))
     if profile == DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE:
         return (DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,)
+    if profile == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE:
+        return (DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY,)
     raise DnsFilterMcpMutationActivationError(
         "unsupported DNSFilter MCP mutation profile"
     )
@@ -538,6 +550,23 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
             raise PermissionError("DNSFILTER_MCP_MUTATION_EXECUTION_DISABLED")
 
         tool_name = _TOOL_BY_PROVIDER[request.context.capability]
+        active_profile = os.getenv(
+            DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
+        ).strip().casefold()
+        if (
+            active_profile == DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE
+            and tool_name != "create_policy"
+        ):
+            raise ConnectorAuthorizationError(
+                "DNSFilter policy-create acceptance profile permits only create_policy."
+            )
+        if (
+            active_profile == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE
+            and tool_name != "delete_policy"
+        ):
+            raise ConnectorAuthorizationError(
+                "DNSFilter policy-delete acceptance profile permits only delete_policy."
+            )
         raw = dict(request.arguments)
         normalized = self._normalize_arguments(tool_name, raw)
         company_id, organization_id, network_scope_ids = self._resolve_boundary(
@@ -656,10 +685,21 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                 opaque.tool_name, opaque.provider_arguments
             )
         except ConnectorTransportError as exc:
-            if (
-                opaque.tool_name == "create_policy"
-                and opaque.preflight.get("policy_name_unique_before_write") is True
-            ):
+            readback_recovery_allowed = (
+                (
+                    opaque.tool_name == "create_policy"
+                    and opaque.preflight.get(
+                        "policy_name_unique_before_write"
+                    ) is True
+                )
+                or (
+                    opaque.tool_name == "delete_policy"
+                    and opaque.preflight.get(
+                        "policy_delete_acceptance_target_verified"
+                    ) is True
+                )
+            )
+            if readback_recovery_allowed:
                 try:
                     verification = self._verify(
                         client,
@@ -864,6 +904,7 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
     ) -> Mapping[str, Any]:
         resolved: dict[str, Any] = {}
         policy_ids: list[int | str] = []
+        policy_payloads: dict[str, Mapping[str, Any]] = {}
         for key in ("policy_id", "source_policy_id"):
             if key in args:
                 policy_ids.append(args[key])
@@ -874,6 +915,7 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                 {"policy_id": policy_id, "include_relationships": True},
             )
             self._require_scope(payload, organization_id, "policy")
+            policy_payloads[str(policy_id)] = payload
         if policy_ids:
             resolved["policy_ids"] = [str(item) for item in policy_ids]
         network_ids = []
@@ -911,6 +953,79 @@ class DnsFilterMcpGovernedConnector(DnsFilterMcpConnector):
                     "DNSFilter policy with the exact requested name already exists."
                 )
             resolved["policy_name_unique_before_write"] = True
+
+        active_profile = os.getenv(
+            DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
+        ).strip().casefold()
+        if (
+            tool == "delete_policy"
+            and active_profile
+            == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE
+        ):
+            target = str(args["policy_id"])
+            if target != DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID:
+                raise ConnectorAuthorizationError(
+                    "DNSFilter policy-delete acceptance profile permits only the "
+                    "approved test policy ID."
+                )
+            payload = policy_payloads.get(target)
+            resource = _resource(payload or {})
+            attrs = resource.get("attributes")
+            if not isinstance(attrs, Mapping):
+                raise ConnectorAuthorizationError(
+                    "DNSFilter policy-delete acceptance preflight did not return "
+                    "policy attributes."
+                )
+            if (
+                str(attrs.get("name") or "")
+                != DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME
+            ):
+                raise ConnectorAuthorizationError(
+                    "DNSFilter policy-delete acceptance target name did not match "
+                    "the approved test policy."
+                )
+            if bool(attrs.get("is_global_policy")):
+                raise ConnectorAuthorizationError(
+                    "DNSFilter policy-delete acceptance target must not be global."
+                )
+            relationships = resource.get("relationships")
+            if not isinstance(relationships, Mapping):
+                raise ConnectorAuthorizationError(
+                    "DNSFilter policy-delete acceptance preflight did not return "
+                    "relationships."
+                )
+            assignment_keys = (
+                "networks",
+                "mac_addresses",
+                "scheduled_policies",
+                "network_subnets",
+                "user_agents",
+                "agent_local_users",
+                "collections",
+            )
+            for key in assignment_keys:
+                relationship = relationships.get(key)
+                if not isinstance(relationship, Mapping):
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter policy-delete acceptance could not prove "
+                        f"relationship {key} is empty."
+                    )
+                data = relationship.get("data")
+                if not isinstance(data, list):
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter policy-delete acceptance could not prove "
+                        f"relationship {key} is empty."
+                    )
+                if data:
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter policy-delete acceptance target is assigned "
+                        f"through relationship {key}."
+                    )
+            resolved["policy_delete_acceptance_target_verified"] = True
+            resolved["policy_delete_acceptance_policy_id"] = target
+            resolved["policy_delete_acceptance_policy_name"] = (
+                DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME
+            )
 
         if "block_page_id" in args:
             payload = client.call_tool(

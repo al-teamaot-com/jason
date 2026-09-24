@@ -201,6 +201,7 @@ Until separately approved:
 - the dedicated `dnsfilter_mcp_mutation` provider is registered as `PLANNED / UNKNOWN / BLOCKED`;
 - the mutation invoker is not constructed or registered while the mutation profile/gate are absent;
 - `policy_create_acceptance_v1` activates and registers only `dns.protection.policy.create` for the first controlled acceptance;
+- `policy_delete_acceptance_v1` activates and registers only `dns.protection.policy.delete` for the separately governed deletion of acceptance policy `1506474`;
 - `governed_v1` activates the full 25-capability mutation surface and is reserved for a later separately approved stage;
 - every active mutation profile also requires `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
 - `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` or unset is a healthy kill switch that keeps the mutation foundation dormant even if a profile string remains configured;
@@ -248,3 +249,8 @@ After the controlled create-policy acceptance and readback, set `JASON_DNSFILTER
 ## First successful production mutation acceptance
 
 The first bounded production write acceptance passed and is recorded in `DNSFilter-Policy-Create-Acceptance-2026-09-24.md`. It created policy `1506474` with exactly one provider mutation attempt and no assignment to a site, network, roaming client, local user, or collection. The test also drove two durable corrections: provider-relative `/tools/<tool_name>` execution-plan paths and a healthy execution-gate-off cleanup path.
+
+
+## Controlled policy-delete acceptance profile
+
+The second live acceptance is intentionally limited to deletion of the first acceptance policy. `policy_delete_acceptance_v1` activates only `dns.protection.policy.delete`. In addition to the normal AOT master-scope boundary, the connector hard-binds this profile to policy ID `1506474` and the exact name `Jason DNSFilter Governed Write Test 2026-09-24`. Preflight must prove the target is non-global and every assignment relationship is explicitly present and empty. The test omits `force`, performs at most one provider deletion attempt, and treats a provider error as success only when provider-native readback proves the exact target is absent. See `DNSFilter-Policy-Delete-Acceptance-Plan-2026-09-24.md`.
