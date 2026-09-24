@@ -109,3 +109,19 @@ After the acceptance:
 ## Acceptance record
 
 After execution, preserve the approval ID, intent fingerprint, execution-plan fingerprint, execution ID, correlation ID, provider invocation count, pre-write relationship evidence, provider result, post-write readback, and final dormant cleanup state in a dedicated acceptance record.
+
+## Execution result
+
+This acceptance was executed successfully on 2026-09-24.
+
+- Provider mutation invocation count: `1`
+- Approval ID: `approval_mcp_cf888a8fdc2b4254bb6cc556023fff74`
+- Execution ID: `exec_mcp_action_afeaa87613a749fdbf826ece039568e5`
+- Correlation ID: `corr_mcp_action_f9ed5100adbf47b8b0a565e6833348df`
+- Deleted policy ID: `1506474`
+- Post-write exact target presence: `false`
+- Post-write global-inclusive policy count: `39`
+- Final mutation state: dormant
+- Exact delete discovery after cleanup: unavailable
+
+The complete acceptance evidence is recorded in `DNSFilter-Policy-Delete-Acceptance-2026-09-24.md`.
