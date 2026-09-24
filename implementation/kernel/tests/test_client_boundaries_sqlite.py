@@ -135,3 +135,40 @@ def test_boundary_store_supports_process_cached_worker_thread_reads(tmp_path):
 
     assert observed == expected
     store.close()
+
+
+def test_external_scope_ids_survive_store_reopen(tmp_path):
+    path = tmp_path / "scoped-boundaries.sqlite3"
+    store = SQLiteClientBoundaryStore(path)
+    repository = SQLiteClientBoundaryRepository(store)
+    scoped = replace(boundary(), external_scope_ids=("1001", "1002"))
+    repository.add(scoped)
+    store.close()
+
+    reopened = SQLiteClientBoundaryStore(path)
+    observed = SQLiteClientBoundaryRepository(reopened).get(scoped.id)
+    assert observed == scoped
+    reopened.close()
+
+
+def test_shared_external_tenant_allows_disjoint_scopes_but_rejects_overlap(tmp_path):
+    store = SQLiteClientBoundaryStore(tmp_path / "shared-boundaries.sqlite3")
+    repository = SQLiteClientBoundaryRepository(store)
+    first = replace(
+        boundary(boundary_id="boundary-1", client_id="client-1", tenant_id="tenant-shared"),
+        external_scope_ids=("1001",),
+    )
+    second = replace(
+        boundary(boundary_id="boundary-2", client_id="client-2", tenant_id="tenant-shared"),
+        external_scope_ids=("1002",),
+    )
+    repository.add(first)
+    repository.add(second)
+
+    overlapping = replace(
+        boundary(boundary_id="boundary-3", client_id="client-3", tenant_id="tenant-shared"),
+        external_scope_ids=("1002",),
+    )
+    with pytest.raises(BoundaryConflictError):
+        repository.add(overlapping)
+    store.close()

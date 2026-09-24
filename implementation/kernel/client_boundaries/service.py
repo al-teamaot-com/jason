@@ -120,6 +120,7 @@ class ClientBoundaryService:
         external_tenant_id: str,
         consented_at: datetime,
         service_principal_id: str | None = None,
+        external_scope_ids: tuple[str, ...] = (),
     ) -> ClientBoundary:
         self._require_identifier(
             external_tenant_id,
@@ -127,18 +128,6 @@ class ClientBoundaryService:
         )
 
         consumed = self._state_service.consume(state)
-
-        existing_tenant = (
-            self._boundaries.find_active_for_external_tenant(
-                provider=consumed.provider,
-                external_tenant_id=external_tenant_id,
-            )
-        )
-        if existing_tenant is not None:
-            raise BoundaryConflictError(
-                "External tenant is already mapped "
-                "to an active client boundary."
-            )
 
         boundary = ClientBoundary(
             id=f"bnd_{uuid.uuid4().hex}",
@@ -156,6 +145,7 @@ class ClientBoundaryService:
                 consented_at,
                 "consented_at",
             ),
+            external_scope_ids=self._normalize_scope_ids(external_scope_ids),
         )
 
         self._boundaries.add(boundary)
@@ -217,6 +207,13 @@ class ClientBoundaryService:
             self._clock(),
             "clock",
         )
+
+    @staticmethod
+    def _normalize_scope_ids(values: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(sorted({str(value).strip() for value in values if str(value).strip()}))
+        if any("/" in value or "\\" in value for value in normalized):
+            raise ValueError("external_scope_ids must contain opaque identifiers.")
+        return normalized
 
     @staticmethod
     def _require_identifier(

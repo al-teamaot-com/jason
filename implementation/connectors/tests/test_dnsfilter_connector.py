@@ -63,6 +63,7 @@ def boundary(*, status=BoundaryStatus.VALIDATED, profile="dnsfilter-organization
         consent_transaction_id="owner-approved-dnsfilter-read",
         created_at=now,
         validated_at=now if status is BoundaryStatus.VALIDATED else None,
+        external_scope_ids=("77",),
     )
 
 
@@ -97,7 +98,11 @@ def build(*, record=None):
 
 def test_agent_search_derives_organization_scope_from_boundary():
     connector, secrets, audit = build()
-    FakeClient.response = {"data": [{"id": "agent-1", "attributes": {"hostname": "Atomic-50291"}}]}
+    FakeClient.response = {"data": [{
+        "id": "agent-1",
+        "attributes": {"hostname": "Atomic-50291"},
+        "relationships": {"network": {"data": {"id": "77"}}},
+    }]}
     result = connector.execute(
         ConnectorRequest(
             context("dnsfilter.user_agent.search"),
@@ -108,6 +113,7 @@ def test_agent_search_derives_organization_scope_from_boundary():
     path, params = FakeClient.calls[-1]
     assert path == "/v1/user_agents"
     assert params["organization_ids"] == [9001]
+    assert params["network_ids"] == [77]
     assert params["search"] == "Atomic-50291"
     assert params["agent_state"] == "protected"
     assert secrets.calls == ["dnsfilter.readonly"]
@@ -144,15 +150,20 @@ def test_cross_client_network_response_fails_closed():
         )
 
 
-def test_organization_scope_cannot_be_supplied_by_caller():
+def test_provider_scope_cannot_be_supplied_by_caller():
     connector, secrets, _ = build()
-    with pytest.raises(ConnectorAuthorizationError, match="server-derived"):
-        connector.execute(
-            ConnectorRequest(
-                context("dnsfilter.user_agent.search"),
-                {"company_id": 333, "organization_ids": [9999]},
+    for extra in (
+        {"organization_ids": [9999]},
+        {"network_ids": [999]},
+        {"network_id": 999},
+    ):
+        with pytest.raises(ConnectorAuthorizationError, match="server-derived"):
+            connector.execute(
+                ConnectorRequest(
+                    context("dnsfilter.user_agent.search"),
+                    {"company_id": 333, **extra},
+                )
             )
-        )
     assert secrets.calls == []
     assert FakeClient.calls == []
 
@@ -200,6 +211,7 @@ def test_autotask_self_company_zero_is_valid_dnsfilter_boundary():
         consent_transaction_id=record.consent_transaction_id,
         created_at=record.created_at,
         validated_at=record.validated_at,
+        external_scope_ids=(),
     )
     connector, secrets, _ = build(record=record)
     FakeClient.response = {"data": {"id": DNSFILTER_ORG_ID}}
@@ -227,6 +239,60 @@ def test_agent_state_and_page_size_are_bounded_before_provider_call():
             ConnectorRequest(
                 context("dnsfilter.network.search"),
                 {"company_id": 333, "page_size": 9999},
+            )
+        )
+    assert secrets.calls == []
+    assert FakeClient.calls == []
+
+
+def test_client_boundary_requires_network_scope_before_secret_resolution():
+    record = boundary()
+    record = record.__class__(
+        id=record.id,
+        client_id=record.client_id,
+        provider=record.provider,
+        external_tenant_id=record.external_tenant_id,
+        primary_domain=record.primary_domain,
+        profile=record.profile,
+        application_id=record.application_id,
+        status=record.status,
+        consent_transaction_id=record.consent_transaction_id,
+        created_at=record.created_at,
+        consented_at=record.consented_at,
+        validated_at=record.validated_at,
+        service_principal_id=record.service_principal_id,
+        last_error_code=record.last_error_code,
+        offboarded_at=record.offboarded_at,
+        external_scope_ids=(),
+    )
+    connector, secrets, _ = build(record=record)
+    with pytest.raises(ConnectorAuthorizationError, match="network boundary"):
+        connector.execute(
+            ConnectorRequest(context("dnsfilter.network.search"), {"company_id": 333})
+        )
+    assert secrets.calls == []
+    assert FakeClient.calls == []
+
+
+def test_agent_response_outside_authorized_network_fails_closed():
+    connector, _, _ = build()
+    FakeClient.response = {"data": [{
+        "id": "agent-other",
+        "relationships": {"network": {"data": {"id": "999"}}},
+    }]}
+    with pytest.raises(ConnectorAuthorizationError, match="client network"):
+        connector.execute(
+            ConnectorRequest(context("dnsfilter.user_agent.search"), {"company_id": 333})
+        )
+
+
+def test_client_global_policy_view_is_rejected_before_secret_resolution():
+    connector, secrets, _ = build()
+    with pytest.raises(ConnectorAuthorizationError, match="global policy"):
+        connector.execute(
+            ConnectorRequest(
+                context("dnsfilter.policy.search"),
+                {"company_id": 333, "include_global_policies": True},
             )
         )
     assert secrets.calls == []

@@ -36,19 +36,14 @@ _CAPABILITY_TO_TOOL = {
 _ALLOWED_ARGUMENTS = {
     "search_query_logs": {
         "company_id","from","to","fqdn","domain","agent_id","agent_ids",
-        "network_id","network_ids","user_id","user_ids","result","source",
-        "question_type","private_ip","security_report","category_ids",
-        "application_ids","page","per_page","compact",
+        "user_id","user_ids","result","source","question_type","private_ip",
+        "security_report","category_ids","application_ids","page","per_page","compact",
     },
     "explain_query_decision": {
-        "company_id","fqdn","from","to","agent_id","network_id",
+        "company_id","fqdn","from","to","agent_id",
     },
-    "get_blocked_traffic": {
-        "company_id","from","to","limit",
-    },
-    "detect_traffic_anomalies": {
-        "company_id","from","to","network_id",
-    },
+    "get_blocked_traffic": {"company_id","from","to","limit"},
+    "detect_traffic_anomalies": {"company_id","from","to"},
     "stale_agents": {"company_id","days"},
     "agent_version_report": {"company_id","latest_version"},
     "duplicate_agents": {"company_id"},
@@ -63,6 +58,13 @@ _ALLOWED_ARGUMENTS = {
     },
     "pending_unblock_requests_count": {"company_id"},
 }
+
+_FORBIDDEN_SCOPE_ARGUMENTS = frozenset(
+    {"organization_id","organization_ids","msp_id","network_id","network_ids","site_id","site_ids","confirm"}
+)
+_MULTI_NETWORK_TOOLS = frozenset({"search_query_logs"})
+_SINGLE_NETWORK_TOOLS = frozenset({"explain_query_decision", "detect_traffic_anomalies"})
+_ORGANIZATION_ONLY_TOOLS = frozenset(_CAPABILITY_TO_TOOL.values()) - _MULTI_NETWORK_TOOLS - _SINGLE_NETWORK_TOOLS
 
 
 class DnsFilterMcpConnector:
@@ -91,44 +93,53 @@ class DnsFilterMcpConnector:
         tool_name = _CAPABILITY_TO_TOOL[request.context.capability]
         arguments = dict(request.arguments)
         self._validate_arguments(tool_name, arguments)
-        company_id, organization_id = self._resolve_boundary(
-            request.context,
-            arguments,
+        company_id, organization_id, network_ids = self._resolve_boundary(
+            request.context, arguments
         )
+        client_scoped = company_id != "0"
+
+        if client_scoped and tool_name in _ORGANIZATION_ONLY_TOOLS:
+            raise ConnectorAuthorizationError(
+                f"DNSFilter MCP tool {tool_name} cannot prove client-network isolation."
+            )
+        if client_scoped and tool_name in _SINGLE_NETWORK_TOOLS and len(network_ids) != 1:
+            raise ConnectorAuthorizationError(
+                f"DNSFilter MCP tool {tool_name} requires exactly one authorized client network."
+            )
+
         provider_arguments = {
-            key: value
-            for key, value in arguments.items()
-            if key != "company_id"
+            key: value for key, value in arguments.items() if key != "company_id"
         }
         provider_arguments["organization_id"] = organization_id
+        if client_scoped and tool_name in _MULTI_NETWORK_TOOLS:
+            provider_arguments["network_ids"] = list(network_ids)
+        elif client_scoped and tool_name in _SINGLE_NETWORK_TOOLS:
+            provider_arguments["network_id"] = network_ids[0]
 
-        self._audit.record(
-            "connector.requested",
-            request.context,
-            {
-                "provider": self.provider_name,
-                "tool": tool_name,
-                "company_id": company_id,
-                "organization_boundary_validated": True,
-                "oauth_user_session": True,
-            },
-        )
+        audit_scope = {
+            "provider": self.provider_name,
+            "tool": tool_name,
+            "company_id": company_id,
+            "organization_id": organization_id,
+            "network_scope_ids": list(network_ids),
+            "organization_boundary_validated": True,
+            "network_boundary_validated": bool(network_ids) or not client_scoped,
+            "oauth_user_session": True,
+        }
+        self._audit.record("connector.requested", request.context, audit_scope)
         client = self._client_factory(self._oauth_store)
         data = client.call_tool(tool_name, provider_arguments)
-        self._assert_response_scope(
+        verification = self._assert_response_scope(
             data,
             organization_id,
+            network_ids,
             tool_name=tool_name,
+            client_scoped=client_scoped,
         )
         self._audit.record(
             "connector.completed",
             request.context,
-            {
-                "provider": self.provider_name,
-                "tool": tool_name,
-                "company_id": company_id,
-                "organization_boundary_validated": True,
-            },
+            {**audit_scope, "scope_verification": verification},
         )
         return ConnectorResult(
             capability=request.context.capability,
@@ -137,20 +148,12 @@ class DnsFilterMcpConnector:
         )
 
     @staticmethod
-    def _validate_arguments(
-        tool_name: str,
-        arguments: Mapping[str, Any],
-    ) -> None:
-        forbidden = {
-            "organization_id","organization_ids","msp_id","confirm",
-        }.intersection(arguments)
-        if forbidden:
+    def _validate_arguments(tool_name: str, arguments: Mapping[str, Any]) -> None:
+        if _FORBIDDEN_SCOPE_ARGUMENTS.intersection(arguments):
             raise ConnectorAuthorizationError(
-                "DNSFilter MCP organization scope and confirmations are server-derived."
+                "DNSFilter MCP organization and network scope is server-derived."
             )
-        unexpected = sorted(
-            set(arguments) - _ALLOWED_ARGUMENTS[tool_name]
-        )
+        unexpected = sorted(set(arguments) - _ALLOWED_ARGUMENTS[tool_name])
         if unexpected:
             raise ConnectorConfigurationError(
                 "DNSFilter MCP request contains unsupported argument(s): "
@@ -161,10 +164,7 @@ class DnsFilterMcpConnector:
                 raise ConnectorConfigurationError(
                     "DNS query-log search requires from and to."
                 )
-        if tool_name in {
-            "get_blocked_traffic",
-            "detect_traffic_anomalies",
-        }:
+        if tool_name in {"get_blocked_traffic", "detect_traffic_anomalies"}:
             if not arguments.get("from") or not arguments.get("to"):
                 raise ConnectorConfigurationError(
                     f"DNSFilter MCP {tool_name} requires from and to."
@@ -188,20 +188,16 @@ class DnsFilterMcpConnector:
                 raise ConnectorConfigurationError(
                     f"DNSFilter MCP {key} must be positive."
                 )
-            if key == "per_page" and value > 100:
+            if key in {"per_page", "limit"} and value > 100:
                 raise ConnectorConfigurationError(
-                    "DNSFilter MCP per_page must be 1-100."
-                )
-            if key == "limit" and value > 100:
-                raise ConnectorConfigurationError(
-                    "DNSFilter MCP limit must be 1-100."
+                    f"DNSFilter MCP {key} must be 1-100."
                 )
 
     def _resolve_boundary(
         self,
         context: ConnectorContext,
         arguments: Mapping[str, Any],
-    ) -> tuple[str, int]:
+    ) -> tuple[str, int, tuple[int, ...]]:
         raw_company_id = arguments.get("company_id")
         if isinstance(raw_company_id, bool):
             raise ConnectorAuthorizationError(
@@ -217,10 +213,7 @@ class DnsFilterMcpConnector:
             raise ConnectorAuthorizationError(
                 "An exact Autotask company_id is required for DNSFilter MCP access."
             )
-        if (
-            context.client_id is not None
-            and str(context.client_id) != company_id
-        ):
+        if context.client_id is not None and str(context.client_id) != company_id:
             raise ConnectorAuthorizationError(
                 "DNSFilter MCP request client scope does not match the selected company."
             )
@@ -246,29 +239,47 @@ class DnsFilterMcpConnector:
             raise ConnectorAuthorizationError(
                 "DNSFilter organization boundary contains an invalid organization ID."
             )
-        return company_id, organization_id
 
-    @staticmethod
+        scopes: list[int] = []
+        for raw_scope in boundary.external_scope_ids:
+            try:
+                scope_id = int(str(raw_scope))
+            except (TypeError, ValueError) as exc:
+                raise ConnectorAuthorizationError(
+                    "DNSFilter client boundary contains an invalid network ID."
+                ) from exc
+            if scope_id < 1:
+                raise ConnectorAuthorizationError(
+                    "DNSFilter client boundary contains an invalid network ID."
+                )
+            scopes.append(scope_id)
+        network_ids = tuple(sorted(set(scopes)))
+        if company_id != "0" and not network_ids:
+            raise ConnectorAuthorizationError(
+                "No validated DNSFilter network boundary exists for this company."
+            )
+        return company_id, organization_id, network_ids
+
+    @classmethod
     def _assert_response_scope(
+        cls,
         data: Mapping[str, Any],
         expected_organization_id: int,
+        network_ids: tuple[int, ...],
         *,
         tool_name: str,
-    ) -> None:
-        # DNSFilter's MCP tools are invoked with an injected organization_id.
-        # When the returned payload repeats the organization identifier, verify
-        # it exactly. Some aggregate tools omit it; for those the provider-side
-        # scoped request remains the enforceable boundary.
-        candidates = []
+        client_scoped: bool,
+    ) -> str:
+        organization_candidates: list[Any] = []
         for key in ("organization_id","organizationId"):
             if key in data:
-                candidates.append(data[key])
+                organization_candidates.append(data[key])
         organization = data.get("organization")
         if isinstance(organization, Mapping):
             for key in ("id","organization_id"):
                 if key in organization:
-                    candidates.append(organization[key])
-        for observed in candidates:
+                    organization_candidates.append(organization[key])
+        for observed in organization_candidates:
             try:
                 value = int(str(observed))
             except (TypeError, ValueError) as exc:
@@ -279,3 +290,38 @@ class DnsFilterMcpConnector:
                 raise ConnectorAuthorizationError(
                     "DNSFilter MCP response crossed the authorized organization boundary."
                 )
+
+        if not client_scoped:
+            return "organization_scope"
+
+        observed_networks = cls._collect_network_ids(data)
+        if observed_networks and not observed_networks.issubset(frozenset(network_ids)):
+            raise ConnectorAuthorizationError(
+                "DNSFilter MCP response crossed the authorized client network boundary."
+            )
+        if tool_name in _MULTI_NETWORK_TOOLS | _SINGLE_NETWORK_TOOLS:
+            return (
+                "network_response_verified"
+                if observed_networks
+                else "provider_request_network_scope"
+            )
+        return "organization_scope"
+
+    @classmethod
+    def _collect_network_ids(cls, value: Any) -> set[int]:
+        observed: set[int] = set()
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if key in {"network_id", "networkId"} and child not in (None, ""):
+                    try:
+                        observed.add(int(str(child)))
+                    except (TypeError, ValueError) as exc:
+                        raise ConnectorAuthorizationError(
+                            "DNSFilter MCP response contained an invalid network identifier."
+                        ) from exc
+                else:
+                    observed.update(cls._collect_network_ids(child))
+        elif isinstance(value, list):
+            for child in value:
+                observed.update(cls._collect_network_ids(child))
+        return observed

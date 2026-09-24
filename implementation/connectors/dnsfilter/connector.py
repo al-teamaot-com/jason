@@ -38,14 +38,16 @@ _ALLOWED_ARGUMENTS = {
     },
     "agent_search": {
         "company_id", "search", "state", "status", "agent_state",
-        "network_ids", "policy_id", "traffic_received_last_15_mins",
-        "page_number", "page_size",
+        "policy_id", "traffic_received_last_15_mins", "page_number", "page_size",
     },
     "agent_counts": {
-        "company_id", "search", "state", "status", "network_ids",
-        "new_agent_states",
+        "company_id", "search", "state", "status", "new_agent_states",
     },
 }
+
+_FORBIDDEN_SCOPE_ARGUMENTS = frozenset(
+    {"organization_id", "organization_ids", "msp_id", "network_id", "network_ids", "site_id", "site_ids"}
+)
 
 
 class DnsFilterConnector:
@@ -77,10 +79,17 @@ class DnsFilterConnector:
         operation = _CAPABILITY_OPERATIONS[request.context.capability]
         arguments = dict(request.arguments)
         self._validate_arguments(operation, arguments)
-        company_id, organization_id = self._resolve_organization_boundary(
-            request,
-            arguments,
+        company_id, organization_id, network_ids = self._resolve_boundary(
+            request, arguments
         )
+        client_scoped = company_id != "0"
+
+        if client_scoped and operation == "policy_search" and bool(
+            arguments.get("include_global_policies")
+        ):
+            raise ConnectorAuthorizationError(
+                "DNSFilter global policy views are not approved for client-scoped reads."
+            )
 
         credentials = self._secrets.resolve(
             DNSFILTER_READONLY_SECRET,
@@ -89,30 +98,38 @@ class DnsFilterConnector:
         require_dnsfilter_credentials(credentials)
         client = self._client_factory(credentials)
 
-        self._audit.record(
-            "connector.requested",
-            request.context,
-            {
-                "provider": self.provider_name,
-                "operation": operation,
-                "company_id": company_id,
-                "organization_boundary_validated": True,
-            },
-        )
+        audit_scope = {
+            "provider": self.provider_name,
+            "operation": operation,
+            "company_id": company_id,
+            "organization_id": organization_id,
+            "network_scope_ids": list(network_ids),
+            "organization_boundary_validated": True,
+            "network_boundary_validated": bool(network_ids) or not client_scoped,
+        }
+        self._audit.record("connector.requested", request.context, audit_scope)
+
         data = self._execute_operation(
             client,
             operation,
             arguments,
             organization_id,
+            network_ids,
+            client_scoped=client_scoped,
         )
-        self._assert_response_scope(operation, data, organization_id)
+        data, verification = self._enforce_response_scope(
+            operation,
+            data,
+            organization_id,
+            network_ids,
+            client_scoped=client_scoped,
+        )
         self._audit.record(
             "connector.completed",
             request.context,
             {
-                "provider": self.provider_name,
-                "company_id": company_id,
-                "organization_boundary_validated": True,
+                **audit_scope,
+                "scope_verification": verification,
             },
         )
         return ConnectorResult(
@@ -123,12 +140,9 @@ class DnsFilterConnector:
 
     @staticmethod
     def _validate_arguments(operation: str, arguments: Mapping[str, Any]) -> None:
-        forbidden = {
-            "organization_id", "organization_ids", "msp_id",
-        }.intersection(arguments)
-        if forbidden:
+        if _FORBIDDEN_SCOPE_ARGUMENTS.intersection(arguments):
             raise ConnectorAuthorizationError(
-                "DNSFilter organization scope is server-derived and may not be supplied."
+                "DNSFilter organization and network scope is server-derived and may not be supplied."
             )
         unexpected = sorted(set(arguments) - _ALLOWED_ARGUMENTS[operation])
         if unexpected:
@@ -163,11 +177,11 @@ class DnsFilterConnector:
                     "DNSFilter state must be online or offline."
                 )
 
-    def _resolve_organization_boundary(
+    def _resolve_boundary(
         self,
         request: ConnectorRequest,
         arguments: Mapping[str, Any],
-    ) -> tuple[str, int]:
+    ) -> tuple[str, int, tuple[int, ...]]:
         raw_company_id = arguments.get("company_id")
         if isinstance(raw_company_id, bool):
             raise ConnectorAuthorizationError(
@@ -213,7 +227,26 @@ class DnsFilterConnector:
             raise ConnectorAuthorizationError(
                 "DNSFilter organization boundary contains an invalid organization ID."
             )
-        return company_id, organization_id
+
+        network_ids: list[int] = []
+        for raw_scope in boundary.external_scope_ids:
+            try:
+                scope_id = int(str(raw_scope))
+            except (TypeError, ValueError) as exc:
+                raise ConnectorAuthorizationError(
+                    "DNSFilter client boundary contains an invalid network ID."
+                ) from exc
+            if scope_id < 1:
+                raise ConnectorAuthorizationError(
+                    "DNSFilter client boundary contains an invalid network ID."
+                )
+            network_ids.append(scope_id)
+        network_scope = tuple(sorted(set(network_ids)))
+        if company_id != "0" and not network_scope:
+            raise ConnectorAuthorizationError(
+                "No validated DNSFilter network boundary exists for this company."
+            )
+        return company_id, organization_id, network_scope
 
     @staticmethod
     def _paging(arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -229,6 +262,9 @@ class DnsFilterConnector:
         operation: str,
         arguments: Mapping[str, Any],
         organization_id: int,
+        network_ids: tuple[int, ...],
+        *,
+        client_scoped: bool,
     ) -> Mapping[str, Any]:
         if operation == "organization_read":
             return client.get(f"/v1/organizations/{organization_id}")
@@ -236,6 +272,8 @@ class DnsFilterConnector:
         if operation == "network_search":
             params = cls._paging(arguments)
             params["organization_id"] = organization_id
+            if client_scoped:
+                params["network_ids"] = list(network_ids)
             for key in ("protected", "unprotected"):
                 if key in arguments:
                     params[key] = arguments[key]
@@ -244,15 +282,19 @@ class DnsFilterConnector:
         if operation == "policy_search":
             params = cls._paging(arguments)
             params["organization_id"] = organization_id
-            if "include_global_policies" in arguments:
+            if client_scoped:
+                params["include_global_policies"] = False
+            elif "include_global_policies" in arguments:
                 params["include_global_policies"] = arguments["include_global_policies"]
             return client.get("/v1/policies", params)
 
         if operation == "agent_search":
             params = cls._paging(arguments)
             params["organization_ids"] = [organization_id]
+            if client_scoped:
+                params["network_ids"] = list(network_ids)
             for key in (
-                "search", "state", "status", "agent_state", "network_ids",
+                "search", "state", "status", "agent_state",
                 "policy_id", "traffic_received_last_15_mins",
             ):
                 if key in arguments:
@@ -261,7 +303,9 @@ class DnsFilterConnector:
 
         if operation == "agent_counts":
             params: dict[str, Any] = {"organization_ids": [organization_id]}
-            for key in ("search", "state", "status", "network_ids", "new_agent_states"):
+            if client_scoped:
+                params["network_ids"] = list(network_ids)
+            for key in ("search", "state", "status", "new_agent_states"):
                 if key in arguments:
                     params[key] = arguments[key]
             return client.get("/v1/user_agents/counts", params)
@@ -269,58 +313,119 @@ class DnsFilterConnector:
         raise ConnectorConfigurationError("Unsupported DNSFilter operation.")
 
     @classmethod
-    def _assert_response_scope(
+    def _enforce_response_scope(
         cls,
         operation: str,
         data: Mapping[str, Any],
         expected_organization_id: int,
-    ) -> None:
-        if operation == "agent_counts":
-            return
+        network_ids: tuple[int, ...],
+        *,
+        client_scoped: bool,
+    ) -> tuple[Mapping[str, Any], str]:
         payload = data.get("data")
-        if operation == "agent_search":
-            if not isinstance(payload, list):
-                raise ConnectorAuthorizationError(
-                    "DNSFilter agent collection response has an invalid shape."
-                )
-            return
+
         if operation == "organization_read":
-            cls._assert_resource_id(
-                payload,
-                expected_organization_id,
-                "organization",
+            cls._assert_resource_id(payload, expected_organization_id, "organization")
+            if not client_scoped:
+                return data, "organization_id_exact"
+            resource = dict(payload) if isinstance(payload, Mapping) else {}
+            minimized = {
+                key: resource[key]
+                for key in ("id", "type")
+                if key in resource
+            }
+            return {**dict(data), "data": minimized}, "organization_minimized_for_client"
+
+        if operation == "agent_counts":
+            return data, (
+                "provider_request_network_scope"
+                if client_scoped
+                else "organization_scope"
             )
-            return
 
         resources = payload if isinstance(payload, list) else [payload]
         if not resources or resources == [None]:
-            return
+            return data, "empty_response_scope_safe"
+
+        authorized = frozenset(network_ids)
         for resource in resources:
-            cls._assert_relationship_organization(
-                resource,
-                expected_organization_id,
-            )
+            if operation != "agent_search":
+                cls._assert_relationship_organization(
+                    resource, expected_organization_id
+                )
+            if client_scoped:
+                observed = (
+                    {cls._resource_id(resource, "network")}
+                    if operation == "network_search"
+                    else cls._relationship_network_ids(resource)
+                )
+                if not observed:
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter response did not prove the client network boundary."
+                    )
+                if not observed.issubset(authorized):
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter response crossed the authorized client network boundary."
+                    )
+
+        return data, (
+            "network_scope_exact"
+            if client_scoped
+            else "organization_scope"
+        )
 
     @staticmethod
-    def _assert_resource_id(
-        resource: Any,
-        expected_id: int,
-        label: str,
-    ) -> None:
+    def _resource_id(resource: Any, label: str) -> int:
         if not isinstance(resource, Mapping):
             raise ConnectorAuthorizationError(
                 f"DNSFilter {label} response has an invalid shape."
             )
         try:
-            observed = int(str(resource.get("id")))
+            return int(str(resource.get("id")))
         except (TypeError, ValueError) as exc:
             raise ConnectorAuthorizationError(
                 f"DNSFilter {label} response did not prove its resource ID."
             ) from exc
-        if observed != expected_id:
+
+    @classmethod
+    def _assert_resource_id(
+        cls,
+        resource: Any,
+        expected_id: int,
+        label: str,
+    ) -> None:
+        if cls._resource_id(resource, label) != expected_id:
             raise ConnectorAuthorizationError(
                 f"DNSFilter {label} response crossed the authorized boundary."
             )
+
+    @staticmethod
+    def _relationship_network_ids(resource: Any) -> set[int]:
+        if not isinstance(resource, Mapping):
+            raise ConnectorAuthorizationError(
+                "DNSFilter returned a non-object resource."
+            )
+        relationships = resource.get("relationships")
+        if not isinstance(relationships, Mapping):
+            return set()
+        observed: set[int] = set()
+        for key in ("network", "networks", "site", "sites"):
+            relationship = relationships.get(key)
+            if not isinstance(relationship, Mapping):
+                continue
+            related = relationship.get("data")
+            items = related if isinstance(related, list) else [related]
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                try:
+                    observed.add(int(str(item.get("id"))))
+                except (TypeError, ValueError) as exc:
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter response contained an invalid network relationship."
+                    ) from exc
+        return observed
+
     @staticmethod
     def _assert_relationship_organization(
         resource: Any,

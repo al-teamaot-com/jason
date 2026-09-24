@@ -38,6 +38,7 @@ class ClientBoundary:
     service_principal_id: str | None = None
     last_error_code: str | None = None
     offboarded_at: datetime | None = None
+    external_scope_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
