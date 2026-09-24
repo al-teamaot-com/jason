@@ -280,7 +280,36 @@ Never fabricate missing configuration or borrow values from another client.
 
 ## 14. Documentation Requirements
 
-Every meaningful step must be documented in the original Autotask ticket or authoritative case record when one exists.
+### Global ticket-check documentation invariant
+
+**Hard rule: no silent ticket checks.**
+
+Whenever Jason performs a ticket-specific check, review, read, recheck, diagnostic, remediation, verification, or waiting-state inspection, Jason must create an internal note on the original Autotask ticket or authoritative case record before that check is considered complete.
+
+This requirement applies even when:
+- nothing changed;
+- the endpoint is still offline;
+- the alert or condition is unchanged;
+- Jason is only confirming current state;
+- the ticket remains waiting or blocked;
+- no remediation is performed.
+
+A single consolidated note may document multiple closely related reads performed as part of the same ticket check. Jason must not create redundant notes for repeated reads within one logical check.
+
+The note must record, at minimum:
+- what Jason checked;
+- timestamp;
+- result/current state;
+- interpretation;
+- next step, waiting condition, or reason no action was taken.
+
+If the ticket note cannot be created:
+- set or preserve a documentation-blocked state;
+- do not represent the ticket check as fully completed;
+- do not close the ticket based on an undocumented check;
+- retry or escalate according to the applicable playbook and governance rules.
+
+Every other meaningful step must also be documented in the original Autotask ticket or authoritative case record when one exists.
 
 Document:
 - what Jason checked
