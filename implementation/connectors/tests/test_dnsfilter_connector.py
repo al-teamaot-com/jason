@@ -185,6 +185,34 @@ def test_client_context_must_match_company():
     assert secrets.calls == []
 
 
+
+def test_autotask_self_company_zero_is_valid_dnsfilter_boundary():
+    record = boundary()
+    record = record.__class__(
+        id="boundary-dnsfilter-aot-self",
+        client_id="0",
+        provider=record.provider,
+        external_tenant_id=record.external_tenant_id,
+        primary_domain="teamaot.com",
+        profile=record.profile,
+        application_id=record.application_id,
+        status=record.status,
+        consent_transaction_id=record.consent_transaction_id,
+        created_at=record.created_at,
+        validated_at=record.validated_at,
+    )
+    connector, secrets, _ = build(record=record)
+    FakeClient.response = {"data": {"id": DNSFILTER_ORG_ID}}
+    result = connector.execute(
+        ConnectorRequest(
+            context("dnsfilter.organization.read", client_id="0"),
+            {"company_id": 0},
+        )
+    )
+    assert result.provider == "dnsfilter"
+    assert FakeClient.calls[-1][0] == "/v1/organizations/9001"
+    assert secrets.calls == ["dnsfilter.readonly"]
+
 def test_agent_state_and_page_size_are_bounded_before_provider_call():
     connector, secrets, _ = build()
     with pytest.raises(ConnectorConfigurationError, match="agent_state"):

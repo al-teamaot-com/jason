@@ -164,6 +164,33 @@ def test_missing_boundary_and_bad_page_size_fail_before_provider_call(tmp_path):
     assert FakeClient.calls == []
 
 
+
+def test_autotask_self_company_zero_is_valid_mcp_boundary(tmp_path):
+    record = boundary()
+    record = record.__class__(
+        id="dnsfilter-boundary-aot-self",
+        client_id="0",
+        provider=record.provider,
+        external_tenant_id=record.external_tenant_id,
+        primary_domain="teamaot.com",
+        profile=record.profile,
+        application_id=record.application_id,
+        status=record.status,
+        consent_transaction_id=record.consent_transaction_id,
+        created_at=record.created_at,
+        validated_at=record.validated_at,
+    )
+    connector, _ = build(tmp_path, record=record)
+    FakeClient.response = {"organization_id": ORG_ID, "data": []}
+    result = connector.execute(
+        ConnectorRequest(
+            context("dnsfilter_mcp.stale_agents.search", client_id="0"),
+            {"company_id": 0, "days": 30},
+        )
+    )
+    assert result.provider == "dnsfilter_mcp"
+    assert FakeClient.calls[-1][1]["organization_id"] == 9001
+
 def test_client_context_must_match_selected_company(tmp_path):
     connector, _ = build(tmp_path)
     with pytest.raises(ConnectorAuthorizationError, match="does not match"):

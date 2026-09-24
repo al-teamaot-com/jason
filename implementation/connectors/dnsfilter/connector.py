@@ -179,7 +179,7 @@ class DnsFilterConnector:
             raise ConnectorAuthorizationError(
                 "An exact Autotask company_id is required for DNSFilter access."
             ) from exc
-        if int(company_id) < 1:
+        if int(company_id) < 0:
             raise ConnectorAuthorizationError(
                 "An exact Autotask company_id is required for DNSFilter access."
             )

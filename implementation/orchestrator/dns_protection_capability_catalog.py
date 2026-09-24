@@ -82,7 +82,7 @@ def _read_capability(
         capability_name=name,
         version="1.0",
         display_name=display_name,
-        lifecycle_status=CapabilityLifecycle.PILOT,
+        lifecycle_status=CapabilityLifecycle.ACTIVE,
         business_purpose=purpose,
         owner_service="Jason DNS Protection Intelligence",
         architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
