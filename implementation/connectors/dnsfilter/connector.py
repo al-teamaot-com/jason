@@ -90,6 +90,13 @@ class DnsFilterConnector:
             raise ConnectorAuthorizationError(
                 "DNSFilter global policy views are not approved for client-scoped reads."
             )
+        if client_scoped and operation == "network_search" and any(
+            key in arguments for key in ("protected", "unprotected")
+        ):
+            raise ConnectorConfigurationError(
+                "Client-scoped DNSFilter site reads do not support "
+                "protected/unprotected collection filters."
+            )
 
         credentials = self._secrets.resolve(
             DNSFILTER_READONLY_SECRET,
@@ -271,11 +278,6 @@ class DnsFilterConnector:
 
         if operation == "network_search":
             if client_scoped:
-                if any(key in arguments for key in ("protected", "unprotected")):
-                    raise ConnectorConfigurationError(
-                        "Client-scoped DNSFilter site reads do not support "
-                        "protected/unprotected collection filters."
-                    )
                 resources = [
                     cls._exact_resource(
                         client,
