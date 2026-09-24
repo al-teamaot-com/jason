@@ -216,15 +216,26 @@ Backend registration, Jason capability activation, ChatGPT app catalog configura
 
 ### Autotask current acceptance
 
-- Controlled company: **XYZ Test Company** (`1158`).
-- Controlled ticket: `T20191013.0001` (`8870`).
-- Bounded action: `service.ticket.update` priority `3` → `2`.
-- Direct provider access: disabled.
-- Post-write governed readback: completed; current priority confirmed as `2` on 2026-09-16.
+The bounded ticket-update path is live-proven under execution-plan binding and direct-update canonicalization.
 
-Status: **bounded ticket-update path live-proven**.
+Latest production acceptance (2026-09-24):
 
-Do not treat this as unrestricted Autotask CRUD authority. Additional capability families or principals require their own governed activation/authority.
+- ticket: `T20260905.0004` / Autotask ID `139815` / OWNI7JAN25;
+- technician-friendly request: `ticket_id=139815`, `status=Complete`;
+- canonical provider payload before authorization: `{"id":139815,"status":5}`;
+- symbolic resolution: `Complete -> 5` through authoritative Autotask picklist metadata;
+- provider: `autotask_ticket_update` / `autotask.ticket.update`;
+- provider attempts: exactly one;
+- execution-plan re-prepare: exact fingerprint match required before provider invocation;
+- built-in post-write readback: verified;
+- independent governed post-read: status `5` / Complete;
+- direct provider access: disabled.
+
+The generic MCP boundary now reconciles exact `ticket_id` / `ticketID` / `id` selectors, confirms the authoritative positive numeric Autotask ID through governed read, retains only explicitly requested allowed mutable fields, and fails closed on ambiguous identity or symbolic resolution before approval/execution-plan binding.
+
+Status: **direct technician-friendly ticket updates production-proven under canonical intent + execution-plan binding**.
+
+Do not treat this as unrestricted Autotask CRUD authority. Additional capability families or principals require their own governed activation/authority. Durable acceptance record: `docs/sessions/Jason-Direct-Ticket-Update-Canonicalization-Production-Acceptance-2026-09-24.md`.
 
 ### Datto RMM current acceptance
 
