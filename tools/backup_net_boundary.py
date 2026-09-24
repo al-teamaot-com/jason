@@ -97,6 +97,27 @@ def _exact_asset(
     return asset
 
 
+def _prove_empty_asset_inventory(
+    client: BackupNetClient,
+    *,
+    customer_id: str,
+) -> dict[str, Any]:
+    response = client.get(
+        "/api/epb/v1/assets",
+        {
+            "customer_id": customer_id,
+            "page_number": 1,
+            "page_size": 1,
+        },
+    )
+    items = _items(response)
+    if items:
+        raise BoundaryDiscoveryError(
+            "Endpoint Backup assets exist for this customer; exact asset proof is required."
+        )
+    return {"inventory_empty": True}
+
+
 def _safe_asset_summary(asset: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "id": asset.get("id"),
@@ -180,7 +201,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--company-id", required=True)
     parser.add_argument("--customer-name", required=True)
-    parser.add_argument("--asset-name", required=True)
+    proof = parser.add_mutually_exclusive_group(required=True)
+    proof.add_argument("--asset-name")
+    proof.add_argument("--allow-empty-customer", action="store_true")
     parser.add_argument("--primary-domain", required=True)
     parser.add_argument("--openbao-url", default=DEFAULT_OPENBAO_URL)
     parser.add_argument("--role-id-path", type=Path, default=DEFAULT_ROLE_ID_PATH)
@@ -195,9 +218,9 @@ def main() -> int:
     try:
         company_id = str(int(args.company_id))
     except (TypeError, ValueError) as exc:
-        raise SystemExit("DENIED: company-id must be a positive integer") from exc
-    if int(company_id) < 1:
-        raise SystemExit("DENIED: company-id must be a positive integer")
+        raise SystemExit("DENIED: company-id must be a non-negative integer") from exc
+    if int(company_id) < 0:
+        raise SystemExit("DENIED: company-id must be a non-negative integer")
 
     context = ConnectorContext(
         correlation_id=f"corr_backup_boundary_{uuid4().hex}",
@@ -216,11 +239,19 @@ def main() -> int:
     try:
         client = BackupNetClient(secret_values)
         customer_id, customer_name = _exact_customer(client, args.customer_name.strip())
-        asset = _exact_asset(
-            client,
-            customer_id=customer_id,
-            asset_name=args.asset_name.strip(),
-        )
+        if args.asset_name:
+            asset_proof = _safe_asset_summary(
+                _exact_asset(
+                    client,
+                    customer_id=customer_id,
+                    asset_name=args.asset_name.strip(),
+                )
+            )
+        else:
+            asset_proof = _prove_empty_asset_inventory(
+                client,
+                customer_id=customer_id,
+            )
     finally:
         secret_values.clear()
 
@@ -229,7 +260,7 @@ def main() -> int:
         "company_id": company_id,
         "customer_name": customer_name,
         "customer_id": customer_id,
-        "asset_proof": _safe_asset_summary(asset),
+        "asset_proof": asset_proof,
         "boundary_applied": False,
         "secret_values_printed": False,
     }

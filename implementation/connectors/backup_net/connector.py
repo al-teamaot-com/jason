@@ -137,7 +137,7 @@ class BackupNetConnector:
                 "Backup.net request contains unsupported argument(s): "
                 + ", ".join(unexpected)
             )
-        if operation == "backupiq_alert_search":
+        if operation == "backupiq_alert_search" and "type" in arguments:
             alert_type = str(arguments.get("type") or "").strip()
             if alert_type not in {"alert", "job", "conditional", "helix"}:
                 raise ConnectorConfigurationError(
@@ -173,7 +173,7 @@ class BackupNetConnector:
             raise ConnectorAuthorizationError(
                 "An exact Autotask company_id is required for Backup.net access."
             ) from exc
-        if int(company_id) < 1:
+        if int(company_id) < 0:
             raise ConnectorAuthorizationError(
                 "An exact Autotask company_id is required for Backup.net access."
             )
@@ -243,6 +243,7 @@ class BackupNetConnector:
         if operation == "backup_search":
             return client.get("/v1/backups", params)
         if operation == "backupiq_alert_search":
+            params.setdefault("type", "alert")
             return client.get("/v1/backupiq/alerts", params)
         raise ConnectorConfigurationError(
             "Unsupported Backup.net operation."
