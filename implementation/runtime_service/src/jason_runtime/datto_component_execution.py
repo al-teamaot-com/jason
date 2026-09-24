@@ -163,12 +163,10 @@ def configured_pilot() -> DattoComponentExecutionPilot | None:
     device_class = _env(DATTO_EXECUTION_DEVICE_CLASS_ENV)
     components = configured_datto_components()
 
-    if (
-        not allowlist_name
-        and not device_uid
-        and not device_class
-        and not components
-    ):
+    # Durable approved-component inventory is independent of the legacy
+    # single-device pilot. Approved components alone must not activate or
+    # partially activate that pilot.
+    if not allowlist_name and not device_uid and not device_class:
         return None
 
     if (

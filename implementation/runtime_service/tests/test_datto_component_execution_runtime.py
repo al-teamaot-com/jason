@@ -213,6 +213,36 @@ def test_exact_profile_activates_component_execution(
     )
 
 
+def test_durable_components_alone_do_not_activate_legacy_pilot(monkeypatch):
+    clear_env(monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "configured_datto_components",
+        lambda: (object(),),
+    )
+
+    assert configured_pilot() is None
+
+
+def test_partial_legacy_pilot_still_fails_closed_with_durable_components(monkeypatch):
+    clear_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_ALLOWLIST_NAME_ENV,
+        "pilot-diagnostic",
+    )
+    monkeypatch.setattr(
+        module,
+        "configured_datto_components",
+        lambda: (object(),),
+    )
+
+    with pytest.raises(
+        module.DattoRmmComponentExecutionActivationError,
+        match="incomplete",
+    ):
+        configured_pilot()
+
+
 def test_json_component_scope_is_authoritative(monkeypatch):
     clear_env(monkeypatch)
     enable_multi_component_env(monkeypatch)
