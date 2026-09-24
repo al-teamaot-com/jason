@@ -116,6 +116,17 @@ class DattoRmmComponentExecutionPolicy:
         "Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1"
     )
 
+    _DRIVE_FOLDER_SIZE_UID = (
+        "8b7f7b3d-6462-40ca-9415-71232aecdb1f"
+    )
+    _DRIVE_FOLDER_SIZE_NAME = (
+        "Drive or Folder Size Report - AOT Ver 11142024"
+    )
+    _BITLOCKER_TPM_AUDIT_UID = (
+        "d9fdca0f-8659-4512-8086-88d631323b56"
+    )
+    _BITLOCKER_TPM_AUDIT_NAME = "BitLocker & TPM Audit [WIN]"
+
     # Exact reviewed Datto identity for the arbitrary PowerShell runner.
     # Variable permission is deliberately bound to both UID and display name.
     # The runtime scope independently forces this component to per_run.
@@ -147,6 +158,48 @@ class DattoRmmComponentExecutionPolicy:
             return (
                 ComponentVariablePolicy(
                     name="ServiceName",
+                    variable_type="string",
+                    required=False,
+                    maximum_length=256,
+                ),
+            )
+
+        # SUPPORT #261: these exact diagnostic components are per-run approved,
+        # but their reviewed variables still require source-controlled contracts.
+        # Bind each contract to both the live UID and exact display name so a
+        # renamed/replaced component cannot inherit variable authority.
+        if (
+            entry.provider_component_uid == cls._DRIVE_FOLDER_SIZE_UID
+            and entry.display_name.casefold()
+            == cls._DRIVE_FOLDER_SIZE_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="RootFolder",
+                    variable_type="string",
+                    required=True,
+                    maximum_length=1024,
+                ),
+            )
+
+        if (
+            entry.provider_component_uid == cls._BITLOCKER_TPM_AUDIT_UID
+            and entry.display_name.casefold()
+            == cls._BITLOCKER_TPM_AUDIT_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="usrGetRecovery",
+                    variable_type="boolean",
+                    required=False,
+                ),
+                ComponentVariablePolicy(
+                    name="usrAlert",
+                    variable_type="boolean",
+                    required=False,
+                ),
+                ComponentVariablePolicy(
+                    name="usrUDF",
                     variable_type="string",
                     required=False,
                     maximum_length=256,

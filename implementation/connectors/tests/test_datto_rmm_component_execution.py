@@ -216,6 +216,77 @@ def test_policy_rejects_unknown_or_invalid_variables() -> None:
         )
 
 
+def test_support_261_drive_folder_size_exact_variables_are_allowed() -> None:
+    entry = ComponentAllowlistEntry(
+        allowlist_name="read-only-diagnostics",
+        canonical_component_id="diagnostics.disk.folder-size",
+        display_name="Drive or Folder Size Report - AOT Ver 11142024",
+        provider_component_uid="8b7f7b3d-6462-40ca-9415-71232aecdb1f",
+        allowed_target_classes=frozenset({"workstation"}),
+    )
+    prepared = policy(entry=entry).prepare(
+        allowlist_name="read-only-diagnostics",
+        device_uid="device-uid-1",
+        device_class="workstation",
+        component_uid=entry.provider_component_uid,
+        variables={"RootFolder": "C:\\"},
+        observed_component_name=entry.display_name,
+    )
+
+    assert prepared.normalized_variables == {"RootFolder": "C:\\"}
+    assert prepared.provider_request.body["jobComponent"]["variables"] == [
+        {"name": "RootFolder", "value": "C:\\"}
+    ]
+
+
+def test_support_261_bitlocker_exact_variables_are_normalized() -> None:
+    entry = ComponentAllowlistEntry(
+        allowlist_name="read-only-diagnostics",
+        canonical_component_id="diagnostics.security.bitlocker-tpm",
+        display_name="BitLocker & TPM Audit [WIN]",
+        provider_component_uid="d9fdca0f-8659-4512-8086-88d631323b56",
+        allowed_target_classes=frozenset({"workstation"}),
+    )
+    prepared = policy(entry=entry).prepare(
+        allowlist_name="read-only-diagnostics",
+        device_uid="device-uid-1",
+        device_class="workstation",
+        component_uid=entry.provider_component_uid,
+        variables={
+            "usrGetRecovery": False,
+            "usrAlert": False,
+            "usrUDF": "",
+        },
+        observed_component_name=entry.display_name,
+    )
+
+    assert prepared.normalized_variables == {
+        "usrGetRecovery": "false",
+        "usrAlert": "false",
+        "usrUDF": "",
+    }
+
+
+def test_support_261_variable_contracts_do_not_transfer_to_changed_uid() -> None:
+    entry = ComponentAllowlistEntry(
+        allowlist_name="read-only-diagnostics",
+        canonical_component_id="diagnostics.disk.folder-size",
+        display_name="Drive or Folder Size Report - AOT Ver 11142024",
+        provider_component_uid="different-component-uid",
+        allowed_target_classes=frozenset({"workstation"}),
+    )
+
+    with pytest.raises(PermissionError, match="variable is not approved"):
+        policy(entry=entry).prepare(
+            allowlist_name="read-only-diagnostics",
+            device_uid="device-uid-1",
+            device_class="workstation",
+            component_uid=entry.provider_component_uid,
+            variables={"RootFolder": "C:\\"},
+            observed_component_name=entry.display_name,
+        )
+
+
 def test_mutation_proposal_requires_allowlist_policy_and_client_scope() -> None:
     with pytest.raises(RuntimeError, match="allowlist policy is not configured"):
         DattoRmmMutationConnector(audit=Audit()).execute(
