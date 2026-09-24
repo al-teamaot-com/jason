@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -35,7 +36,8 @@ CREATE TABLE IF NOT EXISTS client_boundaries (
     validated_at TEXT,
     service_principal_id TEXT,
     last_error_code TEXT,
-    offboarded_at TEXT
+    offboarded_at TEXT,
+    external_scope_ids TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS ix_client_boundaries_client_provider
@@ -90,8 +92,22 @@ class SQLiteClientBoundaryStore:
         )
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.executescript(_SCHEMA)
+        self._migrate_schema()
         self.connection.commit()
         os.chmod(self.path, 0o600)
+
+    def _migrate_schema(self) -> None:
+        columns = {
+            str(row[1])
+            for row in self.connection.execute(
+                "PRAGMA table_info(client_boundaries)"
+            ).fetchall()
+        }
+        if "external_scope_ids" not in columns:
+            self.connection.execute(
+                "ALTER TABLE client_boundaries "
+                "ADD COLUMN external_scope_ids TEXT NOT NULL DEFAULT '[]'"
+            )
 
     def close(self) -> None:
         self.connection.close()
@@ -111,8 +127,8 @@ class SQLiteClientBoundaryRepository:
                         id, client_id, provider, external_tenant_id, primary_domain,
                         profile, application_id, status, consent_transaction_id,
                         created_at, consented_at, validated_at, service_principal_id,
-                        last_error_code, offboarded_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        last_error_code, offboarded_at, external_scope_ids
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     _boundary_values(boundary),
                 )
@@ -172,7 +188,7 @@ class SQLiteClientBoundaryRepository:
                     primary_domain = ?, profile = ?, application_id = ?, status = ?,
                     consent_transaction_id = ?, created_at = ?, consented_at = ?,
                     validated_at = ?, service_principal_id = ?, last_error_code = ?,
-                    offboarded_at = ?
+                    offboarded_at = ?, external_scope_ids = ?
                 WHERE id = ?
                 """,
                 (*_boundary_values(boundary)[1:], boundary.id),
@@ -198,25 +214,35 @@ class SQLiteClientBoundaryRepository:
             exclusion = " AND id <> ?"
             parameters.append(exclude_id)
 
-        row = self._store.connection.execute(
+        rows = self._store.connection.execute(
             f"""
-            SELECT client_id, external_tenant_id
+            SELECT client_id, external_tenant_id, external_scope_ids
             FROM client_boundaries
             WHERE provider = ?
               AND (client_id = ? OR external_tenant_id = ?)
               AND status IN (?, ?)
               {exclusion}
-            LIMIT 1
             """,
             tuple(parameters),
-        ).fetchone()
-        if row is None:
-            return
-        if str(row[0]) == boundary.client_id:
-            raise BoundaryConflictError("Client already has an active provider boundary.")
-        raise BoundaryConflictError(
-            "External tenant is already mapped to another active client boundary."
-        )
+        ).fetchall()
+        new_scopes = frozenset(boundary.external_scope_ids)
+        for row in rows:
+            if str(row[0]) == boundary.client_id:
+                raise BoundaryConflictError(
+                    "Client already has an active provider boundary."
+                )
+            if str(row[1]) != boundary.external_tenant_id:
+                continue
+            current_scopes = frozenset(_decode_scope_ids(row[2]))
+            if (
+                not current_scopes
+                or not new_scopes
+                or current_scopes.intersection(new_scopes)
+            ):
+                raise BoundaryConflictError(
+                    "External tenant is already mapped "
+                    "to another active client boundary."
+                )
 
 
 class SQLiteOnboardingTransactionRepository:
@@ -297,6 +323,7 @@ def _boundary_values(boundary: ClientBoundary) -> tuple[object, ...]:
         boundary.service_principal_id,
         boundary.last_error_code,
         _iso(boundary.offboarded_at),
+        json.dumps(list(boundary.external_scope_ids), separators=(",", ":")),
     )
 
 
@@ -317,7 +344,20 @@ def _boundary_from_row(row: tuple[object, ...]) -> ClientBoundary:
         service_principal_id=None if row[12] is None else str(row[12]),
         last_error_code=None if row[13] is None else str(row[13]),
         offboarded_at=_dt(None if row[14] is None else str(row[14])),
+        external_scope_ids=_decode_scope_ids(row[15] if len(row) > 15 else None),
     )
+
+
+def _decode_scope_ids(value: object | None) -> tuple[str, ...]:
+    if value in (None, ""):
+        return ()
+    try:
+        decoded = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    if not isinstance(decoded, list):
+        return ()
+    return tuple(str(item) for item in decoded if str(item).strip())
 
 
 def _transaction_values(transaction: OnboardingTransaction) -> tuple[object, ...]:
