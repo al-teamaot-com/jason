@@ -19,6 +19,11 @@ from .client import BackupNetClient, require_backup_net_credentials
 
 BACKUP_NET_PROVIDER = "backup_net"
 BACKUP_NET_PROFILE = "endpoint-backup-read"
+BACKUP_NET_READONLY_SECRET = "backup_net.readonly"
+BACKUP_NET_FULL_ACCESS_SECRET = "backup_net.fullaccess"
+BACKUP_NET_APPROVED_SECRETS = frozenset(
+    {BACKUP_NET_READONLY_SECRET, BACKUP_NET_FULL_ACCESS_SECRET}
+)
 
 _CAPABILITY_OPERATIONS = {
     "backup_net.endpoint_asset.search": "asset_search",
@@ -52,7 +57,6 @@ _PROVIDER_CUSTOMER_KEYS = ("customerId", "customer_id")
 
 class BackupNetConnector:
     provider_name = BACKUP_NET_PROVIDER
-    logical_secret = "backup_net.readonly"
     capabilities = frozenset(_CAPABILITY_OPERATIONS)
 
     def __init__(
@@ -62,12 +66,18 @@ class BackupNetConnector:
         audit: AuditSink,
         boundaries: ClientBoundaryRepository,
         *,
+        logical_secret: str = BACKUP_NET_READONLY_SECRET,
         client_factory=BackupNetClient,
     ) -> None:
+        if logical_secret not in BACKUP_NET_APPROVED_SECRETS:
+            raise ConnectorConfigurationError(
+                "Backup.net logical secret profile is not approved."
+            )
         self._secrets = secrets
         self._transport = transport
         self._audit = audit
         self._boundaries = boundaries
+        self._logical_secret = logical_secret
         self._client_factory = client_factory
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
@@ -82,7 +92,7 @@ class BackupNetConnector:
         self._validate_arguments(operation, arguments)
         company_id, customer_id = self._resolve_customer_boundary(request, arguments)
 
-        credentials = self._secrets.resolve(self.logical_secret, request.context)
+        credentials = self._secrets.resolve(self._logical_secret, request.context)
         require_backup_net_credentials(credentials)
         client = self._client_factory(credentials)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -261,3 +262,27 @@ def test_runtime_composition_registers_endpoint_security_reads_only(tmp_path):
     assert "endpoint.security.scan.execute" not in invokers
     assert "endpoint.security.isolate" not in invokers
     assert "endpoint.security.quarantine.execute" not in invokers
+
+def test_backup_net_full_access_profile_is_an_explicit_runtime_setting(tmp_path):
+    settings = replace(
+        _settings(tmp_path),
+        backup_net_enabled=True,
+        backup_net_access_profile="full_access",
+        backup_net_full_access_openbao_role_id_path=tmp_path / "backup-full-role",
+        backup_net_full_access_openbao_secret_id_path=tmp_path / "backup-full-secret",
+    )
+    settings.validate()
+    application = build_runtime_application(settings)
+    assert application.capabilities.get_current(
+        capability_name=BACKUP_ENDPOINT_ASSET_SEARCH
+    ) is not None
+
+
+def test_backup_net_unknown_access_profile_fails_closed(tmp_path):
+    settings = replace(_settings(tmp_path), backup_net_access_profile="unmanaged")
+    try:
+        settings.validate()
+    except ValueError as error:
+        assert "JASON_BACKUP_NET_ACCESS_PROFILE" in str(error)
+    else:
+        raise AssertionError("unknown Backup.net access profile must fail closed")

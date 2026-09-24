@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from connectors.backup_net.connector import BackupNetConnector
+from connectors.backup_net.connector import (
+    BACKUP_NET_FULL_ACCESS_SECRET,
+    BackupNetConnector,
+)
 from connectors.core.contracts import (
     ConnectorAuthorizationError,
     ConnectorConfigurationError,
@@ -82,7 +85,7 @@ def context(capability, *, client_id=None, organization_id="aot"):
         mode="observe",
     )
 
-def build(*, record=None):
+def build(*, record=None, logical_secret="backup_net.readonly"):
     repo = InMemoryClientBoundaryRepository()
     if record is not False:
         repo.add(record or boundary())
@@ -95,6 +98,7 @@ def build(*, record=None):
         transport=FakeTransport(),
         audit=audit,
         boundaries=repo,
+        logical_secret=logical_secret,
         client_factory=FakeClient,
     )
     return connector, secrets, audit
@@ -227,3 +231,21 @@ def test_client_context_must_match_selected_company():
             )
         )
     assert secrets.calls == []
+
+def test_full_access_profile_uses_separate_logical_secret():
+    connector, secrets, _ = build(logical_secret=BACKUP_NET_FULL_ACCESS_SECRET)
+    FakeClient.response = {
+        "items": [{"id": "asset-1", "name": "DGV-50859", "customerId": CUSTOMER_ID}]
+    }
+    connector.execute(
+        ConnectorRequest(
+            context("backup_net.endpoint_asset.search"),
+            {"company_id": 1627, "name": "DGV-50859"},
+        )
+    )
+    assert secrets.calls == ["backup_net.fullaccess"]
+
+
+def test_unapproved_logical_secret_profile_fails_closed():
+    with pytest.raises(ConnectorConfigurationError, match="logical secret profile"):
+        build(logical_secret="backup_net.unmanaged")

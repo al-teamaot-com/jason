@@ -297,7 +297,38 @@ If the OpenBao KV secret already exists but the hardened runtime AppRole files a
 
 `reactivate` does not ask for or rewrite the provider Client ID/Secret. It creates fresh AppRole artifacts in the hardened runtime-secret directory.
 
-The credential is created in UniView under **Settings -> Public APIs -> New** and is used only with the OAuth 2.0 client-credentials flow. Per Kaseya's documented request contract, the token call sends `Authorization: Basic <base64(client_id:client_secret)>` and the form body contains only `grant_type=client_credentials`. The connector fixes authentication to `https://login.backup.net/connect/token` and API reads to `https://public-api.backup.net`; those hosts are not secret-configurable.
+### Backup.net full-access credential profile
+
+A provider credential with broader Backup.net permissions must use a **separate** Jason secret identity rather than replacing the production read-only identity.
+
+Logical secret: `backup_net.fullaccess`
+
+Approved provider path:
+
+`secret/data/connectors/backup-net/production/full-access`
+
+Runtime identity:
+
+- policy/AppRole: `jason-backup-net-full-access`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/backup-net-full-access-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Provision and verify with:
+
+`sudo python3 tools/provider_secret.py create backup_net_full_access`
+
+`sudo python3 tools/provider_secret.py verify backup_net_full_access`
+
+Select this credential at runtime only with the explicit setting:
+
+`JASON_BACKUP_NET_ACCESS_PROFILE=full_access`
+
+The full-access AppRole still has **read-only OpenBao access** to exactly one KV secret plus self-revoke. Provider-side credential permission never grants Jason capability authority, approval, client scope, or mutation authority.
+
+The credential is created in UniView under **Settings -> Public APIs -> New** and uses the same OAuth 2.0 client-credentials flow. Per Kaseya's documented request contract, the token call sends `Authorization: Basic <base64(client_id:client_secret)>` and the form body contains only `grant_type=client_credentials`. The connector fixes authentication to `https://login.backup.net/connect/token` and API access to `https://public-api.backup.net`; those hosts are not secret-configurable.
+
+As verified against the published OpenAPI document on 2026-09-24 (`https://apidoc-public-api.backup.net/swagger/public_api-v1/swagger.json`), the current Public API advertises GET operations only. Therefore the full-access credential profile is **mutation-ready but exposes no Jason write capability today**. Do not invent private/UI endpoints or register a Backup.net mutation capability until a provider-supported write operation is documented and implemented with execution-plan binding, exact target/payload validation, approval, readback verification, and rollback/recovery handling.
 
 Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jason client-boundary record mapping the exact Autotask company ID to the Backup.net customer UUID. Provider `customer_id` is never accepted from the caller. The connector injects the mapped UUID and verifies every returned record proves the same customer.
 

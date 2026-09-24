@@ -796,16 +796,17 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-006 — Client backup-posture reads / Datto Endpoint Backup API
 
 - **Priority:** P1
-- **Status:** Planned — high priority
+- **Status:** Read-only production foundation complete; full-access credential profile source-built; provider-supported write operations pending
 - **Risk level:** High
-- **Idea:** Add governed provider reads for backup inventory, protection coverage, last successful backup, failures, recovery points, retention/plan metadata, encryption/separation metadata where available, and restore-test evidence. Datto Endpoint Backup is the first concrete implementation target.
-- **Why it matters:** Jason currently has to infer some backup health from DRMM alerts and ticket context. Direct Endpoint Backup API visibility is required for reliable troubleshooting, ticket resolution, compliance evidence, and automated backup-health workflows.
-- **Initial Datto Endpoint Backup read capabilities:** account/device lookup; protection/enrollment state; active/inactive status; last successful backup; last attempted backup; current backup state; failure/error details; backup history; recovery-point visibility; retention/plan metadata where exposed by the API.
-- **Later governed actions:** trigger supported backup operations, recovery/restore workflows, or other mutations only after the provider API surface and safety model are validated.
+- **Idea:** Maintain governed provider access for backup inventory, protection coverage, last successful backup, failures, recovery points, retention/plan metadata, encryption/separation metadata where available, and restore-test evidence. Datto Endpoint Backup / UniView Backup.net is the first production implementation.
+- **Implemented checkpoint (2026-09-24):** Production-accepted `backup.endpoint.asset.search/read`, `backup.endpoint.backup.search`, and `backup.backupiq.alert.search` through the validated Autotask-company-to-Backup.net-customer boundary. Controlled DGV-50859 acceptance passed through Central Orchestrator with `direct_provider_access=false`.
+- **Full-access credential checkpoint (2026-09-24):** Source adds isolated logical secret `backup_net.fullaccess`, dedicated KV path/AppRole/runtime artifacts, and explicit runtime profile selection via `JASON_BACKUP_NET_ACCESS_PROFILE=full_access`. The full-access provider credential uses the same documented OAuth/API hosts while OpenBao remains least-privilege to one secret.
+- **Current provider limitation:** The published Backup.net Public API OpenAPI contract advertises GET operations only as of 2026-09-24. A full-access credential therefore does not create a documented mutation endpoint. No private/UI endpoint may be substituted and no Backup.net write capability may be registered from credential permission alone.
+- **Later governed actions:** Add trigger/restore/configuration or other mutations only after a provider-supported write operation is documented. Each mutation must use exact capability authority, approval where required, execution-plan binding, target/payload validation, post-write readback, retry/recovery rules, and non-disruptive/disruptive action gates.
 - **Origin:** Reclassified from `SUPPORT-CAP-008` on 2026-09-18 and expanded from preserved recovery-roadmap work on 2026-09-23.
-- **Prerequisites:** validate the current Datto Endpoint Backup public API and authentication model; map Endpoint Backup devices to DRMM/Autotask identities; implement client isolation and pagination; add read-only contract tests; normalize backup health states; capture audit/evidence; define approval and rollback requirements for any future write actions.
+- **Remaining prerequisites for writes:** provider-documented mutation operations and schemas; risk classification; rollback/recovery semantics; controlled test target; exact JKD-001 grants; acceptance evidence.
 - **Decision owner:** Platform Owner / Backup Service Owner / Jason Governance Authority
-- **Review trigger:** Begin as a high-priority connector enhancement; implement authoritative read/health capabilities first so Jason can answer whether a device is actively protected and whether backups are healthy without relying on inference.
+- **Review trigger:** Re-check the official Public API contract when Kaseya publishes write operations or provides an explicitly supported write contract.
 
 ### TODO-CONN-007 — Network/security-appliance posture reads
 
