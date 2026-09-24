@@ -130,9 +130,13 @@ The caller cannot promote a `per_run` component to `standing_safe`. Exact Jason 
 Current production `standing_safe` Datto components:
 
 - `Get-DNS Settings AOT Ver 06042025-1` — UID `afb858ae-e0d5-4c7b-b0da-8617a22b60d4`;
-- `Check Datto EDR/AV Status AOT Ver 12122025-1` — UID `8cb0f063-5875-452e-88ad-2e1748ed0fd0`.
+- `Check Datto EDR/AV Status AOT Ver 12122025-1` — UID `8cb0f063-5875-452e-88ad-2e1748ed0fd0`;
+- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` — UID `2b49d490-bcae-4825-b31e-c4f1be881ae5`;
+- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` — UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`, durable metadata fingerprint `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`.
 
-No reboot component is currently in production scope.
+The DNSFilter diagnostic was accepted for standing-safe autonomous diagnostic execution on 2026-09-24 after authoritative live metadata readback. The proof execution on AOT-50282 used job `d951ae82-37e4-406f-bdab-dd192c626d64`, action correlation `corr_mcp_action_f91a337e7e5e4cedb3824ed2b52795f2`, exactly one provider attempt, terminal `completed` readback, and governed stdout correlation `corr_mcp_5b18eccd8dc14cb182f2d7870d7679e6`.
+
+No reboot component is currently in production scope. The DNSFilter installer remains a separate authority decision and is not promoted by this diagnostic acceptance.
 
 ## Autotask accepted state
 
