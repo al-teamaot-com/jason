@@ -13,6 +13,8 @@ from jason_runtime.dnsfilter_mcp_mutation import (
     DNSFILTER_MCP_MUTATION_ENABLED_ENV,
     DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,
     DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
     DNSFILTER_MCP_MUTATION_PROFILE_ENV,
     DNSFILTER_MCP_MUTATION_PROVIDER,
 )
@@ -455,4 +457,54 @@ def test_dnsfilter_policy_create_acceptance_profile_registers_only_create(
     )
     assert active_mutations == {
         DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY
+    }
+
+
+def test_dnsfilter_policy_delete_acceptance_profile_registers_only_delete(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    monkeypatch.setattr(
+        "jason_runtime.datto_component_execution.configured_pilot",
+        lambda: None,
+    )
+    application = build_runtime_application(_settings(tmp_path))
+
+    for capability_name in DNSFILTER_MCP_MUTATION_TOOLS:
+        definition = application.capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        expected = (
+            "active"
+            if capability_name
+            == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY
+            else "building"
+        )
+        assert definition.lifecycle_status.value == expected
+
+    provider = (
+        application.governed_orchestrator
+        ._resolution
+        ._providers
+        .get(DNSFILTER_MCP_MUTATION_PROVIDER)
+    )
+    assert provider.lifecycle_status.value == "available"
+    assert provider.health_status.value == "healthy"
+    assert provider.approval_status.value == "approved"
+
+    registered = set(
+        application.governed_orchestrator
+        ._invoker
+        .registered_capabilities()
+    )
+    active_mutations = set(DNSFILTER_MCP_MUTATION_TOOLS).intersection(
+        registered
+    )
+    assert active_mutations == {
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY
     }

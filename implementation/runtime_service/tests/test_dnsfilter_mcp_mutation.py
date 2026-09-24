@@ -39,6 +39,10 @@ from jason_runtime.dnsfilter_mcp_mutation import (
     DNSFILTER_MCP_MUTATION_PROFILE_ENV,
     DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,
     DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME,
+    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
     DNSFILTER_MCP_MUTATION_PROVIDER,
     DnsFilterMcpGovernedConnector,
     DnsFilterMcpMutationActivationError,
@@ -55,6 +59,9 @@ BLOCK_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
 ]
 CREATE_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
     "dns.protection.policy.create"
+]
+DELETE_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
+    "dns.protection.policy.delete"
 ]
 SITE_FORWARDER_CAP = DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES[
     "dns.protection.site.forwarders.update"
@@ -83,6 +90,7 @@ class FakeClient:
     cross_org = False
     fail_mutation = False
     fail_after_policy_create = False
+    fail_after_policy_delete = False
 
     def __init__(self, store):
         self.store = store
@@ -109,26 +117,38 @@ class FakeClient:
         cls.cross_org = False
         cls.fail_mutation = False
         cls.fail_after_policy_create = False
+        cls.fail_after_policy_delete = False
 
     def call_tool(self, tool, arguments):
         args = dict(arguments)
         self.calls.append((tool, args))
         if tool == "get_policy":
-            org = 999999 if self.cross_org else ORG_ID
-            return {
+            target = str(args["policy_id"])
+            resource = next(
+                (
+                    dict(item)
+                    for item in self.policies
+                    if str(item.get("id")) == target
+                ),
+                None,
+            )
+            if resource is None:
+                raise ConnectorTransportError("synthetic policy not found")
+            attrs = dict(resource.get("attributes") or {})
+            attrs["organization_id"] = (
+                999999 if self.cross_org else ORG_ID
+            )
+            if target == str(POLICY_ID):
+                attrs["blacklist_domains"] = sorted(self.domains)
+            resource["attributes"] = attrs
+            relationships = dict(resource.get("relationships") or {})
+            relationships["organization"] = {
                 "data": {
-                    "id": str(POLICY_ID),
-                    "attributes": {
-                        "organization_id": org,
-                        "blacklist_domains": sorted(self.domains),
-                        "whitelist_domains": [],
-                        "blacklist_categories": [],
-                    },
-                    "relationships": {
-                        "organization": {"data": {"id": str(org)}},
-                    },
+                    "id": str(999999 if self.cross_org else ORG_ID)
                 }
             }
+            resource["relationships"] = relationships
+            return {"data": resource}
         if tool == "list_policies":
             return {
                 "data": [dict(item) for item in self.policies],
@@ -205,6 +225,24 @@ class FakeClient:
                     "synthetic provider error after create"
                 )
             return {"data": resource}
+        if tool == "delete_policy":
+            assert args["confirm"] is True
+            target = str(args["policy_id"])
+            before = len(self.policies)
+            self.policies[:] = [
+                item
+                for item in self.policies
+                if str(item.get("id")) != target
+            ]
+            if len(self.policies) == before:
+                raise ConnectorTransportError(
+                    "synthetic delete target not found"
+                )
+            if self.fail_after_policy_delete:
+                raise ConnectorTransportError(
+                    "synthetic provider error after delete"
+                )
+            return {"status": "deleted", "policy_id": target}
         raise AssertionError(f"unexpected fake tool call: {tool}")
 
 
@@ -910,3 +948,248 @@ def test_legacy_absolute_dnsfilter_mcp_path_is_rejected(
     with pytest.raises(PermissionError, match="tool binding changed"):
         connector.execute_governed_execution(tampered)
     assert not any(tool == "create_policy" for tool, _ in FakeClient.calls)
+
+
+def _policy_delete_acceptance_resource(*, assigned=False, name=None, policy_id=None):
+    target_id = (
+        str(policy_id)
+        if policy_id is not None
+        else DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+    )
+    target_name = (
+        name
+        if name is not None
+        else DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME
+    )
+    relationships = {
+        "organization": {"data": {"id": str(ORG_ID)}},
+        "networks": {"data": []},
+        "mac_addresses": {"data": []},
+        "scheduled_policies": {"data": []},
+        "network_subnets": {"data": []},
+        "user_agents": {"data": []},
+        "agent_local_users": {"data": []},
+        "collections": {"data": []},
+    }
+    if assigned:
+        relationships["networks"] = {
+            "data": [{"id": str(NETWORK_ID)}]
+        }
+    return {
+        "id": target_id,
+        "attributes": {
+            "organization_id": ORG_ID,
+            "name": target_name,
+            "is_global_policy": False,
+            "blacklist_domains": [],
+            "whitelist_domains": [],
+            "blacklist_categories": [],
+        },
+        "relationships": relationships,
+    }
+
+
+def test_policy_delete_acceptance_profile_activates_only_delete(monkeypatch):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    state = register_dnsfilter_mcp_mutation_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+
+    assert state.enabled is True
+    assert state.capability_names == (
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY,
+    )
+    assert state.provider_ids == (DNSFILTER_MCP_MUTATION_PROVIDER,)
+    for capability_name in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES:
+        definition = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        expected = (
+            CapabilityLifecycle.ACTIVE
+            if capability_name
+            == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY
+            else CapabilityLifecycle.BUILDING
+        )
+        assert definition.lifecycle_status is expected
+
+
+def test_policy_delete_acceptance_profile_rejects_other_mutations(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    connector, _ = build(tmp_path)
+
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="permits only delete_policy",
+    ):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(CREATE_CAP),
+                {"company_id": 0, "name": "Not Permitted"},
+            )
+        )
+    assert FakeClient.calls == []
+
+
+def test_policy_delete_acceptance_preflight_binds_exact_unassigned_target(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    connector, _ = build(tmp_path)
+    FakeClient.policies.append(_policy_delete_acceptance_resource())
+
+    prepared = connector.prepare_governed_execution(
+        ConnectorRequest(
+            context(DELETE_CAP),
+            {
+                "company_id": 0,
+                "policy_id": int(
+                    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+                ),
+            },
+        )
+    )
+
+    assert prepared.normalized_path == "/tools/delete_policy"
+    assert prepared.resource_identifier == (
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+    )
+    assert prepared.payload["confirm"] is True
+    assert (
+        prepared.symbolic_resolutions[
+            "policy_delete_acceptance_target_verified"
+        ]
+        is True
+    )
+    assert (
+        prepared.symbolic_resolutions[
+            "policy_delete_acceptance_policy_name"
+        ]
+        == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_NAME
+    )
+
+
+def test_policy_delete_acceptance_rejects_any_other_policy_id(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    connector, _ = build(tmp_path)
+    FakeClient.policies.append(
+        _policy_delete_acceptance_resource(policy_id="1506475")
+    )
+
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="approved test policy ID",
+    ):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(DELETE_CAP),
+                {"company_id": 0, "policy_id": 1506475},
+            )
+        )
+    assert not any(tool == "delete_policy" for tool, _ in FakeClient.calls)
+
+
+def test_policy_delete_acceptance_rejects_assigned_target(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    connector, _ = build(tmp_path)
+    FakeClient.policies.append(
+        _policy_delete_acceptance_resource(assigned=True)
+    )
+
+    with pytest.raises(
+        ConnectorAuthorizationError,
+        match="assigned through relationship networks",
+    ):
+        connector.prepare_governed_execution(
+            ConnectorRequest(
+                context(DELETE_CAP),
+                {
+                    "company_id": 0,
+                    "policy_id": int(
+                        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+                    ),
+                },
+            )
+        )
+    assert not any(tool == "delete_policy" for tool, _ in FakeClient.calls)
+
+
+def test_policy_delete_provider_error_recovers_only_when_target_is_absent(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    connector, audit = build(tmp_path)
+    FakeClient.policies.append(_policy_delete_acceptance_resource())
+
+    prepared = connector.prepare_governed_execution(
+        ConnectorRequest(
+            context(DELETE_CAP),
+            {
+                "company_id": 0,
+                "policy_id": int(
+                    DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+                ),
+            },
+        )
+    )
+    FakeClient.fail_after_policy_delete = True
+    result = connector.execute_governed_execution(prepared)
+
+    writes = [
+        args
+        for tool, args in FakeClient.calls
+        if tool == "delete_policy"
+    ]
+    assert len(writes) == 1
+    assert result.data["providerOutcome"] == "error_recovered_by_readback"
+    verification = result.data["jasonVerification"]
+    assert verification["readbackVerified"] is True
+    assert verification["providerErrorRecoveredByReadback"] is True
+    assert not any(
+        str(item.get("id"))
+        == DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_POLICY_ID
+        for item in FakeClient.policies
+    )
+    assert any(
+        event == "connector.mutation.recovered_by_readback"
+        for event, _ in audit.events
+    )
