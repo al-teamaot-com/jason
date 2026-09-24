@@ -5083,6 +5083,7 @@ def main() -> None:
         port=8000,
         log_level="info",
         access_log=False,
+        timeout_keep_alive=30,
     )
 
 
