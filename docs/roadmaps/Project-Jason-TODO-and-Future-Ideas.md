@@ -654,7 +654,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-006 — Complete Datto EDR/AV threat-branch activation
 
 - **Priority:** P1
-- **Status:** In progress — threat closure gate proven fail-closed; production activation pending
+- **Status:** Implemented 2026-09-24 — production-enabled v1.3 with terminal escalation acceptance
 - **Risk level:** High
 - **Idea:** Finish the `datto_edr_av` playbook by completing the controlled remediation/scan/recurrence acceptance path now that provider-native Datto AV scan execution is governed and accepted.
 - **Why it matters:** The production backend can distinguish endpoint-security health, detections, policy, scan history, quarantine state, and can initiate an exact Quick/Full Datto AV scan. The remaining gap is proving the complete composite threat-response closure sequence, including post-scan detection verification, documentation, recurrence handling, and terminal disposition.
@@ -670,7 +670,8 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Acceptance evidence:** `docs/sessions/Jason-Datto-EDR-AV-Governed-Read-Acceptance-2026-09-18.md` and `docs/sessions/Jason-Datto-EDR-AV-Scan-Execution-Acceptance-2026-09-18.md`.
 - **2026-09-18 threat-branch acceptance checkpoint:** Runtime bindings now use the actual live `endpoint.security.scan.start` capability and exact status/detection/scan-history reads. Local focused suite passed 67 tests. Live AOT-50282 evidence proved the safety gate: EDR/AV protection was healthy, the originating artifact was quarantined/remediated, but provider `compromised=true` and an exact SHA-256 recurrence existed across 2026-09-11 and 2026-09-18. The playbook therefore must not close the threat branch. A Full AV scan was already in progress, so duplicate dispatch was suppressed. Evidence was written to Autotask internal note `30503131`. No endpoint mutation/disruptive action was performed.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Complete before setting the playbook registry `enabled=true` or declaring the full threat branch production-ready.
+- **2026-09-24 completion checkpoint:** Live AOT-50282 / T20260918.0005 revalidation confirmed the Full scan from 2026-09-19 completed, later Quick scans through 2026-09-24 completed, and no detection newer than the originating 2026-09-18 high-severity quarantined artifact was present. The identical SHA-256 recurred across prior weekly detections and provider detail still reports `compromised=true`, so the correct terminal outcome is security escalation rather than closure. v1.3 makes `escalation_required` terminal/sticky so later healthy product state, clean scan evidence, or recurrence bookkeeping cannot downgrade an established escalation. The production registry is enabled only under existing Central Orchestrator, approval, provider-isolation, and disruption controls.
+- **Review trigger:** Revisit when Datto threat semantics/capabilities change or operational evidence identifies a needed branch refinement.
 
 ---
 ## Communication and audience controls
