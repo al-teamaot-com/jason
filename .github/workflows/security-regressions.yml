@@ -11,7 +11,7 @@ jobs:
   governed-security-regressions:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
