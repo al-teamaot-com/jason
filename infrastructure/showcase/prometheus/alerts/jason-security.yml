@@ -1,0 +1,63 @@
+groups:
+  - name: jason-security-controls
+    interval: 30s
+    rules:
+      - alert: JasonSecurityControlExporterMissing
+        expr: absent(up{job="jason-security-control"})
+        for: 2m
+        labels:
+          severity: critical
+          service: jason-security
+        annotations:
+          summary: Jason security-control telemetry target is missing
+          description: Prometheus has no security-control scrape series. Security observability is fail-closed until the target returns.
+
+      - alert: JasonSecurityControlExporterDown
+        expr: up{job="jason-security-control"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: jason-security
+        annotations:
+          summary: Jason security-control exporter is down
+          description: Prometheus cannot scrape the secret-safe security-control exporter.
+
+      - alert: JasonAuthorityContextDenialObserved
+        expr: delta(jason_security_control_events{control="authority_context_denied"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+          service: jason-governance
+        annotations:
+          summary: Jason authority-context denial observed
+          description: One or more new authority-context denials were recorded in the last 15 minutes. Review governance evidence before retrying any affected action.
+
+      - alert: JasonExecutionPlanDenialBurst
+        expr: delta(jason_security_control_events{control="execution_plan_denied"}[15m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+          service: jason-governance
+        annotations:
+          summary: Jason execution-plan denial burst detected
+          description: Three or more new execution-plan denials were recorded in 15 minutes. Provider invocation should remain blocked; investigate plan, target, provider, or payload drift.
+
+      - alert: JasonClientContextFailureBurst
+        expr: delta(jason_security_request_terminations{reason="client_context_required"}[15m]) >= 5
+        for: 0m
+        labels:
+          severity: warning
+          service: jason-governance
+        annotations:
+          summary: Jason client-context failure burst detected
+          description: Five or more requests failed closed for missing client context within 15 minutes. Check client-binding or workflow-context propagation rather than broadening scope.
+
+      - alert: JasonProviderEligibilityFailureBurst
+        expr: delta(jason_security_request_terminations{reason="no_eligible_provider"}[30m]) >= 5
+        for: 0m
+        labels:
+          severity: warning
+          service: jason-governance
+        annotations:
+          summary: Jason provider eligibility failure burst detected
+          description: Five or more requests had no eligible provider in 30 minutes. Review capability/provider activation and authority mappings; do not fall back to direct provider access.
