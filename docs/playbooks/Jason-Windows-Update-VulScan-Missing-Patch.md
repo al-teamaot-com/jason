@@ -4,7 +4,9 @@
 
 Jason must distinguish a genuinely failed Windows update from an approved patch that is merely waiting for its normal patch window, perform bounded Windows Update diagnostics/remediation only when justified, protect active users from disruption, and verify the exact KB/build state before completing the ticket.
 
-Success requires a deterministic classification, documented evidence, correct Autotask ownership/device association, bounded repair attempts, safe reboot handling, and authoritative verification that the reported missing patch condition is resolved or appropriately escalated.
+For any missing or unapproved KB, Jason must also produce a plain-English KB intelligence summary and an evidence-based **Patch Reliability Score** before recommending approval, pilot deployment, hold, or rejection. Security urgency and operational reliability are separate dimensions: a critical security patch can still be operationally unsafe to deploy broadly.
+
+Success requires a deterministic classification, documented KB intelligence, correct Autotask ownership/device association, bounded repair attempts, safe reboot handling, an evidence-based approval recommendation, and authoritative verification that the reported missing patch condition is resolved or appropriately escalated.
 
 ## 2. Trigger
 
@@ -29,6 +31,10 @@ In scope:
 - patch-window waiting/recheck logic
 - safe scheduled reboot logic
 - exact post-remediation verification
+- authoritative Microsoft KB / Release Health / MSRC research
+- AOT fleet deployment evidence when available
+- endpoint-role applicability analysis
+- deterministic Patch Reliability Score and approval recommendation
 
 Out of scope unless separately authorized:
 - approving unapproved patches
@@ -65,13 +71,24 @@ Healthy state requires:
 
 ## 6. State Model
 
-identified -> patch_state_check
+identified -> patch_intelligence -> patch_state_check
+
+patch_intelligence ->
+- intelligence_ready
+- intelligence_blocked
 
 patch_state_check ->
 - complete_candidate
 - waiting_patch_window
 - diagnosing_install_failure
+- approval_recommended
 - approval_blocked
+- hold_watch
+- do_not_install
+
+approval_recommended -> approval_blocked | waiting_patch_window
+hold_watch -> patch_intelligence
+do_not_install -> supersedence_check | escalated
 
 waiting_patch_window -> post_window_verification
 
@@ -99,7 +116,7 @@ post_reboot_verification -> verifying
 
 verifying -> complete | escalated
 
-Persist ticket ID, device UID, configuration item ID, KB/patch ID, current state, patch-window timestamp, diagnostic job IDs/results, repair attempts, reboot decision, and next recheck.
+Persist ticket ID, device UID, configuration item ID, KB/patch ID, current state, patch-window timestamp, diagnostic job IDs/results, repair attempts, reboot decision, next recheck, security-urgency classification, Patch Reliability Score, score inputs, evidence timestamp, known-issue applicability, and superseding-update evidence.
 
 ## 7. Diagnostic Workflow
 
@@ -116,7 +133,112 @@ Branch:
 
 An approved-pending patch before its maintenance window is not a failure.
 
-### B. Patch-window check
+### B. KB intelligence and Patch Reliability Score
+
+Before recommending approval of a missing/unapproved KB, Jason must research and document the patch itself.
+
+#### Required KB intelligence
+
+For each exact KB, capture:
+- KB number and exact Microsoft title;
+- product / OS / build applicability;
+- release date;
+- security vs quality classification;
+- relevant CVEs and official severity/exploitation status where available;
+- reboot requirement;
+- Microsoft Known Issues / Release Health status;
+- whether Microsoft has paused, withdrawn, safeguarded, mitigated, or superseded the update;
+- whether a later cumulative or out-of-band update specifically resolves regressions in the original patch;
+- credible external issue reports, clearly separated from official confirmation;
+- AOT deployment evidence on comparable endpoints when available;
+- whether any known issue is actually relevant to the target endpoint's role, hardware, domain state, applications, or features.
+
+Use authoritative Microsoft sources first: the KB article, Windows Release Health, MSRC/CVE guidance, .NET release notes, and Microsoft Update Catalog metadata where appropriate. Community reports are secondary evidence and must never outweigh a current official Microsoft statement.
+
+#### Security Urgency
+
+Security urgency is recorded separately from reliability.
+
+Suggested values:
+- `Emergency` — active exploitation / KEV / urgent vendor direction or equivalent;
+- `Critical` — critical RCE/EoP or equivalent high-impact security exposure;
+- `High` — important security exposure with meaningful risk;
+- `Standard` — normal security/quality maintenance.
+
+A high Security Urgency does **not** increase the Patch Reliability Score. If a patch is urgent but unreliable, Jason should escalate the tradeoff and seek a superseding update, mitigation, or bounded pilot rather than pretending the patch is safe.
+
+#### Patch Reliability Score
+
+Score each KB from **0-100** using the following deterministic dimensions:
+
+1. **Official vendor health — 0-35**
+   - 35: no current official known issue relevant to the update/platform and no pause/safeguard/withdrawal;
+   - 25: known issues exist but are confirmed not applicable to the target endpoint/role;
+   - 15: known issues are applicable but mitigated and low operational risk;
+   - 0: active severe relevant known issue, Microsoft pause/withdrawal/safeguard, or official recommendation that makes broad deployment inappropriate.
+
+2. **AOT fleet evidence — 0-30**
+   - 30: at least 25 comparable successful installs, >=97% success, with no correlated post-patch incident pattern;
+   - 20: at least 10 comparable successful installs, >=95% success, with no correlated incident pattern;
+   - 10: 3-9 comparable successful installs with no correlated incident pattern;
+   - 5: insufficient internal deployment evidence;
+   - 0: material correlated failures, rollback pattern, or significant AOT incident evidence.
+
+3. **Release maturity — 0-15**
+   - 15: released >=14 days;
+   - 10: 7-13 days;
+   - 5: 3-6 days;
+   - 0: <72 hours.
+
+4. **Credible ecosystem evidence — 0-10**
+   - 10: no credible widespread problem pattern found;
+   - 5: isolated/unconfirmed reports only;
+   - 0: broad reproducible issue pattern from credible sources.
+
+5. **Target applicability — 0-10**
+   - 10: known problem areas do not apply to the endpoint's actual role/features;
+   - 5: applicability cannot be confidently determined;
+   - 0: endpoint uses a feature/role/hardware directly affected by a known issue.
+
+Total: **0-100**.
+
+#### Reliability labels
+
+- **80-100 — Considered Safe**
+  - reasonable candidate for normal approval/maintenance;
+  - this means no material blocker was found under the current evidence window, **not zero risk**.
+- **60-79 — Generally Safe**
+  - reasonable to approve after normal safeguards; consider a pilot first for servers/critical roles or when AOT fleet evidence is thin.
+- **40-59 — Caution**
+  - do not broadly approve yet; pilot only when justified by security urgency and governance.
+- **20-39 — Hold**
+  - do not approve broadly; recheck vendor status, AOT telemetry, and supersedence.
+- **0-19 — Don't Install**
+  - do not approve the patch in its present form; seek a superseding/corrective update or alternate mitigation.
+
+#### Hard-stop / score-cap rules
+
+Regardless of arithmetic:
+- if Microsoft has withdrawn/paused the patch or recommends rollback/uninstall, cap at **19 / Don't Install**;
+- if a severe known issue directly applies to the target and has no effective mitigation, cap at **39 / Hold**;
+- if a newer cumulative/OOB update specifically fixes regressions in the older cumulative update, do not recommend approving the older update when the corrective update is applicable; classify the older update as **Don't Install / Prefer superseding update**;
+- if exact KB identity, applicability, or authoritative source evidence cannot be established, do not invent a score: set `intelligence_blocked`;
+- AOT internal success telemetry may improve confidence but may not override a Microsoft withdrawal/safeguard or a directly applicable severe known issue.
+
+The score is **KB + platform + endpoint-role specific**. The same KB may legitimately receive a different recommendation for an RDS server, a domain-joined workstation, and a standalone laptop.
+
+#### Approval recommendation
+
+After scoring:
+- Considered Safe: recommend approval in the normal maintenance path.
+- Generally Safe: recommend approval with normal safeguards; pilot first for critical systems when internal evidence is limited.
+- Caution: recommend pilot/limited deployment only; hold broad approval.
+- Hold: recommend no approval yet and schedule a recheck.
+- Don't Install: recommend rejection of the specific KB and evaluation of a superseding/corrective update or mitigation.
+
+Jason may **recommend** approval based on this workflow. Actual patch approval remains governed and must use an explicitly authorized patch-approval capability if one is added in the future.
+
+### C. Patch-window check
 
 If APPROVED_PENDING and the applicable patch window has not completed:
 - do not force-install
@@ -125,7 +247,7 @@ If APPROVED_PENDING and the applicable patch window has not completed:
 - use Scheduled - Remote or another appropriate waiting status if configured
 - resume after the patch window plus reasonable processing/reboot grace
 
-### C. Standard Windows Update diagnostic component
+### D. Standard Windows Update diagnostic component
 
 Primary component:
 **Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**
@@ -146,7 +268,7 @@ Purpose:
 
 Retrieve terminal job state and actual StdOut/StdErr. Job submission alone is not success.
 
-### D. Supplemental evidence when needed
+### E. Supplemental evidence when needed
 
 If diagnosis is inconclusive or patch failure persists:
 - exact WindowsUpdateClient Event ID/error/HRESULT
@@ -161,6 +283,14 @@ If diagnosis is inconclusive or patch failure persists:
 Do not assume error 0x80073712 proves persistent component-store corruption. OWNi7JAN25 demonstrated that Windows Update can return 0x80073712 while DISM/SFC later report healthy state.
 
 ## 8. Decision Gates
+
+Before recommending patch approval:
+- exact KB identity and applicability proven
+- Patch Reliability Score completed from current evidence
+- hard-stop rules evaluated
+- Security Urgency recorded separately
+- supersedence/corrective-update check completed
+- recommendation documented in the ticket
 
 Before repair:
 - exact device and KB identified
@@ -241,6 +371,11 @@ Do not repeat DISM/SFC/cache-reset work indefinitely.
 
 ## 11. Periodic Rechecks
 
+For hold_watch:
+- for Emergency/Critical security urgency, recheck vendor status/internal evidence at least daily while the ticket remains actionable;
+- for High/Standard urgency, recheck on a reasonable 48-72 hour cadence or when Microsoft/AOT evidence changes;
+- each later recheck is documented as a recheck event, but do not create command-by-command note noise.
+
 For waiting_patch_window:
 - recheck after the scheduled maintenance window plus a reasonable grace period.
 
@@ -271,6 +406,10 @@ Dependencies include:
 - scheduler/recheck support
 - interactive-session checker
 - governed reboot capability
+- authoritative public patch-intelligence retrieval (Microsoft KB / Release Health / MSRC)
+- AOT fleet patch-outcome telemetry or a bounded fallback method to establish internal evidence
+
+If fleet-wide patch success/failure aggregation is not yet available, score AOT fleet evidence as `5 - insufficient internal deployment evidence` rather than guessing. Track fleet telemetry aggregation as an implementation gap; it should eventually correlate patch install outcomes with post-patch Autotask/DRMM incidents.
 
 If a dependency is missing:
 1. verify it is actually missing
@@ -282,24 +421,61 @@ If a dependency is missing:
 
 ## 14. Documentation Requirements
 
-Document:
-- exact KB/update
-- current install/approval state
-- whether the patch window has occurred
-- endpoint online/reboot state
-- component flags used
-- job ID and terminal status
-- relevant sanitized StdOut/StdErr
-- HRESULT/event evidence
-- DISM/SFC results when used
-- repair/retry count
-- live-session/reboot decision
-- post-action verification
+Use the global session-summary rule: do not create one ticket note per command. During a normal troubleshooting/research session, create one consolidated progress note covering the meaningful work. A later scheduled recheck (for example, patch still held or endpoint still offline) is a new note-worthy event.
+
+Every patch/VulScan progress note must include a plain-English **KB intelligence summary** for each targeted KB.
+
+Minimum KB fields:
+- KB number and title;
+- release date/product/build;
+- what the update fixes or why it matters;
+- security urgency;
+- current DRMM install/approval state;
+- reboot requirement;
+- Microsoft known-issue status;
+- relevant target-specific known issues;
+- superseding/corrective update, if any;
+- AOT fleet evidence level;
+- Patch Reliability Score and label;
+- recommendation: Approve / Pilot / Hold / Don't Install / Prefer superseding update;
+- evidence timestamp and named authoritative sources.
+
+Also document, as applicable:
+- whether the patch window has occurred;
+- endpoint online/reboot state;
+- component flags used;
+- meaningful job ID and terminal status;
+- relevant sanitized StdOut/StdErr;
+- HRESULT/event evidence;
+- DISM/SFC results when used;
+- repair/retry count;
+- live-session/reboot decision;
+- post-action verification.
+
+Recommended progress-note format:
+
+```
+Jason - Patch Playbook - Progress Update
+
+KB512xxxx - <Microsoft title>
+Security urgency: <Emergency|Critical|High|Standard>
+DRMM state: <NOT_APPROVED|APPROVED_PENDING|INSTALLED|INSTALL_ERROR>
+Reboot required: <Yes|No>
+Patch Reliability: <score>/100 - <label>
+Microsoft status: <known issues / no known issues / safeguard / superseded>
+Target applicability: <relevant endpoint-specific impact>
+AOT fleet evidence: <summary or insufficient data>
+Recommendation: <Approve|Pilot|Hold|Don't Install|Prefer superseding update>
+Why: <short evidence-based rationale>
+
+Session progress: <diagnostics/remediation summary>
+Next step: <next action/recheck/blocker>
+```
 
 Suggested notes:
-- Jason - Patch Playbook - Asset Validation
+- Jason - Patch Playbook - Progress Update
+- Jason - Patch Playbook - Recheck
 - Jason - Patch Playbook - Waiting Patch Window
-- Jason - Patch Playbook - Diagnostic
 - Jason - Patch Playbook - Windows Update Repair
 - Jason - Patch Playbook - Reboot Scheduled
 - Jason - Patch Playbook - Verification
@@ -328,6 +504,8 @@ Escalate to Help Desk I when:
 - patch remains missing across authorized windows without explainable state
 - WSUS/policy changes beyond approved scope are required
 - supersedence/build state is ambiguous
+- Patch Reliability is Hold/Don't Install and the vulnerability is Emergency/Critical, requiring a human risk decision or alternate mitigation
+- authoritative patch intelligence is unavailable or contradictory
 - manual servicing/install media is required
 - disruptive action beyond playbook authority is required
 
@@ -337,6 +515,7 @@ Include all HRESULTs, repair jobs, outputs, patch states, and recommended next s
 
 Authoritative verification must include:
 - exact KB installed OR authoritative supersedence/build proof
+- if an approval recommendation was required, the KB intelligence/score was refreshed close enough to the decision to remain current
 - patch no longer APPROVED_PENDING/INSTALL_ERROR for the targeted condition
 - DRMM patch status healthy or otherwise explained
 - no unexpected approved pending patch remains
@@ -364,6 +543,8 @@ Include original missing KB, patch state, Windows Update error/HRESULT if any, d
 - Autotask configuration search/association
 - DRMM endpoint read/search
 - DRMM patch search
+- Microsoft KB / Release Health / MSRC intelligence retrieval
+- AOT fleet patch-outcome aggregation (preferred; currently a capability gap if unavailable)
 - DRMM component search/execute/job/output
 - governed read-only Windows commands when supplemental evidence is required
 - interactive Windows session check
@@ -384,6 +565,14 @@ Known case evidence:
 - DISM/SFC/component-store evidence subsequently appeared healthy
 - patch remains APPROVED_PENDING
 - owner directed Jason to respect the normal patch window rather than force installation
+
+Secondary live scoring case:
+- Ticket: T20260923.0066
+- Client: Full Circle Financial Group
+- Device: LT-FCF50827
+- KBs: KB5124008 and KB5126052
+- Known case evidence on 2026-09-24: both exact patches were NOT_APPROVED in DRMM.
+- Acceptance should prove that Jason researches each KB separately, detects corrective/superseding update evidence, produces distinct reliability scores, writes the KB intelligence into the ticket note, and hands off cleanly when patch approval capability is unavailable.
 
 Acceptance must prove:
 1. ticket moved/kept in Jason queue
@@ -425,6 +614,7 @@ Potential future autonomous scope after acceptance:
 - waiting/recheck state transitions
 
 Still per-run approval-bound unless explicitly approved by policy:
+- patch approval changes, regardless of score, until a separate patch-approval authority policy is accepted
 - WU_AutoFixCore=True remediation
 - usrClearWSUS=True
 - reboot/shutdown
