@@ -1,0 +1,11 @@
+[Unit]
+Description=Jason DNSFilter client boundary reconciliation
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec jason-runtime python -m jason_runtime.dnsfilter_boundary_reconcile --apply
+
+[Install]
+WantedBy=multi-user.target
