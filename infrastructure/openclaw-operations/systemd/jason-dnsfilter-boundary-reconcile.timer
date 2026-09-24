@@ -2,7 +2,7 @@
 Description=Reconcile DNSFilter client boundaries hourly
 
 [Timer]
-OnBootSec=10min
+OnActiveSec=10min
 OnUnitActiveSec=1h
 Persistent=true
 Unit=jason-dnsfilter-boundary-reconcile.service
