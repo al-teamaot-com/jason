@@ -1406,6 +1406,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         register_dnsfilter_mcp_mutation_invokers(
             invokers=invokers,
             invoker=dnsfilter_mcp_mutation_invoker,
+            capability_names=dnsfilter_mutation_activation.capability_names,
         )
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 

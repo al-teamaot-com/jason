@@ -151,7 +151,7 @@ Every mutation adapter must implement `prepare_governed_execution` and `execute_
 The prepared plan is secret-free and binds:
 
 - canonical capability;
-- selected provider `dnsfilter_mcp`;
+- selected provider `dnsfilter_mcp_mutation`;
 - exact provider tool;
 - mapped Autotask company ID;
 - mapped DNSFilter organization ID;
@@ -197,10 +197,12 @@ Until separately approved:
 - mutation capability lifecycle remains `BUILDING`;
 - mutation definitions are registered as `BUILDING` only;
 - the dedicated `dnsfilter_mcp_mutation` provider is registered as `PLANNED / UNKNOWN / BLOCKED`;
-- the mutation invoker is not constructed or registered unless both `JASON_DNSFILTER_MCP_MUTATION_PROFILE=governed_v1` and `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true` are set;
-- no mutation authority grant exists;
-- no MCP action surface exposes DNSFilter writes while the write gates are absent;
-- production deployment leaves both DNSFilter mutation gates unset.
+- the mutation invoker is not constructed or registered while the mutation profile/gate are absent;
+- `policy_create_acceptance_v1` activates and registers only `dns.protection.policy.create` for the first controlled acceptance;
+- `governed_v1` activates the full 25-capability mutation surface and is reserved for a later separately approved stage;
+- every activation profile also requires `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
+- authority remains a separate gate; the first acceptance uses only an `execute` grant for `dns.protection.policy.create` with `approval_required=true`;
+- no generic arbitrary MCP action surface is exposed.
 
 ## Future acceptance sequence
 
@@ -214,3 +216,25 @@ Until separately approved:
 8. rollback/compensation test where supported;
 9. separate review for user-disruptive families;
 10. source may be merged/deployed dormant after review; only after the controlled acceptance should production write gates, authority grants, and active write registration be considered.
+
+## Controlled policy-create acceptance profile
+
+The first live acceptance intentionally uses a single-capability profile rather than the full mutation profile.
+
+Profile:
+`JASON_DNSFILTER_MCP_MUTATION_PROFILE=policy_create_acceptance_v1`
+
+Execution gate:
+`JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`
+
+Effect:
+- `dns.protection.policy.create` -> `ACTIVE`;
+- `dnsfilter_mcp_mutation` -> `AVAILABLE / HEALTHY / APPROVED`;
+- only the policy-create mutation invoker is registered;
+- the other 24 mutation definitions remain `BUILDING` and unregistered;
+- authority still must explicitly allow `dns.protection.policy.create`;
+- capability approval remains required.
+
+The first attempt before this profile existed failed closed with zero provider mutations because normal discovery excludes dormant `BUILDING` capabilities. That failure is accepted safety evidence, not a provider failure.
+
+After the controlled create-policy acceptance and readback, return both mutation environment gates to unset unless a subsequent write test has separately approved scope.
