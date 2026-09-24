@@ -123,10 +123,17 @@ class InMemoryClientBoundaryRepository:
                 and current.external_tenant_id
                 == boundary.external_tenant_id
             ):
-                raise BoundaryConflictError(
-                    "External tenant is already mapped "
-                    "to another active client boundary."
-                )
+                current_scopes = frozenset(current.external_scope_ids)
+                new_scopes = frozenset(boundary.external_scope_ids)
+                if (
+                    not current_scopes
+                    or not new_scopes
+                    or current_scopes.intersection(new_scopes)
+                ):
+                    raise BoundaryConflictError(
+                        "External tenant is already mapped "
+                        "to another active client boundary."
+                    )
 
 
 class InMemoryOnboardingTransactionRepository:
