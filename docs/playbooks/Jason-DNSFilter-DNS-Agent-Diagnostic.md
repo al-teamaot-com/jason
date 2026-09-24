@@ -2,16 +2,17 @@
 
 ## 1. Section Goal
 
-**Goal:** Allow Jason to investigate Windows DNSFilter / DNS Agent alerts autonomously with bounded read-only diagnostics, classify the condition, document the result, and stop before any user-impacting remediation unless separately approved.
+**Goal:** Allow Jason to investigate and repair routine Windows DNSFilter / DNS Agent deployment-health alerts autonomously: prove the endpoint should have DNSFilter, verify installation, install the approved client when it is missing, inspect both DNSFilter Windows services, review Windows and DNSFilter operational logs, test DNS resolution/filtering, verify recovery, and document the result. Higher-risk actions remain separately governed.
 
 **Success means:**
 - exact ticket/client/device/alert identity is proven;
 - endpoint availability is checked before diagnostics;
-- service/install/version/event/DNS evidence can be collected without per-run approval;
+- service/install/version/event/DNSFilter-log/DNS evidence can be collected without per-run approval;
+- if DNSFilter is required but genuinely missing, Jason can run the exact approved `Install DNSFilter AOT Ver 08262024` component after all install gates pass;
+- both the filtering service and Service Manager are verified after install and during diagnostics;
 - healthy/stale alerts can be resolved through the governed native alert path;
-- unhealthy cases are classified and handed to an authorized remediation path;
 - one consolidated Autotask note summarizes each work session;
-- no service restart, reinstall, uninstall, DNS change, or reboot occurs under diagnostic authority.
+- uninstall, DNS/NIC changes, registry modification, disabling protection, and reboot remain outside this playbook.
 
 This Section Goal is complete only after the dedicated diagnostic component is deployed, standing-approved, and acceptance-tested.
 
@@ -39,7 +40,9 @@ Current monitor example:
 - read-only service discovery;
 - read-only install/version/path/registry discovery;
 - read-only recent Service Control Manager event review;
-- read-only DNS configuration and DNS resolution tests;
+- read-only DNSFilter filtering-service, Service Manager, and auto-update log review;
+- read-only DNS configuration and DNS resolution/filtering tests;
+- approved installation with `Install DNSFilter AOT Ver 08262024` when the endpoint is eligible, DNSFilter is required, installation is genuinely absent, and required site configuration is proven;
 - current DNSFilter vendor release/known-issue research when relevant;
 - exact DRMM alert resolution after healthy-state verification.
 
@@ -49,7 +52,9 @@ Current monitor example:
 - changing DNS servers/NIC configuration;
 - adapter reset;
 - `ipconfig /flushdns` as remediation;
-- install/upgrade/reinstall/uninstall;
+- arbitrary/manual installer execution outside the approved install component;
+- automatic reinstall/repair-over-install when an existing installation is corrupt or partially present;
+- uninstall;
 - registry modification;
 - disabling DNSFilter;
 - reboot/shutdown;
@@ -58,7 +63,7 @@ Current monitor example:
 
 Preserve all Jason governance, including Central Orchestrator authority and `direct_provider_access=false`.
 
-**Owner policy decision — 2026-09-24:** this diagnostic workflow is approved for autonomous use once its dedicated read-only Datto component is deployed and registered as standing-safe. This approval does not extend to remediation.
+**Owner policy decision — 2026-09-24:** this workflow is approved for autonomous routine diagnosis and missing-agent installation once the dedicated diagnostic component is deployed/standing-approved and the existing `Install DNSFilter AOT Ver 08262024` component has passed the controlled acceptance gates below. This does not authorize uninstall, DNS/NIC changes, reboot, or repair-over-install of a corrupt existing client.
 
 ---
 
@@ -86,8 +91,9 @@ If identity is ambiguous: `state = identification_blocked`.
 Healthy DNSFilter Windows state:
 - endpoint online;
 - required DNSFilter client installed;
-- service associated with display name `DNS Agent` exists;
-- service state `Running`;
+- filtering service exists (`DNS Agent` for whitelabel/MSP or `DNSFilter Agent` for branded installs);
+- for agent versions that include it, Service Manager exists (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`);
+- required DNSFilter services are `Running`;
 - startup mode not disabled;
 - service executable exists;
 - installed version can be identified;
@@ -108,7 +114,9 @@ The alert alone does not prove the agent is currently unhealthy.
 
 `diagnosing -> service_start_failure -> remediation_required`
 
-`diagnosing -> agent_missing_or_corrupt -> remediation_required`
+`diagnosing -> agent_missing -> installing -> verifying`
+
+`diagnosing -> agent_corrupt_or_partial -> remediation_required`
 
 `diagnosing -> dns_resolution_failure -> remediation_required`
 
@@ -116,7 +124,7 @@ The alert alone does not prove the agent is currently unhealthy.
 
 `diagnosing -> evidence_inconclusive -> escalated`
 
-Persist ticket ID, alert UID, device UID, CI ID, service state, version, relevant event/error evidence, diagnostic job ID, DNS result, classification, and next state.
+Persist ticket ID, alert UID, device UID, CI ID, whether DNSFilter is required, install-state proof, filtering-service state, Service Manager state, installed version, relevant Windows/DNSFilter log evidence, diagnostic/install job IDs, DNS/filtering test result, classification, and next state.
 
 ---
 
@@ -150,8 +158,13 @@ Standing classification after acceptance:
 The component must collect only:
 
 **Service state**
-- query exact `DNS Agent` first, with DNSFilter-related fallback discovery;
-- Name, DisplayName, State, StartMode, StartName, PathName, ExitCode, ServiceSpecificExitCode, ProcessId.
+- detect branded vs whitelabel naming;
+- check filtering service: `DNS Agent` or `DNSFilter Agent`;
+- check Service Manager where applicable: `DNS Agent Service Manager` or `DNSFilter Agent Service Manager`;
+- if CyberSight is present, report its service state but do not treat it as required unless policy says it is enabled;
+- for each discovered service return Name, DisplayName, State, StartMode, StartName, PathName, ExitCode, ServiceSpecificExitCode, ProcessId.
+
+DNSFilter documentation states that agent v2.1+ includes a Service Manager that monitors the filtering service and can restart it after an unexpected stop, so both services must be evaluated together.
 
 **Install metadata**
 - check:
@@ -165,17 +178,28 @@ The component must collect only:
 - file/product version;
 - optional Authenticode signature status.
 
-**Recent service events**
-- previous 6 hours by default;
-- Service Control Manager entries referencing DNS Agent/DNSFilter;
+**Recent Windows events**
+- previous 6 hours by default, extend to 24 hours when needed;
+- System Service Control Manager entries referencing DNS Agent/DNSFilter;
+- relevant Application errors from DNSFilter/DNS Agent executables/providers;
 - newest first, bounded output;
-- timestamp, event ID, level, short error/message.
+- timestamp, event ID, provider, level, short error/message.
+
+**DNSFilter operational logs**
+- discover version-appropriate log roots instead of assuming one fixed path;
+- v3.x candidates include `%ProgramData%\\DNSFilter, Inc\\Logs` and whitelabel ProgramData variants;
+- legacy candidates include install-directory log folders such as `C:\\Program Files\\DNSFilter Agent\\logs` and `C:\\Program Files\\DNS Agent\\logs`;
+- inspect bounded recent entries from filtering-service/agent-operations logs, Service Manager logs, and auto-update logs;
+- return filenames, modification times, and recent Warning/Error/Exception/registration/update/service-failure lines with bounded context;
+- do **not** return raw DNS query logs in routine diagnostics because they may contain user browsing/query history;
+- do not change log level or enable DEBUG automatically.
 
 **DNS state**
 - active adapters;
 - configured DNS servers;
 - DNS Client service state;
 - one bounded normal DNS lookup against a neutral hostname;
+- run `nslookup -type=txt debug.dnsfilter.com` or equivalent read-only DNSFilter diagnostic query and report whether expected DNSFilter diagnostic fields are returned, without recording unrelated query history;
 - lookup success/failure and elapsed time.
 
 **System context**
@@ -190,18 +214,41 @@ The diagnostic component must never:
 - change NIC/DNS configuration;
 - flush DNS;
 - modify registry;
-- install/upgrade/uninstall;
+- install/upgrade/uninstall inside the diagnostic component itself;
 - reboot;
 - disable protection;
 - collect DNS query history or secret registration values.
 
-### Step 4 — Vendor evidence when relevant
+### Step 4 — Required-installation gate and approved install path
+
+Before installing, prove all of the following:
+- endpoint is a supported Windows client OS/role for the DNSFilter Roaming Client;
+- client/site policy requires the Roaming Client on this endpoint;
+- the device is not a Windows Server, domain controller, shared desktop/RDS host, or other unsupported role unless DNSFilter support documentation explicitly says otherwise;
+- installation is genuinely absent, not merely hidden from DRMM inventory;
+- no existing filtering service, Service Manager, install registry evidence, binary, or active DNSFilter client is found;
+- required DNSFilter site configuration/secret is available to the existing component through the approved Datto/site-variable mechanism without exposing the secret;
+- endpoint has network connectivity and required runtime prerequisites.
+
+If all gates pass:
+- run exact component `Install DNSFilter AOT Ver 08262024`;
+- poll the same job to terminal state;
+- do not redispatch while active;
+- then rerun the diagnostic component for authoritative verification.
+
+If install evidence is partial/corrupt or an existing client is present but broken:
+- do **not** blindly reinstall over it;
+- set `agent_corrupt_or_partial -> remediation_required` and escalate/seek the separately authorized repair path.
+
+DNSFilter currently documents the Windows Roaming Client for Windows 10+ client systems and states it is not supported on Windows Server/shared desktop environments; v3.x also requires .NET 8 runtime prerequisites. Treat those as hard install gates.
+
+### Step 5 — Vendor evidence when relevant
 
 If version/behavior suggests a client defect, consult current official DNSFilter release/known-issue material first. Compare the installed version to current production and check for applicable DNS/VPN/IPv6/config-sync/stability fixes.
 
 Do not upgrade solely because a newer version exists.
 
-### Step 5 — Classify
+### Step 6 — Classify
 
 **Healthy / stale monitor**
 - service running;
@@ -217,9 +264,15 @@ Do not upgrade solely because a newer version exists.
 - monitor/event evidence shows start attempt failed.
 - Capture exact error/event evidence -> `remediation_required`.
 
-**Agent missing/corrupt**
-- service absent plus install/binary evidence absent or inconsistent.
-- `remediation_required`.
+**Agent missing**
+- DNSFilter is required;
+- supported client endpoint;
+- service/install/binary evidence all prove it is absent.
+- Run the approved install component, then verify both services/logs/DNS.
+
+**Agent corrupt/partial**
+- mixed evidence: service exists but executable/registry/install metadata is broken or inconsistent.
+- `remediation_required`; do not blind reinstall.
 
 **DNS failure while service runs**
 - do not assume restart fixes it;
@@ -265,13 +318,25 @@ Classification: modifying / potentially user-impacting.
 
 **Not autonomously approved by this playbook.**
 
-### Install/upgrade
+### Missing-agent install
 Existing component:
 `Install DNSFilter AOT Ver 08262024`
 
-Classification: modifying.
+Classification: modifying, bounded installation.
 
-**Not approved by this diagnostic playbook.**
+**Owner-approved workflow:** eligible for autonomous use only when all Step 4 install gates pass and after controlled acceptance proves the exact component behaves safely. The component must use the approved client/site configuration source and must never expose the site secret in output or ticket notes.
+
+After install, Jason must verify:
+- filtering service exists and is Running;
+- Service Manager exists/runs when applicable;
+- installed version is identified;
+- DNSFilter operational logs do not show unresolved install/registration/service failure;
+- normal DNS resolution succeeds;
+- DNSFilter diagnostic TXT lookup returns expected filtering evidence;
+- exact DRMM alert clears or can be safely resolved.
+
+### Existing-but-broken client
+Do not automatically reinstall over a partial/corrupt installation under this playbook. Escalate to a separately approved repair/reinstall path.
 
 ### Uninstall
 Existing component:
@@ -369,7 +434,8 @@ Failure to collect evidence is not proof that DNSFilter is absent or broken.
 Escalate when:
 - service/device identity is ambiguous;
 - service repeatedly fails;
-- executable/install appears corrupt;
+- executable/install appears corrupt or partially installed;
+- endpoint is an unsupported DNSFilter Roaming Client OS/role;
 - DNS remains broken while the service is running;
 - remediation needs restart/reinstall/uninstall/DNS changes/reboot without authority;
 - vendor known issue materially matches the endpoint;
@@ -379,11 +445,14 @@ Escalate when:
 
 ## 17. Verification
 
-After any separately authorized remediation, require:
+After install or any separately authorized remediation, require:
 - endpoint online;
-- DNS Agent `Running`;
-- service remains running through a short observation interval;
+- filtering service `Running`;
+- Service Manager `Running` where applicable;
+- required services remain running through a short observation interval;
 - normal DNS lookup succeeds;
+- DNSFilter diagnostic TXT lookup shows expected DNSFilter handling;
+- recent DNSFilter agent/Service Manager logs show no unresolved installation/registration/service-start failure;
 - exact DRMM DNS Agent alert clears or is safely resolved;
 - no new matching service failure appears during verification.
 
@@ -424,9 +493,10 @@ Current:
 - `automation.job.output.read`
 
 Implementation gap:
-- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT`;
+- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT` with both-service checks, Windows events, DNSFilter operational-log parsing, DNS configuration, and DNSFilter diagnostic TXT lookup;
 - review it as read-only/non-disruptive;
-- register it in Jason's durable Datto component approval registry after acceptance.
+- register it in Jason's durable Datto component approval registry after acceptance;
+- review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting standing use under this playbook.
 
 The generic `Run Ad Hoc Command (PowerShell 2-5) [WIN]` must not be promoted to unsupervised authority.
 
@@ -453,22 +523,25 @@ Acceptance must prove:
 1. exact identity;
 2. dedicated component runs without per-run approval under standing-safe policy;
 3. no modifying/disruptive action occurs;
-4. service/install/event/DNS evidence is returned;
+4. filtering service + Service Manager/install/Windows-event/DNSFilter-log/DNS evidence is returned;
 5. exact job is polled without duplicate dispatch;
 6. one consolidated ticket note is written;
 7. incident is correctly classified;
-8. healthy case resolves exact alert;
-9. unhealthy case stops at `remediation_required`;
-10. audit records bind the exact component identity/fingerprint.
+8. if the agent is genuinely missing on a supported/required endpoint, the exact approved installer runs once and is verified rather than repeatedly dispatched;
+9. after install, both services, relevant logs, DNS resolution/filtering, and alert state are verified;
+10. healthy case resolves exact alert;
+11. partial/corrupt install stops at `remediation_required` rather than blind reinstall;
+12. audit records bind exact diagnostic and installer component identities/fingerprints.
 
 ---
 
 ## 22. Section Goal Closure
 
 Close only after:
-- dedicated component is created in Datto RMM;
-- read-only behavior is reviewed;
-- component is standing-approved in Jason's durable registry;
+- dedicated diagnostic component is created in Datto RMM;
+- read-only diagnostic behavior is reviewed;
+- diagnostic component is standing-approved in Jason's durable registry;
+- exact `Install DNSFilter AOT Ver 08262024` component passes controlled gated-install acceptance and is approved for the playbook's missing-agent path;
 - AVMAC-1077 acceptance succeeds;
 - note quality and retry behavior are verified;
 - limitations/TODOs are documented;
