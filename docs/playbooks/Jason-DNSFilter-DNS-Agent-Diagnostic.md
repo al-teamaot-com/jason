@@ -511,11 +511,17 @@ Existing standing-safe building blocks:
 - `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` for exact service state/details and relevant Windows events;
 - `Get-DNS Settings AOT Ver 06042025-1` for current DNS configuration.
 
-Implementation gap:
-- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT` focused on DNSFilter-specific install-state correlation, both-service awareness, operational-log parsing, and DNSFilter diagnostic TXT/filtering verification, while reusing existing generic components where practical;
-- review it as read-only/non-disruptive;
-- register it in Jason's durable Datto component approval registry after acceptance;
-- review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting standing use under this playbook.
+Production diagnostic state:
+- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is live in Datto RMM and accepted as read-only/non-disruptive;
+- exact component UID: `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`;
+- durable approval mode: `standing_safe`;
+- approval source: `durable_registry`;
+- live metadata fingerprint: `95500f4e6229ca2b6e21833cc5e041ce284d930d56d9b3f75660a33159fc7549`;
+- current live Description is classifier-safe and behaviorally accurate;
+- subsequent governed execution may select this exact component without a per-run technician approval.
+
+Remaining implementation gap:
+- review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting any standing use under this playbook.
 
 The generic `Run Ad Hoc Command (PowerShell 2-5) [WIN]` must not be promoted to unsupervised authority.
 
