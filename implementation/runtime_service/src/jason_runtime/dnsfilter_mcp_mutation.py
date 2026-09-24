@@ -41,6 +41,12 @@ from orchestrator.invokers import CapabilityInvokerRegistry
 DNSFILTER_MCP_MUTATION_ENABLED_ENV = "JASON_DNSFILTER_MCP_MUTATION_ENABLED"
 DNSFILTER_MCP_MUTATION_PROFILE_ENV = "JASON_DNSFILTER_MCP_MUTATION_PROFILE"
 DNSFILTER_MCP_MUTATION_PROFILE = "governed_v1"
+DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE = (
+    "policy_create_acceptance_v1"
+)
+DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY = (
+    "dns.protection.policy.create"
+)
 DNSFILTER_MCP_MUTATION_PROVIDER = "dnsfilter_mcp_mutation"
 
 
@@ -213,14 +219,27 @@ class DnsFilterMcpMutationActivationError(RuntimeError):
     pass
 
 
+def _mutation_capabilities_for_profile(profile: str) -> tuple[str, ...]:
+    if profile == DNSFILTER_MCP_MUTATION_PROFILE:
+        return tuple(sorted(DNSFILTER_MCP_MUTATION_TOOLS))
+    if profile == DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE:
+        return (DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,)
+    raise DnsFilterMcpMutationActivationError(
+        "unsupported DNSFilter MCP mutation profile"
+    )
+
+
 def dnsfilter_mcp_mutation_surface_enabled() -> bool:
     profile = os.getenv(
         DNSFILTER_MCP_MUTATION_PROFILE_ENV, ""
     ).strip().casefold()
-    return (
-        profile == DNSFILTER_MCP_MUTATION_PROFILE
-        and dnsfilter_mcp_mutation_execution_enabled()
-    )
+    if not profile:
+        return False
+    try:
+        _mutation_capabilities_for_profile(profile)
+    except DnsFilterMcpMutationActivationError:
+        return False
+    return dnsfilter_mcp_mutation_execution_enabled()
 
 
 def _dnsfilter_mcp_mutation_provider(*, now: datetime) -> ExecutionProvider:
@@ -293,18 +312,12 @@ def register_dnsfilter_mcp_mutation_runtime_foundation(
             provider_ids=(),
             capability_names=(),
         )
-    if profile != DNSFILTER_MCP_MUTATION_PROFILE:
-        raise DnsFilterMcpMutationActivationError(
-            "unsupported DNSFilter MCP mutation profile"
-        )
+    capability_names = _mutation_capabilities_for_profile(profile)
     if not dnsfilter_mcp_mutation_execution_enabled():
         raise DnsFilterMcpMutationActivationError(
             "DNSFilter MCP mutation profile requires mutation execution gate"
         )
 
-    capability_names = tuple(
-        sorted(DNSFILTER_MCP_MUTATION_TOOLS)
-    )
     for capability_name in capability_names:
         capabilities.set_lifecycle(
             capability_name=capability_name,
@@ -359,8 +372,15 @@ def register_dnsfilter_mcp_mutation_invokers(
     *,
     invokers: CapabilityInvokerRegistry,
     invoker: GovernedConnectorCapabilityInvoker,
+    capability_names: Sequence[str],
 ) -> None:
-    for capability_name in sorted(DNSFILTER_MCP_MUTATION_TOOLS):
+    unknown = sorted(set(capability_names) - set(DNSFILTER_MCP_MUTATION_TOOLS))
+    if unknown:
+        raise DnsFilterMcpMutationActivationError(
+            "cannot register unknown DNSFilter mutation capabilities: "
+            + ", ".join(unknown)
+        )
+    for capability_name in sorted(set(capability_names)):
         invokers.register(capability_name, invoker)
 
 

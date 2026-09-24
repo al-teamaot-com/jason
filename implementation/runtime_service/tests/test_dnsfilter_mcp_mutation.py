@@ -36,6 +36,8 @@ from jason_runtime.dnsfilter_mcp_mutation import (
     DNSFILTER_MCP_MUTATION_ENABLED_ENV,
     DNSFILTER_MCP_MUTATION_PROFILE,
     DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+    DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,
+    DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE,
     DNSFILTER_MCP_MUTATION_PROVIDER,
     DnsFilterMcpGovernedConnector,
     DnsFilterMcpMutationActivationError,
@@ -670,3 +672,73 @@ def test_mutation_activation_requires_both_explicit_gates(monkeypatch):
     assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
     assert provider.health_status is ProviderHealth.HEALTHY
     assert provider.approval_status is ProviderApproval.APPROVED
+
+
+def test_policy_create_acceptance_profile_activates_only_policy_create(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.setenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, "true")
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    state = register_dnsfilter_mcp_mutation_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+
+    assert state.enabled is True
+    assert state.capability_names == (
+        DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,
+    )
+    assert state.provider_ids == (DNSFILTER_MCP_MUTATION_PROVIDER,)
+    for capability_name in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES:
+        definition = capabilities.get(
+            capability_name=capability_name,
+            version="1.0",
+        )
+        expected = (
+            CapabilityLifecycle.ACTIVE
+            if capability_name
+            == DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY
+            else CapabilityLifecycle.BUILDING
+        )
+        assert definition.lifecycle_status is expected
+    provider = providers.get(DNSFILTER_MCP_MUTATION_PROVIDER)
+    assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert provider.health_status is ProviderHealth.HEALTHY
+    assert provider.approval_status is ProviderApproval.APPROVED
+
+
+def test_policy_create_acceptance_profile_still_requires_execution_gate(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        DNSFILTER_MCP_MUTATION_PROFILE_ENV,
+        DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_PROFILE,
+    )
+    monkeypatch.delenv(DNSFILTER_MCP_MUTATION_ENABLED_ENV, raising=False)
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    with pytest.raises(
+        DnsFilterMcpMutationActivationError,
+        match="requires mutation execution gate",
+    ):
+        register_dnsfilter_mcp_mutation_runtime_foundation(
+            capabilities=capabilities,
+            providers=providers,
+            now=datetime(2026, 9, 24, tzinfo=timezone.utc),
+        )

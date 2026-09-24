@@ -28,7 +28,7 @@ On 2026-09-24, Jason also performed an unauthenticated MCP discovery/list-tools 
 
 `docs/reference/DNSFilter-MCP-Tool-Catalog-2026-09-24.json`
 
-Twenty-five tools currently advertise a required `confirm: true` field. Those write tools are represented in source only as dormant `BUILDING` capability definitions and are not registered for runtime execution.
+Twenty-five tools currently advertise a required `confirm: true` field. Those write tools are deployed as dormant `BUILDING` capability definitions behind the dedicated `dnsfilter_mcp_mutation` provider, which remains `PLANNED / UNKNOWN / BLOCKED` with no mutation invoker registered unless an explicit mutation activation profile and execution gate are both enabled.
 
 ## REST posture plane
 
@@ -155,7 +155,7 @@ The OAuth session does not authorize DNSFilter writes in Jason. All provider wri
 
 The 2026-09-24 provider tool catalog exposes 25 confirmation-gated writes including policy allow/block-list changes, category/global-list changes, policy clone/create/update/delete, site policy assignment, portal-user administration, roaming-client policy reassignment/uninstall, bulk agent removal, site forwarder changes, block-page changes, and unblock-request decisions.
 
-All 25 are mapped in `implementation/orchestrator/dnsfilter_mcp_mutation_capability_catalog.py`. They remain `BUILDING`, source-only, and unregistered.
+All 25 are mapped in `implementation/orchestrator/dnsfilter_mcp_mutation_capability_catalog.py`. By default they remain `BUILDING`; the dedicated `dnsfilter_mcp_mutation` provider remains `PLANNED / UNKNOWN / BLOCKED`; and no mutation invoker is registered.
 
 Promotion of any write requires exact client/organization resolution, exact target-resource resolution, fixed provider tool mapping, normalized payload binding, stable intent/execution-plan fingerprints, explicit owner/technician approval, provider `confirm: true` only after Jason approval, exactly one provider mutation invocation, provider-native post-write readback, unknown-outcome handling without blind retry, Autotask documentation, and rollback/recovery semantics where possible.
 
@@ -188,6 +188,15 @@ Operations that can interrupt filtering, DNS resolution, endpoint protection, or
 
 No write is activated by the read deployment. Each write family requires a separate governed mutation acceptance and explicit authority grant.
 
+For the first controlled production write acceptance, use the narrow profile:
+
+- `JASON_DNSFILTER_MCP_MUTATION_PROFILE=policy_create_acceptance_v1`
+- `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`
+
+That profile activates and registers only `dns.protection.policy.create`. The other 24 DNSFilter mutation capabilities remain `BUILDING` and have no invoker registration. The authenticated owner must also have a narrow `execute` authority grant for `dns.protection.policy.create` with `approval_required=true`.
+
+The broader `governed_v1` profile exists for a future separately approved full-write activation and must not be used for the first acceptance test.
+
 ## Failure rules
 
 - Never infer authority from DNSFilter account role alone.
@@ -212,3 +221,9 @@ The read-only integration is accepted and live.
 - DNSFilter writes remain unavailable. The deployable write foundation may register them only as dormant `BUILDING` definitions behind a `PLANNED / BLOCKED` mutation provider; no write invoker, authority grant, or active write provider exists unless the separate mutation gates are explicitly enabled.
 
 The deployable dormant read/write design and its separate activation/acceptance gates are documented in `DNSFilter-Full-Read-Write-Design-2026-09-24.md`.
+
+## First write-acceptance attempt — fail-closed result
+
+The first production policy-create acceptance attempt correctly stopped before provider mutation because the write foundation was deployed dormant: `dns.protection.policy.create` was `BUILDING`, `dnsfilter_mcp_mutation` was not available to normal governed-action discovery, and no mutation invoker was registered. The pre-read successfully validated Autotask company `0` -> DNSFilter organization `1110483`, returned the current policy inventory, and found no exact match for the requested test-policy name. Provider mutation invocation count was `0`, ordinary DNSFilter reads remained available, and no configuration or assignment changed.
+
+The corrective control-plane design is the narrow `policy_create_acceptance_v1` profile described above. This avoids activating all 25 administrative writes merely to perform the first controlled create-policy acceptance.
