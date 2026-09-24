@@ -89,6 +89,7 @@ nav:
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
       - OpenBao Initialization and Recovery Record: operations/Jason-OpenBao-Initialization-and-Recovery-Record.md
       - Provider Secret Provisioning: operations/Provider-Secret-Provisioning.md
+      - Datto Endpoint Backup / Backup.net API Current State: operations/BackupNet-Endpoint-Backup-API-Current-State-2026-09-24.md
       - OpenClaw + JKD-001 Operational Hardening: operations/OpenClaw-JKD001-Operational-Hardening.md
       - OpenClaw + JKD-001 Production Packaging: operations/OpenClaw-JKD001-Production-Packaging.md
       - OpenClaw Ed25519 Key Rotation: operations/OpenClaw-Ed25519-Key-Rotation.md
