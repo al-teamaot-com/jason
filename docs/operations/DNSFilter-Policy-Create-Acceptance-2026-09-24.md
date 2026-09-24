@@ -138,4 +138,4 @@ This closes the first policy-create write acceptance. The test policy remains in
 
 ## Follow-up deletion acceptance
 
-The next separately governed acceptance is deletion of this exact unassigned test policy using the narrow `policy_delete_acceptance_v1` profile. The plan is documented in `DNSFilter-Policy-Delete-Acceptance-Plan-2026-09-24.md`. The deletion profile authorizes no other policy target and does not use conversational imperative auto-approval; an explicit governed approval is required before the single provider mutation attempt.
+The next separately governed acceptance is deletion of this exact unassigned test policy using the narrow `policy_delete_acceptance_v1` profile. The plan is documented in `DNSFilter-Policy-Delete-Acceptance-Plan-2026-09-24.md`. The deletion profile authorizes no other policy target. The authenticated owner's explicit conversational imperative to proceed is accepted as the approval signal only for this exact hard-bound deletion acceptance; Jason still persists/binds the approval before the single provider mutation attempt.

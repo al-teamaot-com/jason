@@ -213,7 +213,10 @@ def dnsfilter_mcp_mutation_capabilities(
                     "mcp_tool_name": "execute_governed_capability",
                     "conversation_authenticated_imperative_is_approval": (
                         "true"
-                        if capability_name == "dns.protection.policy.create"
+                        if capability_name in {
+                            "dns.protection.policy.create",
+                            "dns.protection.policy.delete",
+                        }
                         else "false"
                     ),
                     "activation_state": "registered_dormant_not_activated",

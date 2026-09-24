@@ -28,7 +28,7 @@ and:
 
 The profile activates and registers only `dns.protection.policy.delete`. Every other DNSFilter mutation remains `BUILDING` and has no mutation invoker.
 
-Deletion does not use conversational imperative auto-approval. Jason must stop at the governed approval stage and receive an explicit approval before provider invocation.
+For this exact hard-bound acceptance profile, the authenticated owner's explicit conversational imperative to proceed is the approval signal. The authority grant still requires approval, and Jason persists/binds that approval to the exact execution before provider invocation.
 
 ## Preflight requirements
 
