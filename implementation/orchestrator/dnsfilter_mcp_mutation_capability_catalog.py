@@ -41,6 +41,11 @@ DNSFILTER_MCP_MUTATION_TOOLS: dict[str, str] = {
     "dns.protection.unblock.request.decide": "decide_unblock_request",
 }
 
+DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES: dict[str, str] = {
+    capability: f"dnsfilter_mcp.{tool_name}"
+    for capability, tool_name in DNSFILTER_MCP_MUTATION_TOOLS.items()
+}
+
 _USER_DISRUPTIVE = frozenset(
     {
         "dns.protection.policy.domain.block.add",

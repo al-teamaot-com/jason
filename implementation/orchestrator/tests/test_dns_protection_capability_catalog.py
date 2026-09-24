@@ -27,7 +27,7 @@ from orchestrator.dns_protection_capability_catalog import (
 NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 
-def test_dnsfilter_capabilities_are_read_only_pilot_and_company_partitioned():
+def test_dnsfilter_capabilities_are_read_only_active_and_company_partitioned():
     definitions = {item.capability_name: item for item in dns_protection_capabilities(NOW)}
     assert set(definitions) == {
         DNS_PROTECTION_ORGANIZATION_READ,
@@ -48,7 +48,7 @@ def test_dnsfilter_capabilities_are_read_only_pilot_and_company_partitioned():
         DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
     }
     for item in definitions.values():
-        assert item.lifecycle_status is CapabilityLifecycle.PILOT
+        assert item.lifecycle_status is CapabilityLifecycle.ACTIVE
         assert item.metadata["read_only"] == "true"
         assert item.approval.required is False
         assert item.metadata["client_partition_enforced_by"] == (

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from kernel.capabilities import CapabilityLifecycle
 from orchestrator.dnsfilter_mcp_mutation_capability_catalog import (
+    DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES,
     DNSFILTER_MCP_MUTATION_TOOLS,
     dnsfilter_mcp_mutation_capabilities,
 )
@@ -27,6 +28,9 @@ def test_all_public_confirm_gated_writes_have_dormant_capability_contracts():
         )
     }
     assert set(DNSFILTER_MCP_MUTATION_TOOLS.values()) == confirm_gated
+    assert set(DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES) == set(DNSFILTER_MCP_MUTATION_TOOLS)
+    assert len(set(DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES.values())) == len(confirm_gated)
+    assert all(value.startswith("dnsfilter_mcp.") for value in DNSFILTER_MCP_MUTATION_PROVIDER_CAPABILITIES.values())
     definitions = dnsfilter_mcp_mutation_capabilities(NOW)
     assert len(definitions) == len(confirm_gated)
     for item in definitions:
