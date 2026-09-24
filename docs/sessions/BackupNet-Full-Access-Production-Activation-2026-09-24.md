@@ -90,6 +90,27 @@ As of 2026-09-24, the published Backup.net Public API OpenAPI contract advertise
 
 Any future Backup.net mutation requires a provider-supported write operation plus explicit Jason capability authority, execution-plan binding, exact target/payload validation, approval policy, readback verification, and rollback/recovery handling.
 
+## Same-day production hardening follow-up — SUPPORT-CONN-020
+
+Later on 2026-09-24, a governed read against AOT-50282 exposed two connector-contract defects that were not exercised by the original company-1627 acceptance:
+
+- Atlantic Office Machines is the legitimate Autotask self-company record with company ID `0`, but the Backup.net connector and boundary helper incorrectly required a company ID greater than zero.
+- `backup.backupiq.alert.search` rejected an omitted `type` locally even though a general alert search should use provider type `alert`.
+
+PR #252 fixed both conditions without broadening provider authority. Merged production source is `87f9ecd60676db46fff5b815857b62a42f6b8320`. The fix also permits an exact unique Backup.net customer boundary to be validated when the provider proves that customer has zero Endpoint Backup assets; if assets exist, exact asset proof remains mandatory.
+
+A validated boundary was then created for Autotask company `0` / Atlantic Office Machines to Backup.net customer UUID `08de23b9-9685-4cdf-8932-e2318bf4412a`. The provider proved that this customer currently has an empty Endpoint Backup asset inventory.
+
+Post-deployment governed acceptance succeeded:
+
+- AOT-50282 asset search: `corr_mcp_09b4230fe92548deb2329335c959f6de` -> successful empty collection.
+- BackupIQ alert search with omitted `type`: `corr_mcp_1eaf814b3d0f40cda6793f9918a0aa4a` -> successful empty collection.
+- Backup-history search: `corr_mcp_cc46dfae0cfd4d43895aa3cf281ff434` -> successful empty collection.
+
+The empty collections are authoritative provider results for that exact validated customer boundary. They mean Backup.net currently exposes no matching protected AOT asset/history in those queries; they are not authorization or connector failures. Central Orchestrator remained authoritative and `direct_provider_access=false` throughout. No Backup.net mutation or endpoint disruption occurred.
+
+The detailed repair/deployment record is `docs/sessions/BackupNet-SUPPORT-CONN-020-Production-Fix-2026-09-24.md`.
+
 ## Result
 
-PASS. Full-access credential selection is production-active for the existing governed Backup.net read surface with no expansion of Jason mutation authority.
+PASS. Full-access credential selection remains production-active for the existing governed Backup.net read surface with no expansion of Jason mutation authority. SUPPORT-CONN-020 is production-resolved, including valid Autotask company ID `0` handling and bounded default BackupIQ alert search semantics.
