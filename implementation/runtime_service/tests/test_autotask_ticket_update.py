@@ -417,3 +417,98 @@ def test_governed_plan_resolves_symbolic_queue_and_status_before_authorization(m
     assert prepared.normalized_path == "/V1.0/Tickets"
     assert "Authorization" not in prepared.payload
     assert "dynamic-zone.example" not in prepared.normalized_path
+
+
+def test_symbolic_completion_resolution_fails_closed_when_ambiguous(monkeypatch):
+    from connectors.core.connector_base import PreparedRequest
+
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {"username": "u", "integration_code": "i", "secret": "s"}
+
+    class Transport:
+        def request(self, **kwargs):
+            return {"fields": [{"name": "status", "picklistValues": [
+                {"value": "5", "label": "Complete", "isActive": True},
+                {"value": "6", "label": "Complete", "isActive": True},
+            ]}]}
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(), transport=Transport(), audit=SimpleNamespace(record=lambda *a, **k: None), bindings=None
+    )
+    monkeypatch.setattr(
+        connector, "_provider_resolution_context",
+        lambda request: (PreparedRequest(method="PATCH", url="https://zone.example/atservicesrest/V1.0/Tickets", headers={}, params=None, json=None, audit_operation="/V1.0/Tickets"), {}),
+    )
+    with pytest.raises(ValueError, match="PICKLIST_LABEL_NOT_UNIQUE"):
+        connector.prepare_governed_execution(request({"id": 12345, "status": "Complete"}))
+
+
+def test_completion_plan_is_stable_single_write_and_readback_verified(monkeypatch):
+    from connectors.core.connector_base import PreparedRequest
+    from connectors.autotask.mutation_connector import AutotaskMutationConnector
+    from orchestrator.execution_plan import ExecutionPlan
+
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+    calls = []
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {"username": "u", "integration_code": "i", "secret": "s"}
+
+    class Transport:
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+            calls.append((method, url, json))
+            if url.endswith("/Tickets/entityInformation/fields"):
+                return {"fields": [{"name": "status", "picklistValues": [
+                    {"value": "5", "label": "Complete", "isActive": True}
+                ]}]}
+            if method == "PATCH":
+                return {"id": 12345, "status": 5}
+            raise AssertionError((method, url))
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(), transport=Transport(), audit=SimpleNamespace(record=lambda *a, **k: None), bindings=None
+    )
+
+    base = PreparedRequest(
+        method="PATCH", url="https://zone.example/atservicesrest/V1.0/Tickets",
+        headers={}, params=None, json=None, audit_operation="/V1.0/Tickets",
+    )
+    monkeypatch.setattr(connector, "_provider_resolution_context", lambda request: (base, {}))
+    monkeypatch.setattr(
+        AutotaskMutationConnector, "prepare_request",
+        lambda self, req, credentials: PreparedRequest(
+            method="PATCH", url="https://dynamic-zone.example/atservicesrest/V1.0/Tickets",
+            headers={}, params=None, json=dict(req.arguments["payload"]), audit_operation="/V1.0/Tickets",
+        ),
+    )
+    monkeypatch.setattr(connector, "_readback", lambda **kwargs: {"id": 12345, "status": 5})
+
+    first = connector.prepare_governed_execution(request({"id": 12345, "status": "Complete"}))
+    second = connector.prepare_governed_execution(request({"id": 12345, "status": "Complete"}))
+    def plan(prepared):
+        return ExecutionPlan(
+            principal_id="person-al", organization_id="aot", client_id=None,
+            canonical_capability="service.ticket.update", selected_provider_id=AUTOTASK_TICKET_UPDATE_PROVIDER,
+            provider_capability=prepared.provider_capability, action_method=prepared.action_method,
+            resource_type=prepared.resource_type, resource_identifier=prepared.resource_identifier,
+            normalized_path=prepared.normalized_path, normalized_payload=prepared.payload,
+            material_parameters=prepared.parameters, symbolic_resolutions=prepared.symbolic_resolutions,
+        )
+
+    assert plan(first).fingerprint == plan(second).fingerprint
+    assert second.payload == {"id": 12345, "status": 5}
+    assert second.symbolic_resolutions == {"status": {"symbolic": "Complete", "resolved": 5}}
+
+    result = connector.execute_governed_execution(second)
+    patch_calls = [item for item in calls if item[0] == "PATCH"]
+    assert len(patch_calls) == 1
+    assert patch_calls[0][2] == {"id": 12345, "status": 5}
+    assert result.data["jasonVerification"] == {
+        "readbackVerified": True,
+        "ticketId": 12345,
+        "verifiedFields": ["status"],
+    }
