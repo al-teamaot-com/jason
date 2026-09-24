@@ -234,6 +234,9 @@ class SQLiteClientBoundaryRepository:
             if str(row[1]) != boundary.external_tenant_id:
                 continue
             current_scopes = frozenset(_decode_scope_ids(row[2]))
+            master_pair = str(row[0]) == "0" or boundary.client_id == "0"
+            if master_pair and (current_scopes or new_scopes):
+                continue
             if (
                 not current_scopes
                 or not new_scopes
