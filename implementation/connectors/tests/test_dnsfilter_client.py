@@ -65,3 +65,16 @@ def test_http_error_is_redacted():
     assert "401" in message
     assert "very-secret" not in message
     assert "provider-secret-body" not in message
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/v1/networks/1197210", "/v1/policies/251285"],
+)
+def test_client_allows_exact_read_only_network_and_policy_resources(path):
+    opener = FakeOpener({"data": {"id": path.rsplit("/", 1)[-1]}})
+    client = DnsFilterClient({"api_key": "secret-key"}, opener=opener)
+    result = client.get(path)
+    assert result["data"]["id"] == path.rsplit("/", 1)[-1]
+    assert opener.requests[0].get_method() == "GET"
+    assert opener.requests[0].full_url == DNSFILTER_API_URL + path

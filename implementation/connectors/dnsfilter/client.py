@@ -24,7 +24,9 @@ _STATIC_PATHS = frozenset(
         "/v1/user_agents/counts",
     }
 )
-_RESOURCE_PATH = re.compile(r"^/v1/organizations/[1-9][0-9]*$")
+_RESOURCE_PATH = re.compile(
+    r"^/v1/(?:organizations|networks|policies)/[1-9][0-9]*$"
+)
 
 
 def require_dnsfilter_credentials(credentials: Mapping[str, str]) -> None:

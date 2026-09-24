@@ -90,6 +90,13 @@ class DnsFilterConnector:
             raise ConnectorAuthorizationError(
                 "DNSFilter global policy views are not approved for client-scoped reads."
             )
+        if client_scoped and operation == "network_search" and any(
+            key in arguments for key in ("protected", "unprotected")
+        ):
+            raise ConnectorConfigurationError(
+                "Client-scoped DNSFilter site reads do not support "
+                "protected/unprotected collection filters."
+            )
 
         credentials = self._secrets.resolve(
             DNSFILTER_READONLY_SECRET,
@@ -270,21 +277,52 @@ class DnsFilterConnector:
             return client.get(f"/v1/organizations/{organization_id}")
 
         if operation == "network_search":
+            if client_scoped:
+                resources = [
+                    cls._exact_resource(
+                        client,
+                        f"/v1/networks/{network_id}",
+                        label="network",
+                    )
+                    for network_id in network_ids
+                ]
+                return {"data": resources}
+
             params = cls._paging(arguments)
             params["organization_id"] = organization_id
-            if client_scoped:
-                params["network_ids"] = list(network_ids)
             for key in ("protected", "unprotected"):
                 if key in arguments:
                     params[key] = arguments[key]
             return client.get("/v1/networks/msp", params)
 
         if operation == "policy_search":
+            if client_scoped:
+                policy_ids: set[int] = set()
+                for network_id in network_ids:
+                    network = cls._exact_resource(
+                        client,
+                        f"/v1/networks/{network_id}",
+                        label="network",
+                    )
+                    cls._assert_resource_id(network, network_id, "network")
+                    cls._assert_relationship_organization(
+                        network,
+                        organization_id,
+                    )
+                    policy_ids.update(cls._relationship_policy_ids(network))
+                resources = [
+                    cls._exact_resource(
+                        client,
+                        f"/v1/policies/{policy_id}",
+                        label="policy",
+                    )
+                    for policy_id in sorted(policy_ids)
+                ]
+                return {"data": resources}
+
             params = cls._paging(arguments)
             params["organization_id"] = organization_id
-            if client_scoped:
-                params["include_global_policies"] = False
-            elif "include_global_policies" in arguments:
+            if "include_global_policies" in arguments:
                 params["include_global_policies"] = arguments["include_global_policies"]
             return client.get("/v1/policies", params)
 
@@ -373,6 +411,54 @@ class DnsFilterConnector:
             if client_scoped
             else "organization_scope"
         )
+
+    @staticmethod
+    def _exact_resource(
+        client: DnsFilterClient,
+        path: str,
+        *,
+        label: str,
+    ) -> Mapping[str, Any]:
+        response = client.get(path)
+        resource = response.get("data")
+        if not isinstance(resource, Mapping):
+            raise ConnectorAuthorizationError(
+                f"DNSFilter exact {label} read returned an invalid shape."
+            )
+        return resource
+
+    @staticmethod
+    def _relationship_policy_ids(resource: Any) -> set[int]:
+        if not isinstance(resource, Mapping):
+            raise ConnectorAuthorizationError(
+                "DNSFilter network response has an invalid shape."
+            )
+        relationships = resource.get("relationships")
+        if not isinstance(relationships, Mapping):
+            raise ConnectorAuthorizationError(
+                "DNSFilter network response did not prove policy relationships."
+            )
+        observed: set[int] = set()
+        for key in ("policy", "policies", "scheduled_policy"):
+            relationship = relationships.get(key)
+            if not isinstance(relationship, Mapping):
+                continue
+            related = relationship.get("data")
+            items = related if isinstance(related, list) else [related]
+            for item in items:
+                if item is None:
+                    continue
+                if not isinstance(item, Mapping):
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter network response contained an invalid policy relationship."
+                    )
+                try:
+                    observed.add(int(str(item.get("id"))))
+                except (TypeError, ValueError) as exc:
+                    raise ConnectorAuthorizationError(
+                        "DNSFilter network response contained an invalid policy identifier."
+                    ) from exc
+        return observed
 
     @staticmethod
     def _resource_id(resource: Any, label: str) -> int:
