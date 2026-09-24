@@ -19,6 +19,8 @@ from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
+from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
+from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
 from connectors.backup_net.connector import (
     BACKUP_NET_FULL_ACCESS_SECRET,
@@ -126,12 +128,24 @@ from orchestrator.backup_capability_catalog import (
     register_backup_resource_foundation,
 )
 from orchestrator.dns_protection_capability_catalog import (
+    DNSFILTER_MCP_PROVIDER,
     DNSFILTER_PROVIDER,
+    DNS_INVESTIGATION_ANOMALY_SEARCH,
+    DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+    DNS_INVESTIGATION_QUERY_EXPLAIN,
+    DNS_INVESTIGATION_QUERY_SEARCH,
     DNS_PROTECTION_AGENT_COUNTS_READ,
+    DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
     DNS_PROTECTION_AGENT_SEARCH,
+    DNS_PROTECTION_AGENT_STALE_SEARCH,
+    DNS_PROTECTION_AGENT_VERSION_REPORT,
     DNS_PROTECTION_ORGANIZATION_READ,
+    DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
     DNS_PROTECTION_POLICY_SEARCH,
+    DNS_PROTECTION_SITE_DRIFT_SEARCH,
     DNS_PROTECTION_SITE_SEARCH,
+    DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
+    DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
     register_dns_protection_foundation,
 )
 from orchestrator.print_capability_catalog import (
@@ -313,6 +327,10 @@ class RuntimeSettings:
     )
     dnsfilter_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/dnsfilter/secret_id"
+    )
+    dnsfilter_mcp_enabled: bool = False
+    dnsfilter_mcp_oauth_db: Path = Path(
+        "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
     )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -524,6 +542,15 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_DNSFILTER_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/dnsfilter/secret_id",
+                )
+            ),
+            dnsfilter_mcp_enabled=os.getenv(
+                "JASON_DNSFILTER_MCP_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            dnsfilter_mcp_oauth_db=Path(
+                os.getenv(
+                    "JASON_DNSFILTER_MCP_OAUTH_DB",
+                    "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -836,6 +863,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
         enabled=settings.dnsfilter_enabled,
+        mcp_enabled=settings.dnsfilter_mcp_enabled,
     )
     register_email_send(capabilities=capabilities, providers=providers)
 
@@ -1229,6 +1257,31 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         },
     )
 
+    dnsfilter_mcp_oauth = DnsFilterMcpOAuthStore(
+        settings.dnsfilter_mcp_oauth_db
+    )
+    dnsfilter_mcp = DnsFilterMcpConnector(
+        oauth_store=dnsfilter_mcp_oauth,
+        audit=ConnectorEventAudit(orchestration_events),
+        boundaries=provider_boundaries,
+    )
+    dnsfilter_mcp_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={DNSFILTER_MCP_PROVIDER: dnsfilter_mcp},
+        provider_capability_map={
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_QUERY_SEARCH): "dnsfilter_mcp.query_logs.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_QUERY_EXPLAIN): "dnsfilter_mcp.query_decision.explain",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH): "dnsfilter_mcp.blocked_traffic.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_INVESTIGATION_ANOMALY_SEARCH): "dnsfilter_mcp.traffic_anomalies.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_STALE_SEARCH): "dnsfilter_mcp.stale_agents.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_VERSION_REPORT): "dnsfilter_mcp.agent_version.report",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_AGENT_DUPLICATE_SEARCH): "dnsfilter_mcp.duplicate_agents.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_SITE_DRIFT_SEARCH): "dnsfilter_mcp.site_policy_drift.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_POLICY_CATEGORY_SEARCH): "dnsfilter_mcp.policy_category.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH): "dnsfilter_mcp.unblock_requests.search",
+            (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ): "dnsfilter_mcp.unblock_requests.count",
+        },
+    )
+
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
         role_id_path=settings.ses_openbao_role_id_path,
@@ -1319,6 +1372,17 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(DNS_PROTECTION_POLICY_SEARCH, dnsfilter_invoker)
     invokers.register(DNS_PROTECTION_AGENT_SEARCH, dnsfilter_invoker)
     invokers.register(DNS_PROTECTION_AGENT_COUNTS_READ, dnsfilter_invoker)
+    invokers.register(DNS_INVESTIGATION_QUERY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_QUERY_EXPLAIN, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_INVESTIGATION_ANOMALY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_STALE_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_VERSION_REPORT, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_AGENT_DUPLICATE_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_SITE_DRIFT_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_POLICY_CATEGORY_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH, dnsfilter_mcp_invoker)
+    invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ, dnsfilter_mcp_invoker)
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))

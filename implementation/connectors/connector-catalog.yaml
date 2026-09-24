@@ -236,7 +236,47 @@ connectors:
       - Caller-supplied DNSFilter organization and MSP identifiers are rejected; organization scope is derived from the validated client boundary.
       - Network and policy reads must prove the mapped organization relationship where the provider response exposes it.
       - Roaming-agent reads are organization-filtered collections; direct agent-by-ID reads remain unregistered until response scope can be independently proven.
-      - No DNSFilter mutation capability is registered.
+      - REST is the unattended posture/evidence plane; no DNSFilter REST mutation capability is registered.
+  dnsfilter_mcp:
+    status: foundation_built_oauth_pending
+    priority: 11
+    mode: governed_read_first
+    mcp_url: https://mcp.dnsfilter.com/mcp
+    oauth_store: /var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3
+    capabilities:
+      - dnsfilter_mcp.query_logs.search
+      - dnsfilter_mcp.query_decision.explain
+      - dnsfilter_mcp.blocked_traffic.search
+      - dnsfilter_mcp.traffic_anomalies.search
+      - dnsfilter_mcp.stale_agents.search
+      - dnsfilter_mcp.agent_version.report
+      - dnsfilter_mcp.duplicate_agents.search
+      - dnsfilter_mcp.site_policy_drift.search
+      - dnsfilter_mcp.policy_category.search
+      - dnsfilter_mcp.unblock_requests.search
+      - dnsfilter_mcp.unblock_requests.count
+    canonical_mappings:
+      dns.investigation.query.search: dnsfilter_mcp.query_logs.search
+      dns.investigation.query.explain: dnsfilter_mcp.query_decision.explain
+      dns.investigation.blocked.traffic.search: dnsfilter_mcp.blocked_traffic.search
+      dns.investigation.anomaly.search: dnsfilter_mcp.traffic_anomalies.search
+      dns.protection.agent.stale.search: dnsfilter_mcp.stale_agents.search
+      dns.protection.agent.version.report: dnsfilter_mcp.agent_version.report
+      dns.protection.agent.duplicate.search: dnsfilter_mcp.duplicate_agents.search
+      dns.protection.site.drift.search: dnsfilter_mcp.site_policy_drift.search
+      dns.protection.policy.category.search: dnsfilter_mcp.policy_category.search
+      dns.protection.unblock.request.search: dnsfilter_mcp.unblock_requests.search
+      dns.protection.unblock.request.count.read: dnsfilter_mcp.unblock_requests.count
+    live_enablement_gate:
+      - dnsfilter_user_oauth
+      - validated_autotask_company_to_dnsfilter_organization_boundary
+      - explicit_read_authority
+      - controlled_read_only_acceptance
+    notes:
+      - DNSFilter documents per-user OAuth, periodic re-authentication, privacy enforcement, and a confirmation gate on every write.
+      - Jason injects the validated DNSFilter organization ID into each supported MCP read and rejects caller-supplied organization/MSP scope.
+      - The provider's public tool catalog is snapshotted under docs/reference for drift review.
+      - All 25 currently confirm-gated provider writes are represented only as dormant BUILDING capability definitions; none is registered for runtime execution.
 
   teams_approvals:
     status: planned

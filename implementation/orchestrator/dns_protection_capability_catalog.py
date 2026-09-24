@@ -31,12 +31,39 @@ DNS_PROTECTION_POLICY_SEARCH = "dns.protection.policy.search"
 DNS_PROTECTION_AGENT_SEARCH = "dns.protection.agent.search"
 DNS_PROTECTION_AGENT_COUNTS_READ = "dns.protection.agent.counts.read"
 
+DNSFILTER_MCP_PROVIDER = "dnsfilter_mcp"
+DNS_INVESTIGATION_QUERY_SEARCH = "dns.investigation.query.search"
+DNS_INVESTIGATION_QUERY_EXPLAIN = "dns.investigation.query.explain"
+DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH = "dns.investigation.blocked.traffic.search"
+DNS_INVESTIGATION_ANOMALY_SEARCH = "dns.investigation.anomaly.search"
+DNS_PROTECTION_AGENT_STALE_SEARCH = "dns.protection.agent.stale.search"
+DNS_PROTECTION_AGENT_VERSION_REPORT = "dns.protection.agent.version.report"
+DNS_PROTECTION_AGENT_DUPLICATE_SEARCH = "dns.protection.agent.duplicate.search"
+DNS_PROTECTION_SITE_DRIFT_SEARCH = "dns.protection.site.drift.search"
+DNS_PROTECTION_POLICY_CATEGORY_SEARCH = "dns.protection.policy.category.search"
+DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH = "dns.protection.unblock.request.search"
+DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ = "dns.protection.unblock.request.count.read"
+
 _DNSFILTER_CAPABILITIES = (
     DNS_PROTECTION_ORGANIZATION_READ,
     DNS_PROTECTION_SITE_SEARCH,
     DNS_PROTECTION_POLICY_SEARCH,
     DNS_PROTECTION_AGENT_SEARCH,
     DNS_PROTECTION_AGENT_COUNTS_READ,
+)
+
+_DNSFILTER_MCP_CAPABILITIES = (
+    DNS_INVESTIGATION_QUERY_SEARCH,
+    DNS_INVESTIGATION_QUERY_EXPLAIN,
+    DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+    DNS_INVESTIGATION_ANOMALY_SEARCH,
+    DNS_PROTECTION_AGENT_STALE_SEARCH,
+    DNS_PROTECTION_AGENT_VERSION_REPORT,
+    DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
+    DNS_PROTECTION_SITE_DRIFT_SEARCH,
+    DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
+    DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
+    DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
 )
 
 
@@ -194,6 +221,116 @@ def dns_protection_capabilities(
                 "coverage protective DNS posture"
             ),
         ),
+        _read_capability(
+            now=now,
+            name=DNS_INVESTIGATION_QUERY_SEARCH,
+            display_name="Search DNS Query Evidence",
+            purpose="Search provider-native DNS query logs for one mapped client.",
+            resource_types="dns_query,dns_event,dns_investigation",
+            operation="search",
+            selector_keys="company_id,from,to,fqdn,domain,agent_id,network_id,user_id,result,page,per_page",
+            fact_hints="DNS query log blocked allowed domain device user policy threat forensic",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_INVESTIGATION_QUERY_EXPLAIN,
+            display_name="Explain DNS Query Decision",
+            purpose="Explain why a recent DNS query was blocked or allowed for one mapped client.",
+            resource_types="dns_query,dns_policy_decision",
+            operation="read",
+            selector_keys="company_id,fqdn,from,to,agent_id,network_id",
+            fact_hints="why blocked allowed domain DNSFilter decision policy category threat",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+            display_name="Search Blocked DNS Traffic",
+            purpose="Summarize provider-observed blocked DNS traffic for one mapped client.",
+            resource_types="dns_query,dns_blocked_traffic",
+            operation="search",
+            selector_keys="company_id,from,to,limit",
+            fact_hints="top blocked domains categories DNS traffic client",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_INVESTIGATION_ANOMALY_SEARCH,
+            display_name="Search DNS Traffic Anomalies",
+            purpose="Compare DNS traffic with a prior baseline for one mapped client.",
+            resource_types="dns_anomaly,dns_query",
+            operation="search",
+            selector_keys="company_id,from,to,network_id",
+            fact_hints="DNS anomaly spike drop new domain unusual traffic site",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_AGENT_STALE_SEARCH,
+            display_name="Search Stale DNS Protection Agents",
+            purpose="Find roaming clients that have not checked in within a bounded threshold.",
+            resource_types="dns_agent,endpoint",
+            operation="search",
+            selector_keys="company_id,days",
+            fact_hints="DNSFilter stale agent last sync offline roaming client",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_AGENT_VERSION_REPORT,
+            display_name="Read DNS Protection Agent Version Report",
+            purpose="Summarize roaming-client versions and CyberSight install state for one client.",
+            resource_types="dns_agent,endpoint,dns_agent_version",
+            operation="read",
+            selector_keys="company_id,latest_version",
+            fact_hints="DNSFilter agent version outdated CyberSight service state",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
+            display_name="Search Duplicate DNS Protection Agents",
+            purpose="Find likely duplicate roaming-client registrations for one mapped client.",
+            resource_types="dns_agent,endpoint",
+            operation="search",
+            selector_keys="company_id",
+            fact_hints="DNSFilter duplicate agent hostname conflicting registration",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_SITE_DRIFT_SEARCH,
+            display_name="Search DNS Site Policy Drift",
+            purpose="Find sites not using one expected DNS filtering policy.",
+            resource_types="dns_site,dns_policy,dns_configuration_drift",
+            operation="search",
+            selector_keys="company_id,policy_id",
+            fact_hints="DNSFilter site network expected policy drift unassigned",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
+            display_name="Search DNS Policy Category Coverage",
+            purpose="Identify which client policies block or do not block one category.",
+            resource_types="dns_policy,dns_category",
+            operation="search",
+            selector_keys="company_id,category_id,include_global_policies",
+            fact_hints="DNSFilter policy category blocking coverage global policy",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
+            display_name="Search DNS Unblock Requests",
+            purpose="Search the client's DNSFilter unblock-request queue and history.",
+            resource_types="dns_unblock_request,dns_policy_request",
+            operation="search",
+            selector_keys="company_id,tab,page,per_page,requested_after,requested_before,resolved_after,resolved_before,search,sort,status",
+            fact_hints="DNSFilter unblock request pending allow deny domain requester",
+        ),
+        _read_capability(
+            now=now,
+            name=DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
+            display_name="Read Pending DNS Unblock Request Count",
+            purpose="Read the number of pending DNSFilter unblock requests for one client.",
+            resource_types="dns_unblock_request_count",
+            operation="read",
+            selector_keys="company_id",
+            fact_hints="DNSFilter pending unblock requests count queue",
+        ),
     )
 
 
@@ -252,13 +389,75 @@ def dnsfilter_provider(now: datetime, *, enabled: bool) -> ExecutionProvider:
     )
 
 
+def dnsfilter_mcp_provider(now: datetime, *, enabled: bool) -> ExecutionProvider:
+    return ExecutionProvider(
+        provider_id=DNSFILTER_MCP_PROVIDER,
+        display_name="DNSFilter MCP",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=(
+            ProviderLifecycle.AVAILABLE if enabled else ProviderLifecycle.PLANNED
+        ),
+        health_status=(
+            ProviderHealth.HEALTHY if enabled else ProviderHealth.UNAVAILABLE
+        ),
+        approval_status=(
+            ProviderApproval.APPROVED if enabled else ProviderApproval.BLOCKED
+        ),
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=frozenset(_DNSFILTER_MCP_CAPABILITIES),
+        supported_classifications=frozenset({"internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(
+            maximum_concurrent_executions=4,
+            maximum_requests_per_minute=60,
+            maximum_execution_seconds=60,
+        ),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="zero-cost-foundation",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification=(
+                "Use DNSFilter's provider-supported MCP server for DNS investigation "
+                "and interactive administrative evidence while retaining Jason governance."
+            ),
+            review_interval_days=30,
+            last_reviewed_at=now,
+            retirement_criteria=(
+                "DNSFilter MCP is no longer provider-supported.",
+                "A replacement satisfies the canonical DNS investigation contracts.",
+            ),
+            vendor_change_sources=(
+                "DNSFilter MCP connector documentation",
+                "DNSFilter MCP public tool catalog",
+            ),
+            operational_owner="AOT Managed Services",
+            approval_owner="Jason Architecture Authority",
+        ),
+        created_at=now,
+        metadata={
+            "connector_id": DNSFILTER_MCP_PROVIDER,
+            "resource_authority": "dns_investigation_and_admin_evidence",
+            "live_enablement": (
+                "enabled"
+                if enabled
+                else "blocked_pending_oauth_boundaries_and_acceptance"
+            ),
+            "read_only": "true",
+            "oauth_user_session_required": "true",
+            "provider_write_surface_registered": "false",
+        },
+    )
+
+
 def register_dns_protection_foundation(
     *,
     capabilities: CapabilityRegistryService,
     providers: ExecutionProviderRegistryService,
     now: datetime,
     enabled: bool,
+    mcp_enabled: bool = False,
 ) -> None:
     for capability in dns_protection_capabilities(now):
         capabilities.register(capability)
     providers.register(dnsfilter_provider(now, enabled=enabled))
+    providers.register(dnsfilter_mcp_provider(now, enabled=mcp_enabled))

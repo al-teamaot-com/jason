@@ -1,0 +1,4718 @@
+{
+  "discovered_at": "2026-09-24",
+  "server": {
+    "name": "dnsfilter-public",
+    "protocolVersion": "2025-06-18",
+    "version": "0.6.0"
+  },
+  "source": "https://mcp.dnsfilter.com/mcp",
+  "tool_count": 107,
+  "tools": [
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "authenticate"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "get_current_user"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "logout"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "fqdn": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fqdn"
+        ],
+        "type": "object"
+      },
+      "name": "lookup_domain"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "fqdns": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "fqdns"
+        ],
+        "type": "object"
+      },
+      "name": "bulk_lookup_domains"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_category_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "category_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "collection_id": {
+            "type": "number"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "compact": {
+            "type": "boolean"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "fqdn": {
+            "type": "string"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_id": {
+            "type": "number"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "question_type": {
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "all",
+              "blocked",
+              "allowed"
+            ],
+            "type": "string"
+          },
+          "security_report": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "user_id": {
+            "type": "number"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "search_query_logs"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "fqdn": {
+            "type": "string"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "network_id": {
+            "type": "number"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fqdn"
+        ],
+        "type": "object"
+      },
+      "name": "explain_query_decision"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "get_blocked_traffic"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "network_id": {
+            "type": "number"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "analyze_query_patterns"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "network_id": {
+            "type": "number"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "detect_traffic_anomalies"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "category_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "fqdn": {
+            "type": "string"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "enum": [
+              "all",
+              "true",
+              "false"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "top_domains"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "enum": [
+              "all",
+              "true",
+              "false"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "top_categories"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "bucket_size": {
+            "enum": [
+              "1h",
+              "1d",
+              "1w"
+            ],
+            "type": "string"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "show_individual_networks": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "total_threats"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "bucket_size": {
+            "enum": [
+              "1h",
+              "1d",
+              "1w"
+            ],
+            "type": "string"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "type": "boolean"
+          },
+          "show_individual_networks": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "total_requests"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "basic_info": {
+            "type": "boolean"
+          },
+          "exclude_inherit_privacy_mode": {
+            "type": "boolean"
+          },
+          "managed_by_msp_id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owned_msp_id": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "pii_grid_search": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "normal",
+              "msp",
+              "sub_organization"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_organizations"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "basic_info": {
+            "type": "boolean"
+          },
+          "count_network_ips": {
+            "type": "boolean"
+          },
+          "force_truncate_ips": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "search": {
+            "type": "string"
+          },
+          "unprotected": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_networks"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_global_policies": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_policies"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_relationships": {
+            "type": "boolean"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_policy"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_organization_usage"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "type": "number"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_block_pages"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_categories"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "category_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_applications"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "count_network_ips": {
+            "type": "boolean"
+          },
+          "network_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9-]+$",
+                "type": "string"
+              },
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              }
+            ]
+          }
+        },
+        "required": [
+          "network_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_network"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_local_user_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_state": {
+            "enum": [
+              "protected",
+              "unprotected",
+              "bypassed",
+              "pending_uninstall",
+              "uninstalled",
+              "offline"
+            ],
+            "type": "string"
+          },
+          "agent_type": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "auto_update": {
+            "type": "boolean"
+          },
+          "block_page_id": {
+            "type": "number"
+          },
+          "browser_extension_status": {
+            "type": "string"
+          },
+          "cybersight_enabled": {
+            "type": "boolean"
+          },
+          "cybersight_status": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "name_search": {
+            "type": "string"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "new_agent_states": {
+            "type": "boolean"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "policy_id": {
+            "type": "number"
+          },
+          "policy_schedule": {
+            "type": "string"
+          },
+          "release_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scheduled_policy_id": {
+            "type": "number"
+          },
+          "search": {
+            "type": "string"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "online",
+              "offline"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "traffic_received_last_15_mins": {
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "proxy",
+              "agents"
+            ],
+            "type": "string"
+          },
+          "vpn_mode": {
+            "type": "string"
+          },
+          "vpn_status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_user_agents"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "type": "number"
+          },
+          "name_search": {
+            "type": "string"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "new_agent_states": {
+            "type": "boolean"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "release_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "search": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "online",
+              "offline"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "proxy",
+              "agents"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "user_agent_counts"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "bucket_size": {
+            "enum": [
+              "1h",
+              "1d",
+              "1w"
+            ],
+            "type": "string"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "type": "boolean"
+          },
+          "show_individual_networks": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "total_categories"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "top_agents"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "agent_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "application_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "collection_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "from": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          },
+          "mac_addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "msp_id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nat_ips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "organization_id": {
+            "type": "number"
+          },
+          "organization_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "private_ip": {
+            "type": "string"
+          },
+          "private_ip_from": {
+            "type": "string"
+          },
+          "private_ip_to": {
+            "type": "string"
+          },
+          "security_report": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "all",
+              "networks",
+              "agents",
+              "proxies"
+            ],
+            "type": "string"
+          },
+          "to": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ]\\d{2}:\\d{2}(:\\d{2})?(Z|[+-]\\d{2}:?\\d{2})?)?$",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "all",
+              "allowed",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "user_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "name": "top_users"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "fqdn": {
+            "type": "string"
+          },
+          "notes": {
+            "minLength": 10,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fqdn",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "name": "suggest_threat"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "domain",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "add_blocklist_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "domain",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "add_allowlist_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "domain",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "remove_blocklist_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "domain",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "remove_allowlist_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "category_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "category_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "add_blocklist_category"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "category_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "category_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "remove_blocklist_category"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domains": {
+            "items": {
+              "pattern": "^[A-Za-z0-9.-]+$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "policy_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "domains",
+          "policy_ids",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "bulk_add_blocklist_domains"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domains": {
+            "items": {
+              "pattern": "^[A-Za-z0-9.-]+$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "policy_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "domains",
+          "policy_ids",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "bulk_add_allowlist_domains"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "activity_type_ids": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_activities"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "ai_tool": {
+            "enum": [
+              "all",
+              "web",
+              "app",
+              "client"
+            ],
+            "type": "string"
+          },
+          "app_name": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "q": {
+            "type": "string"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "threats_only": {
+            "type": "boolean"
+          },
+          "web_host": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_activity_logs"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "q": {
+            "type": "string"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "web_host": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_websites"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "q": {
+            "type": "string"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "web_host": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "web_host"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_websites_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "app_name": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "q": {
+            "type": "string"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_applications"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "app_name": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "app_name"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_applications_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "threats_only": {
+            "type": "boolean"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_categories"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "web_categories": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "type": "array"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "web_categories"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_categories_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "app_name": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "q": {
+            "type": "string"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_streaming"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "app_name": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "app_name"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_streaming_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_active_clients"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_risky_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_active_time_trend"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_observed_threat_trend"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_event_counts_histogram"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "user_agent_uuid": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "user_agent_uuid"
+        ],
+        "type": "object"
+      },
+      "name": "cs_user_timeline"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "ai_source": {
+            "type": "string"
+          },
+          "ai_tool": {
+            "enum": [
+              "all",
+              "web",
+              "app",
+              "client"
+            ],
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "ai_tool"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_ai_usage"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "ai_source": {
+            "type": "string"
+          },
+          "ai_tool": {
+            "enum": [
+              "all",
+              "web",
+              "app",
+              "client"
+            ],
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_ai_usage_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_top_ai_active_clients"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "ai_source": {
+            "type": "string"
+          },
+          "ai_tool": {
+            "enum": [
+              "all",
+              "web",
+              "app",
+              "client"
+            ],
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_ai_usage_over_time"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_local_user_id": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "agent_local_user_id"
+        ],
+        "type": "object"
+      },
+      "name": "cs_user_activity_summary"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_devices_uuid": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "agent_devices_uuid"
+        ],
+        "type": "object"
+      },
+      "name": "cs_device_activity_summary"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "agent_devices_uuid": {
+            "type": "string"
+          },
+          "agent_local_user_id": {
+            "type": "string"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at"
+        ],
+        "type": "object"
+      },
+      "name": "cs_investigation_summary"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "compare_to_org_avg": {
+            "type": "boolean"
+          },
+          "end_at": {
+            "type": "string"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "size": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "sort_direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "type": "string"
+          },
+          "start_at": {
+            "type": "string"
+          },
+          "user_a_id": {
+            "type": "string"
+          },
+          "user_b_id": {
+            "type": "string"
+          },
+          "weekdays_only": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "start_at",
+          "end_at",
+          "user_a_id"
+        ],
+        "type": "object"
+      },
+      "name": "cs_comparative_user_analysis"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "format": {
+            "enum": [
+              "zendesk",
+              "jira",
+              "email",
+              "plain"
+            ],
+            "type": "string"
+          },
+          "investigation_summary": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "org_uuids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "org_uuids",
+          "investigation_summary"
+        ],
+        "type": "object"
+      },
+      "name": "cs_export_to_report"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "org_health_summary"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_auth_providers": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "email"
+        ],
+        "type": "object"
+      },
+      "name": "user_lookup"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_deployment_users"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "name": "deployment_user_counts"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "type": "object"
+      },
+      "name": "device_lookup"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_global_policies": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "policy_audit"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "seat_usage_summary"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_global_lists"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "list_type": {
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "type": "string"
+          },
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "domain",
+          "list_type",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "add_global_list_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "domain": {
+            "pattern": "^[A-Za-z0-9.-]+$",
+            "type": "string"
+          },
+          "list_type": {
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "type": "string"
+          },
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "domain",
+          "list_type",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "remove_global_list_domain"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "enum": [
+              "block",
+              "unblock"
+            ],
+            "type": "string"
+          },
+          "category_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "category_id",
+          "action",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "set_category_across_org_policies"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "new_name": {
+            "type": "string"
+          },
+          "source_policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          },
+          "target_organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_policy_id",
+          "target_organization_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "clone_policy"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_global_policies": {
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "find_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "allow_list_only": {
+            "type": "boolean"
+          },
+          "allow_unknown_domains": {
+            "type": "boolean"
+          },
+          "allowed_domains": {
+            "items": {
+              "pattern": "^[A-Za-z0-9.-]+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "bing_safe_search": {
+            "type": "boolean"
+          },
+          "blocked_application_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "blocked_category_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "blocked_domains": {
+            "items": {
+              "pattern": "^[A-Za-z0-9.-]+$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "duck_duck_go_safe_search": {
+            "type": "boolean"
+          },
+          "google_safesearch": {
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "policy_ip_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "youtube_restricted_level": {
+            "enum": [
+              "none",
+              "moderate",
+              "strict"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "name",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "create_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "allow_list_only": {
+            "type": "boolean"
+          },
+          "allow_unknown_domains": {
+            "type": "boolean"
+          },
+          "bing_safe_search": {
+            "type": "boolean"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "duck_duck_go_safe_search": {
+            "type": "boolean"
+          },
+          "google_safesearch": {
+            "type": "boolean"
+          },
+          "interstitial": {
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          },
+          "policy_ip_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "youtube_restricted_level": {
+            "enum": [
+              "none",
+              "moderate",
+              "strict"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "update_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "delete_policy"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "pattern": "^(\\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+                "type": "string"
+              }
+            ]
+          },
+          "user": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "type": "integer"
+              },
+              {
+                "const": "system",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "policy_id"
+        ],
+        "type": "object"
+      },
+      "name": "policy_history"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_policy_ips"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "include_global_policies": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "policies_with_nat_ips"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "network_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "policy_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "policy_id",
+          "network_ids",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "apply_policy_to_sites"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "network_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "network_id"
+        ],
+        "type": "object"
+      },
+      "name": "site_policy_status"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "policy_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "policy_id"
+        ],
+        "type": "object"
+      },
+      "name": "sites_not_using_policy"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "category_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "include_global_policies": {
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "category_id"
+        ],
+        "type": "object"
+      },
+      "name": "policies_with_category"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string"
+          },
+          "first_name": {
+            "type": "string"
+          },
+          "last_name": {
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "administrator",
+              "super_administrator",
+              "read_only",
+              "technical",
+              "accountant",
+              "policies_only"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "email",
+          "role",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "invite_user"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "role": {
+            "enum": [
+              "administrator",
+              "super_administrator",
+              "read_only",
+              "technical",
+              "accountant",
+              "policies_only"
+            ],
+            "type": "string"
+          },
+          "user_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "user_id",
+          "role",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "change_user_role"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "email": {
+            "minLength": 3,
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "email",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "send_password_reset"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "days": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "stale_agents"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "latest_version": {
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "agent_version_report"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "duplicate_agents"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "msp_id"
+        ],
+        "type": "object"
+      },
+      "name": "msp_deployment_health"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "network_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "network_id"
+        ],
+        "type": "object"
+      },
+      "name": "site_dns_config"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "type": "object"
+      },
+      "name": "onboarding_checklist"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "issue": {
+            "type": "string"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "organization_id",
+          "issue"
+        ],
+        "type": "object"
+      },
+      "name": "draft_support_ticket"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "policy_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "user_agent_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_agent_id",
+          "policy_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "reassign_agent_policy"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "user_agent_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_agent_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "uninstall_agent"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "user_agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "organization_id",
+          "user_agent_ids",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "bulk_remove_agents"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "local_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "local_resolvers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "network_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "network_id",
+          "local_resolvers",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "update_site_forwarders"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "block_page_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "include_relationships": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "block_page_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_block_page"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "block_email_addr": {
+            "type": "string"
+          },
+          "block_logo_uuid": {
+            "type": "string"
+          },
+          "block_org_name": {
+            "type": "string"
+          },
+          "block_page_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "block_redirect_url": {
+            "type": "string"
+          },
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_page_id",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "update_block_page"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "page": {
+            "type": "number"
+          },
+          "per_page": {
+            "type": "number"
+          },
+          "requested_after": {
+            "type": "string"
+          },
+          "requested_before": {
+            "type": "string"
+          },
+          "resolved_after": {
+            "type": "string"
+          },
+          "resolved_before": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          },
+          "sort": {
+            "type": "string"
+          },
+          "status": {
+            "items": {
+              "enum": [
+                "allowed",
+                "denied",
+                "ignored",
+                "expired",
+                "resolved_already_allowed"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tab": {
+            "enum": [
+              "active",
+              "history"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_unblock_requests"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_unblock_request"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "inputSchema": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "type": "boolean"
+          },
+          "decision": {
+            "enum": [
+              "allow",
+              "allow-universal",
+              "deny",
+              "deny-and-ignore",
+              "resolve-already-allowed"
+            ],
+            "type": "string"
+          },
+          "internal_notes": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "decision",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "name": "decide_unblock_request"
+    },
+    {
+      "annotations": {
+        "openWorldHint": true,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {
+          "msp_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_id": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "organization_ids": {
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "name": "pending_unblock_requests_count"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "api_reference"
+    }
+  ]
+}

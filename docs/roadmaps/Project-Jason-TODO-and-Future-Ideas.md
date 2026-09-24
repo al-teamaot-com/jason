@@ -823,17 +823,19 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-008 — DNSFilter posture integration
 
 - **Priority:** P2
-- **Status:** Source implementation complete and locally tested 2026-09-24; not activated in production
+- **Status:** Dual-plane REST + MCP source implementation complete and locally tested 2026-09-24; production activation in progress
 - **Risk level:** Moderate
-- **Idea:** Add a governed DNSFilter read capability for client/site policy assignment, expected coverage, agent/device state, protective-DNS status, and exceptions.
-- **Implemented source foundation:** Provider-neutral PILOT capabilities cover mapped organization read, organization-scoped network/site search, policy search, roaming-agent posture search, and protection-state counts. Provider implementation is GET-only against `https://api.dnsfilter.com`, uses logical secret `dnsfilter.readonly`, rejects caller-supplied organization/MSP scope, and requires a validated Autotask-company-to-DNSFilter-organization boundary.
-- **Boundary decision:** Direct network/policy/agent-by-ID reads are not registered in this first version because those request shapes do not independently preserve the exact organization scope required by Jason. Organization-filtered collections are used instead, and site/policy records must prove the mapped organization relationship where the provider response exposes it.
-- **Why it matters:** Provides authoritative DNS protection evidence rather than inferring posture from installed components.
+- **Idea:** Add governed DNSFilter posture, investigation, reporting, and future administrative capabilities without bypassing Jason authority.
+- **Implemented source foundation:** REST provides unattended posture reads for mapped organizations/sites/policies/agents. DNSFilter MCP adds provider-supported OAuth investigation/admin reads for query logs, decision explanation, blocked traffic, anomaly analysis, stale/version/duplicate agent checks, site-policy drift, category coverage, and unblock-request monitoring. Both planes reject caller-supplied organization/MSP scope and use the validated Autotask-company-to-DNSFilter-organization boundary.
+- **MCP contract checkpoint (2026-09-24):** Public discovery identified DNSFilter MCP server `dnsfilter-public` v0.6.0 with 107 tools. Eleven organization-bounded read capabilities are implemented. All 25 provider tools that currently require `confirm: true` are represented as dormant BUILDING write contracts and are not runtime-registered. OAuth uses Authorization Code + PKCE with durable mode-0600 token storage and a Jason callback route.
+- **Boundary decision:** REST direct network/policy/agent-by-ID reads remain unregistered where the provider request cannot independently preserve exact organization scope. MCP read tools are fixed in source and receive only the server-derived mapped organization ID; there is no generic arbitrary-tool capability.
+- **Why it matters:** REST supplies deterministic background posture evidence while MCP supplies provider-supported DNS forensics and an eventual governed admin plane, avoiding private/UI automation.
 - **Origin:** Reclassified from `SUPPORT-CAP-010` on 2026-09-18.
-- **Implementation verification (2026-09-24):** DNSFilter client/connector tests, provider-neutral capability tests, client-security-posture tests, provider-secret tests, focused runtime-composition tests, connector regression suite, compile checks, and diff validation pass locally. The capabilities remain PILOT and JASON_DNSFILTER_ENABLED defaults false.
-- **Remaining prerequisites:** protected source merge; dedicated least-privilege DNSFilter API key; OpenBao provisioning; exact client-boundary records; explicit read authority; controlled read-only production acceptance; post-acceptance promotion from PILOT. No provider write authority is included.
+- **Implementation verification (2026-09-24):** REST/MCP client and connector tests, provider-neutral capability tests, public MCP catalog drift tests, dormant-write coverage, client-security-posture tests, provider-secret tests, focused runtime-composition tests, connector regression suite, compile checks, and diff validation pass locally. REST and MCP capabilities remain PILOT and both runtime switches default false.
+- **Remaining prerequisites:** protected source merge/deployment; REST API key/OpenBao provisioning; DNSFilter MCP OAuth sign-in; exact client-boundary records; explicit read authorities; controlled production read acceptance for each plane; post-acceptance promotion from PILOT. No DNSFilter provider write authority is included.
+- **Current runbook:** `docs/operations/DNSFilter-Dual-Plane-Integration-2026-09-24.md`.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Review the local source foundation, then provision credentials/boundaries and perform controlled read-only acceptance when approved.
+- **Review trigger:** Complete controlled production REST/MCP read acceptance, then review individual administrative write families separately.
 
 ### TODO-CONN-009 — BullPhish/security-awareness posture integration
 

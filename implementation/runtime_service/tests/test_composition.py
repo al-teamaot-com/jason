@@ -16,11 +16,22 @@ from orchestrator.backup_capability_catalog import (
     BACKUP_ENDPOINT_BACKUP_SEARCH,
 )
 from orchestrator.dns_protection_capability_catalog import (
+    DNS_INVESTIGATION_ANOMALY_SEARCH,
+    DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+    DNS_INVESTIGATION_QUERY_EXPLAIN,
+    DNS_INVESTIGATION_QUERY_SEARCH,
     DNS_PROTECTION_AGENT_COUNTS_READ,
+    DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
     DNS_PROTECTION_AGENT_SEARCH,
+    DNS_PROTECTION_AGENT_STALE_SEARCH,
+    DNS_PROTECTION_AGENT_VERSION_REPORT,
     DNS_PROTECTION_ORGANIZATION_READ,
+    DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
     DNS_PROTECTION_POLICY_SEARCH,
+    DNS_PROTECTION_SITE_DRIFT_SEARCH,
     DNS_PROTECTION_SITE_SEARCH,
+    DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
+    DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
 )
 from orchestrator.conversation_action_intent import GovernedActionConversationIntentResolver
 from orchestrator.conversation_resource_intent import (
@@ -75,6 +86,7 @@ def _settings(tmp_path: Path, *, ollama_model: str = "local-test") -> RuntimeSet
         model_usage_db=tmp_path / "model-usage.sqlite3",
         resolution_memory_db=tmp_path / "resolution-memory.sqlite3",
         dynamic_conversation_context_db=tmp_path / "dynamic-conversation-context.sqlite3",
+        dnsfilter_mcp_oauth_db=tmp_path / "dnsfilter-mcp-oauth.sqlite3",
         trusted_keys_registry=_trusted_registry(tmp_path),
         openbao_url="http://openbao:8200",
         openbao_role_id_path=tmp_path / "role_id",
@@ -128,6 +140,17 @@ def test_dnsfilter_capabilities_are_composed_but_stay_pilot_and_disabled(tmp_pat
         DNS_PROTECTION_POLICY_SEARCH,
         DNS_PROTECTION_AGENT_SEARCH,
         DNS_PROTECTION_AGENT_COUNTS_READ,
+        DNS_INVESTIGATION_QUERY_SEARCH,
+        DNS_INVESTIGATION_QUERY_EXPLAIN,
+        DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH,
+        DNS_INVESTIGATION_ANOMALY_SEARCH,
+        DNS_PROTECTION_AGENT_STALE_SEARCH,
+        DNS_PROTECTION_AGENT_VERSION_REPORT,
+        DNS_PROTECTION_AGENT_DUPLICATE_SEARCH,
+        DNS_PROTECTION_SITE_DRIFT_SEARCH,
+        DNS_PROTECTION_POLICY_CATEGORY_SEARCH,
+        DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH,
+        DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ,
     }
     for capability_name in expected:
         capability = application.capabilities.get_current(
@@ -149,11 +172,17 @@ def test_dnsfilter_runtime_enablement_is_explicit(tmp_path, monkeypatch):
         dnsfilter_enabled=True,
         dnsfilter_openbao_role_id_path=tmp_path / "dnsfilter-role",
         dnsfilter_openbao_secret_id_path=tmp_path / "dnsfilter-secret",
+        dnsfilter_mcp_enabled=True,
+        dnsfilter_mcp_oauth_db=tmp_path / "dnsfilter-mcp-oauth.sqlite3",
     )
     settings.validate()
     application = build_runtime_application(settings)
     assert application.capabilities.get_current(
         capability_name=DNS_PROTECTION_AGENT_SEARCH,
+        allow_pilot=True,
+    ) is not None
+    assert application.capabilities.get_current(
+        capability_name=DNS_INVESTIGATION_QUERY_SEARCH,
         allow_pilot=True,
     ) is not None
 

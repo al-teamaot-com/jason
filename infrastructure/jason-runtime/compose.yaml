@@ -60,6 +60,8 @@ services:
       JASON_DNSFILTER_ENABLED: ${JASON_DNSFILTER_ENABLED:-false}
       JASON_DNSFILTER_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/dnsfilter/role_id
       JASON_DNSFILTER_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/dnsfilter/secret_id
+      JASON_DNSFILTER_MCP_ENABLED: ${JASON_DNSFILTER_MCP_ENABLED:-false}
+      JASON_DNSFILTER_MCP_OAUTH_DB: /var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3
       JASON_SES_REGION: us-east-1
       JASON_SES_DEFAULT_SENDER: jason@teamaot.com
       JASON_OLLAMA_URL: http://jason-ollama:11434
