@@ -38,7 +38,7 @@ Logical secret: `dnsfilter.readonly`
 
 Provider host: `https://api.dnsfilter.com`
 
-Current source capabilities:
+Current production-accepted read capabilities:
 
 - `dns.protection.organization.read`
 - `dns.protection.site.search`
@@ -56,7 +56,7 @@ Provider ID: `dnsfilter_mcp`
 
 OAuth server/resource: `https://mcp.dnsfilter.com/`
 
-OAuth callback: `https://mcp-jason.teamaot.com/oauth/dnsfilter/callback`
+OAuth completion uses the DNSFilter-supported loopback redirect pattern `http://127.0.0.1:<port>/oauth/callback`. During production acceptance, DNSFilter dynamic registration rejected the custom public Jason callback URI, so Jason used a temporary local-port tunnel to a one-shot callback listener instead.
 
 Durable OAuth state: `/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3`
 
@@ -94,7 +94,7 @@ Start/re-authenticate:
 
 The command dynamically registers or reuses the Jason OAuth client, creates a short-lived state/PKCE transaction, and prints the DNSFilter authorization URL. It never prints tokens or the PKCE verifier.
 
-After the authenticated user approves the DNSFilter sign-in, DNSFilter redirects to the Jason public callback. The callback validates state/issuer, exchanges the code, and stores the resulting tokens.
+After the authenticated user approves the DNSFilter sign-in, DNSFilter redirects to the registered loopback callback. During the 2026-09-24 acceptance, Jason used a temporary SSH loopback tunnel so the browser redirect reached a one-shot Jason callback listener without exposing the authorization code in chat. The callback validates state/issuer, exchanges the code, and stores the resulting tokens.
 
 Verify:
 
@@ -141,8 +141,7 @@ When we activate MCP:
 5. Open that URL in a normal browser.
 6. Sign in to DNSFilter. If AOT uses DNSFilter SSO, enter only the SSO key when DNSFilter asks for it, as documented by DNSFilter.
 7. Complete the provider OAuth approval and select the intended organization context when prompted.
-8. DNSFilter redirects to:
-   `https://mcp-jason.teamaot.com/oauth/dnsfilter/callback`
+8. DNSFilter redirects to the registered loopback URI. Use a temporary SSH local-port tunnel to the one-shot callback listener on Jason; do not paste authorization codes into chat.
 9. Jason validates state and issuer, exchanges the authorization code, and stores the OAuth registration/token material in the private mode-0600 OAuth database. The browser receives only a connected/error status; tokens are never displayed.
 10. Verify from Jason:
     `python3 tools/dnsfilter_mcp_oauth.py verify`
@@ -199,3 +198,17 @@ No write is activated by the read deployment. Each write family requires a separ
 - Never bypass DNSFilter privacy mode.
 - Never silently switch authenticated DNSFilter users.
 - Never treat OAuth expiry as provider outage; require re-authentication.
+
+## Production read acceptance — 2026-09-24
+
+The read-only integration is accepted and live.
+
+- Autotask self-company `0` (`Atlantic Office Machines`) is mapped to DNSFilter organization `1110483` (`Atlantic Office Technologies`).
+- REST and MCP read providers are enabled, `AVAILABLE`, `HEALTHY`, and `APPROVED`.
+- DNSFilter read capabilities are `ACTIVE`.
+- sixteen `observe` grants exist for the authenticated AOT owner identity; there are no DNSFilter execute/administer grants.
+- REST acceptance succeeded after adding `User-Agent: Mozilla/5.0 Project-Jason-DNSFilter-REST/1.0`; without it DNSFilter's Cloudflare edge returned Error 1010 / browser-signature blocked.
+- MCP OAuth verification succeeded and provider reads were accepted against organization `1110483`.
+- DNSFilter writes remain unavailable. The deployable write foundation may register them only as dormant `BUILDING` definitions behind a `PLANNED / BLOCKED` mutation provider; no write invoker, authority grant, or active write provider exists unless the separate mutation gates are explicitly enabled.
+
+The deployable dormant read/write design and its separate activation/acceptance gates are documented in `DNSFilter-Full-Read-Write-Design-2026-09-24.md`.

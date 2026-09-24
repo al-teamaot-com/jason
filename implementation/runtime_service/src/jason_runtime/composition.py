@@ -21,6 +21,11 @@ from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from jason_runtime.dnsfilter_mcp_mutation import (
+    build_dnsfilter_mcp_mutation_invoker,
+    register_dnsfilter_mcp_mutation_invokers,
+    register_dnsfilter_mcp_mutation_runtime_foundation,
+)
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
 from connectors.backup_net.connector import (
     BACKUP_NET_FULL_ACCESS_SECRET,
@@ -865,6 +870,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         enabled=settings.dnsfilter_enabled,
         mcp_enabled=settings.dnsfilter_mcp_enabled,
     )
+    dnsfilter_mutation_activation = (
+        register_dnsfilter_mcp_mutation_runtime_foundation(
+            capabilities=capabilities,
+            providers=providers,
+            now=now,
+        )
+    )
     register_email_send(capabilities=capabilities, providers=providers)
 
     integration_broker = IntegrationBroker(
@@ -1281,6 +1293,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DNSFILTER_MCP_PROVIDER, DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ): "dnsfilter_mcp.unblock_requests.count",
         },
     )
+    dnsfilter_mcp_mutation_invoker = None
+    if dnsfilter_mutation_activation.enabled:
+        dnsfilter_mcp_mutation_invoker = build_dnsfilter_mcp_mutation_invoker(
+            oauth_store=dnsfilter_mcp_oauth,
+            audit=ConnectorEventAudit(orchestration_events),
+            boundaries=provider_boundaries,
+        )
 
     email_secret_broker = Cap007OpenBaoSecretBroker.build(
         base_url=settings.openbao_url,
@@ -1383,6 +1402,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(DNS_PROTECTION_POLICY_CATEGORY_SEARCH, dnsfilter_mcp_invoker)
     invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_SEARCH, dnsfilter_mcp_invoker)
     invokers.register(DNS_PROTECTION_UNBLOCK_REQUEST_COUNT_READ, dnsfilter_mcp_invoker)
+    if dnsfilter_mcp_mutation_invoker is not None:
+        register_dnsfilter_mcp_mutation_invokers(
+            invokers=invokers,
+            invoker=dnsfilter_mcp_mutation_invoker,
+        )
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
     policy = ExecutionPolicyEngine(cost_estimator=CostEstimator(InMemoryPricingRegistry()))
