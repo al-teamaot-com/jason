@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "description": "Reviewed DNSFilter site-name aliases to canonical Autotask company IDs. Exact normalized matches do not need entries.",
+  "aliases": {
+    "Custom Maids": 336,
+    "FULL CIRCLE FINANCIAL": 458
+  }
+}
