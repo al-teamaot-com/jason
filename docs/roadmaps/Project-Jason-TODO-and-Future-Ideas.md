@@ -145,14 +145,14 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-OPS-002 — Governed BackupIQ ticket-processing playbook
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Read evidence path production-active; operational write API still pending
 - **Risk level:** High
 - **Idea:** Build and productionize an end-to-end governed Jason playbook for Autotask tickets titled `BackupIQ: Backup for asset is not available for AOT Office`, including asset resolution, availability gating, periodic rechecks, Endpoint Backup diagnostics, bounded remediation, dependency-ticket creation, full command/result documentation, and verified successful-backup closure.
-- **Current blocker:** The playbook requires the Datto Endpoint Backup API details/credentials available at the Owner's desk so Jason can verify backup inventory/state and require an authoritative successful backup before ticket closure. Do not substitute DRMM agent state alone for backup-success evidence.
-- **Review trigger:** Resume when the Owner is at a trusted workstation with the Endpoint Backup API information.
+- **Current provider state:** The Endpoint Backup API credential blocker is resolved for reads. Production-accepted Backup.net capabilities `backup.endpoint.asset.search/read`, `backup.endpoint.backup.search`, and `backup.backupiq.alert.search` now provide provider-native evidence through the validated Autotask-company-to-Backup.net-customer boundary. Use those reads to establish backup state before remediation and to verify successful-backup closure; do not substitute DRMM agent state alone for backup-success evidence.
+- **Current blocker:** No provider-supported public mutation contract has yet been identified for Endpoint Backup v2 backup-now, restore, restore cancellation, policy/retention, protection-state, or asset-management actions. Product UI capability is not API authority. Until Kaseya documents a supported write contract, remediation may use only separately governed supported paths (for example an already-authorized DRMM deployment/reinstall component), followed by Backup.net readback.
 - **Why it matters:** BackupIQ tickets are repetitive, evidence-driven MSP work that Jason can materially process when the correct read, execution, ticket-write, scheduling, and verification capabilities are available. A deterministic playbook can reduce technician effort while preserving auditability, client isolation, and AOT approval rules.
-- **Why not now:** A live test exposed specific missing capabilities and workflow gaps that prevent safe end-to-end completion today, including governed Autotask ticket creation, reliable DRMM component discovery/metadata reads, durable workflow state, and scheduled periodic rechecks.
-- **Prerequisites:** governed Autotask ticket search/read and internal notes; narrowly scoped Autotask ticket creation; DRMM endpoint/software/service reads; DRMM component search/metadata read; governed component execution; job/result/StdOut reads; site-variable presence validation without secret disclosure; persisted playbook state; periodic recheck scheduling; duplicate suppression; and successful-backup verification.
+- **Remaining workflow prerequisites:** persisted playbook state; scheduled periodic rechecks with duplicate suppression; exact ticket/device/client association; governed endpoint diagnostics/remediation where supported; and authoritative Backup.net successful-backup verification before closure. Provider-native Endpoint Backup writes remain a separate future capability.
+- **Current API reference:** See `docs/operations/BackupNet-Endpoint-Backup-API-Current-State-2026-09-24.md`.
 - **Decision owner:** Jason Governance Authority / Jason Architecture Authority
 - **Review trigger:** Implement as the next operational playbook after the required bounded capabilities are available and validate against the controlled AOT-50740 BackupIQ ticket workflow.
 
