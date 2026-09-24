@@ -29,6 +29,12 @@ Identify:
 
 Use the UniView Public API as authoritative for Endpoint Backup provider state and DRMM as authoritative for endpoint management/connectivity state.
 
+Boundary rules:
+- Use the exact Autotask company identifier associated with the client boundary; do not assume valid company IDs must be greater than zero. The AOT self-company record legitimately uses company ID `0`.
+- Require a validated `backup_net` company-to-customer boundary before provider reads. Never accept a caller-supplied Backup.net customer UUID as authority.
+- A successful provider query returning an empty Endpoint Backup asset collection is authoritative evidence that no matching provider asset was exposed for that exact validated customer/query at that time. Treat it as a protection/onboarding/asset-placement condition to investigate, not as a connector authorization failure.
+- Customer-boundary validation normally requires exact asset proof when provider assets exist. A zero-asset customer may be validated only when the exact unique provider customer is established and a bounded provider inventory query proves the customer currently has no Endpoint Backup assets.
+
 If the provider asset cannot be uniquely matched to the DRMM endpoint, set state=identification_blocked, document the ambiguity, and escalate rather than guessing.
 
 ## 5. Expected State
