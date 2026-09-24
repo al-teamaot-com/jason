@@ -149,6 +149,21 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "backup_net_full_access": {
+        "logical_name": "backup_net.fullaccess",
+        "secret_path": "secret/data/connectors/backup-net/production/full-access",
+        "fields": ("client_id", "client_secret"),
+        "policy_name": "jason-backup-net-full-access",
+        "role_name": "jason-backup-net-full-access",
+        "connector_identity": "backup-net-full-access",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/backup-net-full-access-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

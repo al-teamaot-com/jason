@@ -19,7 +19,11 @@ from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
-from connectors.backup_net.connector import BackupNetConnector
+from connectors.backup_net.connector import (
+    BACKUP_NET_FULL_ACCESS_SECRET,
+    BACKUP_NET_READONLY_SECRET,
+    BackupNetConnector,
+)
 from jason_cap_007.kernel_registration import register_email_send
 from jason_cap_007.service import CAPABILITY_NAME as EMAIL_CAPABILITY_NAME
 from jason_cap_007.service import EmailSendPolicy, GovernedEmailSendInvoker
@@ -280,11 +284,18 @@ class RuntimeSettings:
         "/run/jason-secrets/openbao/kyocera-kfs/secret_id"
     )
     backup_net_enabled: bool = False
+    backup_net_access_profile: str = "read_only"
     backup_net_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/backup-net/role_id"
     )
     backup_net_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/backup-net/secret_id"
+    )
+    backup_net_full_access_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/backup-net-full-access/role_id"
+    )
+    backup_net_full_access_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/backup-net-full-access/secret_id"
     )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -456,6 +467,9 @@ class RuntimeSettings:
             backup_net_enabled=os.getenv(
                 "JASON_BACKUP_NET_ENABLED", "false"
             ).strip().lower() in {"1", "true", "yes", "on"},
+            backup_net_access_profile=os.getenv(
+                "JASON_BACKUP_NET_ACCESS_PROFILE", "read_only"
+            ).strip().lower(),
             backup_net_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_BACKUP_NET_OPENBAO_ROLE_ID_PATH",
@@ -466,6 +480,18 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_BACKUP_NET_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/backup-net/secret_id",
+                )
+            ),
+            backup_net_full_access_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_BACKUP_NET_FULL_ACCESS_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/backup-net-full-access/role_id",
+                )
+            ),
+            backup_net_full_access_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_BACKUP_NET_FULL_ACCESS_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/backup-net-full-access/secret_id",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -573,6 +599,10 @@ class RuntimeSettings:
             raise ValueError("JASON_SES_REGION is required")
         if not self.ses_default_sender:
             raise ValueError("JASON_SES_DEFAULT_SENDER is required")
+        if self.backup_net_access_profile not in {"read_only", "full_access"}:
+            raise ValueError(
+                "JASON_BACKUP_NET_ACCESS_PROFILE must be read_only or full_access"
+            )
         if self.dynamic_conversation_context_ttl_seconds < 60 or self.dynamic_conversation_context_ttl_seconds > 86400:
             raise ValueError(
                 "dynamic conversation context ttl must be between 60 and 86400 seconds"
@@ -1105,16 +1135,29 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     backup_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
     backup_boundaries = SQLiteClientBoundaryRepository(backup_boundary_store)
+    if settings.backup_net_access_profile == "full_access":
+        backup_net_role_id_path = (
+            settings.backup_net_full_access_openbao_role_id_path
+        )
+        backup_net_secret_id_path = (
+            settings.backup_net_full_access_openbao_secret_id_path
+        )
+        backup_net_logical_secret = BACKUP_NET_FULL_ACCESS_SECRET
+    else:
+        backup_net_role_id_path = settings.backup_net_openbao_role_id_path
+        backup_net_secret_id_path = settings.backup_net_openbao_secret_id_path
+        backup_net_logical_secret = BACKUP_NET_READONLY_SECRET
     backup_net_openbao = OpenBaoSecretResolver(
         base_url=settings.openbao_url,
-        role_id_path=settings.backup_net_openbao_role_id_path,
-        secret_id_path=settings.backup_net_openbao_secret_id_path,
+        role_id_path=backup_net_role_id_path,
+        secret_id_path=backup_net_secret_id_path,
     )
     backup_net = BackupNetConnector(
         secrets=backup_net_openbao,
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
         boundaries=backup_boundaries,
+        logical_secret=backup_net_logical_secret,
     )
     backup_net_invoker = GovernedConnectorCapabilityInvoker(
         connectors={BACKUP_NET_PROVIDER: backup_net},
