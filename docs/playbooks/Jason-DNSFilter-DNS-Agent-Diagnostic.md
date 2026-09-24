@@ -144,7 +144,20 @@ Use `endpoint.software.search` for DNSFilter/DNS Agent variants.
 
 Absence from DRMM software inventory is not sufficient proof that DNSFilter is absent.
 
-### Step 3 — Dedicated read-only component
+### Step 3 — Existing standing-safe service and DNS diagnostics
+
+Use the already standing-approved components first where they answer the question cleanly:
+
+- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1`
+  - run for filtering service (`DNS Agent` / `DNSFilter Agent`);
+  - run for Service Manager (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`) when applicable;
+  - captures detailed service properties and relevant Windows event evidence.
+- `Get-DNS Settings AOT Ver 06042025-1`
+  - capture current endpoint DNS configuration without modification.
+
+These generic standing-safe components may be used immediately under existing policy and should not be duplicated merely because the DNSFilter playbook exists.
+
+### Step 4 — Dedicated DNSFilter-specific read-only component
 
 Create:
 
@@ -219,7 +232,7 @@ The diagnostic component must never:
 - disable protection;
 - collect DNS query history or secret registration values.
 
-### Step 4 — Required-installation gate and approved install path
+### Step 5 — Required-installation gate and approved install path
 
 Before installing, prove all of the following:
 - endpoint is a supported Windows client OS/role for the DNSFilter Roaming Client;
@@ -242,13 +255,13 @@ If install evidence is partial/corrupt or an existing client is present but brok
 
 DNSFilter currently documents the Windows Roaming Client for Windows 10+ client systems and states it is not supported on Windows Server/shared desktop environments; v3.x also requires .NET 8 runtime prerequisites. Treat those as hard install gates.
 
-### Step 5 — Vendor evidence when relevant
+### Step 6 — Vendor evidence when relevant
 
 If version/behavior suggests a client defect, consult current official DNSFilter release/known-issue material first. Compare the installed version to current production and check for applicable DNS/VPN/IPv6/config-sync/stability fixes.
 
 Do not upgrade solely because a newer version exists.
 
-### Step 6 — Classify
+### Step 7 — Classify
 
 **Healthy / stale monitor**
 - service running;
@@ -492,8 +505,12 @@ Current:
 - `automation.job.read`
 - `automation.job.output.read`
 
+Existing standing-safe building blocks:
+- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` for exact service state/details and relevant Windows events;
+- `Get-DNS Settings AOT Ver 06042025-1` for current DNS configuration.
+
 Implementation gap:
-- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT` with both-service checks, Windows events, DNSFilter operational-log parsing, DNS configuration, and DNSFilter diagnostic TXT lookup;
+- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT` focused on DNSFilter-specific install-state correlation, both-service awareness, operational-log parsing, and DNSFilter diagnostic TXT/filtering verification, while reusing existing generic components where practical;
 - review it as read-only/non-disruptive;
 - register it in Jason's durable Datto component approval registry after acceptance;
 - review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting standing use under this playbook.
