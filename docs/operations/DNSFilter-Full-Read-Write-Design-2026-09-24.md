@@ -232,6 +232,8 @@ Effect:
 - `dnsfilter_mcp_mutation` -> `AVAILABLE / HEALTHY / APPROVED`;
 - only the policy-create mutation invoker is registered;
 - the other 24 mutation definitions remain `BUILDING` and unregistered;
+- all mutation definitions carry MCP resource/operation metadata and `mcp_action_enabled=true`, but dormant lifecycle prevents the other 24 from becoming discoverable;
+- policy-create alone carries `conversation_authenticated_imperative_is_approval=true` for this first controlled acceptance;
 - authority still must explicitly allow `dns.protection.policy.create`;
 - capability approval remains required.
 
