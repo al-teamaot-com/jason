@@ -201,6 +201,40 @@ Do not issue a second provider mutation because the first job is still active. U
 - unknown, missing, or invalid component classification fails closed;
 - user-disruptive actions require explicit technician approval for the exact disruptive action.
 
+## Host reboot recovery — production control installed 2026-09-24
+
+A 2026-09-23/24 power outage exposed that Jason's host boot path was not self-recovering even though individual containers were durable:
+
+- OpenBao restarted initialized but sealed;
+- the intentionally ephemeral IT Glue/Autotask runtime AppRole files under `/run/jason-runtime-credentials/openbao` were absent after reboot;
+- `jason-runtime` therefore failed closed during OpenBao/AppRole initialization;
+- `jason-mcp-pilot` had `restart=no`;
+- Prometheus still referenced a disposable worktree that had been cleaned during build/worktree cleanup.
+
+PR #223, merged as `4e3b7a4ad26c70650b78ce7b61e9408d439ed743`, added the repository-controlled boot-recovery controller, systemd service, timer, and runbook.
+
+Current verified state:
+
+- `jason-boot-recovery.service`: enabled; successful installed run;
+- `jason-boot-recovery.timer`: enabled and active with a two-minute idempotent check;
+- OpenBao: initialized, unsealed;
+- IT Glue/Autotask ephemeral AppRole staging: restored with expected runtime ownership/mode;
+- `jason-runtime`: running/healthy, `restart=unless-stopped`;
+- `jason-mcp-pilot`: running, internal health HTTP 200, `restart=unless-stopped`;
+- recovery service journal secret-pattern check: PASS;
+- Prometheus: rebound to durable main-repository source and HTTP 200;
+- Grafana: HTTP 200.
+
+Security boundary: the root-only automatic unseal uses the already-retained protected initialization artifact on the same single-host pilot. This is an explicit AOT Owner pilot exception and must not be described as host-root-resistant split custody or production-grade KMS/HSM auto-unseal.
+
+A complete host reboot after installation has **not** been performed because reboot is disruptive and requires separate explicit approval. Do not claim reboot-cycle acceptance until that test is actually performed.
+
+Authoritative records:
+
+- `docs/operations/Jason-Boot-Recovery.md`;
+- `docs/operations/Jason-OpenBao-Initialization-and-Recovery-Record.md`;
+- `docs/sessions/Jason-Boot-Recovery-Production-Acceptance-2026-09-24.md`.
+
 ## Grafana / production observability — current release accepted
 
 The authoritative Grafana/Prometheus source remains repository-provisioned under `infrastructure/showcase`.
