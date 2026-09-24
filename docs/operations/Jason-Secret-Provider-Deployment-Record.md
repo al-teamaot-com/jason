@@ -4,7 +4,7 @@
 **Profile:** Pilot  
 **Status:** READY — OpenBao runtime, provider-specific AppRole paths, recovery, backup, restore, governed read-only provider bindings, Microsoft Graph identity enrichment, and CAP-007 SES send credential boundaries are verified for the currently approved pilot scope  
 **Owner:** Jason Architecture Authority  
-**Last reconciled:** 2026-09-18
+**Last reconciled:** 2026-09-24
 
 ## Purpose
 
@@ -32,7 +32,7 @@ This is the canonical non-secret operational record for the secret provider used
 | Historical wrapper token-file health path | May be unconfigured while production provider AppRole runtime is healthy | Verified operational distinction |
 | Audit device | File audit output at `/opt/jason/infrastructure/openbao/audit/audit.log` | Verified present and receiving requests |
 | Seal status | Initialized and unsealed | Verified during host preflight |
-| Seal method | Manual Shamir unseal, 3-of-5 | Verified from protected initialization material and successful unseal |
+| Seal method | Shamir 3-of-5; approved root-only local automatic unseal for the single-host pilot | Verified / Owner-approved 2026-09-24 |
 | Bootstrap credential | Revoked and `/etc/jason/openbao-bootstrap.token` removed | Verified |
 | Commissioning contract-test input | `/etc/jason/openbao-contract-test.value` removed after commissioning | Verified |
 | Historical wrapper health command | `/usr/local/bin/jason-secret --health` | Commissioning/general wrapper only; not a production-provider readiness gate |
@@ -40,6 +40,11 @@ This is the canonical non-secret operational record for the secret provider used
 | Canonical production-provider readiness | AppRole resolver tests + provider provisioning preflight + bounded live proof appropriate to provider | Verified for current pilot providers |
 | Host validation Python | Repository-local `~/projects/jason/.venv` where needed | Verified; system Python cannot be assumed to contain test dependencies |
 | Direct resolver contract | `OpenBaoSecretResolver.resolve(logical_name, ConnectorContext)` with non-empty correlation ID | Verified |
+| Boot recovery controller | `/usr/local/sbin/jason-boot-recovery` from repository `tools/jason_boot_recovery.py` | Installed and live 2026-09-24 |
+| Boot recovery service | `jason-boot-recovery.service` | Enabled; successful production recovery check |
+| Boot recovery timer | `jason-boot-recovery.timer` | Enabled and active; two-minute idempotent recovery check |
+| Ephemeral IT Glue/Autotask staging | `/run/jason-runtime-credentials/openbao/{it-glue,autotask}` | Automatically restored from protected bootstrap artifacts when absent |
+| MCP restart policy | `unless-stopped` | Reconciled 2026-09-24 by recovery controller |
 | Backup unit | `/etc/systemd/system/jason-openbao-backup.service` | Installed; governed manual execution completed successfully on 2026-08-06 |
 | Backup schedule | `/etc/systemd/system/jason-openbao-backup.timer`, daily at 02:30 | Installed and active when last inspected |
 | Backup destination | `/opt/jason/backups/openbao` | Verified |
@@ -48,6 +53,31 @@ This is the canonical non-secret operational record for the secret provider used
 | Last successful restore test | 2026-08-06; isolated governed restore matched the live source contract | Verified |
 | Operational owner | AOT Infrastructure Owner | Approved governance role |
 | Escalation contact | AOT Security Escalation | Approved governance role |
+
+## 2026-09-24 boot recovery production reconciliation
+
+A power outage exposed three durability gaps: OpenBao restarted sealed, the IT Glue/Autotask `/run` AppRole staging disappeared by design, and `jason-mcp-pilot` had `restart=no`. The monitoring deployment also still referenced a disposable worktree whose Prometheus configuration path had been deleted/replaced by a directory.
+
+The accepted recovery change is PR #223 / merge commit `4e3b7a4ad26c70650b78ce7b61e9408d439ed743`.
+
+Verified non-secret production state after installation:
+
+- OpenBao: initialized, unsealed, active;
+- protected initialization artifact: ownership/mode and SHA-256 matched the canonical recovery record;
+- four ephemeral IT Glue/Autotask staging files: UID/GID `1000:1000`, mode `0400`, nonzero;
+- `jason-runtime`: running and healthy, `restart=unless-stopped`;
+- `jason-mcp-pilot`: running, internal `/healthz` HTTP 200, `restart=unless-stopped`;
+- `jason-boot-recovery.service`: enabled and completed successfully;
+- `jason-boot-recovery.timer`: enabled and active;
+- recovery journal secret-pattern check: PASS;
+- Prometheus: recreated from durable `/home/al/projects/jason/infrastructure/showcase/prometheus/prometheus.yml`, HTTP 200;
+- Grafana: HTTP 200.
+
+The automatic local unseal is an explicit single-host pilot exception. It does not improve resistance to host-root compromise because the protected recovery artifact is retained on the same host. It must not be represented as a production-grade KMS/HSM or off-host split-custody design.
+
+A full host reboot acceptance test was **not** performed on 2026-09-24 because reboot is disruptive and requires separate explicit approval. The installed service/timer and live non-disruptive acceptance are verified; the full reboot test remains a separate acceptance event.
+
+Authoritative acceptance record: `docs/sessions/Jason-Boot-Recovery-Production-Acceptance-2026-09-24.md`.
 
 ## Logical secret mappings
 

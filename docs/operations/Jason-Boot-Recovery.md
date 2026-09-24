@@ -72,3 +72,32 @@ A recovery is accepted only when:
 - `jason-runtime` is healthy;
 - `jason-mcp-pilot` passes `/healthz`;
 - no protected value appears in service output.
+
+## Production installation and acceptance — 2026-09-24
+
+Repository change:
+
+- PR #223;
+- merge commit `4e3b7a4ad26c70650b78ce7b61e9408d439ed743`.
+
+Installed host state:
+
+- `/usr/local/sbin/jason-boot-recovery`: installed root-owned, mode `0750`;
+- `jason-boot-recovery.service`: enabled;
+- `jason-boot-recovery.timer`: enabled and active;
+- timer cadence: two-minute idempotent recovery check;
+- first installed service run: successful with `JASON_BOOT_RECOVERY=PASS`;
+- `jason-runtime`: running/healthy with `restart=unless-stopped`;
+- `jason-mcp-pilot`: running with `restart=unless-stopped`, internal health HTTP 200;
+- OpenBao: initialized and unsealed;
+- recovery journal secret-pattern check: PASS.
+
+The same recovery event also exposed a monitoring durability defect: Prometheus referenced the disposable `openai-usage-reporting-20260922` worktree. Prometheus was recreated from the durable main-repository source at `/home/al/projects/jason/infrastructure/showcase/prometheus/prometheus.yml` and returned HTTP 200. Grafana remained healthy and returned HTTP 200.
+
+### Acceptance boundary
+
+This production acceptance proves the installed recovery controller, timer, current OpenBao unseal path, ephemeral credential restaging, runtime recovery, MCP recovery, and secret-safe logging while the host is already running.
+
+It does **not** prove a complete host power-cycle/reboot sequence after installation. That test remains pending separate explicit approval because host reboot is disruptive under Jason governance.
+
+Authoritative evidence record: `docs/sessions/Jason-Boot-Recovery-Production-Acceptance-2026-09-24.md`.
