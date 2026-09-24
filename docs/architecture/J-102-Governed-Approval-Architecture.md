@@ -34,6 +34,16 @@ The intent fingerprint binds the canonical semantic Jason action approved by gov
 
 Approval reuse with changed canonical arguments must fail before provider invocation. Approval binding, one-time approval consumption, and successful-retry idempotency remain separate controls.
 
+### Canonicalization boundary before approval binding
+
+Technician-friendly action selectors and aliases must be converted into the exact canonical governed request before approval reservation and intent fingerprinting. Canonicalization is part of the authority boundary, not a provider convenience layer.
+
+For direct Autotask `service.ticket.update`, this means exact `ticket_id` / `ticketID` / `id` selectors are reconciled fail-closed, the authoritative positive numeric Autotask ticket ID is confirmed through a governed read, and the canonical request contains structured `payload.id` plus only the explicitly requested allowed mutable fields. Conflicting, missing, malformed, non-positive, non-unique, or mismatched ticket identity must fail before approval binding.
+
+Human-readable symbolic values such as status or queue labels may remain symbolic in the canonical intent only when the provider adapter resolves them deterministically through authoritative provider metadata during execution-plan preparation. The concrete resolved numeric/provider value and symbolic-resolution evidence are then bound into the execution-plan fingerprint. Zero or multiple valid symbolic mappings fail closed.
+
+A model-facing or MCP adapter must not reserve approval for one friendly request shape and then materially reinterpret it after approval. Any provider-shaped transformation that changes target identity or mutable fields must be complete before the canonical intent is bound, except deterministic provider metadata resolution that is explicitly captured by the execution-plan binding described below.
+
 ### Execution-plan fingerprint
 
 The execution-plan fingerprint binds **what concrete mutation is authorized to reach the selected provider** after provider selection, symbolic resolution, normalization, provider defaulting, and target resolution are complete. Where applicable it includes:

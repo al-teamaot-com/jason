@@ -41,6 +41,7 @@ Each record should include:
 - `Datto-RMM-First-Live-Read-Host-Proof-2026-08-09.md` — first governed Datto RMM live-read proof.
 - `IT-Glue-Datto-Host-Operational-Proof-2026-08-10.md` — physical Jason-host validation of canonical OpenBao provider AppRole runtime, IT Glue/Datto bounded live reads and discovery, Datto managed-device authority, documentation reconciliation behavior, and the regression-baseline defects discovered before the Teams approval round-trip.
 - `CAP-007-Live-Pilot-Proof-2026-08-11.md` — first successful end-to-end governed CAP-007 AWS SES pilot and subsequent authenticated Teams conversational integration evidence for the approved pilot scope.
+- `Jason-Direct-Ticket-Update-Canonicalization-Production-Acceptance-2026-09-24.md` — SUPPORT-CAP-019 root cause, generic direct `service.ticket.update` canonicalization rule, production promotion, execution-plan evidence, and bounded OWNI7JAN25 completion acceptance.
 
 The 2026-08-10 proof is intentionally linked from the bootstrap/secrets runbook, secret-provider deployment record, convergence checklist, live convergence runbook, ADR-004, and `docs/control/CURRENT.md` so the operational facts do not depend on chat history.
 
