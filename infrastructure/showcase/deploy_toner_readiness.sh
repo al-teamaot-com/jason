@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="${JASON_REPO_ROOT:-/home/al/projects/jason}"
 SHOWCASE="$ROOT/infrastructure/showcase"
 SERVICE_SRC="$SHOWCASE/systemd/jason-toner-exporter.service"
-STATE_DIR=/var/lib/jason/toner-intelligence
+USER_SYSTEMD="$HOME/.config/systemd/user"
+STATE_DIR="$HOME/.local/state/jason/toner-intelligence"
 
 cd "$ROOT"
 python3 -m unittest infrastructure/showcase/tests/test_toner_intelligence.py
@@ -12,10 +13,11 @@ python3 -m py_compile infrastructure/toner-intelligence/*.py
 python3 -m json.tool infrastructure/showcase/grafana/dashboards/jason-toner-readiness.json >/dev/null
 docker run --rm --entrypoint=promtool -v "$SHOWCASE/prometheus/prometheus.yml:/tmp/prometheus.yml:ro" prom/prometheus:v3.7.3 check config /tmp/prometheus.yml >/tmp/jason-toner-prometheus-check.txt
 
-sudo install -d -o al -g al -m 0750 "$STATE_DIR"
-sudo install -m 0644 "$SERVICE_SRC" /etc/systemd/system/jason-toner-exporter.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now jason-toner-exporter.service
+install -d -m 0750 "$STATE_DIR"
+install -d -m 0755 "$USER_SYSTEMD"
+install -m 0644 "$SERVICE_SRC" "$USER_SYSTEMD/jason-toner-exporter.service"
+systemctl --user daemon-reload
+systemctl --user enable --now jason-toner-exporter.service
 
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:9473/metrics >/tmp/jason-toner-live.prom; then break; fi
