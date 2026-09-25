@@ -21,9 +21,9 @@ Do not consider the Section Goal complete until the controlled acceptance test s
 
 Primary trigger:
 - Autotask ticket title contains: [Get Idle Log Off Status AOT Ver 08202024] - Compliant: False
-- DRMM policy: AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket)
 - DRMM monitor/component: Get Idle Log Off Status AOT Ver 08202024
 - Current monitor component UID: 2b5de042-a3ec-4721-ba66-e0ca193a3604
+- Historical ticket/alert text may include a DRMM policy name. Treat that as historical evidence only; do not assume the named policy still exists or is the current source of the monitor without a live provider read.
 
 Also applicable when:
 - an existing Jason-owned ticket explicitly reports the Idle Log Off control is missing, broken, or noncompliant; or
@@ -555,21 +555,22 @@ AVMAC-1096 / ticket T20260924.0043 established:
 - exact stale alert 9d34f135-8393-4e7f-b2a8-064a1e98eb07 was resolved through governed alert resolution with one provider attempt and verified readback, correlation corr_mcp_action_8b29c0e4cc124ad0be8e0a5e98b0b6cf;
 - Autotask then completed T20260924.0043 automatically and the final internal resolution note was written;
 - Component Control standing-safe promotion of the setter was rejected by the disruptive/destructive review guard. This is the intended fail-closed result; the setter remains per-run approved;
-- the remaining engineering dependency is to change DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket) so its response no longer invokes the legacy 08202024 setter/payload.
+- the Autotask ticket description historically named DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket), but on 2026-09-25 the operator verified no current DRMM policy exists under that name. The historical ticket text therefore must not be treated as proof of a current provider object or as a required manual change.
+- a fresh governed alert read confirmed no current Idle Log Off alert remained on AVMAC-1096 after resolution.
 
-The individual AVMAC-1096 incident is resolved. The broader autonomous-remediation Section Goal remains open until the policy response is corrected and the governance design intentionally resolves whether any bounded autonomous authority is appropriate.
+The AVMAC-1096 incident is resolved and has no remaining policy-change dependency. The broader playbook remains per-run governed because the setter has future user-session impact; no additional provider change is required for this incident.
 
 ---
 
 ## 22. Section Goal Closure
 
-The Section Goal closes only after:
+The Section Goal closes when:
 - this playbook is merged into Project Jason;
-- the preferred setter and required variables are production-validated;
-- AVMAC-1096 acceptance proves the monitor-error and repair branches;
+- the preferred setter and built-in-default behavior are production-validated;
+- AVMAC-1096 acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout branches;
 - the approved component-control state is documented;
-- any invalid MyFileDestination policy/component defect is corrected;
-- Grafana/Project Jason operational status is updated;
+- historical provider-object names are not treated as current without live verification;
+- Grafana/Project Jason operational status is updated where applicable;
 - known limitations and follow-up engineering items are recorded.
 
-Any unresolved component/policy defect becomes an explicit Support item rather than a hidden exception.
+Do not create or preserve a provider-policy remediation task solely from historical ticket text. Create a new Support/TODO item only when a current provider object and an actual unresolved defect are proven.
