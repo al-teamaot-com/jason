@@ -23,6 +23,8 @@ from orchestrator.information_authorization import (
 from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONTACT_READ,
+    SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_RESOURCE_READ,
     SERVICE_TICKET_SEARCH,
 )
 from orchestrator.service import InvocationResult
@@ -94,11 +96,13 @@ def _request(
     authority_context_id: str | None = "ctx-autotask-info",
     permission_mode: str = "observe",
     requester_kind: str = "human",
+    principal_id: str = "person-al",
+    policy_ids: tuple[str, ...] = (),
 ) -> OrchestrationRequest:
     return OrchestrationRequest(
         execution_id="exec-autotask-info",
         correlation_id="corr-autotask-info",
-        principal_id="person-al",
+        principal_id=principal_id,
         organization_id="aot",
         client_id=None,
         capability_name=capability,
@@ -119,6 +123,7 @@ def _request(
         requester_kind=requester_kind,
         permission_mode=permission_mode,
         authority_context_id=authority_context_id,
+        policy_ids=policy_ids,
     )
 
 
@@ -261,3 +266,101 @@ def test_explicit_impersonated_mode_keeps_other_autotask_reads_service_only(
     )
 
     assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
+
+
+@pytest.mark.parametrize(
+    "capability",
+    [
+        SERVICE_TICKET_SEARCH,
+        SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_RESOURCE_READ,
+    ],
+)
+def test_autonomy_shadow_service_read_has_narrow_internal_release_basis(capability) -> None:
+    request = _request(
+        capability,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-shadow-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(capability),
+    )
+
+    release = invocation.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    )
+    assert release.allowed is True
+    assert "internal_autonomy_shadow_workload" in release.authorization_basis
+    assert "autonomous-shadow-read-v1" in release.authorization_basis
+    assert "trusted_microsoft_identity_binding" not in release.authorization_basis
+
+
+def test_autonomy_shadow_service_read_fails_without_exact_policy() -> None:
+    request = _request(
+        SERVICE_TICKET_SEARCH,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=(),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_SEARCH),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_autonomy_shadow_service_read_cannot_expand_to_general_autotask_catalog() -> None:
+    request = _request(
+        SERVICE_CONTACT_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-shadow-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_autonomy_shadow_policy_cannot_be_reused_by_another_service_principal() -> None:
+    request = _request(
+        SERVICE_TICKET_SEARCH,
+        requester_kind="service",
+        principal_id="some-other-service",
+        policy_ids=("autonomous-shadow-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_SEARCH),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
