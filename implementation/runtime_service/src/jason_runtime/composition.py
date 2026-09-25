@@ -230,6 +230,11 @@ from .datto_component_execution import (
     register_datto_component_execution_invoker,
     register_datto_component_execution_runtime_foundation,
 )
+from .datto_powershell_read import (
+    build_datto_powershell_read_invoker,
+    register_datto_powershell_read_invoker,
+    register_datto_powershell_read_runtime_foundation,
+)
 from .teams_message_send import (
     CAPABILITY as TEAMS_MESSAGE_SEND,
     build_invoker as build_teams_message_send_invoker,
@@ -1021,6 +1026,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_datto_powershell_read_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_teams_message_send_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
@@ -1269,6 +1279,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             audit=ConnectorEventAudit(orchestration_events),
         )
     )
+    datto_powershell_read_invoker = build_datto_powershell_read_invoker(
+        openbao_url=settings.openbao_url,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     datto_alert_resolution_invoker = build_datto_alert_resolution_invoker(
         openbao_url=settings.openbao_url,
         transport=http_transport,
@@ -1470,6 +1485,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_datto_component_execution_invoker(
         invokers=invokers,
         invoker=datto_component_execution_invoker,
+    )
+    register_datto_powershell_read_invoker(
+        invokers=invokers,
+        invoker=datto_powershell_read_invoker,
     )
     invokers.register(TEAMS_MESSAGE_SEND, build_teams_message_send_invoker())
     register_datto_alert_resolution_invoker(
