@@ -110,3 +110,18 @@ Current production state: `docs/control/CURRENT.md`.
 Final bounded Datto proof: `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`.
 
 Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
+
+## AOT Toner Readiness
+
+The production toner-readiness dashboard is observational only. `jason-toner-exporter.service` refreshes a cached read-only KFS snapshot every 15 minutes and exposes it to Prometheus on TCP 9473. The dashboard answers the operational question **Which toner should we ship today?** while failing closed when KFS collection, device reporting, toner telemetry, customer identity, or part-number data is insufficient.
+
+Deployment:
+
+```bash
+JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_toner_readiness.sh
+```
+
+This deployment does not create Autotask tickets, purchase orders, or customer communications. Seasonality and Autotask order-correlation remain separate future enrichment gates.
+
+Operational runbook: `docs/operations/KFS-Toner-Readiness-Production.md`. The exporter refreshes cached analysis every 15 minutes, fails closed on stale KFS/device/toner telemetry, and detects probable cartridge replacements from low-to-full toner transitions.
+Toner metrics intentionally include internal customer/device shipping labels (for example customer name, serial, color, and part number); they remain inside the protected AOT observability boundary and contain no provider credentials or execution authority.

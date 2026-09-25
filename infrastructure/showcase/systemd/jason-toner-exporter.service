@@ -1,0 +1,22 @@
+[Unit]
+Description=Jason KFS Toner Intelligence Prometheus Exporter
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/al/projects/jason/infrastructure/toner-intelligence
+Environment=JASON_TONER_EXPORTER_HOST=0.0.0.0
+Environment=JASON_TONER_EXPORTER_PORT=9473
+Environment=JASON_TONER_REFRESH_SECONDS=900
+Environment=JASON_TONER_SNAPSHOT=/home/al/.local/state/jason/toner-intelligence/snapshot.json
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/toner-intelligence/toner_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadWritePaths=/home/al/.local/state/jason/toner-intelligence
+
+[Install]
+WantedBy=default.target
