@@ -46,8 +46,6 @@ from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
 from .datto_component_execution import (
-    DATTO_COMPONENT_EXECUTION_PROFILE,
-    DATTO_COMPONENT_EXECUTION_PROFILE_ENV,
     DATTO_EXECUTION_ROLE_ID_PATH_ENV,
     DATTO_EXECUTION_SECRET_ID_PATH_ENV,
     DEFAULT_ROLE_ID_PATH,
@@ -63,6 +61,8 @@ from .datto_component_scope import (
 ENDPOINT_POWERSHELL_READ = "endpoint.powershell.read"
 DATTO_RMM_POWERSHELL_READ_PROVIDER = "datto_rmm_powershell_read"
 DATTO_RMM_POWERSHELL_READ_PROVIDER_CAPABILITY = "datto_rmm.powershell.read"
+DATTO_POWERSHELL_READ_PROFILE_ENV = "JASON_DATTO_POWERSHELL_READ_PROFILE"
+DATTO_POWERSHELL_READ_PROFILE = "readonly-v1"
 
 _SUCCESS_STATUSES = frozenset(
     {"complete", "completed", "success", "successful", "succeeded", "finished"}
@@ -161,7 +161,7 @@ def _capability_definition(*, now: datetime) -> CapabilityDefinition:
             "endpoint_state_mutation_allowed": "false",
             "provider_side_effect": "one Datto diagnostic job record",
             "component_uid_fixed_server_side": DATTO_AD_HOC_POWERSHELL_UID,
-            "activation_state": "requires_existing_datto_execution_profile",
+            "activation_state": "dedicated_readonly_profile",
         },
     )
 
@@ -231,12 +231,12 @@ def register_datto_powershell_read_runtime_foundation(
     capabilities.register(_capability_definition(now=now))
     providers.register(_provider(now=now))
 
-    profile = os.getenv(DATTO_COMPONENT_EXECUTION_PROFILE_ENV, "").strip().casefold()
+    profile = os.getenv(DATTO_POWERSHELL_READ_PROFILE_ENV, "").strip().casefold()
     if not profile:
         return
-    if profile != DATTO_COMPONENT_EXECUTION_PROFILE:
+    if profile != DATTO_POWERSHELL_READ_PROFILE:
         raise DattoPowerShellReadActivationError(
-            "unsupported Datto component execution profile for PowerShell read"
+            "unsupported dedicated Datto PowerShell read profile"
         )
     if not _component_is_configured():
         raise DattoPowerShellReadActivationError(
