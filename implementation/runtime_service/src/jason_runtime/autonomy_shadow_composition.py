@@ -76,8 +76,14 @@ def build_autonomy_shadow_maintenance(
         orchestrator=orchestrator,
         policy_id="autonomous-shadow-read-v1",
     )
+    targeted_reads = GovernedAutonomyReadPort(
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+        policy_id="autonomous-targeted-read-v1",
+    )
     queue_source = AutotaskQueueSource(
         reads=shadow_reads,
+        exact_reads=targeted_reads,
         config=AutotaskQueueDiscoveryConfig(
             owned_resource_ids=tuple(owned_autotask_resource_ids),
         ),
@@ -102,11 +108,6 @@ def build_autonomy_shadow_maintenance(
     targeted_store = SQLiteTargetedWakeStore(targeted_wake_db)
     work_ledger = SQLiteWorkLedger(work_db)
     work_resume = LedgerWorkResumePort(work_ledger)
-    targeted_reads = GovernedAutonomyReadPort(
-        request_factory=request_factory,
-        orchestrator=orchestrator,
-        policy_id="autonomous-targeted-read-v1",
-    )
     targeted = TargetedWakeMaintenance(
         store=targeted_store,
         reads=targeted_reads,
