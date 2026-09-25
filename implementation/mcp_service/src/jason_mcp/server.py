@@ -61,10 +61,16 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_READ,
+    SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
 )
 from jason_runtime.autotask_internal_note import (
     SERVICE_TICKET_NOTE_CREATE,
     autotask_internal_note_mcp_surface_enabled,
+)
+from orchestrator.provider_mutation_capability_catalog import (
+    SERVICE_TICKET_ATTACHMENT_CREATE,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.datto_component_scope import (
@@ -856,7 +862,12 @@ def _contract_client_context_for_identity(
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> tuple[str | None, ExecutionContext | None]:
-    if capability_name not in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+    scoped_reads = {
+        SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ,
+        SERVICE_TICKET_ATTACHMENT_SEARCH, SERVICE_TICKET_ATTACHMENT_READ,
+        SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+    }
+    if capability_name not in scoped_reads:
         return bound_client_id, None
     raw_company_id = arguments.get("company_id")
     if raw_company_id is None or isinstance(raw_company_id, bool):
@@ -2644,6 +2655,57 @@ def _canonicalize_governed_action_arguments(
         if raw.get("return_work") is True:
             return _ticket_work_handoff_arguments(raw)
         return _direct_ticket_update_arguments(raw)
+
+    if capability_name == SERVICE_TICKET_ATTACHMENT_CREATE:
+        allowed = {
+            "company_id", "ticket_id", "file_name", "title",
+            "visibility", "data_base64",
+        }
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                "AUTOTASK_TICKET_ATTACHMENT_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        import base64 as _base64
+        import binascii as _binascii
+        for key in ("company_id", "ticket_id"):
+            value = raw.get(key)
+            if isinstance(value, bool):
+                raise ValueError(f"AUTOTASK_TICKET_ATTACHMENT_{key.upper()}_REQUIRED")
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"AUTOTASK_TICKET_ATTACHMENT_{key.upper()}_REQUIRED") from exc
+            if value < 1:
+                raise ValueError(f"AUTOTASK_TICKET_ATTACHMENT_{key.upper()}_REQUIRED")
+            raw[key] = value
+        name = str(raw.get("file_name") or "").strip()
+        if not name or len(name) > 255 or "/" in name or "\\" in name or "\x00" in name:
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_FILENAME_INVALID")
+        title = str(raw.get("title") or "").strip() or name
+        if len(title) > 250:
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_TITLE_INVALID")
+        visibility = str(raw.get("visibility") or "internal").strip().casefold()
+        if visibility != "internal":
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_VISIBILITY_INTERNAL_ONLY")
+        encoded = str(raw.get("data_base64") or "").strip()
+        if not encoded:
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_DATA_REQUIRED")
+        try:
+            decoded = _base64.b64decode(encoded, validate=True)
+        except (_binascii.Error, ValueError) as exc:
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_DATA_INVALID") from exc
+        if not decoded or len(decoded) > 6_000_000:
+            raise ValueError("AUTOTASK_TICKET_ATTACHMENT_SIZE_INVALID")
+        return {
+            "company_id": raw["company_id"],
+            "ticket_id": raw["ticket_id"],
+            "file_name": name,
+            "title": title,
+            "visibility": visibility,
+            "data_base64": _base64.b64encode(decoded).decode("ascii"),
+        }
 
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
         if "payload" in raw:

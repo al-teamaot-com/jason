@@ -24,6 +24,9 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_COUNT,
     SERVICE_CONTRACT_SEARCH,
     SERVICE_CONTRACT_READ,
+    SERVICE_TICKET_ATTACHMENT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_READ,
+    SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
     register_provider_read_foundation,
 )
 
@@ -241,3 +244,21 @@ def test_contract_client_selector_binding_allows_matching_client():
     delegate=Delegate(); invoker=GovernedProviderReadConnectorInvoker(delegate=delegate)
     invoker.invoke(request=req, resolution=resolution)
     assert delegate.called is True
+
+
+def test_ticket_attachment_read_arguments_are_company_and_ticket_bound():
+    from orchestrator.provider_read_argument_adapter import adapt_autotask_arguments
+    search=adapt_autotask_arguments(
+        SERVICE_TICKET_ATTACHMENT_SEARCH,{"company_id":333,"ticket_id":140000}
+    )
+    assert search == {"company_id":333,"ticket_id":140000}
+    read=adapt_autotask_arguments(
+        SERVICE_TICKET_ATTACHMENT_READ,{"company_id":333,"ticket_id":140000,"resource_id":555}
+    )
+    assert read == {"company_id":333,"ticket_id":140000,"attachment_id":555}
+    content=adapt_autotask_arguments(
+        SERVICE_TICKET_ATTACHMENT_CONTENT_READ,{"company_id":333,"ticket_id":140000,"resource_id":555,"max_bytes":1234}
+    )
+    assert content["max_bytes"] == 1234
+    with pytest.raises(ValueError):
+        adapt_autotask_arguments(SERVICE_TICKET_ATTACHMENT_SEARCH,{"ticket_id":140000})

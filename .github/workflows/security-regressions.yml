@@ -43,6 +43,7 @@ jobs:
             implementation/kernel/tests/test_client_boundaries_sqlite.py \
             implementation/orchestrator/tests/test_execution_plan_binding.py \
             implementation/orchestrator/tests/test_provider_read_extended_capabilities.py \
+            implementation/connectors/tests/test_autotask_ticket_attachments.py \
             implementation/mcp_service/tests/test_contract_client_context.py \
             implementation/orchestrator/tests/test_governed_execution_replay.py \
             implementation/orchestrator/tests/test_approval_continuation_guard.py \
@@ -56,6 +57,7 @@ jobs:
             implementation/runtime_service/tests/test_autotask_procurement_runtime.py \
             implementation/runtime_service/tests/test_autotask_ticket_create.py \
             implementation/runtime_service/tests/test_autotask_ticket_update.py \
+            implementation/runtime_service/tests/test_autotask_ticket_attachment_runtime.py \
             implementation/runtime_service/tests/test_datto_alert_resolution_runtime.py \
             implementation/runtime_service/tests/test_datto_component_approval_registry.py \
             implementation/runtime_service/tests/test_datto_component_execution_regression.py \

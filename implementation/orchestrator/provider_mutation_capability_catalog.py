@@ -17,6 +17,7 @@ SERVICE_TICKET_CREATE = "service.ticket.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
 SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
+SERVICE_TICKET_ATTACHMENT_CREATE = "service.ticket.attachment.create"
 SERVICE_TICKET_CHARGE_CREATE = "service.ticket.charge.create"
 SERVICE_TICKET_CHARGE_UPDATE = "service.ticket.charge.update"
 SERVICE_PRODUCT_CREATE = "service.product.create"
@@ -39,6 +40,7 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
+        SERVICE_TICKET_ATTACHMENT_CREATE,
         SERVICE_TICKET_CHARGE_CREATE,
         SERVICE_TICKET_CHARGE_UPDATE,
         SERVICE_PRODUCT_CREATE,
@@ -206,6 +208,15 @@ def autotask_mutation_capability_definitions(
             resource_types="service_ticket_note,ticket_note",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_ATTACHMENT_CREATE,
+            display_name="Create Service Ticket Attachment",
+            business_purpose="Attach one approved bounded file to one exact verified Autotask ticket.",
+            resource_types="service_ticket_attachment,ticket_attachment,attachment,file",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
         _mutation_capability(
             now=now,

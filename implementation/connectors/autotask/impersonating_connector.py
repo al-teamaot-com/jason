@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 from dataclasses import dataclass, replace
@@ -361,6 +363,83 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         if len(set(matches)) != 1:
             raise PermissionError("AUTOTASK_REQUESTER_RESOURCE_NOT_UNIQUE")
         return matches[0]
+
+    _ATTACHMENT_READ_OPERATIONS = frozenset({
+        "autotask.ticket.attachments.list",
+        "autotask.ticket.attachment.get",
+        "autotask.ticket.attachment.content.get",
+    })
+
+    def _verify_attachment_ticket_company(self, request: ConnectorRequest) -> None:
+        if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
+            return
+        try:
+            expected_company = int(request.arguments.get("company_id"))
+            ticket_id = int(request.arguments.get("ticket_id"))
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("AUTOTASK_ATTACHMENT_SCOPE_INVALID") from exc
+        if expected_company < 1 or ticket_id < 1:
+            raise PermissionError("AUTOTASK_ATTACHMENT_SCOPE_INVALID")
+        ticket_request = ConnectorRequest(
+            context=replace(request.context, capability="autotask.ticket.get"),
+            arguments={"ticket_id": ticket_id},
+        )
+        observed = AutotaskConnector.execute(self, ticket_request).data
+        items = observed.get("items") if isinstance(observed, Mapping) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
+            raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_NOT_UNIQUE")
+        try:
+            observed_ticket = int(items[0].get("id"))
+            observed_company = int(items[0].get("companyID"))
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_SCOPE_INVALID") from exc
+        if observed_ticket != ticket_id or observed_company != expected_company:
+            raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_COMPANY_MISMATCH")
+
+    @staticmethod
+    def _sanitize_attachment_metadata(payload: Any) -> Any:
+        if isinstance(payload, Mapping):
+            return {
+                str(key): AutotaskImpersonatingConnector._sanitize_attachment_metadata(value)
+                for key, value in payload.items()
+                if str(key) != "data"
+            }
+        if isinstance(payload, list):
+            return [AutotaskImpersonatingConnector._sanitize_attachment_metadata(value) for value in payload]
+        return payload
+
+    def execute(self, request: ConnectorRequest):
+        if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
+            return super().execute(request)
+        self._verify_attachment_ticket_company(request)
+        result = super().execute(request)
+        if request.context.capability != "autotask.ticket.attachment.content.get":
+            return type(result)(
+                capability=result.capability, provider=result.provider,
+                data=self._sanitize_attachment_metadata(result.data),
+                evidence_ids=result.evidence_ids, warnings=result.warnings,
+            )
+        data = result.data
+        raw = data.get("data") if isinstance(data, Mapping) else None
+        if raw is None and isinstance(data, Mapping) and isinstance(data.get("item"), Mapping):
+            raw = data["item"].get("data")
+        if raw is None and isinstance(data, Mapping):
+            items = data.get("items")
+            if isinstance(items, list):
+                exact = [item for item in items if isinstance(item, Mapping)]
+                if len(exact) != 1:
+                    raise ValueError("AUTOTASK_ATTACHMENT_CONTENT_NOT_UNIQUE")
+                raw = exact[0].get("data")
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("AUTOTASK_ATTACHMENT_CONTENT_MISSING")
+        try:
+            decoded = base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("AUTOTASK_ATTACHMENT_CONTENT_INVALID_BASE64") from exc
+        max_bytes = int(request.arguments.get("max_bytes", 6_000_000))
+        if len(decoded) > max_bytes:
+            raise ValueError("AUTOTASK_ATTACHMENT_CONTENT_EXCEEDS_BOUND")
+        return result
 
     def prepare_request(
         self,

@@ -63,6 +63,9 @@ from .provider_read_capability_catalog import (
     SERVICE_TICKET_CHARGE_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_READ,
+    SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -541,6 +544,47 @@ def adapt_autotask_arguments(
         return {
             "ticket_id": arguments.get("ticket_id") or _resource_id(arguments)
         }
+    if capability_name in {
+        SERVICE_TICKET_ATTACHMENT_SEARCH,
+        SERVICE_TICKET_ATTACHMENT_READ,
+        SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+    }:
+        company_id = arguments.get("company_id")
+        ticket_id = arguments.get("ticket_id")
+        if company_id is None or isinstance(company_id, bool):
+            raise ValueError("company_id is required for ticket attachment reads")
+        if ticket_id is None or isinstance(ticket_id, bool):
+            raise ValueError("ticket_id is required for ticket attachment reads")
+        try:
+            company_id = int(company_id); ticket_id = int(ticket_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("company_id and ticket_id must be positive integers") from exc
+        if company_id < 1 or ticket_id < 1:
+            raise ValueError("company_id and ticket_id must be positive integers")
+        result = {"company_id": company_id, "ticket_id": ticket_id}
+        if capability_name != SERVICE_TICKET_ATTACHMENT_SEARCH:
+            attachment_id = _resource_id(arguments)
+            if isinstance(attachment_id, bool):
+                raise ValueError("attachment id must be a positive integer")
+            try:
+                attachment_id = int(attachment_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("attachment id must be a positive integer") from exc
+            if attachment_id < 1:
+                raise ValueError("attachment id must be a positive integer")
+            result["attachment_id"] = attachment_id
+        if capability_name == SERVICE_TICKET_ATTACHMENT_CONTENT_READ:
+            raw_max = arguments.get("max_bytes", 6_000_000)
+            if isinstance(raw_max, bool):
+                raise ValueError("max_bytes must be between 1 and 6000000")
+            try:
+                max_bytes = int(raw_max)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("max_bytes must be between 1 and 6000000") from exc
+            if not 1 <= max_bytes <= 6_000_000:
+                raise ValueError("max_bytes must be between 1 and 6000000")
+            result["max_bytes"] = max_bytes
+        return result
     if capability_name == SERVICE_NOTIFICATION_HISTORY_SEARCH:
         company_id = arguments.get("company_id")
         if company_id is None or not str(company_id).strip():
@@ -769,14 +813,19 @@ class GovernedProviderReadConnectorInvoker:
 
     @staticmethod
     def _enforce_client_selector_binding(request: OrchestrationRequest, capability_name: str) -> None:
-        if capability_name not in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+        scoped = {
+            SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ,
+            SERVICE_TICKET_ATTACHMENT_SEARCH, SERVICE_TICKET_ATTACHMENT_READ,
+            SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+        }
+        if capability_name not in scoped:
             return
         client_id = str(request.client_id or "").strip()
         company_id = request.arguments.get("company_id")
         if not client_id:
-            raise PermissionError("client context is required for contract reads")
+            raise PermissionError("client context is required for company-scoped reads")
         if company_id is None or isinstance(company_id, bool):
-            raise PermissionError("company_id is required for contract reads")
+            raise PermissionError("company_id is required for company-scoped reads")
         try:
             canonical_company = str(int(company_id))
         except (TypeError, ValueError) as exc:
@@ -784,7 +833,7 @@ class GovernedProviderReadConnectorInvoker:
         if int(canonical_company) < 0:
             raise PermissionError("company_id must be a non-negative Autotask company id")
         if client_id != canonical_company:
-            raise PermissionError("contract company selector does not match governed client context")
+            raise PermissionError("company selector does not match governed client context")
 
     def invoke(
         self,

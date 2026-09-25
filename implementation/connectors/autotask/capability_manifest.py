@@ -35,6 +35,9 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_CHARGE_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_READ,
+    SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -100,8 +103,12 @@ def build_autotask_manifest() -> IntegrationManifest:
         ),
         SelectorDefinition(
             "ticket_id",
-            "Durable Autotask ticket identifier used for related note reads.",
+            "Durable Autotask ticket identifier used for related note/attachment reads.",
             verified_identity_required=True,
+        ),
+        SelectorDefinition(
+            "max_bytes",
+            "Maximum decoded attachment content bytes; bounded to 6000000 for Autotask ticket attachments.",
         ),
         SelectorDefinition("entity", "Approved Autotask entity family for schema description."),
     )
@@ -232,6 +239,43 @@ def build_autotask_manifest() -> IntegrationManifest:
                     ResourceObservation("notes", "Ticket note evidence."),
                 ),
                 relationships=("ticket -> company", "ticket -> contact", "ticket -> configuration"),
+            ),
+            ResourceDefinition(
+                resource_type="service_ticket_attachment",
+                description="Autotask attachment metadata/content bounded to one verified ticket and client company.",
+                selectors=selectors,
+                operations=(
+                    IntegrationOperation(
+                        operation_id="service.ticket.attachment.search",
+                        kind=OperationKind.SEARCH,
+                        capability_name=SERVICE_TICKET_ATTACHMENT_SEARCH,
+                        description="List attachment metadata for one exact authorized ticket without returning file bytes.",
+                        read_only=True,
+                        selector_names=("company_id", "ticket_id"),
+                        collection_supported=True,
+                    ),
+                    IntegrationOperation(
+                        operation_id="service.ticket.attachment.read",
+                        kind=OperationKind.READ,
+                        capability_name=SERVICE_TICKET_ATTACHMENT_READ,
+                        description="Read metadata for one exact attachment on one exact authorized ticket.",
+                        read_only=True,
+                        selector_names=("company_id", "ticket_id", "resource_id"),
+                    ),
+                    IntegrationOperation(
+                        operation_id="service.ticket.attachment.content.read",
+                        kind=OperationKind.READ,
+                        capability_name=SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+                        description="Read bounded base64 attachment content as untrusted evidence.",
+                        read_only=True,
+                        selector_names=("company_id", "ticket_id", "resource_id", "max_bytes"),
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("metadata", "Filename, title, visibility, type, creator, and size."),
+                    ResourceObservation("content", "Bounded attachment content available only through the explicit content-read capability."),
+                ),
+                relationships=("attachment -> ticket", "ticket -> company"),
             ),
             ResourceDefinition(
                 resource_type="service_notification",

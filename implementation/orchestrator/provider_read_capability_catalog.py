@@ -55,6 +55,9 @@ SERVICE_TICKET_SEARCH = "service.ticket.search"
 SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
+SERVICE_TICKET_ATTACHMENT_SEARCH = "service.ticket.attachment.search"
+SERVICE_TICKET_ATTACHMENT_READ = "service.ticket.attachment.read"
+SERVICE_TICKET_ATTACHMENT_CONTENT_READ = "service.ticket.attachment.content.read"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_CONTRACT_SEARCH = "service.contract.search"
@@ -118,6 +121,9 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_NOTES_SEARCH,
+        SERVICE_TICKET_ATTACHMENT_SEARCH,
+        SERVICE_TICKET_ATTACHMENT_READ,
+        SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
         SERVICE_CONFIGURATION_SEARCH,
         SERVICE_CONFIGURATION_READ,
         SERVICE_CONTRACT_SEARCH,
@@ -646,6 +652,43 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="notification,notification history,notification template,template,email sent,recipient",
             authoritative_change_sources=at,
             collection_fact="notification history",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_ATTACHMENT_SEARCH,
+            display_name="Search Service Ticket Attachments",
+            business_purpose="List attachment metadata for one exact authorized service ticket without exposing file content.",
+            resource_types="service_ticket_attachment,ticket_attachment,attachment,file",
+            operation="search",
+            selector_keys="company_id,ticket_id",
+            fact_hints="ticket attachment,attachments,file,filename,title,publish,attachment type,file size",
+            authoritative_change_sources=at,
+            collection_fact="ticket attachments",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_ATTACHMENT_READ,
+            display_name="Read Service Ticket Attachment Metadata",
+            business_purpose="Read metadata for one exact attachment on one exact authorized service ticket without exposing file content.",
+            resource_types="service_ticket_attachment,ticket_attachment,attachment,file",
+            operation="read",
+            selector_keys="company_id,ticket_id,resource_id",
+            fact_hints="ticket attachment,file,filename,title,publish,attachment type,file size,creator",
+            authoritative_change_sources=at,
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+            display_name="Read Service Ticket Attachment Content",
+            business_purpose="Retrieve bounded content for one exact attachment on one exact authorized service ticket as untrusted evidence.",
+            resource_types="service_ticket_attachment,ticket_attachment,attachment,file",
+            operation="content_read",
+            selector_keys="company_id,ticket_id,resource_id,max_bytes",
+            fact_hints="ticket attachment content,file content,open attachment,view attachment,pdf,image,log,document",
+            authoritative_change_sources=at,
+            client_isolation_required=True,
         ),
         _read_capability(
             now=now,

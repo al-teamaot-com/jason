@@ -28,6 +28,9 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_SEARCH,
+    SERVICE_TICKET_ATTACHMENT_READ,
+    SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
@@ -40,6 +43,7 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -446,3 +450,23 @@ def test_contract_reads_remain_dormant_in_v5_v6_and_activate_only_in_v7() -> Non
     assert set(v7.capability_names) == set(
         PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_CAPABILITIES
     )
+
+
+def test_attachment_reads_are_dormant_in_v7_and_activate_only_in_v8() -> None:
+    attachment_reads={
+        SERVICE_TICKET_ATTACHMENT_SEARCH,SERVICE_TICKET_ATTACHMENT_READ,
+        SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+    }
+    capabilities,providers=_registries()
+    v7=apply_provider_read_activation_profile(
+        capabilities=capabilities,providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
+    )
+    assert attachment_reads.isdisjoint(set(v7.capability_names))
+
+    capabilities,providers=_registries()
+    v8=apply_provider_read_activation_profile(
+        capabilities=capabilities,providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
+    )
+    assert attachment_reads.issubset(set(v8.capability_names))
