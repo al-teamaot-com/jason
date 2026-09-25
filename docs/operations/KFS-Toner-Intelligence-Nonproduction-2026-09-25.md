@@ -1,6 +1,8 @@
 # KFS Toner Intelligence — Nonproduction Prototype
 
-Status: **prototype only — do not deploy to production**
+Status: **historical design record — promoted to production read-only observability on 2026-09-25**
+
+Current production operations: `docs/operations/KFS-Toner-Readiness-Production.md`
 
 ## Goal
 Provide an AOT morning view that answers: **Which toner should we ship today?**
@@ -34,8 +36,8 @@ Until enough history exists, the prototype reports `seasonality_status=insuffici
 4. Measure recommendation-to-order and recommendation-to-replacement days.
 5. Track misses, early recommendations, duplicates avoided, and model/color-specific reliability.
 
-## Production gates
-Do not deploy until the dashboard and logic have been reviewed with real AOT data, customer mapping is reliable, zero/unknown toner semantics are validated, seasonality has sufficient history, and AOT explicitly approves production deployment.
+## Historical production gates
+These were the prototype promotion gates. AOT explicitly approved production deployment on 2026-09-25 after live-data review and telemetry fail-closed controls were added. Seasonality remains intentionally disabled pending sufficient history; see the current production operations document for active limits and controls.
 
 ## Telemetry freshness safety gate
 A shipping recommendation is valid only when both the KFS collector and the relevant device/toner telemetry are fresh.

@@ -122,3 +122,6 @@ JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_toner_readiness.sh
 ```
 
 This deployment does not create Autotask tickets, purchase orders, or customer communications. Seasonality and Autotask order-correlation remain separate future enrichment gates.
+
+Operational runbook: `docs/operations/KFS-Toner-Readiness-Production.md`. The exporter refreshes cached analysis every 15 minutes, fails closed on stale KFS/device/toner telemetry, and detects probable cartridge replacements from low-to-full toner transitions.
+Toner metrics intentionally include internal customer/device shipping labels (for example customer name, serial, color, and part number); they remain inside the protected AOT observability boundary and contain no provider credentials or execution authority.

@@ -21,7 +21,8 @@ Project Jason's major 2026-09-25 work is production-accepted:
 - **CONN-015 read phase:** governed Autotask contract search/read production-accepted; contract writes remain blocked by provider update permission.
 - **CONN-019:** governed Autotask ticket attachment search/read/content-read and approval-required create production-accepted.
 - **Authority administration:** Owner-only exact authority grant list/add/revoke production-deployed; wildcard/administer grant creation is prohibited and execute grants require approval.
-- **Observability:** Security & Learning, Client Security Posture, Resolution Memory, Production Health, Governed Actions, and Command Center surfaces are active under an evidence-not-authority model.
+- **Observability:** Security & Learning, Client Security Posture, Resolution Memory, Production Health, Governed Actions, Command Center, and **AOT Toner Readiness** surfaces are active under an evidence-not-authority model.
+- **Toner readiness:** production read-only KFS toner forecasting is active through `jason-toner-exporter.service` and Grafana. Fresh telemetry is mandatory for `ship_today` / `ship_soon`; Autotask order/ticket automation and seasonality remain disabled.
 
 ## Current provider-read profile
 
@@ -85,7 +86,8 @@ Production includes secret-safe exporters/dashboards for:
 - security controls and Security & Learning;
 - Resolution Memory;
 - client security posture;
-- usage/attribution/roadmap/command-center views.
+- usage/attribution/roadmap/command-center views;
+- AOT Toner Readiness, including Ship Today/Ship Soon/Needs Review/Watch, KFS collector freshness, device/toner reporting freshness, and probable cartridge replacement detection.
 
 Security/posture metrics must not contain secrets, raw auth context, client names, ticket IDs, principals, fingerprints, or raw provider payloads.
 
@@ -97,6 +99,7 @@ The production runtime/MCP code line includes merged authority-administration so
 
 ## Open follow-up work
 
+- Toner readiness: add Autotask order/PO correlation and accuracy measurement; learn customer/device-specific seasonality only after sufficient historical meter data exists. Do not automate toner orders or tickets until the dashboard recommendations have been validated operationally.
 - Contract writes remain blocked by Autotask contract update permission.
 - OPS-005 can improve evidence coverage for Microsoft tenant mapping, VulScan, IT Glue, DRMM site-scoped monitoring, and backup-recency policy.
 - Other backlog/support items remain governed by `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md` and `SUPPORT.md`.
@@ -104,5 +107,7 @@ The production runtime/MCP code line includes merged authority-administration so
 ## Durable evidence
 
 Primary 2026-09-25 handoff: `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`.
+
+Current toner operations: `docs/operations/KFS-Toner-Readiness-Production.md`.
 
 Historical production proofs remain under `docs/sessions/`; they should not be rewritten to look current.
