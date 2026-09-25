@@ -727,7 +727,10 @@ class AutotaskInternalNoteConnector(
         if not autotask_mutation_execution_enabled():
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
         credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
-        prepared = AutotaskMutationConnector.prepare_request(self, normalized_request, credentials)
+        prepared = self.prepare_request(
+            normalized_request,
+            credentials,
+        )
         relative_path = prepared.audit_operation or urlsplit(prepared.url).path
         return ProviderPreparedExecution(
             provider_capability=request.context.capability,
