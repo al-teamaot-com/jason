@@ -284,8 +284,8 @@ class AutotaskTicketAttachmentConnector(AutotaskMutationConnector):
         for item in values:
             if not isinstance(item, Mapping):
                 continue
-            label = str(item.get("label") or "").strip().casefold()
-            if "internal" not in label:
+            label = " ".join(str(item.get("label") or "").strip().casefold().split())
+            if label not in {"internal users only", "internal only"}:
                 continue
             try:
                 matches.append(int(item.get("value")))

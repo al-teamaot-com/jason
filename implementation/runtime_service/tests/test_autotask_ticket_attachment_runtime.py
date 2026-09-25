@@ -63,7 +63,11 @@ class Transport:
         if url.endswith("/V1.0/TicketAttachments/entityInformation"):
             return {"userAccessForCreate":1}
         if url.endswith("/V1.0/TicketAttachments/entityInformation/fields"):
-            return {"fields":[{"name":"publish","picklistValues":[{"label":"Internal Only","value":2},{"label":"All","value":1}]}]}
+            return {"fields":[{"name":"publish","picklistValues":[
+                {"label":"All Autotask Users","value":1},
+                {"label":"Internal Users Only","value":2},
+                {"label":"Internal & Co-Managed","value":4},
+            ]}]}
         if url.endswith("/V1.0/Tickets/query"):
             return {"item":{"id":140000,"companyID":self.ticket_company}}
         if method == "POST" and url.endswith("/V1.0/Tickets/140000/Attachments"):
@@ -157,3 +161,10 @@ def test_successful_attachment_post_and_exact_readback_are_verified_and_sanitize
     assert len(posts) == 1
     assert posts[0]["json"]["data"] == transport.encoded
     assert posts[0]["headers"]["ImpersonationResourceId"] == "77"
+
+
+def test_internal_visibility_resolution_ignores_internal_and_comanaged():
+    transport=Transport(); c=connector(transport)
+    prepared=c.prepare_governed_execution(request(transport.encoded))
+    assert prepared.payload["publish"] == 2
+    assert prepared.symbolic_resolutions == {"visibility":"2"}
