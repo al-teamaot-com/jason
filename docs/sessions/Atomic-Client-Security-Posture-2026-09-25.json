@@ -1,0 +1,215 @@
+{
+  "schema_version": "1.0",
+  "reviewed_at": "2026-09-25T07:22:07.381948Z",
+  "client": {
+    "autotask_company_id": "333",
+    "name": "Atomic Plumbing & Drain Cleaning"
+  },
+  "bindings": {
+    "drmm_site_uid": "a6af04fc-2e2a-4236-82ca-9d47ac616524",
+    "it_glue_organization_id": null,
+    "dnsfilter_organization_id": "1110483",
+    "endpoint_backup_customer_id": "08dd6091-d9a8-499f-89aa-f9579896952f",
+    "microsoft_tenant_id": null,
+    "vulscan_client_id": null
+  },
+  "counts": {
+    "confirmed_good": 0,
+    "confirmed_gap": 2,
+    "unknown": 5,
+    "not_applicable": 0,
+    "evidence_unavailable": 5
+  },
+  "assessments": [
+    {
+      "control_id": "ENDPOINT-ENCRYPTION",
+      "title": "Endpoint disk encryption",
+      "state": "unknown",
+      "rationale": "No authoritative observation establishes this control state.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "ENDPOINT-AV",
+      "title": "Managed antivirus protection",
+      "state": "confirmed_gap",
+      "rationale": "Authoritative evidence contains a value outside the AOT baseline.",
+      "remediation_hint": "Restore the AOT-managed AV/EDR protection state.",
+      "evidence": [
+        {
+          "source": "datto_rmm.endpoint.device.read",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_dc28df69090e41448fc7f9e10cde3bf8",
+          "facts": {
+            "managed_av_healthy": false,
+            "resource": "APD-50213",
+            "observed_status": "Windows Defender Antivirus / NotRunning"
+          }
+        },
+        {
+          "source": "datto_rmm.endpoint.device.read",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_0d4db8aa07f244dfa0f29abbc2163935",
+          "facts": {
+            "managed_av_healthy": false,
+            "resource": "APD-HYPERV",
+            "observed_status": "Datto AV / RunningAndNotUpToDate"
+          }
+        }
+      ]
+    },
+    {
+      "control_id": "ENDPOINT-EDR",
+      "title": "Managed EDR protection",
+      "state": "unknown",
+      "rationale": "No authoritative observation establishes this control state.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "ENDPOINT-OS",
+      "title": "Supported endpoint operating system",
+      "state": "confirmed_gap",
+      "rationale": "Authoritative evidence contains a value outside the AOT baseline.",
+      "remediation_hint": "Upgrade or replace unsupported operating systems.",
+      "evidence": [
+        {
+          "source": "datto_rmm+Microsoft Lifecycle",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_a3d0c83acae04fe9a37c8f2cf11e6edf",
+          "facts": {
+            "os_supported": false,
+            "resource": "ATOMIC9-PC",
+            "operating_system": "Microsoft Windows 10 Pro 10.0.19045",
+            "lifecycle_basis": "Windows 10 22H2 end of support 2025-10-14"
+          }
+        },
+        {
+          "source": "datto_rmm+Microsoft Lifecycle",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_0d4db8aa07f244dfa0f29abbc2163935",
+          "facts": {
+            "os_supported": false,
+            "resource": "APD-HYPERV",
+            "operating_system": "Microsoft HyperV Server 2012 6.2.9200",
+            "lifecycle_basis": "2012 generation past normal support"
+          }
+        }
+      ]
+    },
+    {
+      "control_id": "ENDPOINT-MONITORING",
+      "title": "DRMM monitoring health",
+      "state": "evidence_unavailable",
+      "rationale": "Authoritative evidence source is not currently available to Jason.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "VULNERABILITY",
+      "title": "Vulnerability-management coverage",
+      "state": "evidence_unavailable",
+      "rationale": "Authoritative evidence source is not currently available to Jason.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "DNS-PROTECTION",
+      "title": "Protective DNS coverage",
+      "state": "unknown",
+      "rationale": "No authoritative observation establishes this control state.",
+      "remediation_hint": null,
+      "evidence": [
+        {
+          "source": "dnsfilter.agent.counts.read",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_754166f7c22b441db104881434e4161f",
+          "facts": {
+            "protected_agents": 23,
+            "unprotected_agents": 0,
+            "bypassed_agents": 0,
+            "complete_client_coverage_proven": false
+          }
+        }
+      ]
+    },
+    {
+      "control_id": "BACKUP-COVERAGE",
+      "title": "Managed backup coverage",
+      "state": "unknown",
+      "rationale": "No authoritative observation establishes this control state.",
+      "remediation_hint": null,
+      "evidence": [
+        {
+          "source": "backup_net.endpoint.asset.search",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_414f73d92b234ac3866a1ec5d8d3dd59",
+          "facts": {
+            "exact_customer_binding": true,
+            "complete_expected_device_coverage_proven": false
+          }
+        }
+      ]
+    },
+    {
+      "control_id": "BACKUP-SUCCESS",
+      "title": "Recent successful backup",
+      "state": "unknown",
+      "rationale": "No authoritative observation establishes this control state.",
+      "remediation_hint": null,
+      "evidence": [
+        {
+          "source": "backup_net.endpoint.asset.search",
+          "observed_at": "2026-09-25T07:22:07.381948Z",
+          "correlation_id": "corr_mcp_414f73d92b234ac3866a1ec5d8d3dd59",
+          "facts": {
+            "resource": "APD-50213",
+            "last_successful_backup": "2026-09-10T04:32:51.841Z",
+            "current_drmm_online": true,
+            "baseline_recency_threshold_defined": false
+          }
+        }
+      ]
+    },
+    {
+      "control_id": "IDENTITY-MFA",
+      "title": "Microsoft identity MFA posture",
+      "state": "evidence_unavailable",
+      "rationale": "Authoritative evidence source is not currently available to Jason.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "IDENTITY-CA",
+      "title": "Conditional Access baseline",
+      "state": "evidence_unavailable",
+      "rationale": "Authoritative evidence source is not currently available to Jason.",
+      "remediation_hint": null,
+      "evidence": []
+    },
+    {
+      "control_id": "DOCUMENTATION",
+      "title": "Required documentation completeness",
+      "state": "evidence_unavailable",
+      "rationale": "Authoritative evidence source is not currently available to Jason.",
+      "remediation_hint": null,
+      "evidence": []
+    }
+  ],
+  "improvement_proposals": [
+    {
+      "control_id": "ENDPOINT-AV",
+      "title": "Managed antivirus protection",
+      "rationale": "Authoritative evidence contains a value outside the AOT baseline.",
+      "proposed_action": "Restore the AOT-managed AV/EDR protection state."
+    },
+    {
+      "control_id": "ENDPOINT-OS",
+      "title": "Supported endpoint operating system",
+      "rationale": "Authoritative evidence contains a value outside the AOT baseline.",
+      "proposed_action": "Upgrade or replace unsupported operating systems."
+    }
+  ],
+  "automatic_changes_allowed": false,
+  "authority_semantics": "evidence_only_never_grants_execution_authority"
+}

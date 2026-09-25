@@ -48,6 +48,7 @@ jobs:
             infrastructure/showcase/playbook_exporter.py \
             infrastructure/showcase/resolution_memory_exporter.py \
             infrastructure/showcase/security_control_exporter.py \
+            infrastructure/showcase/client_posture_exporter.py \
             implementation/orchestrator/open_world_teams_query_flow.py \
             implementation/orchestrator/teams_identity_binding.py \
             implementation/usage_attribution \
@@ -64,6 +65,7 @@ jobs:
             infrastructure/showcase/tests/test_playbook_exporter.py \
             infrastructure/showcase/tests/test_resolution_memory_exporter.py \
             infrastructure/showcase/tests/test_security_control_exporter.py \
+            infrastructure/showcase/tests/test_client_posture_exporter.py \
             implementation/orchestrator/tests/test_open_world_usage_attribution.py \
             implementation/orchestrator/tests/test_teams_identity_usage_audit.py \
             implementation/usage_attribution/test_runtime_context.py
@@ -76,3 +78,4 @@ jobs:
           python -m json.tool infrastructure/showcase/grafana/dashboards/jason-command-center.json >/dev/null
           python -m json.tool infrastructure/showcase/grafana/dashboards/jason-usage-attribution.json >/dev/null
           python -m json.tool infrastructure/showcase/grafana/dashboards/jason-security-learning.json >/dev/null
+          python -m json.tool infrastructure/showcase/grafana/dashboards/jason-client-security-posture.json >/dev/null
