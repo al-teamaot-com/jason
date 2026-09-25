@@ -44,6 +44,9 @@ class RuntimeHttpApplication:
     capabilities: Any | None = None
     microsoft_identity_bindings: Any | None = None
     microsoft_user_directory: Any | None = None
+    # Same-thread bounded maintenance hook. The HTTP layer never invokes it from
+    # request dispatch; JasonRuntimeHttpServer.service_actions() owns maintenance.
+    maintenance: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"

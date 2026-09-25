@@ -23,6 +23,9 @@ from .provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_RESOURCE_READ,
+    SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
@@ -33,6 +36,18 @@ from .service import CapabilityInvoker, InvocationResult
 class TrustedPrincipalBindingResolver(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
+
+
+_AUTONOMOUS_SHADOW_READS = frozenset(
+    {
+        SERVICE_TICKET_SEARCH,
+        SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_RESOURCE_SEARCH,
+        SERVICE_RESOURCE_READ,
+    }
+)
+_AUTONOMOUS_SHADOW_PRINCIPAL = "jason-autonomy-worker"
+_AUTONOMOUS_SHADOW_POLICY = "autonomous-shadow-read-v1"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -112,6 +127,26 @@ def _jason_managed_requester_authorization_proven(
     )
 
 
+
+def _autonomous_shadow_requester_authorization_proven(
+    *,
+    request: OrchestrationRequest,
+    capability_name: str,
+) -> bool:
+    """Authorize only the exact internal shadow workload read surface."""
+
+    return bool(
+        capability_name in _AUTONOMOUS_SHADOW_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_SHADOW_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AutotaskImpersonationInformationAuthorizer:
     """Authorize Autotask information release using the configured requester mode.
@@ -150,20 +185,31 @@ class AutotaskImpersonationInformationAuthorizer:
             return invocation
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
-            if (
-                resolution.capability_name not in AUTOTASK_CAPABILITIES
-                or not _jason_managed_requester_authorization_proven(
-                    request=request,
-                    bindings=self.bindings,
-                )
-            ):
+            if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
-            basis = (
-                "jason_managed",
-                "jkd001_authority_context",
-                "trusted_microsoft_identity_binding",
-                "central_orchestrator_governed_read",
-            )
+            if _jason_managed_requester_authorization_proven(
+                request=request,
+                bindings=self.bindings,
+            ):
+                basis = (
+                    "jason_managed",
+                    "jkd001_authority_context",
+                    "trusted_microsoft_identity_binding",
+                    "central_orchestrator_governed_read",
+                )
+            elif _autonomous_shadow_requester_authorization_proven(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_shadow_workload",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_SHADOW_POLICY,
+                )
+            else:
+                return invocation
         elif mode == AUTOTASK_AUTH_MODE_IMPERSONATED:
             if (
                 resolution.capability_name not in _IMPERSONATED_CANONICAL_READS

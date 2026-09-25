@@ -262,3 +262,22 @@ def test_ticket_attachment_read_arguments_are_company_and_ticket_bound():
     assert content["max_bytes"] == 1234
     with pytest.raises(ValueError):
         adapt_autotask_arguments(SERVICE_TICKET_ATTACHMENT_SEARCH,{"ticket_id":140000})
+
+
+def test_service_resource_search_and_read_are_provider_neutral():
+    from orchestrator.provider_read_capability_catalog import SERVICE_RESOURCE_SEARCH, SERVICE_RESOURCE_READ
+    from orchestrator.provider_read_argument_adapter import adapt_autotask_arguments
+    import json
+
+    search = adapt_autotask_arguments(
+        SERVICE_RESOURCE_SEARCH,
+        {"first_name": "Jason", "email": "jason@teamaot.com", "page_size": 25},
+    )
+    assert search["entity"] == "Resources"
+    query = json.loads(search["search"])
+    assert {"op": "eq", "field": "firstName", "value": "Jason"} in query["filter"]
+    assert {"op": "eq", "field": "email", "value": "jason@teamaot.com"} in query["filter"]
+    assert query["MaxRecords"] == 25
+
+    read = adapt_autotask_arguments(SERVICE_RESOURCE_READ, {"resource_id": 29682899})
+    assert read == {"entity": "Resources", "entity_id": 29682899}

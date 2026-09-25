@@ -46,6 +46,8 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTRACT_SEARCH,
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
+    SERVICE_RESOURCE_READ,
+    SERVICE_RESOURCE_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
@@ -131,6 +133,15 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "first_name": "firstName",
         "last_name": "lastName",
         "email": "emailAddress",
+    },
+    SERVICE_RESOURCE_SEARCH: {
+        "resource_id": "id",
+        "first_name": "firstName",
+        "last_name": "lastName",
+        "email": "email",
+    },
+    SERVICE_RESOURCE_READ: {
+        "resource_id": "id",
     },
     SERVICE_TICKET_SEARCH: {
         "resource_id": "id",
@@ -601,6 +612,8 @@ def adapt_autotask_arguments(
         if company_id is None or not str(company_id).strip():
             raise ValueError("company_id is required for contract search")
         return {"entity": "Contracts", "search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_RESOURCE_READ:
+        return {"entity": "Resources", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_PRODUCT_READ:
         return {"entity": "Products", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_SERVICE_READ:
@@ -612,6 +625,7 @@ def adapt_autotask_arguments(
     if capability_name == SERVICE_TICKET_CHARGE_READ:
         return {"entity": "TicketCharges", "entity_id": _resource_id(arguments)}
     entity_searches = {
+        SERVICE_RESOURCE_SEARCH: "Resources",
         SERVICE_PRODUCT_SEARCH: "Products",
         SERVICE_PRODUCT_VENDOR_SEARCH: "ProductVendors",
         SERVICE_SERVICE_SEARCH: "Services",
