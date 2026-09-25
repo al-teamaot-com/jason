@@ -7,7 +7,7 @@ Central Orchestrator governed capabilities.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -28,7 +28,9 @@ class QueueCandidate:
     priority: int
     source_queue: str
     owned_by_jason: bool = False
-    materially_changed: bool = True
+    urgent: bool = False
+    source_version: str | None = None
+    context: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -200,20 +202,22 @@ class AutonomousQueueWorker:
 
         for candidate in candidates:
             existing = self.ledger.get(candidate.resource_id)
-            if existing and existing.state in {
-                WorkState.ACTIVE,
-                WorkState.VERIFYING,
-                WorkState.WAITING,
-                WorkState.APPROVAL_PENDING,
-                WorkState.BLOCKED,
-            } and not candidate.materially_changed:
+            if (
+                existing
+                and existing.source_version is not None
+                and candidate.source_version is not None
+                and existing.source_version == candidate.source_version
+            ):
                 continue
             self.ledger.upsert(
                 WorkItem(
                     resource_id=candidate.resource_id,
                     state=WorkState.CANDIDATE,
                     priority=candidate.priority,
+                    owned_by_jason=candidate.owned_by_jason,
+                    urgent=candidate.urgent,
                     reason=f"Queue candidate from {candidate.source_queue}",
+                    source_version=candidate.source_version,
                     updated_at=now,
                 )
             )
@@ -259,6 +263,7 @@ class AutonomousQueueWorker:
             wake_on=result.wake_on,
             queue_reconciliation_required=result.queue_reconciliation_required,
             reason=result.reason,
+            source_version=item.source_version,
             updated_at=now,
         )
         self.ledger.upsert(updated)

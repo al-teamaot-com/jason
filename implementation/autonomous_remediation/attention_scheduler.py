@@ -37,12 +37,15 @@ class WorkItem:
     resource_id: str
     state: WorkState
     priority: int = 0
+    owned_by_jason: bool = False
+    urgent: bool = False
     playbook_id: str | None = None
     next_action: str | None = None
     next_check_at: datetime | None = None
     wake_on: str | None = None
     queue_reconciliation_required: bool = False
     reason: str = ""
+    source_version: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -77,7 +80,15 @@ class WorkLedger:
             item for item in self._items.values()
             if item.state in {WorkState.AVAILABLE, WorkState.CANDIDATE}
         ]
-        candidates.sort(key=lambda item: (-item.priority, item.updated_at, item.resource_id))
+        candidates.sort(
+            key=lambda item: (
+                -int(item.urgent),
+                -int(item.owned_by_jason),
+                -item.priority,
+                item.updated_at,
+                item.resource_id,
+            )
+        )
         activated = []
         for item in candidates[:slots]:
             active = replace(item, state=WorkState.ACTIVE, updated_at=now)
@@ -157,12 +168,15 @@ class SQLiteWorkLedger(WorkLedger):
         resource_id TEXT PRIMARY KEY,
         state TEXT NOT NULL,
         priority INTEGER NOT NULL,
+        owned_by_jason INTEGER NOT NULL DEFAULT 0,
+        urgent INTEGER NOT NULL DEFAULT 0,
         playbook_id TEXT,
         next_action TEXT,
         next_check_at TEXT,
         wake_on TEXT,
         queue_reconciliation_required INTEGER NOT NULL,
         reason TEXT NOT NULL,
+        source_version TEXT,
         updated_at TEXT NOT NULL
     );
     """
@@ -175,6 +189,20 @@ class SQLiteWorkLedger(WorkLedger):
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(self._SCHEMA)
+        columns = {
+            str(row["name"])
+            for row in self._connection.execute("PRAGMA table_info(autonomous_work_items)")
+        }
+        migrations = {
+            "source_version": "TEXT",
+            "owned_by_jason": "INTEGER NOT NULL DEFAULT 0",
+            "urgent": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for name, ddl in migrations.items():
+            if name not in columns:
+                self._connection.execute(
+                    f"ALTER TABLE autonomous_work_items ADD COLUMN {name} {ddl}"
+                )
         os.chmod(self.path, 0o600)
         super().__init__(self._load_items())
 
@@ -190,19 +218,22 @@ class SQLiteWorkLedger(WorkLedger):
             self._connection.execute(
                 """
                 INSERT INTO autonomous_work_items(
-                    resource_id, state, priority, playbook_id, next_action,
+                    resource_id, state, priority, owned_by_jason, urgent, playbook_id, next_action,
                     next_check_at, wake_on, queue_reconciliation_required,
-                    reason, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reason, source_version, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(resource_id) DO UPDATE SET
                     state=excluded.state,
                     priority=excluded.priority,
+                    owned_by_jason=excluded.owned_by_jason,
+                    urgent=excluded.urgent,
                     playbook_id=excluded.playbook_id,
                     next_action=excluded.next_action,
                     next_check_at=excluded.next_check_at,
                     wake_on=excluded.wake_on,
                     queue_reconciliation_required=excluded.queue_reconciliation_required,
                     reason=excluded.reason,
+                    source_version=excluded.source_version,
                     updated_at=excluded.updated_at
                 """,
                 self._item_values(item),
@@ -223,12 +254,15 @@ class SQLiteWorkLedger(WorkLedger):
             item.resource_id,
             item.state.value,
             item.priority,
+            int(item.owned_by_jason),
+            int(item.urgent),
             item.playbook_id,
             item.next_action,
             item.next_check_at.isoformat() if item.next_check_at else None,
             item.wake_on,
             int(item.queue_reconciliation_required),
             item.reason,
+            item.source_version,
             item.updated_at.isoformat(),
         )
 
@@ -238,11 +272,14 @@ class SQLiteWorkLedger(WorkLedger):
             resource_id=row["resource_id"],
             state=WorkState(row["state"]),
             priority=int(row["priority"]),
+            owned_by_jason=bool(row["owned_by_jason"]),
+            urgent=bool(row["urgent"]),
             playbook_id=row["playbook_id"],
             next_action=row["next_action"],
             next_check_at=datetime.fromisoformat(row["next_check_at"]) if row["next_check_at"] else None,
             wake_on=row["wake_on"],
             queue_reconciliation_required=bool(row["queue_reconciliation_required"]),
             reason=row["reason"],
+            source_version=row["source_version"],
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

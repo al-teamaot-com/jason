@@ -169,3 +169,31 @@ Before production activation:
 8. prove the red-team scenarios above;
 9. run a controlled Autotask acceptance pilot;
 10. only then enable unattended queue processing.
+
+## Autonomous workload identity
+
+Unattended execution must not impersonate the interactive technician who originally discussed a ticket. Jason uses a dedicated non-human workload identity (`jason-autonomy-worker`) evaluated by JKD-001. The identity receives only exact capability grants. Approval-required actions additionally require a separate durable owner promotion for the exact playbook version and capability, followed by a short-lived exact-action reservation in the governed execution ledger. The Central Orchestrator still binds and consumes the concrete execution plan once.
+
+Source metadata is not authority. Setting `autonomy.activation=autonomous` in the playbook catalog is only an eligibility declaration. Standing execution requires a separate durable `PlaybookAutonomyApproval`; absence, expiration, revocation, version drift, capability drift, or duplicate active promotion records fail closed.
+
+## Queue ownership and priority
+
+The Autotask queue adapter resolves queue IDs and ticket priority ordering from live Tickets field metadata rather than relying on provider IDs as ordinal values. Initial AOT metadata validation on 2026-09-25 confirmed Critical, High, Medium, Normal, and Copy/Print are ordered by provider `sortOrder`. Jason normalizes that ordering into a provider-neutral priority score.
+
+Selection order is: urgent work first; then Jason-owned work; then normalized priority; then age/stable identity. This means normal work already owned by Jason is resumed before newly discovered work, while Critical/Emergency work may trigger reconsideration. Among equally urgent work, Jason-owned work remains preferred.
+
+Tickets assigned to a human in another queue are not claimed. An assigned ticket outside the Jason queue is eligible only when its assignee is authoritatively configured as a Jason-owned Autotask resource. Jason currently lacks the provider-neutral Autotask Resources read needed to derive that identity dynamically; GitHub issue #178 tracks that gap. Until then, assignment ownership is never inferred from recurring numeric IDs.
+
+## Shadow-mode production checkpoint - 2026-09-25
+
+A governed read-only production reconciliation was run across Jason, Help Desk I, Help Desk II, Monitoring Alert, and Client Portal queues. No ticket, device, note, job, alert, or provider object was mutated.
+
+Findings:
+
+- Jason queue: 11 In Progress, 0 New, and no current Updated-by-Email/Emergency items in the checked status set.
+- The current queue includes recognized shadow playbooks for Datto EDR/AV, Security Log Self-Heal, DNS Agent, VulScan Missing Patch, BackupIQ, and Unexpected Shutdown.
+- Active Jason tickets for POST errors, Idle Log Off, and Low Disk Space do not yet have complete registered playbook source coverage in this branch. Idle Log Off hardening is tracked by #245; the Low Disk Space execution-plan blocker is tracked by #261.
+- Other queues contain human-assigned work, unassigned work, and tickets carrying the same opaque Autotask resource ID seen on Jason-owned tickets. Because Autotask Resources is not yet a governed readable resource, Jason does not infer that opaque ID is itself Jason.
+- No playbook is currently durably promoted for unattended mutation. The playbook catalog is shadow-only and its `allowed_capabilities` sets are empty.
+
+This checkpoint proves queue discovery and classification behavior without granting execution authority.

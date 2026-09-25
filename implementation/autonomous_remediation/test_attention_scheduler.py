@@ -114,3 +114,59 @@ def test_sqlite_work_ledger_survives_restart(tmp_path):
     assert restored.playbook_id == "unexpected-shutdown"
     assert restored.wake_on == "device_online"
     reopened.close()
+
+
+def test_sqlite_work_ledger_migrates_pre_source_version_schema(tmp_path):
+    import sqlite3
+    from .attention_scheduler import SQLiteWorkLedger
+
+    path = tmp_path / "legacy-work.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("""
+            CREATE TABLE autonomous_work_items (
+                resource_id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                priority INTEGER NOT NULL,
+                playbook_id TEXT,
+                next_action TEXT,
+                next_check_at TEXT,
+                wake_on TEXT,
+                queue_reconciliation_required INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        connection.execute(
+            "INSERT INTO autonomous_work_items VALUES (?,?,?,?,?,?,?,?,?,?)",
+            ("T1", "waiting", 1, None, None, None, None, 0, "legacy", "2026-09-25T10:00:00+00:00"),
+        )
+    ledger = SQLiteWorkLedger(path)
+    assert ledger.get("T1").source_version is None
+    ledger.close()
+
+
+def test_owned_work_beats_higher_priority_external_work_when_not_urgent():
+    ledger = WorkLedger([
+        WorkItem("OWNED", WorkState.CANDIDATE, priority=10, owned_by_jason=True),
+        WorkItem("EXTERNAL", WorkState.CANDIDATE, priority=9999, owned_by_jason=False),
+    ])
+    activated = ledger.activate_next(AutonomyConfig(1))
+    assert [item.resource_id for item in activated] == ["OWNED"]
+
+
+def test_urgent_external_work_can_preempt_nonurgent_owned_work():
+    ledger = WorkLedger([
+        WorkItem("OWNED", WorkState.CANDIDATE, priority=9999, owned_by_jason=True, urgent=False),
+        WorkItem("URGENT", WorkState.CANDIDATE, priority=9999, owned_by_jason=False, urgent=True),
+    ])
+    activated = ledger.activate_next(AutonomyConfig(1))
+    assert [item.resource_id for item in activated] == ["URGENT"]
+
+
+def test_equally_urgent_owned_work_beats_external_work():
+    ledger = WorkLedger([
+        WorkItem("OWNED", WorkState.CANDIDATE, priority=9998, owned_by_jason=True, urgent=True),
+        WorkItem("EXTERNAL", WorkState.CANDIDATE, priority=9999, owned_by_jason=False, urgent=True),
+    ])
+    activated = ledger.activate_next(AutonomyConfig(1))
+    assert [item.resource_id for item in activated] == ["OWNED"]

@@ -14,6 +14,8 @@ Operational evidence never creates authority. Autonomous execution begins only a
 
 See `docs/architecture/JASON_AUTONOMOUS_QUEUE_OPERATING_MODEL.md`.
 
+Unattended execution uses a dedicated non-human JKD-001 workload identity and a separate durable playbook-autonomy promotion store. Source playbook metadata cannot self-promote authority. The current registered playbooks remain shadow-only; production queue reconciliation may classify/investigate without unattended provider mutation until exact playbook versions/capabilities receive durable owner promotion and the remaining runtime acceptance gates pass.
+
 ## End-to-end flow
 
 ```text
