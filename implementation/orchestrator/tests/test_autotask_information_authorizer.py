@@ -25,6 +25,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
+    SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
 from orchestrator.service import InvocationResult
@@ -357,6 +358,95 @@ def test_autonomy_shadow_policy_cannot_be_reused_by_another_service_principal() 
     ).invoke(
         request=request,
         resolution=_resolution(SERVICE_TICKET_SEARCH),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_autonomy_targeted_ticket_read_has_separate_narrow_release_basis() -> None:
+    request = _request(
+        SERVICE_TICKET_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-targeted-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": [{"id": 140629}]}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_READ),
+    )
+    release = invocation.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    )
+    assert release.allowed is True
+    assert "internal_autonomy_targeted_read_workload" in release.authorization_basis
+    assert "autonomous-targeted-read-v1" in release.authorization_basis
+    assert "autonomous-shadow-read-v1" not in release.authorization_basis
+
+
+def test_autonomy_targeted_policy_cannot_expand_to_contact_read() -> None:
+    request = _request(
+        SERVICE_CONTACT_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-targeted-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_autonomy_targeted_policy_cannot_be_reused_by_another_service_principal() -> None:
+    request = _request(
+        SERVICE_TICKET_READ,
+        requester_kind="service",
+        principal_id="some-other-service",
+        policy_ids=("autonomous-targeted-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_shadow_policy_still_cannot_release_ticket_read() -> None:
+    request = _request(
+        SERVICE_TICKET_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-shadow-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_READ),
     )
     assert (
         invocation.information_authorization
