@@ -39,7 +39,14 @@ MAX_STRING = 8000
 
 
 def _db(path: Path) -> sqlite3.Connection:
-    c = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=3.0)
+    # governed-execution.sqlite3 is mounted read-only inside the observability
+    # container and its normal SQLite read-only open still attempts lock/journal
+    # handling that fails on the bind mount. It uses DELETE journaling in
+    # production, so a fresh immutable connection is safe for this evidence-only
+    # exporter and cannot create lock/journal files. Other stores retain normal
+    # mode=ro semantics so WAL sidecars remain visible where required.
+    suffix = "?mode=ro&immutable=1" if path == LEDGER_DB else "?mode=ro"
+    c = sqlite3.connect(f"file:{path}{suffix}", uri=True, timeout=3.0)
     c.row_factory = sqlite3.Row
     return c
 

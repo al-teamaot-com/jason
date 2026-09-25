@@ -89,3 +89,17 @@ def test_target_prefers_friendly_context_when_present():
     assert out['ticket_number'] == 'T20260925.0051'
     assert out['client_name'] == 'XYZ Test Company'
     assert out['device_name'] == 'AOT-50282'
+
+
+def test_governed_execution_db_uses_immutable_readonly_uri(monkeypatch, tmp_path):
+    db_path = tmp_path / 'governed.sqlite3'
+    import sqlite3
+    c = sqlite3.connect(db_path)
+    c.execute('create table sample (id integer)')
+    c.commit(); c.close()
+    monkeypatch.setattr(mod, 'LEDGER_DB', db_path)
+    conn = mod._db(db_path)
+    try:
+        assert conn.execute('select count(*) from sample').fetchone()[0] == 0
+    finally:
+        conn.close()
