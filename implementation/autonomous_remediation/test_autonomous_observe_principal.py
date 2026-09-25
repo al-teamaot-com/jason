@@ -78,24 +78,25 @@ def _capability():
     )
 
 
-def _factory(tmp_path, *, permission=PermissionMode.OBSERVE):
+def _factory(tmp_path, *, permission=PermissionMode.OBSERVE, with_grant=True):
     identities = InMemoryIdentityRepository()
     grants = InMemoryAuthorityGrantRepository()
     approvals = InMemoryApprovalRepository()
     identities.put(
         IdentityRecord("jason-autonomy-worker", "service", "aot")
     )
-    grants.put(
-        AuthorityGrant(
-            grant_id="grant-shadow-read",
-            subject_id="jason-autonomy-worker",
-            capability=CAPABILITY,
-            organization_id="aot",
-            client_id=None,
-            permission=permission,
-            approval_required=False,
+    if with_grant:
+        grants.put(
+            AuthorityGrant(
+                grant_id="grant-shadow-read",
+                subject_id="jason-autonomy-worker",
+                capability=CAPABILITY,
+                organization_id="aot",
+                client_id=None,
+                permission=permission,
+                approval_required=False,
+            )
         )
-    )
     authority = IdentityAuthorityService(
         identities=identities,
         grants=grants,
@@ -135,8 +136,22 @@ def test_observe_request_uses_nonhuman_workload_identity(tmp_path):
     assert request.policy_ids == ("autonomous-shadow-read-v1",)
 
 
-def test_execute_only_grant_does_not_authorize_shadow_read(tmp_path):
-    factory = _factory(tmp_path, permission=PermissionMode.EXECUTE)
+def test_higher_execute_grant_cannot_change_shadow_request_mode(tmp_path):
+    request = _factory(
+        tmp_path,
+        permission=PermissionMode.EXECUTE,
+    ).build_observe(
+        capability_name=CAPABILITY,
+        arguments={"status": "New"},
+        client_id=None,
+    )
+    assert request.permission_mode == "observe"
+    assert request.requester_kind == "service"
+    assert request.approval_present is False
+
+
+def test_missing_grant_denies_shadow_read(tmp_path):
+    factory = _factory(tmp_path, with_grant=False)
     with pytest.raises(AutonomousAuthorityError):
         factory.build_observe(
             capability_name=CAPABILITY,
