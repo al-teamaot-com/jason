@@ -33,6 +33,7 @@ def test_autonomy_shadow_is_disabled_by_default(tmp_path):
     assert settings.autonomy_shadow_failure_retry_seconds == 300
     assert settings.autonomy_targeted_wake_retry_seconds == 300
     assert settings.autonomy_targeted_wake_db.name == "autonomy-targeted-wakes.sqlite3"
+    assert settings.autonomy_work_db.name == "autonomy-work.sqlite3"
     assert settings.autonomy_owned_autotask_resource_ids == ()
 
 
