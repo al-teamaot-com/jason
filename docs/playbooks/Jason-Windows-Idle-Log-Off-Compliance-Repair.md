@@ -197,23 +197,31 @@ Continue with independent verification where available and repair the deployment
 
 **Evidence source:** exact status component and/or approved read-only verification.
 
-Preferred component:
+Authoritative monitor:
 - Get Idle Log Off Status AOT Ver 08202024
 - UID: 2b5de042-a3ec-4721-ba66-e0ca193a3604
+- Datto type: monitor. It is evaluated by DRMM policy/monitoring and cannot be run as an on-demand script or quick job.
 
-Expected:
-- component executes successfully;
+Expected normal-cycle result:
+- monitor evaluates through DRMM;
 - output is syntactically valid;
 - Compliant=True.
 
-If valid Compliant=True:
--> state = verifying / stale-alert path.
+For immediate post-remediation verification, use approved read-only endpoint evidence instead of trying to execute the monitor on demand. Verify the expected mechanism directly:
+- scheduled task AOT_IdleLogOff exists;
+- task state is Ready;
+- principal is SYSTEM / Highest;
+- executable is C:\Temp\MyIdleLogOff\MyIdleLogOff.exe;
+- approved baseline arguments are 240 60 (four-hour idle threshold / 60-second warning).
 
-If valid Compliant=False:
--> determine whether control is missing vs unhealthy, then remediate.
+If the normal monitor cycle later reports Compliant=True:
+-> state = verifying / healthy.
 
-If status component itself cannot produce reliable output:
--> state = dependency_blocked or monitor_execution_failure; do not blindly install until enough evidence exists to make the repair safe.
+If the existing alert still carries only historical legacy-setter failure evidence while independent mechanism verification is healthy:
+-> classify the alert as stale evidence and resolve only that exact alert through governed alert resolution.
+
+If the normal monitor cycle produces a fresh Compliant=False after verified repair:
+-> state = monitor_execution_failure or remediation_failed and investigate the monitor/policy path. Do not blindly rerun the setter.
 
 ### Step 4: Check remediation component readiness
 
@@ -224,11 +232,11 @@ If status component itself cannot produce reliable output:
 Confirm:
 - exact component name/UID;
 - current component version;
-- required variables;
-- approved standard values are available;
-- MyFileDestination is a valid approved local path;
-- no stale metadata/fingerprint mismatch;
-- endpoint remains online.
+- endpoint remains online;
+- the approved production baseline is the 02042026-1 setter invoked with its built-in defaults and no legacy variable overrides;
+- if any variable override is proposed, every value comes from an authoritative AOT/client source and is validated before dispatch;
+- never carry forward the legacy policy's invalid MyFileDestination payload;
+- no stale metadata/fingerprint mismatch.
 
 Preferred repair component:
 - Set Idle Log Off AOT Ver 02042026-1
@@ -249,10 +257,10 @@ All gates must pass before repair/install:
 5. No endpoint-specific exception exists.
 6. Current state is validly noncompliant or sufficiently proven missing/broken.
 7. Preferred setter component identity is exact.
-8. Required variables/configuration are known from approved AOT/client policy.
-9. MyFileDestination is a valid approved path; never pass a blank/invalid value.
+8. Use the production-validated built-in defaults unless an authoritative AOT/client requirement explicitly calls for overrides.
+9. Never pass the legacy MyFileDestination value/payload. If any override is required, validate it before dispatch.
 10. No conflicting maintenance or user-disruptive operation is in progress.
-11. Current governance permits the component execution.
+11. Current governance permits the component execution and exact per-run technician approval is present.
 
 If any gate fails, do not improvise.
 
@@ -268,22 +276,24 @@ UID: acc6a240-881d-4655-9470-87f60c8e35e8
 
 **Preconditions:** all Section 8 gates pass.
 
-**Approval classification:** modifying, non-rebooting configuration action.
+**Approval classification:** modifying configuration action with future user-session impact. It does not immediately force a logoff during installation, but it intentionally enforces idle-session logoff after the configured threshold.
 
-**Authority intent:** Once this playbook and its controlled acceptance are approved for autonomy, Jason may run this exact bounded setter on an in-scope endpoint that has a matching alert and passes all gates. Until then, normal component approval policy applies.
+**Authority intent:** Keep this setter per-run approved. Production Component Control review on 2026-09-25 rejected standing-safe promotion with DATTO_COMPONENT_DISRUPTIVE_OR_DESTRUCTIVE_REVIEW_REQUIRED. Do not weaken that guard. Jason may execute this exact setter only when the playbook gates pass and an authorized technician explicitly approves that specific remediation.
 
 **Required variable handling:**
-- use documented AOT/client values;
-- standard idle time currently described by the component as four hours;
-- do not invent CheckForIdleEvery_X_Min, MyWarningTimeOut, or MyFileDestination;
-- never expose secrets;
-- validate MyFileDestination before dispatch.
+- production acceptance validated the 02042026-1 setter with its built-in defaults and no overrides;
+- resulting task arguments were 240 60 (four-hour idle threshold / 60-second warning);
+- do not invent CheckForIdleEvery_X_Min, MyIdleTimeInMin, MyWarningTimeOut, or MyFileDestination;
+- do not pass the legacy policy's invalid MyFileDestination payload;
+- if future client-specific overrides are required, source and validate them authoritatively before execution;
+- never expose secrets.
 
 ### Remediation B: Stale alert
 
-If independent verification returns valid Compliant=True:
-- do not run the setter;
+If independent verification proves the approved Idle Log Off mechanism is healthy and the existing alert contains only historical legacy-setter failure evidence:
+- do not run the setter again;
 - resolve only the exact stale DRMM alert;
+- require alert-resolution readback;
 - verify ticket self-heal/completion.
 
 ### Remediation C: Monitor/response plumbing failure
@@ -438,29 +448,31 @@ Escalation must state symptoms, evidence, attempted actions, job IDs, current st
 
 After repair/install:
 
-1. Wait for the setter job to reach terminal success.
+1. Wait for the setter job to reach terminal success or classify provider lifecycle evidence safely if Datto leaves a stale job state.
 2. Read stdout and stderr.
-3. Re-run the exact Idle Log Off status check.
-4. Require a valid Compliant=True result.
-5. Confirm no monitor/runtime/config error.
-6. Confirm the exact DRMM alert clears or resolve it only after healthy state is proven.
+3. Perform approved read-only endpoint verification of the installed Idle Log Off mechanism; do not attempt to run the monitor as an on-demand component.
+4. Require the verified task/mechanism to match the approved baseline: AOT_IdleLogOff, SYSTEM/Highest, expected executable, and arguments 240 60 unless an authoritative override applies.
+5. Observe the monitor's next normal DRMM evaluation when available. A fresh Compliant=False after successful mechanism verification is a monitor/policy investigation, not permission to blindly rerun the setter.
+6. If the existing alert contains only stale legacy-setter failure evidence and independent healthy-state verification is complete, resolve only that exact alert through governed alert resolution and require readback.
 7. Re-read the Autotask ticket and confirm expected completion or document a ticket-status governance blocker.
 
-Setter job success alone is not incident resolution.
+Setter job success alone is not incident resolution; endpoint-state verification and alert/ticket disposition are required.
 
 ---
 
 ## 18. Completion Criteria
 
-Complete only when:
+Complete the individual incident only when:
 1. exact endpoint/CI is proven;
 2. applicability is proven;
-3. diagnostics distinguish real noncompliance from monitor failure;
+3. diagnostics distinguish real noncompliance from monitor/plumbing failure;
 4. required repair/install succeeded, or no repair was needed;
-5. valid Compliant=True verification exists;
-6. exact alert is cleared;
+5. authoritative healthy-state evidence exists from the normal monitor cycle or approved independent mechanism verification;
+6. exact alert is cleared/resolved with readback;
 7. ticket documentation is complete;
-8. no unresolved playbook-specific blocker remains.
+8. any remaining policy/governance engineering item is explicitly tracked rather than hidden.
+
+The playbook's autonomy Section Goal is separate from incident completion and remains open while the setter requires per-run approval or the DRMM policy still points to the legacy setter.
 
 ---
 
@@ -494,8 +506,9 @@ Minimum required capabilities:
 - persisted playbook state
 - scheduled/recheck support
 
-Potential implementation improvement:
-- a dedicated standing-safe Idle Log Off diagnostic component that independently verifies the installed mechanism and configuration without depending solely on the monitoring script.
+Potential implementation improvements:
+- a dedicated standing-safe Idle Log Off diagnostic component that independently verifies the installed mechanism and configuration without depending solely on the monitoring script;
+- a governed DRMM policy-response read/update capability so Jason can verify and replace legacy response-component assignments without direct provider access.
 
 ---
 
@@ -517,17 +530,34 @@ Acceptance must prove:
 3. applicability to the endpoint;
 4. monitor-error classification instead of blindly trusting Compliant=False;
 5. current preferred setter selection;
-6. deterministic approved variable handling, including valid MyFileDestination;
+6. production-validated built-in-default handling with no legacy MyFileDestination override;
 7. exactly one bounded setter execution if the endpoint is truly noncompliant;
-8. terminal job/output readback;
-9. valid Compliant=True verification;
-10. exact alert resolution;
+8. terminal job/output readback or safe stale-job classification;
+9. approved independent mechanism verification, plus normal-cycle monitor observation when available;
+10. exact alert resolution with readback;
 11. Autotask documentation/completion behavior;
 12. retry/failure handling;
-13. no reboot or unrelated endpoint changes;
+13. no reboot, immediate forced logoff, or unrelated endpoint changes;
 14. persisted state and cleanup.
 
-A successful test should also verify the older setter is not accidentally selected when the current approved version is available.
+A successful test should also verify the older setter is not accidentally selected when the current approved version is available and that the monitor is never dispatched as a quick job.
+
+### 2026-09-25 controlled production acceptance result
+
+AVMAC-1096 / ticket T20260924.0043 established:
+- exact endpoint/CI association remained AVMAC-1096 / CI 1583;
+- the legacy 08202024 response component failed with Invalid MyFileDestination;
+- the preferred Set Idle Log Off AOT Ver 02042026-1 setter was dispatched exactly once under owner approval using built-in defaults;
+- setter stdout reported successful staging and scheduled-task creation; stderr was empty;
+- independent read-only verification proved AOT_IdleLogOff was Ready, SYSTEM, Highest, executing C:\Temp\MyIdleLogOff\MyIdleLogOff.exe with arguments 240 60 and exit code 0;
+- no immediate forced logoff or reboot occurred;
+- Get Idle Log Off Status AOT Ver 08202024 was confirmed to be a DRMM monitor that cannot be executed on demand; the attempted quick-job invocation returned HTTP 500 before job creation and is classified as an invalid execution path, not an endpoint failure;
+- exact stale alert 9d34f135-8393-4e7f-b2a8-064a1e98eb07 was resolved through governed alert resolution with one provider attempt and verified readback, correlation corr_mcp_action_8b29c0e4cc124ad0be8e0a5e98b0b6cf;
+- Autotask then completed T20260924.0043 automatically and the final internal resolution note was written;
+- Component Control standing-safe promotion of the setter was rejected by the disruptive/destructive review guard. This is the intended fail-closed result; the setter remains per-run approved;
+- the remaining engineering dependency is to change DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket) so its response no longer invokes the legacy 08202024 setter/payload.
+
+The individual AVMAC-1096 incident is resolved. The broader autonomous-remediation Section Goal remains open until the policy response is corrected and the governance design intentionally resolves whether any bounded autonomous authority is appropriate.
 
 ---
 
