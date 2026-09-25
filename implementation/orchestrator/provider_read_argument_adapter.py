@@ -42,6 +42,8 @@ from .provider_read_capability_catalog import (
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
     SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_CONTRACT_READ,
+    SERVICE_CONTRACT_SEARCH,
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
@@ -143,6 +145,19 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "company_id": "companyID",
         "name": "referenceTitle",
+    },
+    SERVICE_CONTRACT_SEARCH: {
+        "resource_id": "id",
+        "company_id": "companyID",
+        "contract_name": "contractName",
+        "contract_number": "contractNumber",
+        "status": "status",
+        "contract_type": "contractType",
+        "contract_category": "contractCategory",
+    },
+    SERVICE_CONTRACT_READ: {
+        "resource_id": "id",
+        "company_id": "companyID",
     },
     SERVICE_NOTIFICATION_HISTORY_SEARCH: {
         "resource_id": "id",
@@ -531,6 +546,17 @@ def adapt_autotask_arguments(
         if company_id is None or not str(company_id).strip():
             raise ValueError("company_id is required for notification-history search")
         return {"search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_CONTRACT_READ:
+        company_id = arguments.get("company_id")
+        if company_id is None or not str(company_id).strip():
+            raise ValueError("company_id is required for contract read")
+        _resource_id(arguments)
+        return {"entity": "Contracts", "search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_CONTRACT_SEARCH:
+        company_id = arguments.get("company_id")
+        if company_id is None or not str(company_id).strip():
+            raise ValueError("company_id is required for contract search")
+        return {"entity": "Contracts", "search": _autotask_search(capability_name, arguments)}
     if capability_name == SERVICE_PRODUCT_READ:
         return {"entity": "Products", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_SERVICE_READ:

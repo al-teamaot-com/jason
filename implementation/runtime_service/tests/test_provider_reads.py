@@ -23,6 +23,8 @@ from orchestrator.provider_read_capability_catalog import (
     DOCUMENTATION_ORGANIZATION_SEARCH,
     IT_GLUE_PROVIDER,
     SERVICE_TICKET_SEARCH,
+    SERVICE_CONTRACT_SEARCH,
+    SERVICE_CONTRACT_READ,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.provider_reads import (
@@ -128,6 +130,8 @@ def test_provider_read_runtime_registers_canonical_invokers_without_io() -> None
     registered = set(invokers.registered_capabilities())
     assert DOCUMENTATION_ORGANIZATION_SEARCH in registered
     assert SERVICE_TICKET_SEARCH in registered
+    assert SERVICE_CONTRACT_SEARCH in registered
+    assert SERVICE_CONTRACT_READ in registered
 
 
 def test_runtime_openbao_identity_is_split_by_provider_without_reading_credentials() -> None:
