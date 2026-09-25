@@ -651,6 +651,21 @@ When complete, document the implementation, tests, capability changes, and remai
 
 ---
 
+### TODO-OPS-009 — Governed DRMM policy response-component management
+
+- **Priority:** P1
+- **Status:** Planned — provider/governance implementation required
+- **Risk level:** High
+- **Idea:** Add a governed capability to read the exact response-component assignment and arguments for one Datto RMM monitoring policy, then update that exact assignment through Central Orchestrator with explicit approval and post-write readback.
+- **Why it matters:** Jason can currently identify and repair endpoint state but cannot safely correct a policy that keeps dispatching an obsolete or broken response component. The first production case is the Idle Log Off policy `AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket)`, which still references legacy `Set Idle Log Off AOT Ver 08202024` behavior that produced `Invalid MyFileDestination` even though `Set Idle Log Off AOT Ver 02042026-1` is the validated current setter.
+- **Required behavior:** resolve the exact policy identity; read current monitor/response assignment and arguments; fail closed on ambiguity; require explicit technician approval for changes; permit only exact component/argument replacement; perform one provider mutation; require post-write readback; preserve prior assignment for rollback/audit; never use private/undocumented provider endpoints; preserve `direct_provider_access=false`.
+- **Idle Log Off acceptance target:** prove the policy currently references the legacy response, replace it with the validated 02042026-1 setter using the approved built-in-default invocation with no legacy MyFileDestination override, then read the policy back and confirm future monitor-triggered remediation will select only the new setter.
+- **Governance boundary:** this capability changes policy configuration, not component standing authority. The Idle Log Off setter remains per-run approved because Component Control rejected standing-safe promotion as potentially disruptive.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement before declaring the Idle Log Off autonomous-remediation Section Goal complete.
+
+---
+
 ### TODO-OPS-006 — Complete Datto EDR/AV threat-branch activation
 
 - **Priority:** P1
