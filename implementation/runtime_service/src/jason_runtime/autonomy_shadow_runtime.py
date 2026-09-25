@@ -28,10 +28,12 @@ class GovernedAutonomyReadPort:
         request_factory: AutonomousRequestFactory,
         orchestrator: OrchestratorPort,
         client_id: str | None = None,
+        policy_id: str = "autonomous-shadow-read-v1",
     ) -> None:
         self.request_factory = request_factory
         self.orchestrator = orchestrator
         self.client_id = client_id
+        self.policy_id = policy_id
 
     def execute(
         self,
@@ -42,6 +44,7 @@ class GovernedAutonomyReadPort:
             capability_name=capability,
             arguments=arguments,
             client_id=self.client_id,
+            policy_id=self.policy_id,
         )
         result = self.orchestrator.execute(request)
         return {

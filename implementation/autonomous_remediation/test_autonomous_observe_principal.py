@@ -158,3 +158,15 @@ def test_missing_grant_denies_shadow_read(tmp_path):
             arguments={"status": "New"},
             client_id=None,
         )
+
+
+def test_observe_request_can_use_separate_targeted_policy(tmp_path):
+    request = _factory(tmp_path).build_observe(
+        capability_name=CAPABILITY,
+        arguments={"status": "New"},
+        client_id=None,
+        policy_id="autonomous-targeted-read-v1",
+    )
+    assert request.policy_ids == ("autonomous-targeted-read-v1",)
+    assert request.permission_mode == "observe"
+    assert request.requester_kind == "service"
