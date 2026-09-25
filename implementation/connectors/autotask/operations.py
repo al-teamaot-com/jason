@@ -35,6 +35,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "NotificationHistory",
         "TicketNotes",
         "TicketCharges",
+        "TicketAttachments",
     }
 )
 
@@ -81,6 +82,21 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/Tickets/{ticket_id}/Notes",
         path_arguments=("ticket_id",),
     ),
+    "autotask.ticket.attachments.list": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Tickets/{ticket_id}/Attachments",
+        path_arguments=("ticket_id",),
+    ),
+    "autotask.ticket.attachment.get": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Tickets/{ticket_id}/Attachments/{attachment_id}",
+        path_arguments=("ticket_id", "attachment_id"),
+    ),
+    "autotask.ticket.attachment.content.get": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/Tickets/{ticket_id}/Attachments/{attachment_id}",
+        path_arguments=("ticket_id", "attachment_id"),
+    ),
     "autotask.notification_history.search": OperationDefinition(
         method="GET",
         path_template="/V1.0/NotificationHistory/query",
@@ -109,6 +125,12 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_arguments=("ticketID",),
         json_argument="payload",
         require_positive_body_id=True,
+    ),
+    "autotask.ticket.attachment.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Tickets/{ticketID}/Attachments",
+        path_arguments=("ticketID",),
+        json_argument="payload",
     ),
     "autotask.ticket.charge.create": OperationDefinition(
         method="POST",

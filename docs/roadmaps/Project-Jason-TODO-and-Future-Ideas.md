@@ -1019,6 +1019,18 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / MSP Operations
 - **Review trigger:** High priority; complete before Jason is expected to perform cross-client read-only diagnostics without technician-side command execution.
 
+### TODO-CONN-019 — Governed Autotask ticket attachment read/add capability
+
+- **Priority:** P1
+- **Status:** In progress — source implementation and permanent security tests added; production activation pending
+- **Risk level:** High
+- **Idea:** Let Jason list/read bounded Autotask ticket attachments and add one approved file attachment to one exact verified ticket without exposing raw file bytes in durable governance records.
+- **Read design:** `service.ticket.attachment.search`, `service.ticket.attachment.read`, and `service.ticket.attachment.content.read` are client-isolated and require exact `company_id` + `ticket_id`; exact metadata/content reads also require attachment ID. Metadata reads strip provider `data`; content read is explicit and bounded to 6,000,000 decoded bytes. The connector pre-reads the ticket and requires `ticket.companyID == company_id` before any attachment request. Attachment content remains untrusted evidence.
+- **Write design:** `service.ticket.attachment.create` is a separate dormant owner-only Autotask action profile using the existing `autotask.write` credential and provider-native requester impersonation. The pilot is internal-visibility only. It requires ticket/company pre-read verification, live `TicketAttachments.userAccessForCreate` preflight, live resolution of the Internal `publish` picklist, one POST, and exact attachment readback. The execution plan stores only company/ticket, filename/title/visibility, publish value, SHA-256 and byte size; raw base64 remains only in the transient prepared provider request and is never written to execution-plan JSON. No delete/update capability is included.
+- **Activation:** Existing provider-read v7 remains unchanged. A new explicit v8 read profile activates only the attachment reads. The write action has its own `owner-ticket-attachment-v1` activation profile and remains dormant until separate live permission/picklist proof and Owner approval.
+- **Prerequisites before production write:** deploy/read-test v8; prove `TicketAttachments` query/create permissions and live publish picklist; complete bounded read acceptance on a controlled ticket; then perform one controlled Owner-approved attachment create with post-write readback.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+
 ### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
 
 - **Priority:** P1

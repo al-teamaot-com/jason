@@ -21,6 +21,7 @@ AUTOTASK_MUTATION_OPERATIONS = frozenset(
         "autotask.ticket.update",
         "autotask.ticket.note.create",
         "autotask.ticket.note.update",
+        "autotask.ticket.attachment.create",
     }
 )
 
@@ -29,6 +30,7 @@ _OPERATION_PREFLIGHT = {
     "autotask.ticket.update": ("Tickets", "userAccessForUpdate"),
     "autotask.ticket.note.create": ("TicketNotes", "userAccessForCreate"),
     "autotask.ticket.note.update": ("TicketNotes", "userAccessForUpdate"),
+    "autotask.ticket.attachment.create": ("TicketAttachments", "userAccessForCreate"),
 }
 
 _ACCESS_LABELS = {
