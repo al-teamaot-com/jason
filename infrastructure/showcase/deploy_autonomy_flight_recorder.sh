@@ -75,7 +75,7 @@ for line in Path(sys.argv[1]).read_text().splitlines():
         k,v=line.split('=',1); vals[k]=v
 user=vals.get('GRAFANA_ADMIN_USER','admin'); password=vals.get('GRAFANA_ADMIN_PASSWORD','')
 auth=base64.b64encode(f'{user}:{password}'.encode()).decode()
-for path,expected in [('/api/dashboards/uid/jason-autonomy-flight-recorder','jason-autonomy-flight-recorder'),('/api/datasources/uid/jason-autonomy-flight-recorder','jason-autonomy-flight-recorder')]:
+for path,expected in [('/api/dashboards/uid/jason-autonomy-flight-recorder','jason-autonomy-flight-recorder'),('/api/dashboards/uid/jason-autonomy-action-detail','jason-autonomy-action-detail'),('/api/datasources/uid/jason-autonomy-flight-recorder','jason-autonomy-flight-recorder')]:
     req=Request('http://127.0.0.1:3000'+path,headers={'Authorization':'Basic '+auth})
     with urlopen(req,timeout=5) as resp: payload=json.load(resp)
     uid=(payload.get('dashboard') or payload).get('uid')

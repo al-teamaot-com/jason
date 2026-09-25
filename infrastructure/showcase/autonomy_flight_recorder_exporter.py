@@ -32,6 +32,7 @@ LEDGER_DB = Path(os.environ.get("JASON_GOVERNED_EXECUTION_DB", "/var/lib/jason/o
 AUTHORITY_DB = Path(os.environ.get("JASON_AUTHORITY_DB", "/var/lib/jason/authority/authority.sqlite3"))
 SHADOW_DB = Path(os.environ.get("JASON_AUTONOMY_SHADOW_DB", "/var/lib/jason/openclaw/autonomy-shadow.sqlite3"))
 PRINCIPAL = os.environ.get("JASON_AUTONOMY_PRINCIPAL", "jason-autonomy-worker")
+ENRICHMENT_PATH = Path(os.environ.get("JASON_AUTONOMY_FLIGHT_RECORDER_ENRICHMENT", "/app/flight_recorder_enrichment.json"))
 
 SENSITIVE_KEY = re.compile(r"(?i)(secret|password|passwd|token|api[_-]?key|credential|authorization|cookie|private[_-]?key|client[_-]?secret)")
 SENSITIVE_TEXT = re.compile(r"(?i)(bearer\s+[A-Za-z0-9._~+/=-]{12,}|basic\s+[A-Za-z0-9+/=]{12,})")
@@ -217,6 +218,107 @@ def _timeline(*, row: dict[str, Any], terminal: dict[str, Any] | None, plan: dic
         })
     return entries
 
+
+
+def _load_enrichment() -> dict[str, dict[str, Any]]:
+    try:
+        payload = json.loads(ENRICHMENT_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    tickets = payload.get("tickets", payload)
+    if not isinstance(tickets, dict):
+        return {}
+    return {str(k): v for k, v in tickets.items() if isinstance(v, dict)}
+
+
+def _enrich_target(target: dict[str, Any], enrichment: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    out = dict(target)
+    ticket_id = out.get("ticket_id")
+    record = enrichment.get(str(ticket_id)) if ticket_id not in (None, "") else None
+    if not isinstance(record, dict):
+        return out
+    mapping = {
+        "ticket_number": "ticket_number",
+        "client_id": "company_id",
+        "client_name": "company_name",
+        "configuration_item_id": "configuration_item_id",
+        "device": "device_id",
+        "device_name": "device_name",
+        "ticket_title": "ticket_title",
+    }
+    for target_key, record_key in mapping.items():
+        if out.get(target_key) in (None, "") and record.get(record_key) not in (None, ""):
+            out[target_key] = str(record[record_key])
+    return out
+
+
+def _human_value(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                item_text = json.dumps(_sanitize(item), separators=(",", ":"), default=str)
+            else:
+                item_text = _human_value(item)
+            parts.append(f"{key}={item_text}")
+        return "; ".join(parts)
+    if isinstance(value, list):
+        return "; ".join(_human_value(v) for v in value)
+    return str(value)
+
+
+def _timeline_rows(record: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    timeline = ((record.get("details") or {}).get("action_timeline") or []) if isinstance(record, dict) else []
+    for entry in timeline:
+        if not isinstance(entry, dict):
+            continue
+        rows.append({
+            "time": entry.get("time") or "",
+            "event": entry.get("event") or "",
+            "what_jason_did": entry.get("message") or "",
+            "input": _human_value(entry.get("input")),
+            "returned": _human_value(entry.get("output")),
+            "verification": _human_value(entry.get("evidence")),
+        })
+    return rows
+
+
+def _display_playbook(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "—"
+    return " ".join(part.capitalize() for part in re.split(r"[_\-]+", text) if part)
+
+
+def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
+    details = record.get("details") if isinstance(record.get("details"), dict) else {}
+    target = details.get("target") if isinstance(details.get("target"), dict) else {}
+    return {
+        "ticket": record.get("ticket") or "",
+        "ticket_title": target.get("ticket_title") or "",
+        "client": record.get("client") or "",
+        "device": record.get("device") or "",
+        "playbook": record.get("playbook") or "",
+        "playbook_version": record.get("playbook_version") or "",
+        "action": record.get("action") or "",
+        "capability": record.get("capability") or "",
+        "provider": record.get("provider") or "",
+        "result": record.get("result") or "",
+        "failure_reason": record.get("failure_reason") or "",
+        "verified": bool(record.get("verified")),
+        "provider_attempts": record.get("provider_attempts") or 0,
+        "execution_id": record.get("execution_id") or "",
+        "correlation_id": record.get("correlation_id") or "",
+        "approval_id": details.get("approval_id") or "",
+    }
+
 def _approval_metadata(approval_ids: set[str]) -> dict[str, dict[str, Any]]:
     if not approval_ids or not AUTHORITY_DB.exists():
         return {}
@@ -288,6 +390,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
 
     approval_meta = _approval_metadata(approval_ids)
     event_groups = _event_groups()
+    enrichment = _load_enrichment()
     actions: list[dict[str, Any]] = []
     covered_execution_ids: set[str] = set()
 
@@ -296,7 +399,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
         covered_execution_ids.add(execution_id)
         plan = _json(row.get("execution_plan_json"), {}) or {}
         result = _json(row.get("result_json"), {}) or {}
-        target = _target_from_plan(plan)
+        target = _enrich_target(_target_from_plan(plan), enrichment)
         approval_id = str(row.get("approval_id") or "") or None
         meta = approval_meta.get(approval_id or "", {})
         events = event_groups.get(execution_id, [])
@@ -367,8 +470,8 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "time": _iso(row.get("created_at")),
             "ticket": target.get("ticket_number") or target.get("ticket_id") or "—",
             "client": target.get("client_name") or str(target.get("client_id") or "—"),
-            "device": target.get("device_name") or target.get("device") or "—",
-            "playbook": meta.get("playbook") or "—",
+            "device": target.get("device_name") or target.get("device") or "No device / CI",
+            "playbook": _display_playbook(meta.get("playbook")),
             "playbook_version": meta.get("playbook_version") or "—",
             "action": action_name,
             "capability": capability or "—",
@@ -380,6 +483,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "duration_ms": event_payload.get("duration_ms"),
             "execution_id": execution_id,
             "correlation_id": row.get("correlation_id") or "—",
+            "details_link": "View Timeline",
             "details": _sanitize(raw_details),
         })
 
@@ -517,6 +621,14 @@ class Handler(BaseHTTPRequestHandler):
                 if kind in {"action", "read"}:
                     records = [item for item in records if item.get("kind") == kind]
                 return self._send_json(records[:limit])
+            if parsed.path.startswith("/api/actions/") and parsed.path.endswith("/timeline"):
+                execution_id = parsed.path.split("/")[-2]
+                record = next((a for a in load_actions(500) if a["execution_id"] == execution_id), None)
+                return self._send_json(_timeline_rows(record) if record else {"error": "not_found"}, 200 if record else 404)
+            if parsed.path.startswith("/api/actions/") and parsed.path.endswith("/summary"):
+                execution_id = parsed.path.split("/")[-2]
+                record = next((a for a in load_actions(500) if a["execution_id"] == execution_id), None)
+                return self._send_json([_summary_row(record)] if record else {"error": "not_found"}, 200 if record else 404)
             if parsed.path.startswith("/api/actions/"):
                 execution_id = parsed.path.rsplit("/", 1)[-1]
                 record = next((a for a in load_actions(500) if a["execution_id"] == execution_id), None)
