@@ -19,6 +19,7 @@ from kernel.identity_authority import (
     ApprovalRecord,
     AuthorityOutcome,
     AuthorityRequest,
+    ExecutionContext,
     IdentityRecord,
     PermissionMode,
 )
@@ -854,28 +855,28 @@ def _contract_client_context_for_identity(
     bound_client_id: str | None,
     capability_name: str,
     arguments: Mapping[str, Any],
-) -> str | None:
+) -> tuple[str | None, ExecutionContext | None]:
     if capability_name not in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
-        return bound_client_id
+        return bound_client_id, None
     raw_company_id = arguments.get("company_id")
     if raw_company_id is None or isinstance(raw_company_id, bool):
-        return bound_client_id
+        return bound_client_id, None
     try:
         company_id = str(int(raw_company_id))
     except (TypeError, ValueError):
-        return bound_client_id
+        return bound_client_id, None
     if int(company_id) < 0:
-        return bound_client_id
+        return bound_client_id, None
     if bound_client_id is not None:
-        return bound_client_id
+        return bound_client_id, None
 
     # Organization-scoped client selection is owner-only. Reuse Jason's existing
     # authenticated owner allowlist rather than inventing a second owner concept.
     if principal not in approval_owner_identities():
-        return None
+        return None, None
 
-    # An authorized owner may select a client only through an exact governed
-    # Autotask company read. Caller-supplied client_id is never accepted.
+    # Prove the selected Autotask company exists through the ordinary governed
+    # organization-scoped read path before deriving any client-specific context.
     company = _governed_read_for_identity(
         principal=principal,
         organization=organization,
@@ -885,24 +886,64 @@ def _contract_client_context_for_identity(
         arguments={"resource_id": int(company_id)},
     )
     if company.get("status") != "succeeded":
-        return None
+        return None, None
 
     app = _runtime()
-    decision = app.identity_authority.evaluate(
+    # Prove the owner already has the normal organization-scoped OBSERVE grant for
+    # this exact contract capability. JKD-001 remains exact and unchanged.
+    base = app.identity_authority.evaluate(
         AuthorityRequest(
-            request_id=f"ctx_contract_{uuid4().hex}",
-            correlation_id=f"corr_contract_ctx_{uuid4().hex}",
+            request_id=f"ctx_contract_base_{uuid4().hex}",
+            correlation_id=f"corr_contract_base_{uuid4().hex}",
             principal_id=principal,
             organization_id=organization,
-            client_id=company_id,
+            client_id=None,
             capability=capability_name,
             requested_mode=PermissionMode.OBSERVE,
             authentication_assurance=assurance,
         )
     )
-    if decision.outcome is not AuthorityOutcome.ALLOWED:
-        return None
-    return company_id
+    if base.outcome is not AuthorityOutcome.ALLOWED or base.execution_context is None:
+        return None, None
+
+    now = datetime.now(timezone.utc)
+    expires_at = min(
+        base.execution_context.expires_at,
+        now + timedelta(minutes=1),
+    )
+    derived = ExecutionContext(
+        context_id=f"ctx_contract_client_{uuid4().hex}",
+        correlation_id=f"corr_contract_client_{uuid4().hex}",
+        principal_id=principal,
+        organization_id=organization,
+        client_id=company_id,
+        capability=capability_name,
+        requested_mode=PermissionMode.OBSERVE,
+        maximum_mode=PermissionMode.OBSERVE,
+        outcome=AuthorityOutcome.ALLOWED,
+        approval_required=False,
+        matched_grants=base.execution_context.matched_grants,
+        authentication_assurance=assurance,
+        issued_at=now,
+        expires_at=expires_at,
+    )
+    contexts = app.identity_authority.contexts
+    if contexts is None:
+        return None, None
+    contexts.put_context(derived)
+
+    audit = app.identity_authority.audit
+    if audit is not None:
+        audit.append_authority_audit(
+            event_type="authority.owner_client_context.derived",
+            correlation_id=derived.correlation_id,
+            principal_id=principal,
+            organization_id=organization,
+            capability=capability_name,
+            outcome=AuthorityOutcome.ALLOWED.value,
+            reason_codes=("OWNER_EXACT_COMPANY_SCOPE_DERIVED",),
+        )
+    return company_id, derived
 
 
 def _governed_read(
@@ -916,7 +957,7 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
-    client_id = _contract_client_context_for_identity(
+    client_id, derived_context = _contract_client_context_for_identity(
         principal=principal,
         organization=organization,
         assurance=assurance,
@@ -931,6 +972,7 @@ def _governed_read(
         client_id=client_id,
         capability_name=capability_name,
         arguments=arguments,
+        preauthorized_context=derived_context,
     )
 
 
@@ -1264,34 +1306,57 @@ def _governed_read_for_identity(
     client_id: str | None,
     capability_name: str,
     arguments: Mapping[str, Any],
+    preauthorized_context: ExecutionContext | None = None,
 ) -> dict[str, Any]:
     app = _runtime()
 
     execution_id = f"exec_mcp_{uuid4().hex}"
-    correlation_id = f"corr_mcp_{uuid4().hex}"
-
-    decision = app.identity_authority.evaluate(
-        AuthorityRequest(
-            request_id=execution_id,
-            correlation_id=correlation_id,
-            principal_id=principal,
-            organization_id=organization,
-            client_id=client_id,
-            capability=capability_name,
-            requested_mode=PermissionMode.OBSERVE,
-            authentication_assurance=assurance,
-        )
+    correlation_id = (
+        preauthorized_context.correlation_id
+        if preauthorized_context is not None
+        else f"corr_mcp_{uuid4().hex}"
     )
 
-    if decision.outcome is not AuthorityOutcome.ALLOWED:
-        return {
-            "status": "denied",
-            "capability": capability_name,
-            "reason_codes": list(decision.reason_codes),
-            "correlation_id": correlation_id,
-        }
-
-    context = decision.execution_context
+    if preauthorized_context is None:
+        decision = app.identity_authority.evaluate(
+            AuthorityRequest(
+                request_id=execution_id,
+                correlation_id=correlation_id,
+                principal_id=principal,
+                organization_id=organization,
+                client_id=client_id,
+                capability=capability_name,
+                requested_mode=PermissionMode.OBSERVE,
+                authentication_assurance=assurance,
+            )
+        )
+        if decision.outcome is not AuthorityOutcome.ALLOWED:
+            return {
+                "status": "denied",
+                "capability": capability_name,
+                "reason_codes": list(decision.reason_codes),
+                "correlation_id": correlation_id,
+            }
+        context = decision.execution_context
+    else:
+        context = preauthorized_context
+        exact = (
+            context.outcome is AuthorityOutcome.ALLOWED
+            and context.principal_id == principal
+            and context.organization_id == organization
+            and context.client_id == client_id
+            and context.capability == capability_name
+            and context.requested_mode is PermissionMode.OBSERVE
+            and context.maximum_mode is PermissionMode.OBSERVE
+            and context.authentication_assurance == assurance
+        )
+        if not exact:
+            return {
+                "status": "denied",
+                "capability": capability_name,
+                "reason_codes": ["DERIVED_AUTHORITY_CONTEXT_SCOPE_MISMATCH"],
+                "correlation_id": correlation_id,
+            }
 
     if context is None:
         return {
