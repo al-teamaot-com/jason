@@ -7,7 +7,7 @@ The Flight Recorder is a read-only Grafana view of Jason's autonomous execution 
 - what Jason ran;
 - which ticket/device/client the governed execution targeted when that context is present;
 - the playbook/version and capability;
-- provider result and attempt count;
+- provider result, concise failure reason when unsuccessful, and attempt count;
 - verification/readback result;
 - full sanitized execution-plan/result/audit details on demand.
 

@@ -378,6 +378,11 @@
               "type": "string"
             },
             {
+              "selector": "failure_reason",
+              "text": "Failure Reason",
+              "type": "string"
+            },
+            {
               "selector": "verified",
               "text": "Verified",
               "type": "boolean"
@@ -533,6 +538,18 @@
                 "value": {
                   "type": "color-text"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failure Reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
               }
             ]
           },

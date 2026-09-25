@@ -188,6 +188,17 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
         capability = row.get("capability_name") or plan.get("capability_name")
         provider_cap = plan.get("provider_capability") or event_payload.get("provider_capability")
         state = str(row.get("state") or event_payload.get("status") or "unknown")
+        failure_reason = None
+        if state != "succeeded":
+            failure_reason = (
+                row.get("failure_reason")
+                or result.get("error_code")
+                or event_payload.get("failure_reason")
+                or event_payload.get("reason_code")
+            )
+            if not failure_reason and isinstance(result.get("reason_codes"), list) and result.get("reason_codes"):
+                failure_reason = ", ".join(str(x) for x in result.get("reason_codes")[:3])
+            failure_reason = str(failure_reason or "Unspecified failure")
         verification = None
         if isinstance(result.get("output"), dict):
             output_data = result["output"].get("data")
@@ -222,7 +233,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "provider_capability": provider_cap,
             "provider_attempts": result.get("attempts") or row.get("attempt_count"),
             "state": state,
-            "failure_reason": row.get("failure_reason"),
+            "failure_reason": failure_reason,
             "target": target,
             "execution_plan": plan,
             "result": result,
@@ -246,6 +257,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "capability": capability or "—",
             "provider": provider or "—",
             "result": state,
+            "failure_reason": failure_reason or "",
             "verified": verified,
             "provider_attempts": int(result.get("attempts") or row.get("attempt_count") or 0),
             "duration_ms": event_payload.get("duration_ms"),
