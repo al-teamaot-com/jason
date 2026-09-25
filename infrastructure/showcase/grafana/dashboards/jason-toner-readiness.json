@@ -10,7 +10,7 @@
     {
       "id": 1,
       "type": "text",
-      "title": "AOT Toner Readiness \u2014 NONPRODUCTION",
+      "title": "AOT Toner Readiness",
       "gridPos": {
         "h": 5,
         "w": 24,
@@ -19,7 +19,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Review-only toner intelligence\n**Not production. No orders or tickets are created.** The primary question is: **Which toner should we ship today?**\n\n**Hard safety rule:** no fresh KFS telemetry = no Ship Today/Ship Soon recommendation. Missing device or toner reporting is forced to **Needs Review**. Customer/device seasonality remains disabled until sufficient history exists."
+        "content": "### Production read-only toner intelligence\nThe primary question is: **Which toner should we ship today?**\n\n**Hard safety rule:** no fresh KFS telemetry = no Ship Today/Ship Soon recommendation. Missing device or toner reporting is forced to **Needs Review**. This dashboard is observational only and creates no Autotask orders or tickets. Customer/device seasonality remains disabled until sufficient history exists."
       }
     },
     {
@@ -478,7 +478,8 @@
     "jason",
     "kfs",
     "toner",
-    "nonproduction"
+    "production",
+    "read-only"
   ],
   "templating": {
     "list": []
@@ -488,7 +489,7 @@
     "to": "now"
   },
   "timezone": "browser",
-  "title": "AOT Toner Readiness \u2014 NONPRODUCTION",
-  "uid": "jason-toner-readiness-nonprod",
-  "version": 2
+  "title": "AOT Toner Readiness",
+  "uid": "jason-toner-readiness",
+  "version": 3
 }

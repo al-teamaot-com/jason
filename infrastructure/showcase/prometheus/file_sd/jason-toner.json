@@ -1,0 +1,3 @@
+[
+  {"targets":["host.docker.internal:9473"],"labels":{"job":"jason-toner"}}
+]
