@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
@@ -17,6 +18,7 @@ from uuid import UUID, uuid4
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from kernel.identity_authority import (
     ApprovalRecord,
+    AuthorityGrant,
     AuthorityOutcome,
     AuthorityRequest,
     ExecutionContext,
@@ -3334,6 +3336,187 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
     "wipe",
     "format disk",
 )
+
+
+def _authority_admin_owner() -> tuple[str, str]:
+    principal, organization, _, _ = _authenticated_write_identity()
+    owners = approval_owner_identities()
+    if not owners or principal not in owners:
+        raise PermissionError("AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED")
+    return principal, organization
+
+
+def _exact_authority_capability(app: Any, capability: str) -> str:
+    requested = str(capability or "").strip()
+    if not requested or any(token in requested for token in ("*", "?", "[", "]")):
+        raise ValueError("AUTHORITY_GRANT_EXACT_CAPABILITY_REQUIRED")
+    matches = [
+        item for item in app.capabilities.list_all()
+        if item.capability_name == requested and item.lifecycle_status.value == "active"
+    ]
+    if len(matches) != 1:
+        raise ValueError("AUTHORITY_GRANT_ACTIVE_CAPABILITY_REQUIRED")
+    return requested
+
+
+def _authority_grant_subject(app: Any, subject_id: str, organization: str) -> str:
+    subject = str(subject_id or "").strip()
+    if not subject:
+        raise ValueError("AUTHORITY_GRANT_SUBJECT_REQUIRED")
+    identity = app.identity_authority.identities.get(subject)
+    if identity is None or identity.status != "active":
+        raise ValueError("AUTHORITY_GRANT_ACTIVE_SUBJECT_REQUIRED")
+    if identity.organization_id != organization:
+        raise PermissionError("AUTHORITY_GRANT_SUBJECT_ORGANIZATION_MISMATCH")
+    return subject
+
+
+def _authority_permission(value: str, approval_required: bool) -> PermissionMode:
+    try:
+        permission = PermissionMode(str(value or "").strip().casefold())
+    except ValueError as exc:
+        raise ValueError("AUTHORITY_GRANT_PERMISSION_INVALID") from exc
+    if permission is PermissionMode.ADMINISTER:
+        raise PermissionError("AUTHORITY_GRANT_ADMINISTER_NOT_ALLOWED")
+    if permission is PermissionMode.EXECUTE and approval_required is not True:
+        raise PermissionError("AUTHORITY_GRANT_EXECUTE_REQUIRES_APPROVAL")
+    return permission
+
+
+def _authority_grant_id(*, subject: str, capability: str, organization: str, client_id: str | None, permission: PermissionMode, approval_required: bool) -> str:
+    material = "|".join((
+        subject, capability, organization, client_id or "", permission.value,
+        "approval" if approval_required else "no-approval",
+    ))
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+    return f"grant_exact_{digest}"
+
+
+def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str) -> None:
+    audit = app.identity_authority.audit
+    if audit is None:
+        raise RuntimeError("AUTHORITY_GRANT_AUDIT_UNAVAILABLE")
+    audit.append_authority_audit(
+        event_type=event_type,
+        correlation_id=f"authority-admin:{uuid4().hex}",
+        principal_id=admin_principal,
+        organization_id=organization,
+        capability=capability,
+        outcome="succeeded",
+        reason_codes=("EXACT_GRANT_ADMIN", f"GRANT_ID:{grant_id}"),
+    )
+
+
+@mcp.tool()
+def list_exact_authority_grants(subject_id: str = "") -> dict[str, Any]:
+    """Owner-only: list exact Jason authority grants for one active AOT subject."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        subject = _authority_grant_subject(app, subject_id or admin, organization)
+        grants = app.identity_authority.grants.list_for_subject(subject)
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded",
+        "subject_id":subject,
+        "grants":[{
+            "grant_id":g.grant_id,"capability":g.capability,"organization_id":g.organization_id,
+            "client_id":g.client_id,"permission":g.permission.value,
+            "approval_required":g.approval_required,"status":g.status,
+            "effective_from":g.effective_from.isoformat() if g.effective_from else None,
+            "effective_until":g.effective_until.isoformat() if g.effective_until else None,
+        } for g in grants],
+    }
+
+
+@mcp.tool()
+def grant_exact_authority(
+    subject_id: str,
+    capability: str,
+    permission: str = "execute",
+    approval_required: bool = True,
+    client_id: str | None = None,
+) -> dict[str, Any]:
+    """Owner-only: add one exact authority grant; execute grants always require approval."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        subject = _authority_grant_subject(app, subject_id, organization)
+        exact_capability = _exact_authority_capability(app, capability)
+        normalized_client = None if client_id is None or not str(client_id).strip() else str(client_id).strip()
+        if normalized_client is not None and any(x in normalized_client for x in ("*","?","[","]")):
+            raise ValueError("AUTHORITY_GRANT_EXACT_CLIENT_REQUIRED")
+        mode = _authority_permission(permission, approval_required)
+        grant_id = _authority_grant_id(
+            subject=subject, capability=exact_capability, organization=organization,
+            client_id=normalized_client, permission=mode, approval_required=approval_required,
+        )
+        repo = app.identity_authority.grants
+        candidate = AuthorityGrant(
+            grant_id=grant_id, subject_id=subject, capability=exact_capability,
+            organization_id=organization, client_id=normalized_client, permission=mode,
+            approval_required=approval_required, status="active",
+        )
+        existing = repo.get(grant_id)
+        if existing is not None:
+            if existing == candidate:
+                return {
+                    "status":"succeeded","idempotent":True,"grant_id":grant_id,
+                    "subject_id":subject,"capability":exact_capability,"permission":mode.value,
+                    "approval_required":approval_required,"client_id":normalized_client,
+                }
+            raise ValueError("AUTHORITY_GRANT_ID_CONFLICT")
+        _authority_grant_audit(
+            app=app,event_type="authority.grant.create.requested",admin_principal=admin,
+            organization=organization,capability=exact_capability,grant_id=grant_id,
+        )
+        repo.put(candidate)
+        _authority_grant_audit(
+            app=app,event_type="authority.grant.created",admin_principal=admin,
+            organization=organization,capability=exact_capability,grant_id=grant_id,
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded","idempotent":False,"grant_id":grant_id,
+        "subject_id":subject,"capability":exact_capability,"permission":mode.value,
+        "approval_required":approval_required,"client_id":normalized_client,
+    }
+
+
+@mcp.tool()
+def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
+    """Owner-only: revoke one exact Jason authority grant by grant ID."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        requested = str(grant_id or "").strip()
+        if not requested:
+            raise ValueError("AUTHORITY_GRANT_ID_REQUIRED")
+        repo = app.identity_authority.grants
+        current = repo.get(requested)
+        if current is None:
+            raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
+        if current.organization_id != organization:
+            raise PermissionError("AUTHORITY_GRANT_ORGANIZATION_MISMATCH")
+        _authority_grant_audit(
+            app=app,event_type="authority.grant.revoke.requested",admin_principal=admin,
+            organization=organization,capability=current.capability,grant_id=requested,
+        )
+        revoked = repo.revoke(requested)
+        if revoked is None:
+            raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
+        _authority_grant_audit(
+            app=app,event_type="authority.grant.revoked",admin_principal=admin,
+            organization=organization,capability=revoked.capability,grant_id=requested,
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded","grant_id":revoked.grant_id,"subject_id":revoked.subject_id,
+        "capability":revoked.capability,"status_after":revoked.status,
+    }
 
 
 def _component_approval_owner() -> tuple[str, str]:
