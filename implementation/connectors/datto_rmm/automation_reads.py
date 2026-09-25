@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from connectors.core.contracts import ConnectorRequest
@@ -28,6 +29,7 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
     maximum_component_page_size = 250
     maximum_job_output_records = 20
     maximum_job_output_chars = 65536
+    active_job_stale_after_seconds = 6 * 60 * 60
 
     def execute(self, request: ConnectorRequest):
         if request.context.capability == "datto_rmm.component.search":
@@ -664,6 +666,29 @@ class DattoRmmAutomationReadConnector(DattoRmmConnector):
             job["name"] = name
         if date_created:
             job["date_created"] = date_created
+
+        if status.casefold() == "active" and date_created:
+            try:
+                created_ms = int(date_created)
+                age_seconds = max(
+                    0.0,
+                    datetime.now(timezone.utc).timestamp()
+                    - (created_ms / 1000.0),
+                )
+            except (TypeError, ValueError, OverflowError):
+                age_seconds = None
+
+            if age_seconds is not None:
+                job["age_seconds"] = int(age_seconds)
+                if age_seconds >= cls.active_job_stale_after_seconds:
+                    job["provider_status"] = status
+                    job["status"] = "stale_or_unknown"
+                    job["stale_reason"] = (
+                        "provider_active_exceeded_quick_job_staleness_budget"
+                    )
+                    job["retry_safety"] = (
+                        "do_not_redispatch_until_current_execution_absence_is_verified"
+                    )
 
         return {
             "job": job,
