@@ -95,6 +95,7 @@ class AutonomousRequestFactory:
         arguments: Mapping[str, Any],
         client_id: str | None,
         correlation_id: str | None = None,
+        policy_id: str = "autonomous-shadow-read-v1",
     ) -> OrchestrationRequest:
         """Build one JKD-001-authorized observe request for the workload identity."""
 
@@ -155,7 +156,7 @@ class AutonomousRequestFactory:
             requester_kind="service",
             principal_attributes={"workload": self.principal.principal_id},
             permission_mode="observe",
-            policy_ids=("autonomous-shadow-read-v1",),
+            policy_ids=(policy_id,),
             authority_context_id=context.context_id,
             allow_pilot_capability=True,
             allow_pilot_provider=True,
