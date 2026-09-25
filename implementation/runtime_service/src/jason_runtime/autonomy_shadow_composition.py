@@ -20,6 +20,7 @@ from autonomous_remediation.playbook_autonomy_approval import (
 )
 from autonomous_remediation.playbook_catalog import PlaybookCatalog
 from autonomous_remediation.shadow_assessment import ShadowQueueAssessor
+from autonomous_remediation.targeted_recheck import SQLiteTargetedWakeStore
 from kernel.capabilities import CapabilityRegistryService
 from kernel.identity_authority import IdentityAuthorityService
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -28,6 +29,10 @@ from .autonomy_shadow_runtime import (
     GovernedAutonomyReadPort,
     ShadowAutonomyMaintenance,
     SQLiteShadowAssessmentStore,
+)
+from .autonomy_targeted_wake_runtime import (
+    CompositeAutonomyMaintenance,
+    TargetedWakeMaintenance,
 )
 
 
@@ -42,10 +47,12 @@ def build_autonomy_shadow_maintenance(
     shadow_db: Path,
     promotion_db: Path,
     playbook_registry: Path,
+    targeted_wake_db: Path,
     owned_autotask_resource_ids: Iterable[int] = (),
     max_active_work_items: int = 2,
     interval_seconds: int = 1800,
     failure_retry_seconds: int = 300,
+    targeted_wake_retry_seconds: int = 300,
 ):
     """Build read-only shadow autonomy or return None with no side effects."""
 
@@ -82,9 +89,17 @@ def build_autonomy_shadow_maintenance(
         classifier=classifier,
     )
     store = SQLiteShadowAssessmentStore(shadow_db)
-    return ShadowAutonomyMaintenance(
+    shadow = ShadowAutonomyMaintenance(
         assessor=assessor,
         store=store,
         interval_seconds=interval_seconds,
         failure_retry_seconds=failure_retry_seconds,
     )
+    targeted_store = SQLiteTargetedWakeStore(targeted_wake_db)
+    targeted = TargetedWakeMaintenance(
+        store=targeted_store,
+        reads=reads,
+        queue_attention=shadow,
+        retry_seconds=targeted_wake_retry_seconds,
+    )
+    return CompositeAutonomyMaintenance(targeted, shadow)
