@@ -110,12 +110,46 @@ def _parse_env_assignment(value: str) -> tuple[str, str]:
     return key, assigned
 
 
-def _parse_readonly_bind(value: str) -> tuple[str, str]:
+def _docker_bind_source_exists(*, source: str, image: str) -> bool:
+    completed = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "python",
+            "--mount",
+            f"type=bind,src={source},dst=/jason-bind-probe,readonly",
+            image,
+            "-c",
+            "import os,sys; sys.exit(0 if os.path.exists('/jason-bind-probe') else 1)",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def _parse_readonly_bind(
+    value: str,
+    *,
+    probe_image: str | None = None,
+) -> tuple[str, str]:
     source, separator, destination = value.partition(":")
     if not separator or not os.path.isabs(source) or not os.path.isabs(destination):
         raise ValueError("add-readonly-bind must use absolute SOURCE:DESTINATION paths")
     if not os.path.exists(source):
-        raise ValueError(f"read-only bind source does not exist: {source}")
+        if probe_image is None or not _docker_bind_source_exists(
+            source=source,
+            image=probe_image,
+        ):
+            raise ValueError(f"read-only bind source does not exist: {source}")
     return source, destination
 
 
@@ -222,7 +256,10 @@ def _build_create_command(
 
     additional_destinations: set[str] = set()
     for raw_bind in additional_readonly_binds:
-        source, destination = _parse_readonly_bind(raw_bind)
+        source, destination = _parse_readonly_bind(
+            raw_bind,
+            probe_image=image,
+        )
         if destination in additional_destinations:
             raise ValueError(f"duplicate additional bind destination: {destination}")
         additional_destinations.add(destination)
