@@ -19,6 +19,10 @@ class QueueAttentionPort(Protocol):
     def request_reconcile(self, reason: str) -> None: ...
 
 
+class WorkResumePort(Protocol):
+    def resume(self, resource_id: str, *, reason: str) -> bool: ...
+
+
 DEFAULT_TARGETED_READ_CAPABILITIES = frozenset(
     {
         "service.ticket.read",
@@ -41,6 +45,7 @@ class TargetedWakeMaintenance:
         store: SQLiteTargetedWakeStore,
         reads: GovernedReadPort,
         queue_attention: QueueAttentionPort,
+        work_resume: WorkResumePort | None = None,
         allowed_capabilities=frozenset(DEFAULT_TARGETED_READ_CAPABILITIES),
         retry_seconds: int = 300,
         maximum_per_tick: int = 20,
@@ -53,6 +58,7 @@ class TargetedWakeMaintenance:
         self.store = store
         self.reads = reads
         self.queue_attention = queue_attention
+        self.work_resume = work_resume
         self.allowed_capabilities = frozenset(allowed_capabilities)
         self.retry_seconds = retry_seconds
         self.maximum_per_tick = maximum_per_tick
@@ -88,6 +94,16 @@ class TargetedWakeMaintenance:
                             or result.get("reason_codes")
                             or "targeted read failed"
                         )
+                    )
+
+                if wake.resume_work_item:
+                    if self.work_resume is None:
+                        raise RuntimeError(
+                            "targeted wake requested work resume but no resume port is configured"
+                        )
+                    self.work_resume.resume(
+                        wake.resource_id,
+                        reason=f"targeted_read_complete:{capability}",
                     )
 
                 self.store.complete(wake.wake_id)

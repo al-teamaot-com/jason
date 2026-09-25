@@ -146,6 +146,10 @@ class Reads:
             return {'status':'succeeded','evidence':{'data':{'fields':[
                 {'name':'queueID','picklistValues':[{'value':'100','label':'Jason','isActive':True},{'value':'200','label':'Help Desk I','isActive':True}]},
                 {'name':'priority','picklistValues':[{'value':'4','label':'Critical','sortOrder':1,'isActive':True}]},
+                {'name':'status','picklistValues':[
+                    {'value':'1','label':'New','isActive':True},
+                    {'value':'8','label':'In Progress','isActive':True},
+                ]},
             ]}}}
         q=arguments['filters']['queueID']; status=arguments['status']; items=[]
         if q==200 and status=='New':
