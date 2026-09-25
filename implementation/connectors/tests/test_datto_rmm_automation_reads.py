@@ -373,7 +373,7 @@ def test_old_active_quick_job_is_reported_stale_unknown(monkeypatch) -> None:
             arguments={"job_uid": "job-old-active"},
         )
     )
-    job = result.data["data"]["job"]
+    job = result.data["job"]
     assert job["status"] == "stale_or_unknown"
     assert job["provider_status"] == "active"
     assert job["age_seconds"] >= 6 * 60 * 60
@@ -403,6 +403,6 @@ def test_recent_active_quick_job_remains_active(monkeypatch) -> None:
             arguments={"job_uid": "job-recent-active"},
         )
     )
-    job = result.data["data"]["job"]
+    job = result.data["job"]
     assert job["status"] == "active"
     assert "provider_status" not in job
