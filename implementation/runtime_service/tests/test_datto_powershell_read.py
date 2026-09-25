@@ -182,8 +182,8 @@ def test_runtime_foundation_activates_only_as_read(monkeypatch):
     )
 
     monkeypatch.setenv(
-        module.DATTO_COMPONENT_EXECUTION_PROFILE_ENV,
-        module.DATTO_COMPONENT_EXECUTION_PROFILE,
+        module.DATTO_POWERSHELL_READ_PROFILE_ENV,
+        module.DATTO_POWERSHELL_READ_PROFILE,
     )
     monkeypatch.setattr(module, "_component_is_configured", lambda: True)
 
@@ -212,7 +212,7 @@ def test_runtime_foundation_activates_only_as_read(monkeypatch):
     assert module.ENDPOINT_POWERSHELL_READ in provider.capabilities
 
 
-def test_runtime_foundation_stays_dormant_without_existing_datto_profile(monkeypatch):
+def test_runtime_foundation_stays_dormant_without_readonly_profile(monkeypatch):
     from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService, InMemoryCapabilityRegistry
     from kernel.execution_providers import (
         ExecutionProviderRegistryService,
@@ -220,7 +220,7 @@ def test_runtime_foundation_stays_dormant_without_existing_datto_profile(monkeyp
         ProviderLifecycle,
     )
 
-    monkeypatch.delenv(module.DATTO_COMPONENT_EXECUTION_PROFILE_ENV, raising=False)
+    monkeypatch.delenv(module.DATTO_POWERSHELL_READ_PROFILE_ENV, raising=False)
     capabilities = CapabilityRegistryService(
         registry=InMemoryCapabilityRegistry()
     )
