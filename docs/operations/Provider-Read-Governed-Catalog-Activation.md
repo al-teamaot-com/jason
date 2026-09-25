@@ -1,7 +1,7 @@
 # Governed Provider Read Catalog Activation
 
-**Status:** Approved production direction  
-**Updated:** 2026-09-11  
+**Status:** Approved production direction
+**Updated:** 2026-09-25
 **Scope:** IT Glue and Autotask read providers
 
 ## Purpose
@@ -10,7 +10,7 @@ Jason must not require a developer to hard-code or separately activate every rea
 
 The production profile implementing this behavior is:
 
-`itglue-autotask-governed-catalog-v3`
+`itglue-autotask-entra-procurement-mail-contract-attachment-catalog-v8`
 
 ## Governing rule
 
@@ -30,12 +30,15 @@ Unknown activation profiles and catalog/contract drift fail closed.
 
 ## What this changes
 
-Legacy profiles remain available only for rollback compatibility:
+Earlier profiles remain historical/rollback boundaries. The current progression is:
 
-- `itglue-autotask-initial-read-v1`
-- `itglue-autotask-document-read-v2`
+- v3/v4: governed IT Glue/Autotask/Entra catalog foundations;
+- v5: procurement catalog;
+- v6: procurement-mail catalog;
+- v7: contract catalog (`service.contract.search` / `service.contract.read`);
+- **v8:** contract + ticket-attachment read catalog.
 
-Those profiles contain historical per-capability subsets. They are not the desired production architecture.
+Existing profiles are never silently broadened when a new resource family is added; the next explicit profile activates that family after CI and bounded production acceptance.
 
 The governed-catalog profile removes the second per-resource activation allowlist. All currently registered IT Glue and Autotask governed read capabilities become discoverable when the profile is selected, subject to normal identity, client/tenant scope, Central Orchestrator policy, provider boundaries, and information-release authorization.
 
@@ -54,7 +57,7 @@ This temporary mode means:
 - service-account fetch authority does not automatically become requester release authority;
 - release is allowed only for a registered Autotask read capability after Jason has a positive authenticated human binding, an allowed JKD-001 authority decision, a validated authority context, observe-only permission mode, and Central-Orchestrator-governed execution;
 - sensitive evidence remains subject to the existing information-sensitivity and derived-output controls;
-- provider writes remain disabled.
+- this requester-read compatibility mode grants no provider-write authority; any active write remains separately profile-gated, credential-separated, authority-checked, and approval-governed.
 
 The legacy provider-native mode remains available as:
 
@@ -74,8 +77,8 @@ Until that work is complete, `jason_managed` is a compatibility mode, not the in
 
 This profile and temporary requester mode do **not**:
 
-- enable provider writes;
-- enable Add/Edit/Delete operations;
+- grant provider-write authority merely because reads are active;
+- bypass the separately governed mutation profiles for Add/Edit/Delete operations;
 - bypass Microsoft/Jason identity binding;
 - bypass JKD-001 requester authority;
 - bypass client/tenant scope;
@@ -87,7 +90,7 @@ This profile and temporary requester mode do **not**:
 
 ## Production acceptance
 
-Before selecting `itglue-autotask-governed-catalog-v3` and the temporary Jason-managed Autotask requester mode in production:
+Before selecting a new provider-read profile in production:
 
 - focused provider-read activation tests must pass;
 - capability discovery tests must pass;
@@ -101,9 +104,9 @@ Before selecting `itglue-autotask-governed-catalog-v3` and the temporary Jason-m
 After deployment, verify:
 
 - all registered IT Glue/Autotask governed reads are discoverable;
-- no write capability is exposed;
+- the expected read capabilities for the selected profile are exposed and older profiles remain unchanged;
+- any write capability is exposed only through its separately approved mutation profile and exact authority grant;
 - `direct_provider_access=false`;
-- `write_tools_enabled=false`;
 - execution remains Central-Orchestrator governed;
 - an exact ticket request can resolve to the appropriate ticket search/read path without requiring a new hard-coded conversational capability;
 - Autotask reads no longer fail because of requester impersonation in `jason_managed` mode;
@@ -112,3 +115,13 @@ After deployment, verify:
 ## Design intent
 
 A technician should be able to ask Jason for any information that is represented by an already trusted provider's governed read catalog. Jason should resolve the resource and operation dynamically. The security boundary is whether the provider/resource may be read and whether the resulting information may be released to the authenticated requester—not whether someone previously anticipated the exact natural-language question and added a one-off capability activation entry.
+
+## 2026-09-25 production extension
+
+The v8 profile is production-accepted. It preserves the v7 contract reads and adds:
+
+- `service.ticket.attachment.search`;
+- `service.ticket.attachment.read`;
+- `service.ticket.attachment.content.read`.
+
+Attachment metadata reads do not release base64 file bodies; content reads are explicit and bounded. Company/ticket scope is verified before attachment access. Attachment create is intentionally **not** implied by v8; it is a separate mutation capability with exact approval-required authority.

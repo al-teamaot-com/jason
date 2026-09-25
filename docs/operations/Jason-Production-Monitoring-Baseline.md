@@ -4,7 +4,7 @@
 
 This baseline defines the operational signals that the Jason Command Center displays and the conditions that should raise an alert. Monitoring is observational only; it must never grant authority, bypass Jason governance, call providers with raw monitoring credentials, or expose secrets/provider records into Prometheus labels.
 
-The baseline was refreshed after the 2026-09-14 host recovery and MCP v4 provider-read cutover. The dedicated production-health dashboard/exporter was deployed and accepted on 2026-09-14.
+The baseline originated with the 2026-09-14 host recovery and has been refreshed through the 2026-09-25 v8 provider-read, security-observability, client-posture, and governed attachment/authority work. Historical v4 values below are no longer production expectations unless explicitly marked as historical.
 
 ## Monitoring boundary
 
@@ -56,32 +56,20 @@ The original production acceptance sample returned `jason_root_filesystem_writab
 
 | Signal | Expected production value |
 | --- | --- |
-| `jason-runtime` state | running |
-| `jason-runtime` Docker health | healthy |
-| `jason-mcp-pilot` state | running |
-| MCP image | `jason-mcp:autotask-entra-67da8d80ca97-repaired` until the next explicitly accepted release |
-| MCP source revision | `67da8d80ca9703505d651e9e0935f5bd1aa7c651` until superseded |
-| provider-read activation profile | `itglue-autotask-entra-governed-catalog-v4` |
-| Autotask requester mode | `jason_managed` while transitional authorization remains approved |
-| MCP network | `jason-core` |
-| MCP port binding | `10.87.246.157:8765 -> 8000/tcp` |
-| MCP restart policy | `no` |
-| required read-only credential mounts | present |
+| `jason-runtime` state | running / healthy |
+| `jason-mcp-pilot` state | running / healthy |
+| provider-read activation profile | `itglue-autotask-entra-procurement-mail-contract-attachment-catalog-v8` |
+| governed execution | Central Orchestrator |
+| direct provider access | `false` |
+| generic governed execution | enabled |
+| attachment reads | search/read/content-read active |
+| attachment create | active only through dedicated writer profile + exact approval-required authority |
+| required credential mounts | present; contents never exported |
 | watched MCP environment duplicate count | 0 desired |
 
-### Known current exception
+The monitoring contract must no longer assume that no write tools exist. Jason has multiple separately governed write/action capabilities. Monitoring should detect **unexpected** write-capability/profile/authority drift, not treat the existence of approved write actions as failure.
 
-The live MCP currently contains duplicate Docker environment entries for source revision/profile/requester-mode because the v4 container was built from the previous environment file plus explicit overrides. Runtime composition and live capability execution prove the effective profile is v4, but the duplicate count remains visible as a warning until a controlled container recreation removes the ambiguity.
-
-The deployed exporter correctly reports one extra value for each of:
-
-- `JASON_SOURCE_REVISION`;
-- `JASON_PROVIDER_READ_ACTIVATION_PROFILE`;
-- `JASON_AUTOTASK_REQUESTER_AUTH_MODE`.
-
-The accepted image/source/profile/requester-mode checks otherwise pass. Issue #180 tracks cleanup.
-
-The `JasonMCPDuplicateEnvironment` Prometheus rule uses a two-minute `for` period. An immediate post-deployment query can therefore legitimately show zero firing alerts even while the duplicate metric is nonzero; the rule should be evaluated after the hold period before asserting notification state.
+Current production code/profile facts are summarized in `docs/control/CURRENT.md`; volatile image IDs/source labels must still be verified from the live containers after each deployment.
 
 ## OpenBao / credential monitors
 
@@ -99,18 +87,20 @@ Because `/run` is ephemeral, post-reboot operational checks must verify credenti
 
 ## Authority / governance monitors
 
-The following are required operational invariants even when not all are scraped every 15 seconds:
+Required invariants:
 
-- exactly one active Microsoft-to-Jason binding for the production requester context used by the pilot;
-- provider read grants remain OBSERVE-only;
-- no provider write surface becomes discoverable;
+- authenticated Microsoft/Jason identity binding remains exact;
+- provider-read grants remain observe-only;
+- write/action authority is exact by capability and subject;
+- execute grants that are configured approval-required remain approval-gated;
+- Owner-only authority administration rejects wildcard capabilities, cross-org subjects, `ADMINISTER` grant creation, and execute-without-approval;
 - `direct_provider_access=false`;
-- `write_tools_enabled=false`;
 - governed execution remains Central Orchestrator;
-- expected v4 capability catalog remains active;
+- expected **v8** provider-read catalog remains active;
+- attachment create remains separate from read-profile authority;
 - information-release denial remains fail-closed for disallowed/unbounded disclosure.
 
-High-frequency scraping should not execute authority mutations or external provider reads. Authority/capability contract validation is better performed through a low-frequency secret-safe snapshot/canary job whose output contains only pass/fail/count metadata.
+High-frequency monitoring must not mutate authority or call providers. Secret-safe aggregate authority/security telemetry is preferred.
 
 ## Provider health monitoring
 
@@ -129,15 +119,13 @@ These canaries must execute through the same Jason identity/authority/Central-Or
 
 The dashboard shows or should show:
 
-- pre-v4 rollback MCP container exists;
+- a valid immediate rollback MCP/runtime container/image exists for the current accepted deployment;
 - current production MCP image/profile contract;
 - authority backup existence/integrity from the most recent accepted cutover;
 - OpenBao recovery record exists;
 - current boot kernel-corruption count.
 
-Current rollback reference: `jason-mcp-pilot-pre-v4-20260914T085704`.
-
-Current authority backup reference: `/var/lib/jason/authority/authority-pre-v4-20260914T085704.sqlite3`.
+Historical pre-v4 rollback/authority-backup references remain useful disaster-recovery evidence but are not the current release boundary. Verify the most recent deployment-created rollback containers and authority backup before consequential change.
 
 Monitoring must never remove rollback/recovery assets automatically.
 
@@ -147,9 +135,9 @@ Not every quality problem is suitable for a Prometheus alert, but the Command Ce
 
 1. **Provider foreign-key leakage:** unresolved IDs presented where a human/business value should have been resolved. First observed with Autotask assigned resource. Issue #178.
 2. **Microsoft tenant-level capability coverage:** Entra user reads are live; tenant/domain/license/Conditional Access/Exchange resource families remain missing. Issue #179.
-3. **Duplicate MCP environment entries:** current production warning until controlled cleanup. Issue #180.
-4. **Temporary provider requester authorization:** Autotask and IT Glue Jason-managed requester authorization remains transitional debt.
-5. **Continuous provider canaries:** acceptance proof exists but continuous governed canaries are pending. Issue #181.
+3. **Temporary provider requester authorization:** any remaining Jason-managed requester compatibility mode remains transitional debt and should not be broadened.
+4. **Continuous provider canaries:** acceptance proof exists but continuous governed canaries remain a separate monitoring enhancement.
+5. **Posture evidence coverage:** client-specific Microsoft/VulScan/IT Glue/DRMM monitoring gaps should remain visible rather than inferred healthy.
 
 ## Alert severity guidance
 

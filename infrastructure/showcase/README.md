@@ -24,20 +24,19 @@ The script can safely recover the existing Grafana compose credential from the a
 
 ## Current production MCP monitoring contract
 
-The 2026-09-16 accepted governed-action production boundary is monitored against:
+The current production boundary is no longer the 2026-09-16 v4 pilot. The accepted 2026-09-25 contract is:
 
-- MCP image `jason-mcp:generic-governed-8f1e864947a2`;
-- deployed code source `8f1e864947a2e6e79bf47d3de14daacde7d73144`;
-- provider-read profile `itglue-autotask-entra-governed-catalog-v4`;
-- Autotask requester mode `jason_managed`;
-- network `jason-core`;
-- port binding `10.87.246.157:8765 -> 8000/tcp`;
-- restart policy `no`;
-- exact Datto governed-execution profile `owner-diagnostic-v1`;
-- exact controlled Datto allowlist/component/device/class scope used for the production proof;
-- required read-only OpenBao credential mounts, including bounded Autotask write and Datto execution identities.
+- provider-read profile `itglue-autotask-entra-procurement-mail-contract-attachment-catalog-v8`;
+- Central Orchestrator authoritative;
+- `direct_provider_access=false`;
+- generic governed execution enabled;
+- exact write/action profiles may be active when separately approved;
+- attachment reads active under v8;
+- `service.ticket.attachment.create` active only through the dedicated writer profile and exact approval-required authority;
+- required OpenBao credential mounts present;
+- runtime/MCP source/profile drift checked against the currently accepted deployment rather than a hard-coded historical v4 image.
 
-The source-revision contract accepts the exact runtime source environment value when current, and also accepts the commit-encoded current image tag. This prevents a preserved historical `JASON_SOURCE_REVISION` environment value from falsely overriding the stronger immutable deployed image identity.
+Use `docs/control/CURRENT.md` and live container labels/health as the current volatile source boundary. Historical 2026-09-16 Datto proof remains evidence, not the current monitoring contract.
 
 ## Exporters
 
@@ -61,6 +60,9 @@ The source-revision contract accepts the exact runtime source environment value 
 - `status_exporter.py` provides roadmap/legacy component-readiness and OpenClaw authority metrics.
 - `usage_exporter.py` provides read-only model usage/cost and governed-request metrics from durable telemetry.
 - `usage_attribution_exporter.py` provides authenticated-identity/capability attribution metrics.
+- `resolution_memory_exporter.py` provides aggregate Resolution Memory availability/case metrics without raw case content.
+- `security_control_exporter.py` provides aggregate secret-safe authority/execution-plan/fail-closed control metrics.
+- `client_posture_exporter.py` provides aggregate client-posture classification counts without client identity labels.
 
 ## Grafana dashboards
 
@@ -83,9 +85,17 @@ The proof panel records that `Get-DNS Settings AOT Ver 06042025-1` on `AOT-50282
 
 `jason-production-health.json` remains the broader host/runtime/MCP/OpenBao health dashboard. Its `MCP Contract` stat automatically includes the new Datto execution profile/scope checks because they are part of `jason_mcp_contract`.
 
+### Jason Security & Learning
+
+`jason-security-learning.json` shows Resolution Memory/security-control state, source lifecycle, durable autonomy state, and security dispositions. Evidence is explicitly not authority.
+
+### Jason Client Security Posture
+
+`jason-client-security-posture.json` shows aggregate posture-review counts (`confirmed_good`, `confirmed_gap`, `unknown`, `not_applicable`, `evidence_unavailable`) without exposing client identity/evidence payloads.
+
 ### Jason Command Center
 
-`jason-command-center.json` remains the broad host, roadmap, component, cost/usage, and attribution view.
+`jason-command-center.json` remains the broad host, roadmap, component, cost/usage, attribution, and operating-context view.
 
 ## Alerts
 

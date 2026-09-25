@@ -16,17 +16,16 @@ Missing evidence must never be interpreted as healthy. Historical memory may gui
 ## Initial AOT baseline families
 The deterministic evaluator defines controls for BitLocker, managed AV, managed EDR, supported OS, DRMM monitoring health, VulScan coverage, DNSFilter coverage, managed backup coverage, recent backup success, Microsoft MFA posture, Conditional Access baseline, and documentation completeness.
 
-This is an evidence model, not a claim that every provider surface is already available. For example, recent successful backup remains `evidence_unavailable` until the Endpoint Backup API is integrated; Microsoft MFA/Conditional Access remain unavailable where tenant consent does not authorize those reads.
+This is an evidence model, not a claim that every provider surface is available for every client. Endpoint Backup and DNSFilter governed reads are now integrated, but a control remains `unknown` / `evidence_unavailable` until exact client binding and complete current evidence support a classification. Microsoft MFA/Conditional Access remain unavailable for a client until that client's exact tenant binding and authorized evidence path are proven.
 
 ## Safety and authority
 The review is read-only. A `confirmed_gap` creates an improvement proposal; it does not authorize remediation. Existing ticket/company client boundaries remain authoritative. Provider reads must retain their own evidence timestamp and correlation/source reference. Cross-client evidence is prohibited.
 
-## Next production slice
-1. Bind a review to an exact Autotask company/client identity.
-2. Map existing governed DRMM/Autotask/IT Glue evidence into normalized control observations.
-3. Run the first review against a controlled AOT/XYZ test client.
-4. Verify unavailable sources remain visibly unavailable rather than guessed.
-5. Add a report surface and Grafana aggregate telemetry only after the evidence mapping is production-proven.
+## Current production baseline
+
+The production baseline is implemented. Exact client binding, deterministic classification, durable normalized reports, secret-safe Prometheus export, and the `Jason Client Security Posture` Grafana dashboard are active. Atomic Plumbing & Drain Cleaning is the first full mapped production acceptance.
+
+Remaining work is evidence-coverage improvement, not evaluator/report activation: exact Atomic Microsoft tenant mapping, client-scoped VulScan evidence, approved IT Glue organization evidence, DRMM site-scoped monitoring evidence, and an explicit AOT backup-recency threshold.
 
 ## First production binding proof — XYZ Test Company
 On 2026-09-19, Jason resolved `XYZ Test Company` to exact Autotask company ID `1158` through governed `service.company.search` (correlation `corr_mcp_f5d001cb7c4c480aac62d17a30f6fff9`). Autotask configuration enumeration for company 1158 succeeded (correlation `corr_mcp_6eac32f8f6fc497bae4c42403e6758b9`).
