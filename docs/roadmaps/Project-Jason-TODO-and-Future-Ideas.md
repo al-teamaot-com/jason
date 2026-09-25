@@ -688,17 +688,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before enabling any production outbound connector.
 
-### TODO-COMM-002 — Audience-aware deterministic templates
+### TODO-COMM-002 — AOT-approved deterministic client communication templates
 
-- **Priority:** P2
-- **Status:** Proposed
+- **Priority:** P1
+- **Status:** Planned — Owner decision recorded 2026-09-25; required before Jason begins autonomous client-facing ticket communication
 - **Risk level:** Moderate
-- **Idea:** Maintain approved templates by audience, purpose, urgency, and channel.
-- **Why it matters:** Reduces dependence on AI and improves consistency.
-- **Why not now:** Audience taxonomy and communication purposes should first be validated during pilot use.
-- **Prerequisites:** template registry, versioning, localization approach, exception process.
-- **Decision owner:** Communications Owner
-- **Review trigger:** After the audience engine is used in pilot workflows.
+- **Idea:** Maintain an AOT-owned, governed library of approved ticket-note and customer-communication templates rather than depending on Autotask Notification Templates or Quick Note/Ticket Note templates. The documented Autotask API does not expose those configured templates as readable template resources, while Jason can govern and version its own approved content.
+- **Required template metadata:** stable template ID/name; purpose; audience; allowed channels; Autotask publish/internal-vs-customer setting where applicable; required variables; approved wording; allowed playbooks; autonomy level (autonomous or approval-required); owner/approver; version; last-reviewed date.
+- **Governance rule:** When an approved template exists for a client-facing situation, Jason must use that approved template rather than improvise customer-visible wording. If the situation does not fit an approved template closely enough, Jason must require approval or hand the communication to a technician.
+- **Initial template set:** acknowledgement; actively working; waiting on customer; scheduled reboot/maintenance; issue resolved; monitoring after remediation; vendor escalation; unable to proceed / technician follow-up required.
+- **Why it matters:** Gives AOT deterministic control over client-facing language, audience, publication state, and playbook use; reduces AI improvisation; improves consistency; and creates an auditable approval/versioning path for customer communications.
+- **Prerequisites:** template registry and versioning; audience/communication policy engine; governed customer-visible TicketNotes capability and live Autotask publish/noteType resolution from TODO-COMM-005; variable validation; exception/approval process.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Before enabling Jason to autonomously publish any customer-visible ticket note or other client-facing communication.
 
 ### TODO-COMM-004 — Complete Teams approval and information-request workflow
 
