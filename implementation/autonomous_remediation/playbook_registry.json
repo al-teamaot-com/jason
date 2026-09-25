@@ -152,9 +152,9 @@
         "required_gates": [
           "trigger",
           "identity",
+          "volume_identity",
           "device_role",
-          "volume_baseline",
-          "recent_activity_check",
+          "expected_condition",
           "safe_cleanup_target",
           "evidence_fresh",
           "governance_precheck",
@@ -173,8 +173,7 @@
       "source": "docs/playbooks/Jason-Windows-POST-Error-Investigation.md",
       "trigger": {
         "title_contains": [
-          "Power-On-Self-Test (POST) errors",
-          "POST errors occurred"
+          "Power-On-Self-Test (POST) errors"
         ]
       },
       "autonomy": {
@@ -182,11 +181,12 @@
         "required_gates": [
           "trigger",
           "identity",
-          "device_role",
           "recurrence_check",
           "hardware_evidence",
+          "storage_evidence",
           "evidence_fresh",
-          "governance_precheck"
+          "governance_precheck",
+          "autonomy_approved"
         ],
         "allowed_capabilities": [],
         "policy_id": "playbook-autonomy:post_error_investigation"
