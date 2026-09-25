@@ -15,11 +15,13 @@ from connectors.core.contracts import (
     ConnectorRequest,
 )
 from jason_runtime.autotask_ticket_update import (
+    AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV,
     AUTOTASK_TICKET_UPDATE_PROFILE,
     AUTOTASK_TICKET_UPDATE_PROFILE_ENV,
     AUTOTASK_TICKET_UPDATE_PROVIDER,
     SAFE_TICKET_UPDATE_FIELDS,
     AutotaskTicketUpdateConnector,
+    configured_autotask_ticket_update_autonomy_resource_id,
     register_autotask_ticket_update_runtime_foundation,
 )
 from kernel.capabilities import (
@@ -512,3 +514,132 @@ def test_completion_plan_is_stable_single_write_and_readback_verified(monkeypatc
         "ticketId": 12345,
         "verifiedFields": ["status"],
     }
+
+
+def autonomy_request(payload):
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-autonomy-test",
+            principal_id="jason-autonomy-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="autotask.ticket.update",
+            mode="execute",
+        ),
+        arguments={"payload": payload},
+    )
+
+
+def test_autonomy_resource_id_configuration_is_optional_and_validated(monkeypatch):
+    monkeypatch.delenv(AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV, raising=False)
+    assert configured_autotask_ticket_update_autonomy_resource_id() is None
+
+    monkeypatch.setenv(AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV, "29682930")
+    assert configured_autotask_ticket_update_autonomy_resource_id() == 29682930
+
+    monkeypatch.setenv(AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV, "not-an-id")
+    with pytest.raises(RuntimeError, match="AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID"):
+        configured_autotask_ticket_update_autonomy_resource_id()
+
+
+def test_autonomy_ticket_update_uses_api_user_without_impersonation(monkeypatch):
+    from connectors.autotask.connector import AutotaskConnector
+    from connectors.core.connector_base import PreparedRequest
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {"username": "u", "integration_code": "i", "secret": "s"}
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(),
+        transport=SimpleNamespace(),
+        audit=SimpleNamespace(record=lambda *a, **k: None),
+        bindings=None,
+        autonomy_api_resource_id=29682930,
+    )
+    monkeypatch.setattr(
+        AutotaskConnector,
+        "prepare_request",
+        lambda self, req, credentials: PreparedRequest(
+            method="PATCH",
+            url="https://zone.example/atservicesrest/V1.0/Tickets",
+            headers={
+                "Authorization": "secret",
+                "ImpersonationResourceId": "SHOULD-BE-REMOVED",
+            },
+            params=None,
+            json=dict(req.arguments["payload"]),
+            audit_operation="/V1.0/Tickets",
+        ),
+    )
+    preflights = []
+    monkeypatch.setattr(
+        connector,
+        "_preflight_requester_access",
+        lambda **kwargs: preflights.append(kwargs),
+    )
+
+    _, headers = connector._provider_resolution_context(
+        autonomy_request({"id": 12345, "status": "In Progress"})
+    )
+
+    assert "ImpersonationResourceId" not in headers
+    assert len(preflights) == 1
+    assert preflights[0]["operation"] == "autotask.ticket.update"
+
+
+def test_autonomy_ticket_update_readback_uses_api_user_without_impersonation(monkeypatch):
+    from connectors.autotask.connector import AutotaskConnector
+    from connectors.core.connector_base import PreparedRequest
+
+    seen_headers = []
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {"username": "u", "integration_code": "i", "secret": "s"}
+
+    class Transport:
+        def request(
+            self,
+            *,
+            method,
+            url,
+            headers,
+            params=None,
+            json=None,
+            timeout_seconds=30.0,
+        ):
+            seen_headers.append(dict(headers))
+            return {"item": {"id": 12345, "status": 5}}
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(),
+        transport=Transport(),
+        audit=SimpleNamespace(record=lambda *a, **k: None),
+        bindings=None,
+        autonomy_api_resource_id=29682930,
+    )
+    monkeypatch.setattr(
+        AutotaskConnector,
+        "prepare_request",
+        lambda self, req, credentials: PreparedRequest(
+            method="GET",
+            url="https://zone.example/atservicesrest/V1.0/Tickets/12345",
+            headers={
+                "Authorization": "secret",
+                "ImpersonationResourceId": "SHOULD-BE-REMOVED",
+            },
+            params=None,
+            json=None,
+            audit_operation="/V1.0/Tickets/12345",
+        ),
+    )
+
+    observed = connector._readback(
+        request=autonomy_request({"id": 12345, "status": 5}),
+        ticket_id=12345,
+    )
+
+    assert observed == {"id": 12345, "status": 5}
+    assert len(seen_headers) == 1
+    assert "ImpersonationResourceId" not in seen_headers[0]
