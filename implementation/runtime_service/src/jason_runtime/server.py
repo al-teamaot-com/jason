@@ -21,6 +21,20 @@ class JasonRuntimeHttpServer(HTTPServer):
         self.application = application
         super().__init__(server_address, _handler_type(application))
 
+    def service_actions(self) -> None:
+        """Run bounded maintenance on the server's existing SQLite-owning thread."""
+
+        maintenance = self.application.maintenance
+        if maintenance is None:
+            return
+        try:
+            maintenance.tick()
+        except Exception:
+            # Maintenance may fail closed, but it must never terminate the
+            # conversation/runtime service. Detailed failure audit belongs to
+            # the maintenance implementation rather than this framing layer.
+            return
+
 
 def _handler_type(application: RuntimeHttpApplication) -> Type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
