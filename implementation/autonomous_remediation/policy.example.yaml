@@ -1,5 +1,24 @@
 version: 1
 
+autonomous_queue:
+  max_active_work_items: 2
+  attention_mode: event_first
+  staleness_watchdog_enabled: true
+  candidate_investigation_mode: read_only
+  claim_requires_matched_autonomous_playbook: true
+
+governance:
+  hierarchy:
+    - global
+    - site
+    - device
+    - user
+    - ticket
+  evidence_can_create_authority: false
+  exact_ticket_action_grant_binding_required: true
+  grants_may_override_block: false
+  revalidate_before_mutation: true
+
 default_outcome: block
 
 requirements:

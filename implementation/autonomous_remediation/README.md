@@ -6,6 +6,14 @@ Jason may progress from triage to remediation only through deterministic policy,
 
 > Jason shall earn autonomy rather than assume it. Every autonomous action must be supported by evidence, governed by policy, verified after execution, fully auditable, and continuously evaluated. Automation is promoted through demonstrated success and human approval, not confidence alone.
 
+## Autonomous queue ownership foundation
+
+Jason's queue worker uses an event-first attention scheduler, a durable provider-neutral work ledger, deterministic playbook eligibility gates, and hierarchical governance. The initial active-work concurrency limit is configurable and starts at `2`. Waiting, approval-pending, blocked, completed, and escalated work does not consume an active slot.
+
+Operational evidence never creates authority. Autonomous execution begins only after deterministic playbook eligibility reaches `MATCHED_AUTONOMY`; uncertain candidates remain investigation-only and hard conflicts fail closed. Temporary ticket/incident approvals are bound to the exact ticket, capability, target selectors, and normalized action fingerprint.
+
+See `docs/architecture/JASON_AUTONOMOUS_QUEUE_OPERATING_MODEL.md`.
+
 ## End-to-end flow
 
 ```text
