@@ -77,8 +77,8 @@ services:
       - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/role_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/secret_id:ro
-      - ${JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/role-id}:/run/jason-secrets/openbao/datto-rmm-execution/role_id:ro
-      - ${JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/secret-id}:/run/jason-secrets/openbao/datto-rmm-execution/secret_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/datto-rmm-execution-approle/role-id}:/run/jason-secrets/openbao/datto-rmm-execution/role_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/datto-rmm-execution-approle/secret-id}:/run/jason-secrets/openbao/datto-rmm-execution/secret_id:ro
       - ${JASON_SES_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_SES_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/role_id:ro
       - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
       - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
