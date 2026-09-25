@@ -453,6 +453,14 @@ def _set_datto_action_scope(monkeypatch):
             "Get-DNS Settings AOT Ver 06042025-1",
         ),
     )
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_uid",
+        lambda uid: (
+            str(uid),
+            "Get-DNS Settings AOT Ver 06042025-1",
+        ),
+    )
     monkeypatch.delenv(
         "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
         raising=False,
@@ -487,6 +495,15 @@ def _set_datto_multi_component_scope(monkeypatch):
         server,
         "_resolve_live_datto_component_name",
         lambda name: (live[str(name)], str(name)),
+    )
+    names_by_uid = {
+        uid: name
+        for name, uid in live.items()
+    }
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_uid",
+        lambda uid: (str(uid), names_by_uid[str(uid)]),
     )
     monkeypatch.setenv(
         "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME",
@@ -596,6 +613,63 @@ def test_datto_action_live_name_overrides_stale_component_uid(
     assert result["component_name"] == (
         "Get-DNS Settings AOT Ver 06042025-1"
     )
+
+
+def test_datto_action_uid_only_uses_live_catalog_identity(
+    monkeypatch,
+):
+    _set_datto_multi_component_scope(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_uid",
+        lambda uid: (
+            str(uid),
+            "Newly Added Safe Diagnostic",
+        ),
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_ALLOW_UNCLASSIFIED_PER_RUN",
+        "true",
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {
+            "device_uid": "device-123",
+            "component_uid": "new-live-component",
+        },
+    )
+
+    assert result["component_uid"] == "new-live-component"
+    assert result["component_name"] == "Newly Added Safe Diagnostic"
+
+
+def test_datto_action_uid_only_unknown_live_component_fails_closed(
+    monkeypatch,
+):
+    _set_datto_multi_component_scope(monkeypatch)
+
+    def reject(_uid):
+        raise ValueError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_uid",
+        reject,
+    )
+
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {
+                "device_uid": "device-123",
+                "component_uid": "stale-or-unknown-component",
+            },
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_COMPONENT_IDENTITY_MISMATCH"
+    else:
+        raise AssertionError("unknown live component UID must fail closed")
 
 
 def test_datto_action_rejects_unknown_component_in_multi_scope(
