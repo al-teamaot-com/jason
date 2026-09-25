@@ -467,6 +467,19 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
             ],
             admin_key,
         )
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_cost_buckets = _openai_get(
+            "/organization/costs",
+            [
+                ("start_time", str(int(month_start.timestamp()))),
+                ("end_time", str(int(now.timestamp()))),
+                ("bucket_width", "1d"),
+                ("limit", "31"),
+                ("group_by", "project_id"),
+                ("group_by", "line_item"),
+            ],
+            admin_key,
+        )
 
         detail: dict[tuple[str, str, str], dict[str, int]] = {}
         totals = {"requests": 0, "input": 0, "cached_input": 0, "output": 0}
@@ -540,6 +553,48 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
                 except Exception:
                     continue
 
+        monthly_cost_usd = Decimal("0")
+        monthly_reported_cost_rows = 0
+        daily_costs: dict[int, Decimal] = {}
+        for bucket in monthly_cost_buckets:
+            bucket_start = int(bucket.get("start_time") or 0)
+            bucket_total = Decimal("0")
+            for result in bucket.get("results", []):
+                if not isinstance(result, dict):
+                    continue
+                amount = result.get("amount")
+                if not isinstance(amount, dict):
+                    continue
+                if str(amount.get("currency") or "usd").casefold() != "usd":
+                    continue
+                try:
+                    value = Decimal(str(amount.get("value") or "0"))
+                    monthly_cost_usd += value
+                    bucket_total += value
+                    monthly_reported_cost_rows += 1
+                except Exception:
+                    continue
+            if bucket_start:
+                daily_costs[bucket_start] = bucket_total
+
+        elapsed_days = max(1, now.day)
+        daily_average_mtd = monthly_cost_usd / Decimal(elapsed_days)
+        projected_month_end_cost = daily_average_mtd * Decimal(
+            (now.replace(month=now.month % 12 + 1, day=1) - timedelta(days=1)).day
+            if now.month < 12
+            else 31
+        )
+        recent_days = sorted(daily_costs)[-7:]
+        recent_7d_cost = sum((daily_costs[d] for d in recent_days), Decimal("0"))
+        recent_7d_average = (
+            recent_7d_cost / Decimal(len(recent_days)) if recent_days else Decimal("0")
+        )
+        trend_ratio = (
+            recent_7d_average / daily_average_mtd
+            if daily_average_mtd > 0
+            else Decimal("0")
+        )
+
         return {
             "source_available": 1,
             "cost_source_available": 1,
@@ -547,6 +602,12 @@ def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
             "last_activity": float(last_activity),
             "cost_usd": cost_usd,
             "reported_cost_available": 1 if reported_cost_rows else 0,
+            "monthly_cost_usd": monthly_cost_usd,
+            "monthly_reported_cost_available": 1 if monthly_reported_cost_rows else 0,
+            "daily_average_mtd_usd": daily_average_mtd,
+            "recent_7d_average_usd": recent_7d_average,
+            "projected_month_end_cost_usd": projected_month_end_cost,
+            "recent_vs_mtd_daily_ratio": trend_ratio,
             "estimated_cost_usd": estimated_cost_usd,
             "estimated_request_coverage_ratio": (
                 estimated_requests / totals["requests"] if totals["requests"] else 1.0
@@ -584,6 +645,11 @@ def _openai_org_snapshot(now: datetime) -> dict[str, object]:
             "source_available": 0, "cost_source_available": 0,
             "fetched_at": 0.0, "last_activity": 0.0,
             "cost_usd": Decimal("0"), "reported_cost_available": 0,
+            "monthly_cost_usd": Decimal("0"), "monthly_reported_cost_available": 0,
+            "daily_average_mtd_usd": Decimal("0"),
+            "recent_7d_average_usd": Decimal("0"),
+            "projected_month_end_cost_usd": Decimal("0"),
+            "recent_vs_mtd_daily_ratio": Decimal("0"),
             "estimated_cost_usd": Decimal("0"),
             "estimated_request_coverage_ratio": 0.0,
             "rate_basis": _OPENAI_RATE_BASIS, "rows": [],
@@ -614,6 +680,24 @@ def _render_openai_org_metrics(now: datetime) -> str:
         "# HELP jason_openai_org_cost_usd_24h Cost reported by OpenAI for the rolling 24h query window.",
         "# TYPE jason_openai_org_cost_usd_24h gauge",
         f"jason_openai_org_cost_usd_24h {Decimal(data['cost_usd']):.8f}",
+        "# HELP jason_openai_org_cost_usd_mtd OpenAI-reported organization cost from the first day of the current UTC month through now.",
+        "# TYPE jason_openai_org_cost_usd_mtd gauge",
+        f"jason_openai_org_cost_usd_mtd {Decimal(data['monthly_cost_usd']):.8f}",
+        "# HELP jason_openai_org_monthly_reported_cost_available Whether OpenAI has published at least one cost row for the current month.",
+        "# TYPE jason_openai_org_monthly_reported_cost_available gauge",
+        f"jason_openai_org_monthly_reported_cost_available {int(data['monthly_reported_cost_available'])}",
+        "# HELP jason_openai_org_daily_average_mtd_usd Average reported OpenAI organization cost per elapsed calendar day this month.",
+        "# TYPE jason_openai_org_daily_average_mtd_usd gauge",
+        f"jason_openai_org_daily_average_mtd_usd {Decimal(data['daily_average_mtd_usd']):.8f}",
+        "# HELP jason_openai_org_recent_7d_average_usd Average reported OpenAI organization cost across available daily buckets in the latest 7 days.",
+        "# TYPE jason_openai_org_recent_7d_average_usd gauge",
+        f"jason_openai_org_recent_7d_average_usd {Decimal(data['recent_7d_average_usd']):.8f}",
+        "# HELP jason_openai_org_projected_month_end_cost_usd Linear projection of month-end reported cost using current MTD daily average.",
+        "# TYPE jason_openai_org_projected_month_end_cost_usd gauge",
+        f"jason_openai_org_projected_month_end_cost_usd {Decimal(data['projected_month_end_cost_usd']):.8f}",
+        "# HELP jason_openai_org_recent_vs_mtd_daily_ratio Ratio of recent 7-day average daily cost to MTD average daily cost.",
+        "# TYPE jason_openai_org_recent_vs_mtd_daily_ratio gauge",
+        f"jason_openai_org_recent_vs_mtd_daily_ratio {Decimal(data['recent_vs_mtd_daily_ratio']):.8f}",
         "# HELP jason_openai_org_estimated_cost_usd_24h Standard-rate estimate from provider-reported token usage; not an invoice value.",
         "# TYPE jason_openai_org_estimated_cost_usd_24h gauge",
         f"jason_openai_org_estimated_cost_usd_24h {Decimal(data['estimated_cost_usd']):.8f}",

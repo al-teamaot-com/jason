@@ -609,7 +609,7 @@
           },
           "gridPos": {
             "h": 4,
-            "w": 8,
+            "w": 6,
             "x": 0,
             "y": 7
           },
@@ -650,8 +650,8 @@
           },
           "gridPos": {
             "h": 4,
-            "w": 8,
-            "x": 8,
+            "w": 6,
+            "x": 6,
             "y": 7
           },
           "options": {
@@ -669,6 +669,47 @@
             "justifyMode": "auto"
           },
           "description": "Provisional standard-rate estimate from provider-reported token usage. Not an invoice value; long-context and special-tier adjustments may differ."
+        },
+        {
+          "type": "stat",
+          "title": "OpenAI Actual Cost \u2014 MTD",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "jason-prometheus"
+          },
+          "targets": [
+            {
+              "expr": "jason_openai_org_cost_usd_mtd * (jason_openai_org_monthly_reported_cost_available == bool 1) + (-1) * (jason_openai_org_monthly_reported_cost_available == bool 0)",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 7
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "description": "Authoritative OpenAI organization cost reported from the first day of the current month through now."
         },
         {
           "type": "bargauge",
@@ -693,8 +734,8 @@
           },
           "gridPos": {
             "h": 4,
-            "w": 8,
-            "x": 16,
+            "w": 6,
+            "x": 18,
             "y": 7
           },
           "options": {
@@ -704,6 +745,170 @@
             "minVizWidth": 8,
             "minVizHeight": 16
           }
+        },
+        {
+          "type": "stat",
+          "title": "OpenAI Avg Daily Cost \u2014 MTD",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "jason-prometheus"
+          },
+          "targets": [
+            {
+              "expr": "jason_openai_org_daily_average_mtd_usd",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 11
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "description": "Average authoritative OpenAI organization cost per elapsed calendar day this month."
+        },
+        {
+          "type": "stat",
+          "title": "OpenAI Avg Daily Cost \u2014 Recent 7d",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "jason-prometheus"
+          },
+          "targets": [
+            {
+              "expr": "jason_openai_org_recent_7d_average_usd",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 11
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "description": "Average authoritative OpenAI organization daily cost across the latest available 7 daily buckets."
+        },
+        {
+          "type": "stat",
+          "title": "OpenAI Projected Month-End Cost",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "jason-prometheus"
+          },
+          "targets": [
+            {
+              "expr": "jason_openai_org_projected_month_end_cost_usd",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "currencyUSD"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 11
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "description": "Linear projection using the current month-to-date average daily OpenAI organization cost."
+        },
+        {
+          "type": "stat",
+          "title": "OpenAI Recent / MTD Spend Ratio",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "jason-prometheus"
+          },
+          "targets": [
+            {
+              "expr": "100 * jason_openai_org_recent_vs_mtd_daily_ratio",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 11
+          },
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto"
+          },
+          "description": "Recent 7-day average daily spend as a percentage of month-to-date average daily spend. Above 100% means spend is accelerating."
         }
       ]
     },
@@ -715,7 +920,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "panels": [
         {
@@ -766,7 +971,7 @@
             "h": 12,
             "w": 24,
             "x": 0,
-            "y": 9
+            "y": 13
           },
           "options": {
             "showHeader": true,
@@ -784,7 +989,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 13
       },
       "panels": [
         {
@@ -959,6 +1164,6 @@
   "timezone": "browser",
   "title": "Jason Usage & Attribution",
   "uid": "jason-usage-attribution",
-  "version": 5,
+  "version": 7,
   "weekStart": ""
 }
