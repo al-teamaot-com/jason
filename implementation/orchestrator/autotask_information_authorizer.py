@@ -48,6 +48,8 @@ _AUTONOMOUS_SHADOW_READS = frozenset(
 )
 _AUTONOMOUS_SHADOW_PRINCIPAL = "jason-autonomy-worker"
 _AUTONOMOUS_SHADOW_POLICY = "autonomous-shadow-read-v1"
+_AUTONOMOUS_TARGETED_READS = frozenset({SERVICE_TICKET_READ})
+_AUTONOMOUS_TARGETED_POLICY = "autonomous-targeted-read-v1"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -126,6 +128,25 @@ def _jason_managed_requester_authorization_proven(
         and _active_trusted_binding(request=request, bindings=bindings) is not None
     )
 
+
+
+def _autonomous_targeted_requester_authorization_proven(
+    *,
+    request: OrchestrationRequest,
+    capability_name: str,
+) -> bool:
+    """Authorize only the exact internal targeted-read workload surface."""
+
+    return bool(
+        capability_name in _AUTONOMOUS_TARGETED_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_TARGETED_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
 
 
 def _autonomous_shadow_requester_authorization_proven(
@@ -207,6 +228,17 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_SHADOW_POLICY,
+                )
+            elif _autonomous_targeted_requester_authorization_proven(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_targeted_read_workload",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_TARGETED_POLICY,
                 )
             else:
                 return invocation
