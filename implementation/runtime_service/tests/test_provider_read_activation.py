@@ -26,6 +26,8 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
     SERVICE_COMPANY_READ,
+    SERVICE_CONTRACT_READ,
+    SERVICE_CONTRACT_SEARCH,
     SERVICE_TICKET_SEARCH,
     register_provider_read_foundation,
 )
@@ -36,6 +38,8 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_PROFILE,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_CAPABILITIES,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -413,3 +417,32 @@ def test_profile_name_is_restart_persistable_environment_contract(
     assert set(state.capability_names) == EXPECTED_INITIAL_CAPABILITIES
     assert providers.get(IT_GLUE_PROVIDER).lifecycle_status is ProviderLifecycle.AVAILABLE
     assert providers.get(AUTOTASK_PROVIDER).lifecycle_status is ProviderLifecycle.AVAILABLE
+
+
+def test_contract_reads_remain_dormant_in_v5_v6_and_activate_only_in_v7() -> None:
+    contract_reads = {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+    for profile in (
+        PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
+        PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_PROFILE,
+    ):
+        capabilities, providers = _registries()
+        state = apply_provider_read_activation_profile(
+            capabilities=capabilities, providers=providers, profile=profile
+        )
+        assert contract_reads.isdisjoint(set(state.capability_names))
+        for name in contract_reads:
+            assert capabilities.get(
+                capability_name=name, version="1.0"
+            ).lifecycle_status is CapabilityLifecycle.PILOT
+
+    capabilities, providers = _registries()
+    v7 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
+    )
+    assert v7.enabled is True
+    assert contract_reads.issubset(set(v7.capability_names))
+    assert set(v7.capability_names) == set(
+        PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_CAPABILITIES
+    )

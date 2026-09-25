@@ -57,6 +57,8 @@ SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
 SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
+SERVICE_CONTRACT_SEARCH = "service.contract.search"
+SERVICE_CONTRACT_READ = "service.contract.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
@@ -118,6 +120,8 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_TICKET_NOTES_SEARCH,
         SERVICE_CONFIGURATION_SEARCH,
         SERVICE_CONFIGURATION_READ,
+        SERVICE_CONTRACT_SEARCH,
+        SERVICE_CONTRACT_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_ENTITY_FIELDS_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
@@ -173,6 +177,7 @@ def _read_capability(
     authoritative_change_sources: tuple[str, ...],
     collection_fact: str = "",
     canonical_facts: str = "",
+    client_isolation_required: bool = False,
 ) -> CapabilityDefinition:
     """Build a provider-neutral, read-only capability awaiting live acceptance.
 
@@ -237,7 +242,7 @@ def _read_capability(
             "Fail closed without shell, agent, mutation, or first-match fallback."
         ),
         tenant_isolation_required=True,
-        client_isolation_required=False,
+        client_isolation_required=client_isolation_required,
         stewardship=CapabilityStewardship(
             steward="technology-steward",
             business_justification=(
@@ -507,6 +512,40 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             selector_keys="resource_id",
             fact_hints="company,client,organization,account,status,phone,address",
             authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_CONTRACT_SEARCH,
+            display_name="Search Service Contracts",
+            business_purpose="Search authorized Autotask contracts for one exact client company.",
+            resource_types="service_contract,contract,billing_agreement",
+            operation="search",
+            selector_keys=(
+                "company_id,contract_name,contract_number,status,contract_type,"
+                "contract_category,resource_id,filters,page_size,after_resource_id"
+            ),
+            fact_hints=(
+                "contract,contracts,agreement,recurring service agreement,billing contract,"
+                "contract name,contract number,status,type,category,start date,end date,company"
+            ),
+            authoritative_change_sources=at,
+            collection_fact="contracts",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_CONTRACT_READ,
+            display_name="Read Service Contract",
+            business_purpose="Read one exact Autotask contract within one exact client company boundary.",
+            resource_types="service_contract,contract,billing_agreement",
+            operation="read",
+            selector_keys="company_id,resource_id",
+            fact_hints=(
+                "contract,agreement,billing contract,contract name,contract number,status,type,"
+                "category,start date,end date,company"
+            ),
+            authoritative_change_sources=at,
+            client_isolation_required=True,
         ),
         _read_capability(
             now=now,

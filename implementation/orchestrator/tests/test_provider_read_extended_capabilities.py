@@ -22,6 +22,8 @@ from orchestrator.provider_read_capability_catalog import (
     IDENTITY_USER_SEARCH,
     MICROSOFT_GRAPH_PROVIDER,
     SERVICE_TICKET_COUNT,
+    SERVICE_CONTRACT_SEARCH,
+    SERVICE_CONTRACT_READ,
     register_provider_read_foundation,
 )
 
@@ -124,3 +126,61 @@ def test_autotask_notification_history_requires_company_boundary() -> None:
     query=json.loads(out["search"]); fields={x["field"]:x["value"] for x in query["filter"]}
     assert fields == {"companyID":311,"ticketID":140654,"templateName":"Ticket Created"}
     assert query["MaxRecords"] == 25
+
+
+def test_contract_search_requires_exact_company_boundary_and_bounds_continuation():
+    with pytest.raises(ValueError, match="company_id is required"):
+        adapt_autotask_arguments(SERVICE_CONTRACT_SEARCH, {"status": 1})
+
+    adapted = adapt_autotask_arguments(
+        SERVICE_CONTRACT_SEARCH,
+        {
+            "company_id": 333,
+            "status": 1,
+            "contract_type": 7,
+            "page_size": 25,
+            "after_resource_id": 1000,
+        },
+    )
+    assert adapted["entity"] == "Contracts"
+    query = json.loads(adapted["search"])
+    assert query["MaxRecords"] == 25
+    fields = {(x["field"], x["op"]): x["value"] for x in query["filter"]}
+    assert fields[("companyID", "eq")] == 333
+    assert fields[("status", "eq")] == 1
+    assert fields[("contractType", "eq")] == 7
+    assert fields[("id", "gt")] == 1000
+
+
+def test_contract_read_requires_company_and_exact_id_in_same_query():
+    for args in ({"resource_id": 44}, {"company_id": 333}):
+        with pytest.raises(ValueError):
+            adapt_autotask_arguments(SERVICE_CONTRACT_READ, args)
+
+    adapted = adapt_autotask_arguments(
+        SERVICE_CONTRACT_READ,
+        {"company_id": 333, "resource_id": 44},
+    )
+    assert adapted["entity"] == "Contracts"
+    query = json.loads(adapted["search"])
+    fields = {x["field"]: x["value"] for x in query["filter"]}
+    assert fields == {"companyID": 333, "id": 44}
+
+
+def test_contract_reads_reject_raw_provider_search_expressions():
+    with pytest.raises(ValueError, match="provider-specific"):
+        adapt_autotask_arguments(
+            SERVICE_CONTRACT_SEARCH,
+            {"company_id": 333, "search": '{"filter":[]}'},
+        )
+
+
+def test_autotask_manifest_exposes_company_bound_contract_reads():
+    operations = {
+        operation.capability_name: operation
+        for resource in build_autotask_manifest().resources
+        for operation in resource.operations
+    }
+    assert operations[SERVICE_CONTRACT_SEARCH].read_only is True
+    assert "company_id" in operations[SERVICE_CONTRACT_SEARCH].selector_names
+    assert operations[SERVICE_CONTRACT_READ].selector_names == ("company_id", "resource_id")
