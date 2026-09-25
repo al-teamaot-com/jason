@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:9475"],
+    "labels": {"job": "jason-autonomy-flight-recorder"}
+  }
+]

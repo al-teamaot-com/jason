@@ -1,0 +1,29 @@
+[Unit]
+Description=Jason Autonomous Action Flight Recorder Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason
+Environment=JASON_AUTONOMY_FLIGHT_RECORDER_HOST=0.0.0.0
+Environment=JASON_AUTONOMY_FLIGHT_RECORDER_PORT=9475
+Environment=JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/openclaw/orchestration-events.sqlite3
+Environment=JASON_GOVERNED_EXECUTION_DB=/var/lib/jason/openclaw/governed-execution.sqlite3
+Environment=JASON_AUTHORITY_DB=/var/lib/jason/authority/authority.sqlite3
+Environment=JASON_AUTONOMY_SHADOW_DB=/var/lib/jason/openclaw/autonomy-shadow.sqlite3
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/autonomy_flight_recorder_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadOnlyPaths=-/var/lib/jason/openclaw
+ReadOnlyPaths=-/var/lib/jason/authority
+
+[Install]
+WantedBy=multi-user.target

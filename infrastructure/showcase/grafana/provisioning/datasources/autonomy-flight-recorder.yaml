@@ -1,0 +1,11 @@
+apiVersion: 1
+
+datasources:
+  - name: Jason Autonomy Flight Recorder
+    uid: jason-autonomy-flight-recorder
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    url: http://host.docker.internal:9475
+    editable: false
+    jsonData:
+      global_queries: []

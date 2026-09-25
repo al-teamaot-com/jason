@@ -67,6 +67,8 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - observability
       - jason-core
