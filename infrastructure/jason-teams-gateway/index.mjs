@@ -16,6 +16,7 @@ import {
   replyForRuntimeResult,
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
+import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -226,20 +227,27 @@ async function createPersonalConversationAndSend({ aadObjectId, tenantId, text, 
     .isGroup(false)
     .build();
   let messageId = null;
+  let evidenceType = null;
+  let syntheticMessageId = false;
   const conversation = await agent.proactive.createConversation(
     adapter,
     options,
     async (ctx) => {
       const result = await ctx.sendActivity(buildProactiveActivity(text, card));
-      messageId = result?.id ?? result?.resourceResponse?.id ?? null;
+      const evidence = resolveProactiveSendResult({ result, isCard: Boolean(card) });
+      messageId = evidence?.messageId ?? null;
+      evidenceType = evidence?.evidenceType ?? null;
+      syntheticMessageId = Boolean(evidence?.synthetic);
     },
   );
   if (!messageId) {
-    throw new Error("Teams proactive bootstrap send returned no message id");
+    throw new Error("Teams proactive bootstrap send returned no delivery evidence");
   }
   storeCreatedConversation(conversation, aadObjectId, tenantId);
   return {
     messageId,
+    evidenceType,
+    syntheticMessageId,
     conversationId: conversation?.reference?.conversation?.id ?? null,
   };
 }
@@ -394,25 +402,34 @@ server.post("/internal/proactive/send", async (req, res) => {
   }
   try {
     let messageId;
+    let evidenceType = null;
+    let syntheticMessageId = false;
     let conversationId = record?.reference?.conversation?.id ?? null;
     let bootstrapCreated = false;
     if (record) {
       await adapter.continueConversation(record.identity, record.reference, async (ctx) => {
         const result = await ctx.sendActivity(buildProactiveActivity(text, card));
-        messageId = result?.id ?? result?.resourceResponse?.id ?? null;
+        const evidence = resolveProactiveSendResult({ result, isCard: Boolean(card) });
+        messageId = evidence?.messageId ?? null;
+        evidenceType = evidence?.evidenceType ?? null;
+        syntheticMessageId = Boolean(evidence?.synthetic);
       });
     } else {
       const created = await createPersonalConversationAndSend({ aadObjectId, tenantId, text, card });
       messageId = created.messageId;
+      evidenceType = created.evidenceType;
+      syntheticMessageId = created.syntheticMessageId;
       conversationId = created.conversationId;
       bootstrapCreated = true;
     }
-    if (!messageId) throw new Error("Teams proactive send returned no message id");
-    console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, conversationId, messageId, bootstrapCreated }));
+    if (!messageId) throw new Error("Teams proactive send returned no delivery evidence");
+    console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, conversationId, messageId, evidenceType, syntheticMessageId, bootstrapCreated }));
     res.json({
       status: "succeeded",
       channel: "microsoft_teams",
       message_id: messageId,
+      delivery_evidence_type: evidenceType,
+      message_id_synthetic: syntheticMessageId,
       conversation_id: conversationId,
       bootstrap_created: bootstrapCreated,
     });
