@@ -88,6 +88,79 @@ class AutonomousRequestFactory:
         self.execution_ledger = execution_ledger
         self.promotion_store = promotion_store
 
+    def build_observe(
+        self,
+        *,
+        capability_name: str,
+        arguments: Mapping[str, Any],
+        client_id: str | None,
+        correlation_id: str | None = None,
+    ) -> OrchestrationRequest:
+        """Build one JKD-001-authorized observe request for the workload identity."""
+
+        capability = self.capabilities.get_current(
+            capability_name=capability_name,
+            allow_pilot=True,
+        )
+        execution_id = f"exec_autonomy_read_{uuid4().hex}"
+        correlation = correlation_id or f"corr_autonomy_read_{uuid4().hex}"
+        decision = self.authority.evaluate(
+            AuthorityRequest(
+                request_id=execution_id,
+                correlation_id=correlation,
+                principal_id=self.principal.principal_id,
+                organization_id=self.principal.organization_id,
+                client_id=client_id,
+                capability=capability_name,
+                requested_mode=PermissionMode.OBSERVE,
+                authentication_assurance=self.principal.authentication_assurance,
+            )
+        )
+        if decision.outcome is not AuthorityOutcome.ALLOWED:
+            raise AutonomousAuthorityError(
+                "autonomous principal is not authorized to observe: "
+                + ",".join(decision.reason_codes)
+            )
+        context = decision.execution_context
+        if context is None:
+            raise AutonomousAuthorityError("authority context missing")
+        if capability.approval.required:
+            raise AutonomousAuthorityError(
+                "observe path refuses capabilities that require per-call approval"
+            )
+
+        return OrchestrationRequest(
+            execution_id=execution_id,
+            correlation_id=correlation,
+            principal_id=self.principal.principal_id,
+            organization_id=self.principal.organization_id,
+            client_id=client_id,
+            capability_name=capability_name,
+            capability_version=capability.version,
+            requested_mode="deterministic",
+            orchestration_mode=OrchestrationMode.EXECUTE,
+            authority_allowed=True,
+            approval_present=False,
+            risk=capability.risk_level.value,
+            data_handling=DataHandlingPolicy(
+                classification="internal",
+                hosted_processing_allowed=False,
+                retention_allowed=False,
+            ),
+            budget=ExecutionBudget(
+                maximum_estimated_cost=Decimal("1.00"),
+                maximum_attempts=1,
+            ),
+            arguments=dict(arguments),
+            requester_kind="service",
+            principal_attributes={"workload": self.principal.principal_id},
+            permission_mode="observe",
+            policy_ids=("autonomous-shadow-read-v1",),
+            authority_context_id=context.context_id,
+            allow_pilot_capability=True,
+            allow_pilot_provider=True,
+        )
+
     def build(
         self,
         *,
