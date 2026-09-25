@@ -25,6 +25,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_READ,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
+    SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -440,6 +441,80 @@ def test_shadow_policy_still_cannot_release_ticket_read() -> None:
         requester_kind="service",
         principal_id="jason-autonomy-worker",
         policy_ids=("autonomous-shadow-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "capability",
+    [
+        SERVICE_TICKET_READ,
+        SERVICE_COMPANY_READ,
+        SERVICE_TICKET_NOTES_SEARCH,
+    ],
+)
+def test_autonomy_acceptance_policy_allows_only_exact_acceptance_reads(capability) -> None:
+    request = _request(
+        capability,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-execution-acceptance-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(capability),
+    )
+    release = invocation.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    )
+    assert release.allowed is True
+    assert "internal_autonomy_acceptance_workload" in release.authorization_basis
+    assert "autonomous-execution-acceptance-read-v1" in release.authorization_basis
+
+
+def test_autonomy_acceptance_policy_cannot_expand_to_contact_read() -> None:
+    request = _request(
+        SERVICE_CONTACT_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-execution-acceptance-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
+def test_autonomy_acceptance_policy_cannot_be_reused_by_another_service_principal() -> None:
+    request = _request(
+        SERVICE_TICKET_READ,
+        requester_kind="service",
+        principal_id="some-other-service",
+        policy_ids=("autonomous-execution-acceptance-read-v1",),
     )
     invocation = AutotaskImpersonationInformationAuthorizer(
         delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),

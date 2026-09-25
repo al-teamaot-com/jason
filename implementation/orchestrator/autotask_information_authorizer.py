@@ -27,6 +27,7 @@ from .provider_read_capability_catalog import (
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_COUNT,
+    SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -50,6 +51,14 @@ _AUTONOMOUS_SHADOW_PRINCIPAL = "jason-autonomy-worker"
 _AUTONOMOUS_SHADOW_POLICY = "autonomous-shadow-read-v1"
 _AUTONOMOUS_TARGETED_READS = frozenset({SERVICE_TICKET_READ})
 _AUTONOMOUS_TARGETED_POLICY = "autonomous-targeted-read-v1"
+_AUTONOMOUS_ACCEPTANCE_READS = frozenset(
+    {
+        SERVICE_TICKET_READ,
+        SERVICE_COMPANY_READ,
+        SERVICE_TICKET_NOTES_SEARCH,
+    }
+)
+_AUTONOMOUS_ACCEPTANCE_POLICY = "autonomous-execution-acceptance-read-v1"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -149,6 +158,25 @@ def _autonomous_targeted_requester_authorization_proven(
     )
 
 
+def _autonomous_acceptance_requester_authorization_proven(
+    *,
+    request: OrchestrationRequest,
+    capability_name: str,
+) -> bool:
+    """Authorize only the exact internal first autonomous-write acceptance reads."""
+
+    return bool(
+        capability_name in _AUTONOMOUS_ACCEPTANCE_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_ACCEPTANCE_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 def _autonomous_shadow_requester_authorization_proven(
     *,
     request: OrchestrationRequest,
@@ -239,6 +267,17 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_TARGETED_POLICY,
+                )
+            elif _autonomous_acceptance_requester_authorization_proven(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_acceptance_workload",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_ACCEPTANCE_POLICY,
                 )
             else:
                 return invocation
