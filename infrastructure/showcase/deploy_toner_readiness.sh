@@ -26,7 +26,12 @@ for _ in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:9473/metrics >/tmp/jason-toner-live.prom
 docker exec -i jason-prometheus promtool check metrics </tmp/jason-toner-live.prom
-curl -fsS -X POST http://127.0.0.1:9090/-/reload >/dev/null
+(cd "$SHOWCASE" && docker compose up -d --no-deps --force-recreate prometheus)
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:9090/-/ready >/dev/null; then break; fi
+  sleep 1
+done
+curl -fsS http://127.0.0.1:9090/-/ready >/dev/null
 
 docker exec jason-grafana test -r /var/lib/grafana/dashboards/jason-toner-readiness.json
 python3 - <<'PY'
