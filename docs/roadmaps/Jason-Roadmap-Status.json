@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-20",
+  "updated": "2026-09-25",
   "milestones": [
     {
       "id": "FOUNDATION",
@@ -209,6 +209,18 @@
       "id": "MAILBOX-HELPER-001",
       "title": "Approved mailbox onboarding helper",
       "status": "planned",
+      "phase": "Operations"
+    },
+    {
+      "id": "AUTONOMY-EXEC-001",
+      "title": "Governed autonomous execution substrate production acceptance",
+      "status": "complete",
+      "phase": "Operations"
+    },
+    {
+      "id": "AUTONOMY-PLAYBOOK-001",
+      "title": "First operational playbook bounded autonomy testing",
+      "status": "active",
       "phase": "Operations"
     }
   ]
