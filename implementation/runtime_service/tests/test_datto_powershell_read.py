@@ -171,3 +171,73 @@ def test_output_is_bounded(monkeypatch):
     assert len(text) == c.maximum_output_chars
     assert bounded is True
     assert matches == 1
+
+
+def test_runtime_foundation_activates_only_as_read(monkeypatch):
+    from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService, InMemoryCapabilityRegistry
+    from kernel.execution_providers import (
+        ExecutionProviderRegistryService,
+        InMemoryExecutionProviderRegistry,
+        ProviderLifecycle,
+    )
+
+    monkeypatch.setenv(
+        module.DATTO_COMPONENT_EXECUTION_PROFILE_ENV,
+        module.DATTO_COMPONENT_EXECUTION_PROFILE,
+    )
+    monkeypatch.setattr(module, "_component_is_configured", lambda: True)
+
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    module.register_datto_powershell_read_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime.now(timezone.utc),
+    )
+
+    capability = capabilities.get_current(
+        capability_name=module.ENDPOINT_POWERSHELL_READ
+    )
+    provider = providers.get(module.DATTO_RMM_POWERSHELL_READ_PROVIDER)
+
+    assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+    assert capability.metadata["read_only"] == "true"
+    assert capability.metadata["endpoint_state_mutation_allowed"] == "false"
+    assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert module.ENDPOINT_POWERSHELL_READ in provider.capabilities
+
+
+def test_runtime_foundation_stays_dormant_without_existing_datto_profile(monkeypatch):
+    from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService, InMemoryCapabilityRegistry
+    from kernel.execution_providers import (
+        ExecutionProviderRegistryService,
+        InMemoryExecutionProviderRegistry,
+        ProviderLifecycle,
+    )
+
+    monkeypatch.delenv(module.DATTO_COMPONENT_EXECUTION_PROFILE_ENV, raising=False)
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+
+    module.register_datto_powershell_read_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime.now(timezone.utc),
+    )
+
+    capability = capabilities.get_current(
+        capability_name=module.ENDPOINT_POWERSHELL_READ
+    )
+    provider = providers.get(module.DATTO_RMM_POWERSHELL_READ_PROVIDER)
+
+    assert capability.lifecycle_status is CapabilityLifecycle.BUILDING
+    assert provider.lifecycle_status is ProviderLifecycle.PLANNED
