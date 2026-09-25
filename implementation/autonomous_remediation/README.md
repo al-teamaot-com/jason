@@ -14,7 +14,7 @@ Operational evidence never creates authority. Autonomous execution begins only a
 
 See `docs/architecture/JASON_AUTONOMOUS_QUEUE_OPERATING_MODEL.md`.
 
-Unattended execution uses a dedicated non-human JKD-001 workload identity and a separate durable playbook-autonomy promotion store. Source playbook metadata cannot self-promote authority. The current registered playbooks remain shadow-only; production queue reconciliation may classify/investigate without unattended provider mutation until exact playbook versions/capabilities receive durable owner promotion and the remaining runtime acceptance gates pass.
+Unattended execution uses a dedicated non-human JKD-001 workload identity and a separate durable playbook-autonomy promotion store. Source playbook metadata cannot self-promote authority. The autonomous execution substrate passed controlled production acceptance on 2026-09-25 with one exact Autotask internal-note write, one provider attempt, connector plus independent readback, and duplicate suppression. All temporary acceptance authority was revoked afterward. The current operational playbooks remain shadow-only until each exact playbook version/capability set receives its own durable owner promotion and acceptance.
 
 ## End-to-end flow
 
@@ -45,9 +45,9 @@ Agents never invoke Datto RMM, Autotask, communications, or other agents directl
 
 Confidence alone never determines autonomy. The policy decision also considers action risk, device role, client authorization, maintenance window, reversibility, blast radius, evidence quality, prior success, and required approvals.
 
-## Initial production boundary
+## Current production boundary
 
-The first implementation remains `recommend` or `approved_execute` only. It must not automatically close tickets or declare success without post-change verification and client confirmation when user-visible behavior is involved.
+The execution substrate now supports proven bounded autonomous execution, but operational playbooks are not automatically autonomous. Production queue reconciliation remains shadow-first, and each real playbook must be separately promoted for its exact version/capability set. Jason must not automatically close tickets or declare success without independent post-change verification and client confirmation when user-visible behavior is involved.
 
 ## Required execution stages
 
@@ -133,3 +133,32 @@ The common availability/deferred-work behavior is documented consistently in:
 - `08-Session-Records/CURRENT.md`
 
 The evaluator is executable logic; the peer probe and scheduler remain separate governed capabilities/dependencies.
+
+
+## 2026-09-25 autonomous execution substrate acceptance
+
+The first production autonomous provider write is complete and accepted.
+
+Controlled proof:
+
+- workload identity: `jason-autonomy-worker`;
+- client: XYZ Test Company / company `1158`;
+- ticket: `T20260925.0051` / ID `141233`;
+- capability: `service.ticket.note.create`;
+- provider: `autotask_internal_note`;
+- Autotask API Resource: `29682930` / Jason ReadWrite;
+- exactly one provider POST;
+- durable note ID `30509332`;
+- direct API-user attribution: creator `29682930`, no impersonator;
+- connector readback and independent governed note search both matched;
+- second run suppressed the duplicate with no second provider write;
+- temporary acceptance promotion and JKD-001 grants were revoked.
+
+Execution evidence:
+
+- execution `exec_autonomy_559d20ebdeaa40f2bb5ccafc4a1cce61`;
+- correlation `corr_autonomy_4b0af623d006492b87e2f3d4ca4ed133`;
+- approval `approval_mcp_aebd2009640046d782f932ff8d80debd`;
+- execution-plan fingerprint `42c98ab374d904f7f5cf46dea9e8c02bb873eeb56549aa435d5dc3630369ae7d`.
+
+This proves the governance/execution substrate. It does not grant generic write authority. Real operational playbooks remain subject to deterministic match gates, exact durable promotion, bounded capability scope, independent verification, and explicit suspension/revocation.
