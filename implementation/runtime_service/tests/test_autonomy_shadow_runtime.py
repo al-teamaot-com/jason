@@ -50,6 +50,7 @@ def test_governed_read_port_uses_workload_request_factory_and_orchestrator():
     assert result["provider"] == "autotask"
     assert result["evidence"]["items"] == [{"id": 1}]
     assert factory.calls[0]["capability_name"] == "service.ticket.search"
+    assert factory.calls[0]["policy_id"] == "autonomous-shadow-read-v1"
     assert len(orchestrator.requests) == 1
 
 
@@ -140,3 +141,17 @@ def test_shadow_failure_is_bounded_and_runtime_safe(tmp_path):
     assert latest["payload"]["error_type"] == "RuntimeError"
     assert len(latest["payload"]["error_message"]) <= 500
     store.close()
+
+
+def test_governed_read_port_can_bind_targeted_read_policy():
+    factory = Factory()
+    orchestrator = Orchestrator()
+    port = GovernedAutonomyReadPort(
+        request_factory=factory,
+        orchestrator=orchestrator,
+        policy_id="autonomous-targeted-read-v1",
+    )
+    result = port.execute("service.ticket.read", {"ticket_id": 140629})
+    assert result["status"] == "succeeded"
+    assert factory.calls[0]["policy_id"] == "autonomous-targeted-read-v1"
+    assert factory.calls[0]["capability_name"] == "service.ticket.read"
