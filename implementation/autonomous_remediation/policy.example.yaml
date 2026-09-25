@@ -6,6 +6,12 @@ autonomous_queue:
   staleness_watchdog_enabled: true
   candidate_investigation_mode: read_only
   claim_requires_matched_autonomous_playbook: true
+  autotask:
+    # Verified through active service.resource.read/search on 2026-09-25.
+    # 29682930 = Jason ReadWrite (jasonRW@teamaot.com).
+    # 29682926 = Jason ReadOnly and is intentionally not an ownership identity.
+    owned_resource_ids:
+      - 29682930
 
 governance:
   hierarchy:
