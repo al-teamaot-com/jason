@@ -6,6 +6,7 @@ SHOWCASE="$ROOT/infrastructure/showcase"
 SERVICE_SRC="$SHOWCASE/systemd/jason-toner-exporter.service"
 USER_SYSTEMD="$HOME/.config/systemd/user"
 STATE_DIR="$HOME/.local/state/jason/toner-intelligence"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 cd "$ROOT"
 python3 -m unittest infrastructure/showcase/tests/test_toner_intelligence.py
