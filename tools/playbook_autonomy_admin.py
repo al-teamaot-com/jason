@@ -64,10 +64,7 @@ def cmd_approve(args) -> int:
 def cmd_list(args) -> int:
     store = SQLitePlaybookAutonomyApprovalStore(args.database)
     try:
-        rows = store._connection.execute(
-            "SELECT payload FROM playbook_autonomy_approvals ORDER BY approval_id"
-        ).fetchall()
-        records = [store._decode(str(row["payload"])) for row in rows]
+        records = store.list_all()
         _emit(
             "pass",
             action="list",
