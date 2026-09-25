@@ -31,6 +31,8 @@ def test_autonomy_shadow_is_disabled_by_default(tmp_path):
     assert settings.autonomy_max_active_work_items == 2
     assert settings.autonomy_shadow_interval_seconds == 1800
     assert settings.autonomy_shadow_failure_retry_seconds == 300
+    assert settings.autonomy_targeted_wake_retry_seconds == 300
+    assert settings.autonomy_targeted_wake_db.name == "autonomy-targeted-wakes.sqlite3"
     assert settings.autonomy_owned_autotask_resource_ids == ()
 
 
@@ -49,6 +51,15 @@ def test_failure_retry_cannot_exceed_shadow_interval(tmp_path):
         _settings(tmp_path),
         autonomy_shadow_interval_seconds=300,
         autonomy_shadow_failure_retry_seconds=301,
+    )
+    with pytest.raises(ValueError):
+        settings.validate()
+
+
+def test_targeted_wake_retry_is_bounded(tmp_path):
+    settings = replace(
+        _settings(tmp_path),
+        autonomy_targeted_wake_retry_seconds=59,
     )
     with pytest.raises(ValueError):
         settings.validate()
