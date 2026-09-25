@@ -1205,6 +1205,100 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Continue immediately with client-bound evidence mapping.
 
+
+### TODO-NET-001 — Network baseline collector foundation
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Build a reusable Datto RMM component, `Network Baseline Collector AOT`, with `Start / Collect / Status / Stop` modes and persistent local state under a bounded AOT data path.
+- **Why it matters:** Gives Jason a safe longitudinal collection mechanism for endpoint network behavior instead of relying on one-time snapshots.
+- **Acceptance:** The collector can run for several hours on one test endpoint, preserve state across runs, avoid duplicate/missing collection state, and stop cleanly without changing firewall policy.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Start implementation first.
+
+### TODO-NET-002 — Connection and listener collection
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add TCP/UDP connection and listener collection with timestamp, local/remote address and port, protocol, PID, process path, and Windows service correlation where available.
+- **Why it matters:** Identifies which applications are actually using network access and which ports are genuinely required.
+- **Acceptance:** Collection reliably maps active connections and listeners to the owning executable/process/service without modifying endpoint network state.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-001.
+
+### TODO-NET-003 — WFP and firewall event collection
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add bounded collection of relevant Windows Filtering Platform / firewall events, including 5156/5157 where enabled, using Windows Event Log RecordId as a durable cursor.
+- **Why it matters:** Captures short-lived network activity that periodic connection snapshots may miss.
+- **Acceptance:** The collector ingests only new events, survives delayed runs/restarts without replaying the full log, and keeps event volume bounded.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After the basic collector/export path is working.
+
+### TODO-NET-004 — Local aggregation and retention
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Normalize and deduplicate collected telemetry locally into first-seen, last-seen, count, process, direction, local/remote ports, destination, and listener records with bounded rotation/retention.
+- **Why it matters:** Converts high-volume raw connection/event data into a manageable longitudinal baseline that Jason can analyze efficiently.
+- **Acceptance:** Repeated traffic is aggregated correctly, retention remains within configured size/time limits, and old data rotates automatically.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-002; implement before large-scale export.
+
+### TODO-NET-005 — Bounded baseline export to Jason
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add `Export` mode with cursor/page support so Jason can retrieve the complete normalized baseline through Datto job output while staying safely below StdOut/StdErr limits.
+- **Why it matters:** Avoids adding endpoint-to-Jason credentials or a separate file-transfer trust channel while preserving governed Datto transport.
+- **Acceptance:** Jason can retrieve a representative multi-day dataset in bounded pages with no truncation, missing records, or duplicates and can resume safely after an interrupted export.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-004.
+
+### TODO-NET-006 — Jason network-baseline orchestration
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Teach Jason to verify the exact endpoint and online state, start a baseline for a requested duration, monitor collector status, retrieve bounded exports, stop collection, and clean up the scheduled collection lifecycle.
+- **Why it matters:** Lets an operator request a multi-day baseline conversationally without manually managing Datto jobs.
+- **Governance:** Online-state verification is the first eligibility gate for device-dependent work. Collection is read-only. Any firewall/service/network change remains separately approval-gated.
+- **Acceptance:** A request such as “baseline BTA-50220 for 14 days” can be orchestrated end-to-end through governed capabilities, including safe stop/recovery behavior.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-005.
+
+### TODO-NET-007 — Autotask ticket integration for baseline status
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add optional ticket-aware status updates for network-baseline start, daily progress, completion, failure, and stop events while keeping raw telemetry out of normal ticket notes.
+- **Why it matters:** Preserves operational visibility and a durable work trail without turning Autotask into the telemetry database.
+- **Acceptance:** Only the intended ticket receives concise status updates; no unrelated ticket fields are changed; detailed data remains in the baseline evidence path.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-006.
+
+### TODO-NET-008 — Network baseline risk analysis and firewall rule proposal
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** High
+- **Idea:** Have Jason correlate the normalized baseline with endpoint/process context and available DNSFilter evidence, classify observed flows, and produce least-privilege firewall rule proposals.
+- **Why it matters:** Replaces “disable/open the firewall” vendor guidance with evidence-based application/process/port/destination rules.
+- **Analysis classes:** Expected/OS-normal, application-required, vendor-support, LAN-only, cloud/vendor destination, unknown, suspicious, or unnecessary.
+- **Governance:** This item proposes rules only. Enabling the firewall or creating/changing firewall rules is a separate approval-required remediation capability and must preserve rollback.
+- **Acceptance:** Jason can produce a reviewable rule proposal from a completed baseline, clearly distinguish observed evidence from inference, and make no firewall changes without approval.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** After TODO-NET-006 and enough baseline evidence exists.
+
+- **Recommended implementation order:** TODO-NET-001 → TODO-NET-002 → TODO-NET-004 → TODO-NET-005 → TODO-NET-006, then TODO-NET-003, TODO-NET-007, and TODO-NET-008.
+
 ---
 
 ## New-item template
