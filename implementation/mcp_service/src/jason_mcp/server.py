@@ -869,8 +869,13 @@ def _contract_client_context_for_identity(
     if bound_client_id is not None:
         return bound_client_id
 
-    # Organization-scoped principals may select a client only through an exact
-    # governed Autotask company read. Caller-supplied client_id is never accepted.
+    # Organization-scoped client selection is owner-only. Reuse Jason's existing
+    # authenticated owner allowlist rather than inventing a second owner concept.
+    if principal not in approval_owner_identities():
+        return None
+
+    # An authorized owner may select a client only through an exact governed
+    # Autotask company read. Caller-supplied client_id is never accepted.
     company = _governed_read_for_identity(
         principal=principal,
         organization=organization,
@@ -891,7 +896,7 @@ def _contract_client_context_for_identity(
             organization_id=organization,
             client_id=company_id,
             capability=capability_name,
-            requested_mode=PermissionMode.ADMINISTER,
+            requested_mode=PermissionMode.OBSERVE,
             authentication_assurance=assurance,
         )
     )
