@@ -41,7 +41,7 @@
         "h": 4,
         "w": 5,
         "x": 0,
-        "y": 1
+        "y": 18
       },
       "options": {
         "reduceOptions": {
@@ -101,7 +101,7 @@
         "h": 4,
         "w": 5,
         "x": 5,
-        "y": 1
+        "y": 18
       },
       "options": {
         "reduceOptions": {
@@ -154,7 +154,7 @@
         "h": 4,
         "w": 4,
         "x": 10,
-        "y": 1
+        "y": 18
       },
       "options": {
         "reduceOptions": {
@@ -197,7 +197,7 @@
         "h": 4,
         "w": 5,
         "x": 14,
-        "y": 1
+        "y": 18
       },
       "options": {
         "reduceOptions": {
@@ -250,7 +250,7 @@
         "h": 4,
         "w": 5,
         "x": 19,
-        "y": 1
+        "y": 18
       },
       "options": {
         "reduceOptions": {
@@ -292,7 +292,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 5
+        "y": 22
       },
       "options": {
         "displayMode": "gradient",
@@ -327,7 +327,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 5
+        "y": 22
       },
       "options": {
         "displayMode": "gradient",
@@ -363,7 +363,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 13
+        "y": 30
       },
       "options": {
         "displayMode": "gradient",
@@ -397,7 +397,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 13
+        "y": 30
       },
       "options": {
         "displayLabels": [
@@ -431,7 +431,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 37
       },
       "panels": []
     },
@@ -505,7 +505,7 @@
         "h": 13,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 38
       },
       "options": {
         "showHeader": true,
@@ -577,7 +577,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 51
       },
       "options": {
         "showHeader": true,
@@ -592,7 +592,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 1
       },
       "panels": []
     },
@@ -631,7 +631,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 45
+        "y": 2
       },
       "options": {
         "reduceOptions": {
@@ -670,7 +670,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 45
+        "y": 2
       },
       "options": {
         "reduceOptions": {
@@ -710,7 +710,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 45
+        "y": 2
       },
       "options": {
         "reduceOptions": {
@@ -761,7 +761,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 45
+        "y": 2
       },
       "options": {
         "reduceOptions": {
@@ -802,7 +802,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 45
+        "y": 2
       },
       "options": {
         "reduceOptions": {
@@ -844,7 +844,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 45
+        "y": 2
       },
       "options": {
         "displayMode": "gradient",
@@ -902,7 +902,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 6
       },
       "options": {
         "showHeader": true,
