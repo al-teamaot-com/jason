@@ -380,11 +380,19 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             raise PermissionError("AUTOTASK_ATTACHMENT_SCOPE_INVALID") from exc
         if expected_company < 1 or ticket_id < 1:
             raise PermissionError("AUTOTASK_ATTACHMENT_SCOPE_INVALID")
+        credentials = self._secrets.resolve(self.logical_secret, request.context)
         ticket_request = ConnectorRequest(
             context=replace(request.context, capability="autotask.ticket.get"),
             arguments={"ticket_id": ticket_id},
         )
-        observed = AutotaskConnector.execute(self, ticket_request).data
+        prepared = self._prepare_ticket_read_as_query(
+            request=ticket_request, credentials=credentials
+        )
+        observed = self._transport.request(
+            method=prepared.method, url=prepared.url, headers=prepared.headers,
+            params=prepared.params, json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
         items = observed.get("items") if isinstance(observed, Mapping) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
             raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_NOT_UNIQUE")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import os
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -226,11 +227,18 @@ class AutotaskTicketAttachmentConnector(AutotaskMutationConnector):
         company_id: int,
         ticket_id: int,
     ) -> None:
+        search = json.dumps(
+            {
+                "MaxRecords": 2,
+                "filter": [{"op": "eq", "field": "id", "value": ticket_id}],
+            },
+            separators=(",", ":"), sort_keys=True,
+        )
         payload = self._transport.request(
             method="GET",
-            url=f"{self._api_root(prepared)}/V1.0/Tickets/{ticket_id}",
+            url=f"{self._api_root(prepared)}/V1.0/Tickets/query",
             headers=headers,
-            params=None,
+            params={"search": search},
             json=None,
             timeout_seconds=prepared.timeout_seconds,
         )
@@ -320,7 +328,6 @@ class AutotaskTicketAttachmentConnector(AutotaskMutationConnector):
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
         credentials = self._secrets.resolve(self.logical_secret, normalized.context)
         seed_payload = {
-            "id": 0,
             "attachedByContactID": None,
             "attachedByResourceID": None,
             "attachmentType": "FILE_ATTACHMENT",

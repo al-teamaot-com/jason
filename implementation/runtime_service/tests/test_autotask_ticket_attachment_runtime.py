@@ -64,7 +64,7 @@ class Transport:
             return {"userAccessForCreate":1}
         if url.endswith("/V1.0/TicketAttachments/entityInformation/fields"):
             return {"fields":[{"name":"publish","picklistValues":[{"label":"Internal Only","value":2},{"label":"All","value":1}]}]}
-        if url.endswith("/V1.0/Tickets/140000"):
+        if url.endswith("/V1.0/Tickets/query"):
             return {"item":{"id":140000,"companyID":self.ticket_company}}
         if method == "POST" and url.endswith("/V1.0/Tickets/140000/Attachments"):
             return {"itemId":555}
