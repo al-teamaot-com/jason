@@ -220,7 +220,13 @@ class AutotaskQueueSource:
                     candidates[candidate.resource_id] = candidate
 
     def _ensure_metadata(self) -> None:
-        if self._queue_ids is not None and self._priority_scores is not None:
+        if (
+            self._queue_ids is not None
+            and self._priority_scores is not None
+            and self._critical_priority_ids is not None
+            and self._queue_labels_by_id is not None
+            and self._status_labels_by_id is not None
+        ):
             return
         result = self.reads.execute(
             SERVICE_ENTITY_FIELDS_DESCRIBE,
