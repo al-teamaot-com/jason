@@ -88,22 +88,64 @@ class ClientEvidenceBinding:
     drmm_site_uid: str | None = None
     it_glue_organization_id: str | None = None
     dnsfilter_organization_id: str | None = None
+    endpoint_backup_customer_id: str | None = None
+    microsoft_tenant_id: str | None = None
+    vulscan_client_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.autotask_company_id.strip() or not self.autotask_company_name.strip():
             raise ValueError("an exact Autotask company id and name are required")
 
 
-def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint_backup_api_available: bool=False, microsoft_security_reads_available: bool=False, dnsfilter_api_available: bool=False) -> tuple[str,...]:
-    unavailable={"BACKUP-SUCCESS"}
-    if not endpoint_backup_api_available:
-        unavailable.add("BACKUP-COVERAGE")
-    if not microsoft_security_reads_available:
+def unavailable_controls_for_binding(binding: ClientEvidenceBinding, *, endpoint_backup_api_available: bool=False, microsoft_security_reads_available: bool=False, dnsfilter_api_available: bool=False, vulscan_api_available: bool=False) -> tuple[str,...]:
+    unavailable=set()
+    if not endpoint_backup_api_available or binding.endpoint_backup_customer_id is None:
+        unavailable.update({"BACKUP-COVERAGE","BACKUP-SUCCESS"})
+    if not microsoft_security_reads_available or binding.microsoft_tenant_id is None:
         unavailable.update({"IDENTITY-MFA","IDENTITY-CA"})
     if binding.drmm_site_uid is None:
-        unavailable.update({"ENDPOINT-ENCRYPTION","ENDPOINT-AV","ENDPOINT-EDR","ENDPOINT-OS","ENDPOINT-MONITORING","VULNERABILITY"})
+        unavailable.update({"ENDPOINT-ENCRYPTION","ENDPOINT-AV","ENDPOINT-EDR","ENDPOINT-OS","ENDPOINT-MONITORING"})
+    if not vulscan_api_available or binding.vulscan_client_id is None:
+        unavailable.add("VULNERABILITY")
     if not dnsfilter_api_available or binding.dnsfilter_organization_id is None:
         unavailable.add("DNS-PROTECTION")
     if binding.it_glue_organization_id is None:
         unavailable.add("DOCUMENTATION")
     return tuple(sorted(unavailable))
+
+
+def serialize_review(*, review: Mapping[str,Any], client_name: str, reviewed_at: str, binding: ClientEvidenceBinding) -> Mapping[str,Any]:
+    """Return a JSON-safe durable report without raw provider payloads or action authority."""
+    assessments=[]
+    for a in review["assessments"]:
+        assessments.append({
+            "control_id":a.control_id,
+            "title":a.title,
+            "state":a.state.value,
+            "rationale":a.rationale,
+            "remediation_hint":a.remediation_hint,
+            "evidence":[{
+                "source":e.source,
+                "observed_at":e.observed_at,
+                "correlation_id":e.correlation_id,
+                "facts":dict(e.facts),
+            } for e in a.evidence],
+        })
+    return {
+        "schema_version":"1.0",
+        "reviewed_at":reviewed_at,
+        "client":{"autotask_company_id":binding.autotask_company_id,"name":client_name},
+        "bindings":{
+            "drmm_site_uid":binding.drmm_site_uid,
+            "it_glue_organization_id":binding.it_glue_organization_id,
+            "dnsfilter_organization_id":binding.dnsfilter_organization_id,
+            "endpoint_backup_customer_id":binding.endpoint_backup_customer_id,
+            "microsoft_tenant_id":binding.microsoft_tenant_id,
+            "vulscan_client_id":binding.vulscan_client_id,
+        },
+        "counts":dict(review["counts"]),
+        "assessments":assessments,
+        "improvement_proposals":list(review["improvement_proposals"]),
+        "automatic_changes_allowed":False,
+        "authority_semantics":"evidence_only_never_grants_execution_authority",
+    }

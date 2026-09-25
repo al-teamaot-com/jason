@@ -54,3 +54,9 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-security-control.json
         refresh_interval: 30s
+
+  - job_name: jason-client-posture
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-client-posture.json
+        refresh_interval: 30s

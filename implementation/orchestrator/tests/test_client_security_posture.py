@@ -57,3 +57,37 @@ def test_drmm_mapping_does_not_substitute_for_dnsfilter_authority():
  b=ClientEvidenceBinding("333","Atomic Plumbing & Drain Cleaning",drmm_site_uid="site-1")
  unavailable=set(unavailable_controls_for_binding(b))
  assert "DNS-PROTECTION" in unavailable
+
+
+def test_serialize_review_is_json_safe_and_never_grants_authority():
+ import json
+ b=ClientEvidenceBinding("333","Atomic",drmm_site_uid="site-1",dnsfilter_organization_id="dns-1")
+ r=build_review(client_id="333",evidence_by_control={"ENDPOINT-AV":[ev(managed_av_healthy=False)]})
+ out=serialize_review(review=r,client_name="Atomic",reviewed_at="2026-09-25T07:20:00Z",binding=b)
+ assert out["automatic_changes_allowed"] is False
+ assert out["authority_semantics"]=="evidence_only_never_grants_execution_authority"
+ assert out["assessments"][1]["state"]=="confirmed_gap"
+ json.dumps(out)
+
+
+def test_backup_controls_require_api_and_exact_customer_binding():
+ b=ClientEvidenceBinding("333","Atomic",endpoint_backup_customer_id="backup-customer")
+ unavailable=set(unavailable_controls_for_binding(b,endpoint_backup_api_available=True))
+ assert "BACKUP-COVERAGE" not in unavailable and "BACKUP-SUCCESS" not in unavailable
+ assert "IDENTITY-MFA" in unavailable
+
+
+def test_microsoft_controls_require_exact_tenant_binding_even_when_reads_are_live():
+ b=ClientEvidenceBinding("333","Atomic")
+ unavailable=set(unavailable_controls_for_binding(b,microsoft_security_reads_available=True))
+ assert "IDENTITY-MFA" in unavailable and "IDENTITY-CA" in unavailable
+ b=ClientEvidenceBinding("333","Atomic",microsoft_tenant_id="tenant-1")
+ unavailable=set(unavailable_controls_for_binding(b,microsoft_security_reads_available=True))
+ assert "IDENTITY-MFA" not in unavailable and "IDENTITY-CA" not in unavailable
+
+
+def test_vulnerability_control_requires_dedicated_vulscan_binding():
+ b=ClientEvidenceBinding("333","Atomic",drmm_site_uid="site-1")
+ assert "VULNERABILITY" in set(unavailable_controls_for_binding(b,vulscan_api_available=True))
+ b=ClientEvidenceBinding("333","Atomic",drmm_site_uid="site-1",vulscan_client_id="vuln-1")
+ assert "VULNERABILITY" not in set(unavailable_controls_for_binding(b,vulscan_api_available=True))

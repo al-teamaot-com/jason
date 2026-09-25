@@ -1,0 +1,22 @@
+[Unit]
+Description=Jason Client Security Posture Prometheus Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=al
+WorkingDirectory=/home/al/projects/jason
+Environment=JASON_CLIENT_POSTURE_DIR=/var/lib/jason/client-posture
+Environment=JASON_CLIENT_POSTURE_EXPORTER_HOST=0.0.0.0
+Environment=JASON_CLIENT_POSTURE_EXPORTER_PORT=9472
+ExecStart=/usr/bin/python3 /home/al/projects/jason/infrastructure/showcase/client_posture_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/al/projects/jason
+ReadOnlyPaths=-/var/lib/jason/client-posture
+
+[Install]
+WantedBy=multi-user.target
