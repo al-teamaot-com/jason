@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from connectors.core.contracts import ConnectorContext, ConnectorRequest
@@ -346,3 +348,61 @@ def test_automation_read_connector_exposes_no_write_capability() -> None:
         and "execute" not in capability
         for capability in DattoRmmAutomationReadConnector.capabilities
     )
+
+def test_old_active_quick_job_is_reported_stale_unknown(monkeypatch) -> None:
+    patch_token(monkeypatch)
+    old_ms = int((datetime.now(timezone.utc).timestamp() - (7 * 60 * 60)) * 1000)
+    connector = DattoRmmAutomationReadConnector(
+        secrets=Secrets(),
+        transport=Transport(
+            [
+                {
+                    "uid": "job-old-active",
+                    "status": "active",
+                    "dateCreated": str(old_ms),
+                    "name": "Jason - Example",
+                }
+            ]
+        ),
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        request(
+            capability="datto_rmm.job.read",
+            arguments={"job_uid": "job-old-active"},
+        )
+    )
+    job = result.data["job"]
+    assert job["status"] == "stale_or_unknown"
+    assert job["provider_status"] == "active"
+    assert job["age_seconds"] >= 6 * 60 * 60
+    assert job["retry_safety"].startswith("do_not_redispatch")
+
+
+def test_recent_active_quick_job_remains_active(monkeypatch) -> None:
+    patch_token(monkeypatch)
+    recent_ms = int((datetime.now(timezone.utc).timestamp() - (5 * 60)) * 1000)
+    connector = DattoRmmAutomationReadConnector(
+        secrets=Secrets(),
+        transport=Transport(
+            [
+                {
+                    "uid": "job-recent-active",
+                    "status": "active",
+                    "dateCreated": str(recent_ms),
+                }
+            ]
+        ),
+        audit=Audit(),
+    )
+
+    result = connector.execute(
+        request(
+            capability="datto_rmm.job.read",
+            arguments={"job_uid": "job-recent-active"},
+        )
+    )
+    job = result.data["job"]
+    assert job["status"] == "active"
+    assert "provider_status" not in job
