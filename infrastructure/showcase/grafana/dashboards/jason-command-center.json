@@ -660,7 +660,7 @@
     },
     {
       "type": "stat",
-      "title": "Model/API Cost Today",
+      "title": "Recorded Model Cost Today",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -697,11 +697,11 @@
         "graphMode": "none",
         "justifyMode": "auto"
       },
-      "description": "Near-live Jason model spend from the append-only usage ledger. Provider-reported cost is preferred; calculated cost is used when provider cost is unavailable."
+      "description": "Near-live Jason model spend from the append-only usage ledger. Provider-reported cost is preferred; calculated cost is used when provider cost is unavailable. Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces."
     },
     {
       "type": "stat",
-      "title": "Model/API Cost MTD",
+      "title": "Recorded Model Cost MTD",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -738,11 +738,11 @@
         "graphMode": "none",
         "justifyMode": "auto"
       },
-      "description": "Month-to-date effective model spend recorded by Jason."
+      "description": "Month-to-date effective model spend recorded by Jason. Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces."
     },
     {
       "type": "stat",
-      "title": "Model Attempts \u2014 24h",
+      "title": "Recorded Model Attempts \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -776,7 +776,8 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto"
-      }
+      },
+      "description": "Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces."
     },
     {
       "type": "stat",
@@ -819,7 +820,7 @@
     },
     {
       "type": "stat",
-      "title": "Model Tokens \u2014 24h",
+      "title": "Recorded Model Tokens \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -853,7 +854,8 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto"
-      }
+      },
+      "description": "Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces."
     },
     {
       "type": "stat",
@@ -987,8 +989,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Model/API Cost Trend",
-      "description": "Sampled near-live cost totals from Jason's usage ledger.",
+      "title": "Recorded Model Cost Trend",
+      "description": "Sampled near-live cost totals from Jason's usage ledger. Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -1032,7 +1034,7 @@
     },
     {
       "type": "bargauge",
-      "title": "Cost by Provider / Model \u2014 24h",
+      "title": "Recorded Cost by Provider / Model \u2014 24h",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -1071,7 +1073,8 @@
           ],
           "fields": ""
         }
-      }
+      },
+      "description": "Reflects Jason model-usage ledger records only; it is not a claim of all model activity across external ChatGPT/OpenAI surfaces."
     },
     {
       "type": "row",

@@ -23,8 +23,8 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Sites Scanned",
-      "description": "Safe registry scan completeness. A partial scan must not authorize onboarding convergence.",
+      "title": "Registry Snapshot \u2014 Sites Scanned",
+      "description": "Safe registry scan completeness. A partial scan must not authorize onboarding convergence. Snapshot captured 2026-09-22 13:50 ET; not live telemetry.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -64,7 +64,7 @@
     },
     {
       "type": "stat",
-      "title": "Expected Sites",
+      "title": "Registry Snapshot \u2014 Expected Sites",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -100,11 +100,12 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto"
-      }
+      },
+      "description": "Snapshot captured 2026-09-22 13:50 ET; not live telemetry."
     },
     {
       "type": "stat",
-      "title": "Unique Variable Names",
+      "title": "Registry Snapshot \u2014 Unique Variable Names",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
@@ -140,12 +141,13 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto"
-      }
+      },
+      "description": "Snapshot captured 2026-09-22 13:50 ET; not live telemetry."
     },
     {
       "type": "stat",
-      "title": "Candidate Standards",
-      "description": "Discovery candidates at >=70% coverage. Human approval is still required.",
+      "title": "Registry Snapshot \u2014 Candidate Standards",
+      "description": "Discovery candidates at >=70% coverage. Human approval is still required. Snapshot captured 2026-09-22 13:50 ET; not live telemetry.",
       "datasource": {
         "type": "prometheus",
         "uid": "jason-prometheus"
