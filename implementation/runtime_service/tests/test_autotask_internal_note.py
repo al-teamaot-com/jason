@@ -18,6 +18,7 @@ from connectors.core.contracts import (
     ConnectorRequest,
 )
 from jason_runtime.autotask_internal_note import (
+    AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
     AUTOTASK_INTERNAL_NOTE_PROFILE,
     AUTOTASK_INTERNAL_NOTE_PROFILE_ENV,
     AUTOTASK_INTERNAL_NOTE_PROVIDER,
@@ -25,6 +26,7 @@ from jason_runtime.autotask_internal_note import (
     AutotaskInternalNoteConnector,
     AutotaskInternalNoteVerificationError,
     SERVICE_TICKET_NOTE_CREATE,
+    configured_autotask_internal_note_autonomy_email,
     register_autotask_internal_note_runtime_foundation,
 )
 from kernel.capabilities import (
@@ -277,9 +279,13 @@ class _Transport:
         self,
         *,
         mismatch=False,
+        resource_email="al@example.com",
+        resource_id=77,
     ):
         self.requests: list[dict[str, Any]] = []
         self.mismatch = mismatch
+        self.resource_email = resource_email
+        self.resource_id = resource_id
 
     def request(
         self,
@@ -319,8 +325,8 @@ class _Transport:
             return {
                 "items": [
                     {
-                        "id": 77,
-                        "email": "al@example.com",
+                        "id": self.resource_id,
+                        "email": self.resource_email,
                         "isActive": True,
                     }
                 ]
@@ -362,7 +368,7 @@ class _Transport:
                         ),
                         "noteType": 3,
                         "publish": 1,
-                        "creatorResourceID": 77,
+                        "creatorResourceID": self.resource_id,
                         "impersonatorCreatorResourceID": 999,
                     }
                 ]
@@ -373,11 +379,11 @@ class _Transport:
         )
 
 
-def _connector_request():
+def _connector_request(principal_id="person-al"):
     return ConnectorRequest(
         context=ConnectorContext(
             correlation_id="corr-internal-note",
-            principal_id="person-al",
+            principal_id=principal_id,
             organization_id="aot",
             client_id=None,
             capability="autotask.ticket.note.create",
@@ -398,12 +404,15 @@ def _connector_request():
 def _connector(
     transport,
     audit,
+    *,
+    autonomy_principal_email=None,
 ):
     return AutotaskInternalNoteConnector(
         secrets=_Secrets(),
         transport=transport,
         audit=audit,
         bindings=_Bindings(),
+        autonomy_principal_email=autonomy_principal_email,
     )
 
 
@@ -506,4 +515,109 @@ def test_internal_note_connector_never_retries_post_when_readback_fails(
     assert any(
         event == "connector.mutation.verification_failed"
         for event, _ in audit.events
+    )
+
+
+def test_autonomy_email_configuration_is_default_empty_and_aot_only(monkeypatch):
+    monkeypatch.delenv(AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV, raising=False)
+    assert configured_autotask_internal_note_autonomy_email() is None
+
+    monkeypatch.setenv(
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
+        "JasonRW@teamaot.com",
+    )
+    assert (
+        configured_autotask_internal_note_autonomy_email()
+        == "jasonrw@teamaot.com"
+    )
+
+    monkeypatch.setenv(
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
+        "attacker@example.com",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID",
+    ):
+        configured_autotask_internal_note_autonomy_email()
+
+
+def test_autonomous_service_principal_uses_explicit_internal_note_mapping(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+    )
+    audit = _Audit()
+
+    result = _connector(
+        transport,
+        audit,
+        autonomy_principal_email="jasonRW@teamaot.com",
+    ).execute(
+        _connector_request("jason-autonomy-worker")
+    )
+
+    assert result.data["jasonVerification"] == {
+        "readbackVerified": True,
+        "ticketNoteId": 222,
+        "creatorResourceId": 29682930,
+        "impersonatorRecorded": True,
+    }
+
+    posts = [
+        request
+        for request in transport.requests
+        if request["method"] == "POST"
+    ]
+    assert len(posts) == 1
+    assert posts[0]["headers"]["ImpersonationResourceId"] == "29682930"
+
+
+def test_autonomous_service_principal_mapping_is_not_available_to_other_services(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match="AUTOTASK_TRUSTED_PRINCIPAL_BINDING_REQUIRED",
+    ):
+        _connector(
+            transport,
+            _Audit(),
+            autonomy_principal_email="jasonrw@teamaot.com",
+        ).execute(
+            _connector_request("some-other-service")
+        )
+
+    assert not any(
+        request["method"] == "POST"
+        for request in transport.requests
+    )
+
+
+def test_autonomous_service_principal_fails_closed_without_mapping(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match="AUTOTASK_TRUSTED_PRINCIPAL_BINDING_REQUIRED",
+    ):
+        _connector(
+            transport,
+            _Audit(),
+        ).execute(
+            _connector_request("jason-autonomy-worker")
+        )
+
+    assert not any(
+        request["method"] == "POST"
+        for request in transport.requests
     )
