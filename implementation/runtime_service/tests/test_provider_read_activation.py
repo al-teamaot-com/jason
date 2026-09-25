@@ -44,6 +44,7 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
+    PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -470,3 +471,25 @@ def test_attachment_reads_are_dormant_in_v7_and_activate_only_in_v8() -> None:
         profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
     )
     assert attachment_reads.issubset(set(v8.capability_names))
+
+
+def test_service_resource_reads_are_dormant_in_v8_and_activate_only_in_v9() -> None:
+    from orchestrator.provider_read_capability_catalog import SERVICE_RESOURCE_SEARCH, SERVICE_RESOURCE_READ
+
+    capabilities, providers = _registries()
+    v8 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
+    )
+    assert SERVICE_RESOURCE_SEARCH not in set(v8.capability_names)
+    assert SERVICE_RESOURCE_READ not in set(v8.capability_names)
+
+    capabilities, providers = _registries()
+    v9 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE,
+    )
+    assert SERVICE_RESOURCE_SEARCH in set(v9.capability_names)
+    assert SERVICE_RESOURCE_READ in set(v9.capability_names)

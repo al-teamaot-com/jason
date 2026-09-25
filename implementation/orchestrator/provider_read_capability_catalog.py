@@ -51,6 +51,8 @@ SERVICE_COMPANY_SEARCH = "service.company.search"
 SERVICE_COMPANY_READ = "service.company.read"
 SERVICE_CONTACT_SEARCH = "service.contact.search"
 SERVICE_CONTACT_READ = "service.contact.read"
+SERVICE_RESOURCE_SEARCH = "service.resource.search"
+SERVICE_RESOURCE_READ = "service.resource.read"
 SERVICE_TICKET_SEARCH = "service.ticket.search"
 SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
@@ -117,6 +119,8 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_COMPANY_READ,
         SERVICE_CONTACT_SEARCH,
         SERVICE_CONTACT_READ,
+        SERVICE_RESOURCE_SEARCH,
+        SERVICE_RESOURCE_READ,
         SERVICE_TICKET_SEARCH,
         SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
@@ -577,6 +581,29 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id",
             fact_hints="contact,user,email,phone,title,company",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_RESOURCE_SEARCH,
+            display_name="Search Service Resources",
+            business_purpose="Search authorized service-management technician/resource identities.",
+            resource_types="service_resource,technician,service_person",
+            operation="search",
+            selector_keys="resource_id,first_name,last_name,email,filters,page_size,after_resource_id",
+            fact_hints="resource,technician,assigned technician,service person,email,first name,last name,active",
+            authoritative_change_sources=at,
+            collection_fact="service resources",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_RESOURCE_READ,
+            display_name="Read Service Resource",
+            business_purpose="Read one exact authorized service-management technician/resource identity.",
+            resource_types="service_resource,technician,service_person",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="resource,technician,assigned technician,service person,email,first name,last name,active",
             authoritative_change_sources=at,
         ),
         _read_capability(
