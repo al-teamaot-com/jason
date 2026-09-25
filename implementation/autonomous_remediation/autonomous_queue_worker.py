@@ -226,9 +226,34 @@ class AutonomousQueueWorker:
         for item in activated:
             candidate = self._candidates.get(item.resource_id)
             if candidate is None:
+                exact_reader = getattr(self.queue_source, "read_candidate", None)
+                if callable(exact_reader):
+                    try:
+                        candidate = exact_reader(item.resource_id)
+                    except Exception as exc:
+                        self._persist_result(
+                            item,
+                            WorkStepResult(
+                                WorkState.BLOCKED,
+                                (
+                                    "Exact candidate refresh failed: "
+                                    f"{type(exc).__name__}"
+                                ),
+                            ),
+                            now=now,
+                        )
+                        blocked.append(item.resource_id)
+                        continue
+                    if candidate is not None:
+                        self._candidates[item.resource_id] = candidate
+
+            if candidate is None:
                 self._persist_result(
                     item,
-                    WorkStepResult(WorkState.BLOCKED, "Candidate context unavailable after activation."),
+                    WorkStepResult(
+                        WorkState.BLOCKED,
+                        "Known work item is no longer eligible after exact ticket refresh.",
+                    ),
                     now=now,
                 )
                 blocked.append(item.resource_id)
