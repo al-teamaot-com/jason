@@ -1,7 +1,7 @@
 # Jason Autonomous Ticket Worker - Production Scope
 
 **Date:** 2026-09-25  
-**Status:** Implemented; production activation is separately owner-gated.
+**Status:** Production active for the separately promoted EDR/AV health-only branch.
 
 ## Purpose
 
@@ -71,11 +71,21 @@ ticket-worker authority.
 
 ## Runtime
 
-Production activation is disabled by default with
-`JASON_AUTONOMY_WORKER_ENABLED=false`. When explicitly enabled, the worker runs
+Production source defaults remain fail-closed, but the approved production deployment now has
+`JASON_AUTONOMY_WORKER_ENABLED=true`. The worker runs
 on the runtime server's owning thread, uses a durable SQLite operational ledger,
 and limits concurrent autonomous work to the configured Jason autonomy slot
 limit (default two).
 
 The ordinary shadow assessor continues to run independently so unmatched or
 not-yet-autonomous tickets can still be evaluated without mutation.
+
+## Production completion record
+
+Production activation was completed on 2026-09-25. The durable operational promotion is `pbauto_d754251d9ae140fe9a3fa11b090eaf49` for `datto_edr_av@1.3.0`. The autonomous workload uses Autotask Resource `29682930` and the standing-safe Datto component registry.
+
+The first production reconciliation exposed a provider-evidence normalization defect on `T20260921.0015` / `gai-lt2820`: the governed Datto path supplied provider-native `uid` while the worker expected canonical `resource_id`. No remediation was executed. PR #349 added safe normalization for `resource_id`, `uid`, or `deviceUid` while retaining exact UID and hostname matching. It was deployed at revision `aaa536cef3e10edac8a1cc41595caee19be570c6`.
+
+After deployment, `jason-runtime` was healthy with both the autonomous ticket worker and Datto autonomous standing-safe execution enabled. The false blocked state for ticket ID `140792` was removed after the defect fix. Because `gai-lt2820` was offline, reevaluation correctly left no persistent active/blocked work row and performed no provider mutation.
+
+Operational procedures and the expansion checklist are maintained in `docs/operations/JASON_AUTONOMOUS_TICKET_WORKER.md`.

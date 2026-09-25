@@ -154,7 +154,7 @@ The provider-neutral foundation is in:
 - `implementation/autonomous_remediation/autonomy_governance.py`
 - `implementation/autonomous_remediation/autonomous_queue_worker.py`
 
-The first implementation deliberately does not bypass existing Autotask/DRMM governed execution paths and does not deploy a production polling loop.
+The implementation does not bypass existing Autotask/DRMM governed execution paths. A bounded production worker is now deployed for separately promoted operational playbooks.
 ## Production activation requirements
 
 Before production activation:
@@ -170,7 +170,7 @@ Before production activation:
 9. run a controlled Autotask acceptance pilot;
 10. only then enable unattended queue processing.
 
-As of 2026-09-25, items 1-9 have been proven for the autonomous execution substrate, including a controlled production Autotask write. Item 10 remains intentionally gated at the **operational playbook** level: unattended queue mutation stays disabled until an individual real playbook/version/capability set is separately promoted, accepted, and monitored.
+As of 2026-09-25, items 1-10 have been completed for the first operational playbook. `datto_edr_av@1.3.0` has a separate durable owner promotion for its health-only branch and the production worker is enabled. Every additional playbook/version remains independently gated and must complete the same promotion, acceptance, and monitoring process before unattended mutation.
 
 ## Autonomous workload identity
 
@@ -196,7 +196,7 @@ Findings:
 - The current queue includes recognized shadow playbooks for Datto EDR/AV, Security Log Self-Heal, DNS Agent, VulScan Missing Patch, BackupIQ, and Unexpected Shutdown.
 - Active Jason tickets for POST errors, Idle Log Off, and Low Disk Space do not yet have complete registered playbook source coverage in this branch. Idle Log Off hardening is tracked by #245; the Low Disk Space execution-plan blocker is tracked by #261.
 - Other queues contain human-assigned work, unassigned work, and tickets carrying the same opaque Autotask resource ID seen on Jason-owned tickets. Because Autotask Resources is not yet a governed readable resource, Jason does not infer that opaque ID is itself Jason.
-- No operational playbook is currently durably promoted for unattended mutation. The first autonomous execution substrate acceptance used a temporary acceptance-only promotion; that promotion and all temporary acceptance grants were revoked after proof. Operational playbooks remain shadow-only until separately promoted.
+- The shadow checkpoint originally had no operational playbook promotion. Later on 2026-09-25, the EDR/AV health-only branch was separately promoted as `datto_edr_av@1.3.0` under promotion `pbauto_d754251d9ae140fe9a3fa11b090eaf49`; other playbooks remain shadow-only until separately promoted.
 
 This checkpoint proves queue discovery and classification behavior without granting execution authority.
 
@@ -285,12 +285,12 @@ The direct API-user attribution is intentional for the autonomous workload. Huma
 
 A second acceptance run recognized the exact existing marker and returned the already-verified path with duplicate suppression. No second provider write occurred.
 
-After proof:
+At the conclusion of that acceptance checkpoint:
 
 - every temporary acceptance `PlaybookAutonomyApproval` was revoked;
 - all temporary acceptance JKD-001 grants were revoked;
-- no broad autonomous mutation grant remains;
-- operational queue processing remains shadow-only.
+- no broad autonomous mutation grant remained;
+- operational queue processing remained shadow-only until the later EDR/AV operational promotion documented below.
 
 ### Production code boundary
 
@@ -319,4 +319,12 @@ Each operational playbook must still provide, for its exact version and capabili
 9. red-team acceptance;
 10. explicit suspension/revocation behavior.
 
-The next production phase is therefore **operational playbook testing and promotion**, not generic autonomy enablement.
+The production model is therefore **per-playbook testing and promotion**, not generic autonomy enablement. The first such operational promotion is recorded below; additional playbooks remain separately gated.
+
+## Production worker activation - 2026-09-25
+
+The bounded production worker is active for the separately promoted EDR/AV health-only branch. It scans Help Desk I, Help Desk II, Monitoring Alert, and Jason-owned work, with a default maximum of two active work items. Source defaults remain fail-closed; production explicitly enables `JASON_AUTONOMY_WORKER_ENABLED=true` and `JASON_DATTO_COMPONENT_EXECUTION_AUTONOMY_ENABLED=true`.
+
+The first real reconciliation found a normalization mismatch between canonical endpoint evidence (`resource_id`) and provider-native Datto evidence (`uid`). PR #349 corrected the normalization to accept `resource_id`, `uid`, or `deviceUid` while preserving exact CI UID and hostname equality requirements. The corrected worker was deployed at revision `aaa536cef3e10edac8a1cc41595caee19be570c6` and verified healthy.
+
+Full production operating details, recovery rules, current authority, and the procedure for promoting additional playbooks are documented in `docs/operations/JASON_AUTONOMOUS_TICKET_WORKER.md`.
