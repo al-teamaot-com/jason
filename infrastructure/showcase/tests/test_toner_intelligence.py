@@ -33,6 +33,30 @@ class TonerIntelligenceTests(unittest.TestCase):
         self.assertEqual(ti.forecast(readings,0.5).action,'watch')
         self.assertEqual(ti.forecast(readings,4.0).action,'ship_today')
 
+    def test_current_telemetry(self):
+        self.assertEqual(ti.classify_telemetry(0,0,0.1)[0], 'current')
+
+    def test_one_missed_run_is_stale(self):
+        self.assertEqual(ti.classify_telemetry(1,1,1.2)[0], 'stale')
+
+    def test_two_missed_runs_is_not_reporting(self):
+        self.assertEqual(ti.classify_telemetry(2,2,2.2)[0], 'not_reporting')
+
+    def test_long_missing_wins(self):
+        self.assertEqual(ti.classify_telemetry(1,1,8.0)[0], 'long_term_missing')
+
+    def test_toner_can_be_stale_while_device_is_current(self):
+        self.assertEqual(ti.classify_telemetry(0,1,1.0)[0], 'toner_stale')
+
+    def test_stale_telemetry_blocks_shipping_recommendation(self):
+        action, reason = ti.apply_safety_gates('ship_today','projected depletion','stale','device missed latest run','Company A','TK-1')
+        self.assertEqual(action, 'needs_review')
+        self.assertIn('missed', reason)
+
+    def test_missing_customer_blocks_shipping_recommendation(self):
+        action, _ = ti.apply_safety_gates('ship_today','projected depletion','current','ok','','TK-1')
+        self.assertEqual(action, 'needs_review')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -19,7 +19,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Review-only toner intelligence\n**Not production. No orders or tickets are created.** The primary question is: **Which toner should we ship today?** Customer/device seasonality remains disabled until sufficient history exists; replacement events are inferred from low-to-full toner jumps."
+        "content": "### Review-only toner intelligence\n**Not production. No orders or tickets are created.** The primary question is: **Which toner should we ship today?**\n\n**Hard safety rule:** no fresh KFS telemetry = no Ship Today/Ship Soon recommendation. Missing device or toner reporting is forced to **Needs Review**. Customer/device seasonality remains disabled until sufficient history exists."
       }
     },
     {
@@ -210,7 +210,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 13
       },
       "options": {
         "showHeader": true,
@@ -244,7 +244,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 23
       },
       "options": {
         "showHeader": true,
@@ -276,7 +276,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 29
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -302,11 +302,173 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 29
+        "y": 43
       },
       "options": {
         "mode": "markdown",
         "content": "**Current prototype:** recent median toner decline + replacement detection.\n\n**Next learning layer:** customer/device page-volume seasonality, weekday patterns, holidays, recurring busy/slow periods, and Autotask order correlation.\n\nRecommendations with insufficient telemetry must remain review-only."
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "KFS Collector Age",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_kfs_latest_successful_run_age_seconds",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Devices Not Current",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "count(jason_kfs_device_reporting_state{device_reporting_state!=\"current\"})",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Toner Streams Not Current",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "count(jason_toner_current_percent{telemetry_state!=\"current\"})",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 13,
+      "type": "table",
+      "title": "NEEDS REVIEW \u2014 stale/missing telemetry or unresolved identity",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_toner_current_percent{action=\"needs_review\"}",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0
+        },
+        "overrides": []
       }
     }
   ],
@@ -328,5 +490,5 @@
   "timezone": "browser",
   "title": "AOT Toner Readiness \u2014 NONPRODUCTION",
   "uid": "jason-toner-readiness-nonprod",
-  "version": 1
+  "version": 2
 }

@@ -36,3 +36,16 @@ Until enough history exists, the prototype reports `seasonality_status=insuffici
 
 ## Production gates
 Do not deploy until the dashboard and logic have been reviewed with real AOT data, customer mapping is reliable, zero/unknown toner semantics are validated, seasonality has sufficient history, and AOT explicitly approves production deployment.
+
+## Telemetry freshness safety gate
+A shipping recommendation is valid only when both the KFS collector and the relevant device/toner telemetry are fresh.
+
+Freshness is measured against **successful KFS collections**, not calendar days:
+- `current`: device and toner are present in the latest successful collection.
+- `stale`: device missed one successful collection.
+- `not_reporting`: device missed two or more successful collections.
+- `long_term_missing`: device has no fresh telemetry for at least 7 days.
+- `toner_stale`: device is current but this toner stream did not update in the latest successful collection.
+- `collection_stale`: the latest successful KFS collection itself is older than 36 hours.
+
+Any non-current state forces the toner to `needs_review`. **No fresh telemetry = no `ship_today` or `ship_soon` recommendation.** When reporting resumes, new readings are required before the trend should be trusted again; replacement/reset jumps remain separately classified.
