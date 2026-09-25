@@ -60,6 +60,7 @@ services:
       JASON_AUTONOMY_SHADOW_DB: /var/lib/jason/openclaw/autonomy-shadow.sqlite3
     volumes:
       - ./autonomy_flight_recorder_exporter.py:/app/autonomy_flight_recorder_exporter.py:ro
+      - ./flight_recorder_enrichment.json:/app/flight_recorder_enrichment.json:ro
       - /var/lib/jason/openclaw:/var/lib/jason/openclaw:ro
       - /var/lib/jason/authority:/var/lib/jason/authority:ro
     ports:

@@ -398,7 +398,12 @@
               "type": "number"
             },
             {
-              "selector": "details",
+              "selector": "execution_id",
+              "text": "Execution ID",
+              "type": "string"
+            },
+            {
+              "selector": "details_link",
               "text": "Details",
               "type": "string"
             }
@@ -610,21 +615,39 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Execution ID"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "Details"
             },
             "properties": [
               {
                 "id": "custom.width",
-                "value": 90
+                "value": 110
               },
               {
-                "id": "displayName",
-                "value": "Details"
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Timeline",
+                    "url": "/d/jason-autonomy-action-detail/jason-autonomy-action-detail?var-execution_id=${__data.fields.execution_id}",
+                    "targetBlank": false
+                  }
+                ]
               },
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "json-view"
+                  "type": "data-links"
                 }
               }
             ]

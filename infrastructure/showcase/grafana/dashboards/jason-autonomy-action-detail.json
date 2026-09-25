@@ -1,0 +1,309 @@
+{
+  "uid": "jason-autonomy-action-detail",
+  "title": "Jason Autonomous Action Detail",
+  "tags": [
+    "jason",
+    "autonomy",
+    "audit"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 42,
+  "version": 1,
+  "refresh": "30s",
+  "editable": false,
+  "description": "Human-readable flight-recorder detail for one governed autonomous action.",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Back to Flight Recorder",
+      "type": "link",
+      "url": "/d/jason-autonomy-flight-recorder/jason-autonomy-flight-recorder",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "execution_id",
+        "type": "textbox",
+        "label": "Execution ID",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 2
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Action Summary",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "jason-autonomy-flight-recorder"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/actions/${execution_id}/summary",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "headers": []
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "ticket",
+              "text": "Ticket",
+              "type": "string"
+            },
+            {
+              "selector": "ticket_title",
+              "text": "Title",
+              "type": "string"
+            },
+            {
+              "selector": "client",
+              "text": "Client / Company",
+              "type": "string"
+            },
+            {
+              "selector": "device",
+              "text": "Device / CI",
+              "type": "string"
+            },
+            {
+              "selector": "playbook",
+              "text": "Playbook",
+              "type": "string"
+            },
+            {
+              "selector": "playbook_version",
+              "text": "Version",
+              "type": "string"
+            },
+            {
+              "selector": "action",
+              "text": "What Jason Ran",
+              "type": "string"
+            },
+            {
+              "selector": "result",
+              "text": "Result",
+              "type": "string"
+            },
+            {
+              "selector": "failure_reason",
+              "text": "Failure Reason",
+              "type": "string"
+            },
+            {
+              "selector": "verified",
+              "text": "Verified",
+              "type": "boolean"
+            },
+            {
+              "selector": "provider_attempts",
+              "text": "Attempts",
+              "type": "number"
+            }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Action Timeline",
+      "description": "Chronological audit story: exactly what Jason ran, what came back, the result, and verification.",
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 15
+      },
+      "datasource": {
+        "type": "yesoreyeram-infinity-datasource",
+        "uid": "jason-autonomy-flight-recorder"
+      },
+      "targets": [
+        {
+          "refId": "B",
+          "type": "json",
+          "source": "url",
+          "format": "table",
+          "url": "/api/actions/${execution_id}/timeline",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "headers": []
+          },
+          "parser": "backend",
+          "root_selector": "",
+          "columns": [
+            {
+              "selector": "time",
+              "text": "Time",
+              "type": "string"
+            },
+            {
+              "selector": "event",
+              "text": "Event",
+              "type": "string"
+            },
+            {
+              "selector": "what_jason_did",
+              "text": "What Jason Did",
+              "type": "string"
+            },
+            {
+              "selector": "input",
+              "text": "Input / Command",
+              "type": "string"
+            },
+            {
+              "selector": "returned",
+              "text": "Returned",
+              "type": "string"
+            },
+            {
+              "selector": "verification",
+              "text": "Verification",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md",
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Event"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "What Jason Did"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 340
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Input / Command"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Returned"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Verification"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

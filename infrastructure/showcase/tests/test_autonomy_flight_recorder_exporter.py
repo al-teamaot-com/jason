@@ -103,3 +103,45 @@ def test_governed_execution_db_uses_immutable_readonly_uri(monkeypatch, tmp_path
         assert conn.execute('select count(*) from sample').fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_enrichment_promotes_friendly_ticket_company_and_title():
+    target = {
+        'ticket_id': '141233', 'ticket_number': None,
+        'client_id': None, 'client_name': None,
+        'device': None, 'device_name': None,
+        'configuration_item_id': None,
+    }
+    out = mod._enrich_target(target, {
+        '141233': {
+            'ticket_number': 'T20260925.0051',
+            'ticket_title': 'Controlled Test',
+            'company_id': 1158,
+            'company_name': 'XYZ Test Company',
+        }
+    })
+    assert out['ticket_number'] == 'T20260925.0051'
+    assert out['client_id'] == '1158'
+    assert out['client_name'] == 'XYZ Test Company'
+    assert out['ticket_title'] == 'Controlled Test'
+
+
+def test_timeline_rows_are_flat_human_readable_strings():
+    record = {
+        'details': {
+            'action_timeline': [
+                {'time': '09/25/2026 11:14:03 AM EDT', 'event': 'Ran', 'message': 'Jason ran Get-Date.', 'input': 'Get-Date'},
+                {'time': '09/25/2026 11:14:04 AM EDT', 'event': 'Returned', 'message': 'Provider returned output.', 'output': {'stdout': '09/25/2026'}},
+                {'time': '09/25/2026 11:14:04 AM EDT', 'event': 'Verification', 'message': 'Verification: Passed.', 'evidence': {'readbackVerified': True}},
+            ]
+        }
+    }
+    rows = mod._timeline_rows(record)
+    assert rows[0]['input'] == 'Get-Date'
+    assert rows[1]['returned'] == 'stdout=09/25/2026'
+    assert rows[2]['verification'] == 'readbackVerified=true'
+    assert all(isinstance(v, str) for row in rows for v in row.values())
+
+
+def test_display_playbook_is_human_readable():
+    assert mod._display_playbook('autonomy_execution_acceptance') == 'Autonomy Execution Acceptance'
