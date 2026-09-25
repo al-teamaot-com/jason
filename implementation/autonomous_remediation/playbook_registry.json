@@ -2,6 +2,31 @@
   "schema_version": 2,
   "playbooks": [
     {
+      "id": "backupiq_endpoint_backup",
+      "name": "Jason - BackupIQ Datto Endpoint Backup",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
+      "trigger": {
+        "title_contains": [
+          "BackupIQ"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "expected_condition",
+          "evidence_fresh",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:backupiq_endpoint_backup"
+      }
+    },
+    {
       "id": "datto_edr_av",
       "name": "Jason - Datto EDR/AV Diagnose & Repair",
       "version": "1.3.0",
@@ -28,6 +53,111 @@
         ],
         "allowed_capabilities": [],
         "policy_id": "playbook-autonomy:datto_edr_av"
+      }
+    },
+    {
+      "id": "disk_bad_block_event_7",
+      "name": "Jason - Windows Disk Bad Block Event ID 7",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
+      "trigger": {
+        "title_contains": [
+          "bad block",
+          "Event ID 7"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "storage_evidence",
+          "evidence_fresh",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:disk_bad_block_event_7"
+      }
+    },
+    {
+      "id": "dns_agent_diagnostic",
+      "name": "Jason - DNSFilter DNS Agent Diagnostic",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+      "trigger": {
+        "title_contains": [
+          "DNS Agent"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "expected_condition",
+          "evidence_fresh",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:dns_agent_diagnostic"
+      }
+    },
+    {
+      "id": "idle_log_off",
+      "name": "Jason - Windows Idle Log Off Compliance / Repair",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
+      "trigger": {
+        "title_contains": [
+          "Get Idle Log Off Status",
+          "Compliant: False"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "applicability",
+          "expected_condition",
+          "component_variables_valid",
+          "evidence_fresh",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:idle_log_off"
+      }
+    },
+    {
+      "id": "security_log_self_heal",
+      "name": "Security Log Self-Heal",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
+      "trigger": {
+        "title_contains": [
+          "Windows Security Log unreadable"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "expected_condition",
+          "evidence_fresh",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:security_log_self_heal"
       }
     },
     {
@@ -58,56 +188,6 @@
       }
     },
     {
-      "id": "dns_agent_diagnostic",
-      "name": "Jason - DNSFilter DNS Agent Diagnostic",
-      "version": "1.0.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
-      "trigger": {
-        "title_contains": [
-          "DNS Agent"
-        ]
-      },
-      "autonomy": {
-        "activation": "shadow",
-        "required_gates": [
-          "trigger",
-          "identity",
-          "expected_condition",
-          "evidence_fresh",
-          "governance_precheck"
-        ],
-        "allowed_capabilities": [],
-        "policy_id": "playbook-autonomy:dns_agent_diagnostic"
-      }
-    },
-    {
-      "id": "backupiq_endpoint_backup",
-      "name": "Jason - BackupIQ Datto Endpoint Backup",
-      "version": "1.0.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
-      "trigger": {
-        "title_contains": [
-          "BackupIQ"
-        ]
-      },
-      "autonomy": {
-        "activation": "shadow",
-        "required_gates": [
-          "trigger",
-          "identity",
-          "expected_condition",
-          "evidence_fresh",
-          "governance_precheck"
-        ],
-        "allowed_capabilities": [],
-        "policy_id": "playbook-autonomy:backupiq_endpoint_backup"
-      }
-    },
-    {
       "id": "vulscan_missing_patch",
       "name": "Jason - Windows Update VulScan Missing Patch",
       "version": "1.0.0",
@@ -131,57 +211,6 @@
         ],
         "allowed_capabilities": [],
         "policy_id": "playbook-autonomy:vulscan_missing_patch"
-      }
-    },
-    {
-      "id": "security_log_self_heal",
-      "name": "Security Log Self-Heal",
-      "version": "1.0.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
-      "trigger": {
-        "title_contains": [
-          "Windows Security Log unreadable"
-        ]
-      },
-      "autonomy": {
-        "activation": "shadow",
-        "required_gates": [
-          "trigger",
-          "identity",
-          "expected_condition",
-          "evidence_fresh",
-          "governance_precheck"
-        ],
-        "allowed_capabilities": [],
-        "policy_id": "playbook-autonomy:security_log_self_heal"
-      }
-    },
-    {
-      "id": "disk_bad_block_event_7",
-      "name": "Jason - Windows Disk Bad Block Event ID 7",
-      "version": "1.0.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
-      "trigger": {
-        "title_contains": [
-          "bad block",
-          "Event ID 7"
-        ]
-      },
-      "autonomy": {
-        "activation": "shadow",
-        "required_gates": [
-          "trigger",
-          "identity",
-          "storage_evidence",
-          "evidence_fresh",
-          "governance_precheck"
-        ],
-        "allowed_capabilities": [],
-        "policy_id": "playbook-autonomy:disk_bad_block_event_7"
       }
     }
   ]
