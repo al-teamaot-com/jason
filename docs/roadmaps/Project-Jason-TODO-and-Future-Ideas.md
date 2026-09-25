@@ -98,6 +98,25 @@ Items in this document are not approved capabilities and must not be enabled mer
 
 ---
 
+## Endpoint diagnostics and real-time transport
+
+### TODO-ENDPOINT-PS-001 — Supported Datto real-time/Web Remote PowerShell transport
+
+- **Priority:** P1
+- **Status:** Researching
+- **Risk level:** High
+- **Idea:** Research and, only if Datto exposes a supported authenticated interface, add a real-time endpoint PowerShell transport behind the existing governed `endpoint.powershell.read` capability.
+- **Why it matters:** The production read-only PowerShell capability currently uses the supported Datto Quick Job path with `Run Ad Hoc Command (PowerShell 2-5) [WIN]`. It is governed and reliable but asynchronous. A supported real-time transport could materially improve interactive troubleshooting latency.
+- **Current production baseline:** Keep the existing Quick Job/component implementation as the reliable fallback. Do not describe the current implementation as Web Remote or interactive PowerShell.
+- **Required behavior:** Preserve the existing read-only classifier, sensitive-data boundary, exact endpoint binding, authority checks, audit evidence, output controls, and fail-closed behavior. A real-time transport must not create a general-purpose ungoverned shell.
+- **Research boundary:** Determine whether Datto provides a documented/supported API, session, or WebSocket interface for Web Remote PowerShell. Do not reverse-engineer browser-only/private protocols for production use without a separate governance and supportability decision.
+- **Prerequisites:** supported provider interface; authentication/session model; endpoint identity binding; timeout/cancellation semantics; output bounding; audit/correlation evidence; client isolation; security review; controlled production acceptance.
+- **Preferred provider order if admitted:** supported real-time Datto transport first, existing governed Quick Job/component transport as fallback.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Begin provider research after the component-backed `endpoint.powershell.read` production acceptance is documented.
+
+---
+
 ## Operational learning and resolution reuse
 
 ### TODO-OPS-001 — Operational Resolution Memory and case-based troubleshooting reuse
