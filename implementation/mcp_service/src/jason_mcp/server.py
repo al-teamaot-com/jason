@@ -56,6 +56,11 @@ from starlette.responses import JSONResponse
 from jason_runtime.autotask_ticket_create import (
     SERVICE_TICKET_CREATE,
 )
+from orchestrator.provider_read_capability_catalog import (
+    SERVICE_COMPANY_READ,
+    SERVICE_CONTRACT_READ,
+    SERVICE_CONTRACT_SEARCH,
+)
 from jason_runtime.autotask_internal_note import (
     SERVICE_TICKET_NOTE_CREATE,
     autotask_internal_note_mcp_surface_enabled,
@@ -841,6 +846,60 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _contract_client_context_for_identity(
+    *,
+    principal: str,
+    organization: str,
+    assurance: str,
+    bound_client_id: str | None,
+    capability_name: str,
+    arguments: Mapping[str, Any],
+) -> str | None:
+    if capability_name not in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+        return bound_client_id
+    raw_company_id = arguments.get("company_id")
+    if raw_company_id is None or isinstance(raw_company_id, bool):
+        return bound_client_id
+    try:
+        company_id = str(int(raw_company_id))
+    except (TypeError, ValueError):
+        return bound_client_id
+    if int(company_id) < 0:
+        return bound_client_id
+    if bound_client_id is not None:
+        return bound_client_id
+
+    # Organization-scoped principals may select a client only through an exact
+    # governed Autotask company read. Caller-supplied client_id is never accepted.
+    company = _governed_read_for_identity(
+        principal=principal,
+        organization=organization,
+        assurance=assurance,
+        client_id=None,
+        capability_name=SERVICE_COMPANY_READ,
+        arguments={"resource_id": int(company_id)},
+    )
+    if company.get("status") != "succeeded":
+        return None
+
+    app = _runtime()
+    decision = app.identity_authority.evaluate(
+        AuthorityRequest(
+            request_id=f"ctx_contract_{uuid4().hex}",
+            correlation_id=f"corr_contract_ctx_{uuid4().hex}",
+            principal_id=principal,
+            organization_id=organization,
+            client_id=company_id,
+            capability=capability_name,
+            requested_mode=PermissionMode.ADMINISTER,
+            authentication_assurance=assurance,
+        )
+    )
+    if decision.outcome is not AuthorityOutcome.ALLOWED:
+        return None
+    return company_id
+
+
 def _governed_read(
     *,
     capability_name: str,
@@ -852,6 +911,14 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
+    client_id = _contract_client_context_for_identity(
+        principal=principal,
+        organization=organization,
+        assurance=assurance,
+        bound_client_id=client_id,
+        capability_name=capability_name,
+        arguments=arguments,
+    )
     return _governed_read_for_identity(
         principal=principal,
         organization=organization,

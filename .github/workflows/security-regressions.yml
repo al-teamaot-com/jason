@@ -11,7 +11,7 @@ jobs:
   governed-security-regressions:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +20,7 @@ jobs:
       - name: Install security regression dependencies
         run: |
           python -m pip install --upgrade pip pytest
-          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
       - name: Compile security-critical modules and tests
         run: |
           python -m compileall -q \
@@ -42,6 +42,8 @@ jobs:
             implementation/kernel/tests/test_client_boundaries.py \
             implementation/kernel/tests/test_client_boundaries_sqlite.py \
             implementation/orchestrator/tests/test_execution_plan_binding.py \
+            implementation/orchestrator/tests/test_provider_read_extended_capabilities.py \
+            implementation/mcp_service/tests/test_contract_client_context.py \
             implementation/orchestrator/tests/test_governed_execution_replay.py \
             implementation/orchestrator/tests/test_approval_continuation_guard.py \
             implementation/tests/test_approval_continuation.py \
