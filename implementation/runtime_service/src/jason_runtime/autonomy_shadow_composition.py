@@ -10,6 +10,7 @@ from autonomous_remediation.autonomous_principal import (
     AutonomousPrincipal,
     AutonomousRequestFactory,
 )
+from autonomous_remediation.attention_scheduler import SQLiteWorkLedger
 from autonomous_remediation.autotask_queue_source import (
     AutotaskQueueDiscoveryConfig,
     AutotaskQueueSource,
@@ -21,6 +22,7 @@ from autonomous_remediation.playbook_autonomy_approval import (
 from autonomous_remediation.playbook_catalog import PlaybookCatalog
 from autonomous_remediation.shadow_assessment import ShadowQueueAssessor
 from autonomous_remediation.targeted_recheck import SQLiteTargetedWakeStore
+from autonomous_remediation.work_resume import LedgerWorkResumePort
 from kernel.capabilities import CapabilityRegistryService
 from kernel.identity_authority import IdentityAuthorityService
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -48,6 +50,7 @@ def build_autonomy_shadow_maintenance(
     promotion_db: Path,
     playbook_registry: Path,
     targeted_wake_db: Path,
+    work_db: Path,
     owned_autotask_resource_ids: Iterable[int] = (),
     max_active_work_items: int = 2,
     interval_seconds: int = 1800,
@@ -97,6 +100,8 @@ def build_autonomy_shadow_maintenance(
         failure_retry_seconds=failure_retry_seconds,
     )
     targeted_store = SQLiteTargetedWakeStore(targeted_wake_db)
+    work_ledger = SQLiteWorkLedger(work_db)
+    work_resume = LedgerWorkResumePort(work_ledger)
     targeted_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,
         orchestrator=orchestrator,
@@ -106,6 +111,7 @@ def build_autonomy_shadow_maintenance(
         store=targeted_store,
         reads=targeted_reads,
         queue_attention=shadow,
+        work_resume=work_resume,
         retry_seconds=targeted_wake_retry_seconds,
     )
     return CompositeAutonomyMaintenance(targeted, shadow)
