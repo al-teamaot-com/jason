@@ -37,10 +37,15 @@ class _Status:
 class _Result:
     status = _Status()
     output = {
-        "jasonVerification": {
-            "readbackVerified": True,
-            "ticketNoteId": 77,
-        }
+        "provider": "autotask",
+        "provider_capability": "autotask.ticket.note.create",
+        "data": {
+            "itemId": 77,
+            "jasonVerification": {
+                "readbackVerified": True,
+                "ticketNoteId": 77,
+            },
+        },
     }
     provider_id = "autotask_internal_note"
     correlation_id = "corr-pilot"
