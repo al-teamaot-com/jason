@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any, Mapping, Protocol, Sequence
 
 from .attention_scheduler import (
@@ -20,6 +22,7 @@ from .attention_scheduler import (
     WorkState,
 )
 from .playbook_matching import MatchState, PlaybookMatch
+from .targeted_recheck import TargetedWake, WakeKind
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,68 @@ class QueueCandidate:
 
 
 @dataclass(frozen=True)
+class RecheckRequest:
+    """Exact read-only follow-up requested by a playbook outcome."""
+
+    capability_name: str
+    arguments: Mapping[str, Any]
+    due_at: datetime | None = None
+    wake_on: str | None = None
+    queue_reconciliation_required: bool = False
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        capability = str(self.capability_name or "").strip()
+        if not capability:
+            raise ValueError("recheck capability_name must be non-empty")
+        if (self.due_at is None) == (not str(self.wake_on or "").strip()):
+            raise ValueError("recheck requires exactly one of due_at or wake_on")
+        if self.due_at is not None and self.due_at.tzinfo is None:
+            raise ValueError("recheck due_at must be timezone-aware")
+        if not 1 <= self.max_attempts <= 10:
+            raise ValueError("recheck max_attempts must be between 1 and 10")
+        try:
+            json.dumps(dict(self.arguments), sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("recheck arguments must be JSON-serializable") from exc
+
+    def to_wake(
+        self,
+        *,
+        resource_id: str,
+        playbook_id: str,
+        reason: str,
+    ) -> TargetedWake:
+        fingerprint_payload = {
+            "resource_id": resource_id,
+            "playbook_id": playbook_id,
+            "capability_name": self.capability_name,
+            "arguments": dict(self.arguments),
+            "due_at": self.due_at.isoformat() if self.due_at else None,
+            "wake_on": self.wake_on,
+            "queue_reconciliation_required": self.queue_reconciliation_required,
+        }
+        encoded = json.dumps(
+            fingerprint_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        wake_id = "recheck_" + hashlib.sha256(encoded).hexdigest()[:32]
+        return TargetedWake(
+            wake_id=wake_id,
+            resource_id=resource_id,
+            reason=reason,
+            kind=WakeKind.TARGETED_READ,
+            due_at=self.due_at,
+            wake_on=self.wake_on,
+            capability_name=self.capability_name,
+            arguments=dict(self.arguments),
+            queue_reconciliation_required=self.queue_reconciliation_required,
+            max_attempts=self.max_attempts,
+        )
+
+
+@dataclass(frozen=True)
 class WorkStepResult:
     state: WorkState
     reason: str
@@ -41,6 +106,21 @@ class WorkStepResult:
     next_check_at: datetime | None = None
     wake_on: str | None = None
     queue_reconciliation_required: bool = False
+    recheck: RecheckRequest | None = None
+
+    def __post_init__(self) -> None:
+        if self.recheck is not None:
+            if self.next_check_at is not None or self.wake_on is not None:
+                raise ValueError(
+                    "structured recheck cannot be combined with legacy next_check_at/wake_on"
+                )
+            if self.state not in {
+                WorkState.WAITING,
+                WorkState.APPROVAL_PENDING,
+            }:
+                raise ValueError(
+                    "structured recheck is valid only for waiting/approval-pending work"
+                )
 
 
 @dataclass(frozen=True)
@@ -77,6 +157,10 @@ class AuditPort(Protocol):
     def record(self, event_type: str, payload: Mapping[str, Any]) -> None: ...
 
 
+class WakeSchedulerPort(Protocol):
+    def schedule(self, wake: TargetedWake) -> None: ...
+
+
 class AutonomousQueueWorker:
     """One bounded scheduling/execution cycle.
 
@@ -97,6 +181,7 @@ class AutonomousQueueWorker:
         investigation: InvestigationPort,
         execution: ExecutionPort,
         audit: AuditPort,
+        wake_scheduler: WakeSchedulerPort | None = None,
     ) -> None:
         self.config = config
         self.ledger = ledger
@@ -108,6 +193,7 @@ class AutonomousQueueWorker:
         self.investigation = investigation
         self.execution = execution
         self.audit = audit
+        self.wake_scheduler = wake_scheduler
         self._candidates: dict[str, QueueCandidate] = {}
 
     def cycle(
@@ -254,14 +340,54 @@ class AutonomousQueueWorker:
         now: datetime,
         playbook_id: str | None = None,
     ) -> None:
+        effective_playbook_id = playbook_id or item.playbook_id
+        next_check_at = result.next_check_at
+        wake_on = result.wake_on
+        queue_reconciliation_required = result.queue_reconciliation_required
+
+        if result.recheck is not None:
+            if self.wake_scheduler is None:
+                raise RuntimeError(
+                    "structured playbook recheck requires a configured wake scheduler"
+                )
+            wake = result.recheck.to_wake(
+                resource_id=item.resource_id,
+                playbook_id=effective_playbook_id or "unclassified",
+                reason=result.reason,
+            )
+            self.wake_scheduler.schedule(wake)
+            next_check_at = result.recheck.due_at
+            wake_on = result.recheck.wake_on
+            queue_reconciliation_required = (
+                result.recheck.queue_reconciliation_required
+            )
+            self.audit.record(
+                "autonomy.work.recheck_scheduled",
+                {
+                    "resource_id": item.resource_id,
+                    "playbook_id": effective_playbook_id,
+                    "wake_id": wake.wake_id,
+                    "capability_name": wake.capability_name,
+                    "due_at": (
+                        wake.due_at.isoformat()
+                        if wake.due_at is not None
+                        else None
+                    ),
+                    "wake_on": wake.wake_on,
+                    "queue_reconciliation_required": (
+                        wake.queue_reconciliation_required
+                    ),
+                },
+            )
+
         updated = replace(
             item,
             state=result.state,
-            playbook_id=playbook_id or item.playbook_id,
+            playbook_id=effective_playbook_id,
             next_action=result.next_action,
-            next_check_at=result.next_check_at,
-            wake_on=result.wake_on,
-            queue_reconciliation_required=result.queue_reconciliation_required,
+            next_check_at=next_check_at,
+            wake_on=wake_on,
+            queue_reconciliation_required=queue_reconciliation_required,
             reason=result.reason,
             source_version=item.source_version,
             updated_at=now,
