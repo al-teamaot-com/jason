@@ -378,10 +378,24 @@ class OperationalAutonomyMaintenance:
         endpoint = self._read_record(
             "endpoint.device.read", {"resource_id": device_uid}
         )
-        if str(endpoint.get("resource_id") or "") != device_uid:
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != device_uid:
             raise OperationalAutonomyError("DRMM device identity mismatch")
-        if str(endpoint.get("hostname") or "").strip().casefold() != hostname.casefold():
-            raise OperationalAutonomyError("Autotask CI and DRMM hostname do not match")
+        if endpoint_hostname.casefold() != hostname.casefold():
+            raise OperationalAutonomyError(
+                "Autotask CI and DRMM hostname do not match"
+            )
         if endpoint.get("online") is not True:
             raise OperationalAutonomyError("endpoint is not currently online")
 
