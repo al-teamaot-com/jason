@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from types import SimpleNamespace
+
 import pytest
 
 from connectors.core.contracts import (
@@ -699,3 +701,106 @@ def test_governed_execution_rejects_tampered_target_before_quickjob(monkeypatch)
         value.execute_governed_execution(tampered)
 
     assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_autonomy_component_execution_uses_durable_scope_without_legacy_pilot(monkeypatch):
+    from jason_runtime.datto_component_execution import DattoRmmComponentExecutionConnector
+    from jason_runtime.datto_component_scope import DattoApprovedComponent
+    from connectors.core.contracts import ConnectorContext, ConnectorRequest
+
+    class Secrets:
+        def resolve(self, logical_secret, context):
+            return {
+                "api_url": "https://example.invalid",
+                "api_key": "client",
+                "api_secret": "secret",
+            }
+
+    class Transport:
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+            if method == "GET" and "/api/v2/device/" in url:
+                return {"uid": "device-1", "deleted": False, "suspended": False}
+            raise AssertionError((method, url))
+
+    monkeypatch.setattr(
+        "jason_runtime.datto_component_execution.acquire_access_token",
+        lambda **kwargs: SimpleNamespace(token_type="Bearer", access_token="token"),
+    )
+
+    connector = DattoRmmComponentExecutionConnector(
+        secrets=Secrets(),
+        transport=Transport(),
+        audit=SimpleNamespace(record=lambda *args, **kwargs: None),
+        pilot=None,
+        autonomy_enabled=True,
+        autonomy_components=(
+            DattoApprovedComponent(
+                uid="component-safe",
+                name="Safe Diagnostic",
+                approval_mode="standing_safe",
+            ),
+        ),
+    )
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-autonomy-component",
+            principal_id="jason-autonomy-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="datto_rmm.component.execute",
+            mode="execute",
+        ),
+        arguments={
+            "device_uid": "device-1",
+            "component_uid": "component-safe",
+            "component_name": "Safe Diagnostic",
+            "variables": {},
+            "job_name": "Jason autonomous test",
+        },
+    )
+
+    prepared = connector.prepare_governed_execution(request)
+
+    assert prepared.resource_identifier == "device-1"
+    assert prepared.parameters["allowlist_name"] == "aot-approved-components"
+    assert prepared.parameters["device_class"] == "managed_endpoint"
+
+
+def test_autonomy_component_execution_rejects_per_run_component(monkeypatch):
+    from jason_runtime.datto_component_execution import DattoRmmComponentExecutionConnector
+    from jason_runtime.datto_component_scope import DattoApprovedComponent
+    from connectors.core.contracts import ConnectorContext, ConnectorRequest
+
+    connector = DattoRmmComponentExecutionConnector(
+        secrets=SimpleNamespace(),
+        transport=SimpleNamespace(),
+        audit=SimpleNamespace(record=lambda *args, **kwargs: None),
+        pilot=None,
+        autonomy_enabled=True,
+        autonomy_components=(
+            DattoApprovedComponent(
+                uid="component-risky",
+                name="Risky Component",
+                approval_mode="per_run",
+            ),
+        ),
+    )
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-autonomy-component-risky",
+            principal_id="jason-autonomy-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="datto_rmm.component.execute",
+            mode="execute",
+        ),
+        arguments={
+            "device_uid": "device-1",
+            "component_uid": "component-risky",
+            "component_name": "Risky Component",
+            "variables": {},
+        },
+    )
+
+    with pytest.raises(PermissionError, match="DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"):
+        connector.prepare_governed_execution(request)

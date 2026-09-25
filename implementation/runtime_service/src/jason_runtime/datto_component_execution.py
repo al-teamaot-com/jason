@@ -74,6 +74,11 @@ DATTO_COMPONENT_EXECUTION_PROFILE_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE"
 )
 DATTO_COMPONENT_EXECUTION_PROFILE = "owner-diagnostic-v1"
+DATTO_COMPONENT_EXECUTION_AUTONOMY_ENV = (
+    "JASON_DATTO_COMPONENT_EXECUTION_AUTONOMY_ENABLED"
+)
+DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST = "aot-approved-components"
+DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS = "managed_endpoint"
 
 DATTO_EXECUTION_ALLOWLIST_NAME_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME"
@@ -185,6 +190,15 @@ def configured_pilot() -> DattoComponentExecutionPilot | None:
         device_uid=device_uid,
         device_class=device_class,
     )
+
+
+def datto_component_execution_autonomy_enabled() -> bool:
+    return _env(DATTO_COMPONENT_EXECUTION_AUTONOMY_ENV).casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def datto_component_execution_mcp_surface_enabled() -> bool:
@@ -404,10 +418,12 @@ def apply_datto_component_execution_activation(
         )
 
     pilot = configured_pilot()
+    autonomy_enabled = datto_component_execution_autonomy_enabled()
+    durable_components = configured_datto_components() if autonomy_enabled else ()
 
-    if pilot is None:
+    if pilot is None and not (autonomy_enabled and durable_components):
         raise DattoRmmComponentExecutionActivationError(
-            "Datto component-execution pilot configuration is absent"
+            "Datto component-execution configuration is absent"
         )
 
     capability = capabilities.get(
@@ -530,6 +546,8 @@ class DattoRmmComponentExecutionConnector:
         transport: HttpTransport,
         audit: AuditSink,
         pilot: DattoComponentExecutionPilot | None,
+        autonomy_enabled: bool = False,
+        autonomy_components: tuple[DattoApprovedComponent, ...] = (),
         sleeper: Callable[[float], None] = time.sleep,
         maximum_status_reads: int = 1,
         status_interval_seconds: float = 0.0,
@@ -538,6 +556,8 @@ class DattoRmmComponentExecutionConnector:
         self._transport = transport
         self._audit = audit
         self._pilot = pilot
+        self._autonomy_enabled = bool(autonomy_enabled)
+        self._autonomy_components = tuple(autonomy_components)
         self._sleeper = sleeper
         self._maximum_status_reads = maximum_status_reads
         self._status_interval_seconds = status_interval_seconds
@@ -627,11 +647,23 @@ class DattoRmmComponentExecutionConnector:
             )
 
         pilot = self._pilot
-        if pilot is None:
-            raise PermissionError("DATTO_COMPONENT_EXECUTION_PILOT_DISABLED")
+        autonomous_scope = (
+            pilot is None
+            and self._autonomy_enabled
+            and bool(self._autonomy_components)
+        )
+        if pilot is None and not autonomous_scope:
+            raise PermissionError("DATTO_COMPONENT_EXECUTION_SCOPE_DISABLED")
 
-        requested_allowlist = str(request.arguments.get("allowlist_name") or "").strip()
-        if requested_allowlist != pilot.allowlist_name:
+        requested_allowlist = str(
+            request.arguments.get("allowlist_name") or ""
+        ).strip()
+        effective_allowlist = (
+            pilot.allowlist_name
+            if pilot is not None
+            else DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST
+        )
+        if requested_allowlist and requested_allowlist != effective_allowlist:
             raise PermissionError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
 
         requested_device = str(
@@ -642,26 +674,47 @@ class DattoRmmComponentExecutionConnector:
         if not requested_device:
             raise PermissionError("DATTO_COMPONENT_TARGET_REQUIRED")
 
-        requested_class = str(request.arguments.get("device_class") or "").strip()
-        if requested_class.casefold() != pilot.device_class.casefold():
+        requested_class = str(
+            request.arguments.get("device_class") or ""
+        ).strip()
+        effective_device_class = (
+            pilot.device_class
+            if pilot is not None
+            else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+        )
+        if (
+            requested_class
+            and requested_class.casefold() != effective_device_class.casefold()
+        ):
             raise PermissionError("DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED")
 
-        requested_component_name = str(request.arguments.get("component_name") or "").strip()
+        requested_component_name = str(
+            request.arguments.get("component_name") or ""
+        ).strip()
         selected_component = resolve_datto_component(
-            pilot.components,
+            pilot.components if pilot is not None else self._autonomy_components,
             component_uid=request.arguments.get("component_uid"),
             component_name=request.arguments.get("component_name"),
             catalog_verified=True,
         )
+        if (
+            request.context.principal_id == "jason-autonomy-worker"
+            and selected_component.requires_explicit_approval
+        ):
+            raise PermissionError(
+                "DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"
+            )
         variables = request.arguments.get("variables", {})
         allowlist = StaticComponentAllowlist(
             entries=(
                 ComponentAllowlistEntry(
-                    allowlist_name=pilot.allowlist_name,
-                    canonical_component_id=f"datto:{pilot.allowlist_name}:{selected_component.uid}",
+                    allowlist_name=effective_allowlist,
+                    canonical_component_id=(
+                        f"datto:{effective_allowlist}:{selected_component.uid}"
+                    ),
                     display_name=selected_component.name,
                     provider_component_uid=selected_component.uid,
-                    allowed_target_classes=frozenset({pilot.device_class}),
+                    allowed_target_classes=frozenset({effective_device_class}),
                     variable_policies=(),
                     requires_per_run_approval=selected_component.requires_explicit_approval,
                     status="active",
@@ -670,9 +723,9 @@ class DattoRmmComponentExecutionConnector:
         )
         policy = DattoRmmComponentExecutionPolicy(allowlist=allowlist)
         prepared = policy.prepare(
-            allowlist_name=pilot.allowlist_name,
+            allowlist_name=effective_allowlist,
             device_uid=requested_device,
-            device_class=pilot.device_class,
+            device_class=effective_device_class,
             component_uid=selected_component.uid,
             variables=variables,
             job_name=str(
@@ -736,8 +789,8 @@ class DattoRmmComponentExecutionConnector:
             normalized_path=prepared.provider_request.path,
             payload=dict(prepared.provider_request.body),
             parameters={
-                "allowlist_name": pilot.allowlist_name,
-                "device_class": pilot.device_class,
+                "allowlist_name": effective_allowlist,
+                "device_class": effective_device_class,
                 "component_name": selected_component.name,
             },
             symbolic_resolutions=symbolic_resolutions,
@@ -777,7 +830,11 @@ class DattoRmmComponentExecutionConnector:
             raise PermissionError("prepared Datto quick-job payload changed")
         expected_parameters = {
             "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
-            "device_class": self._pilot.device_class if self._pilot is not None else "",
+            "device_class": (
+                self._pilot.device_class
+                if self._pilot is not None
+                else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+            ),
             "component_name": selected_component.name,
         }
         if expected_parameters != dict(prepared_execution.parameters):
@@ -958,11 +1015,16 @@ def build_datto_component_execution_invoker(
         secret_id_path=secret_id_path,
     )
 
+    autonomy_enabled = datto_component_execution_autonomy_enabled()
     connector = DattoRmmComponentExecutionConnector(
         secrets=secrets,
         transport=transport,
         audit=audit,
         pilot=configured_pilot(),
+        autonomy_enabled=autonomy_enabled,
+        autonomy_components=(
+            configured_datto_components() if autonomy_enabled else ()
+        ),
     )
 
     return GovernedConnectorCapabilityInvoker(
