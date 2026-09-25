@@ -4,6 +4,7 @@ import JSON5 from "json5";
 import {
   AgentApplication,
   CloudAdapter,
+  CreateConversationOptionsBuilder,
   MemoryStorage,
 } from "@microsoft/agents-hosting";
 import { createAgentRequestHandler } from "@microsoft/agents-hosting-express";
@@ -48,6 +49,23 @@ function storeConversationReference(context, aadObjectId, tenantId) {
   const identity = context.identity ?? {};
   const store = loadProactiveStore();
   store[aadObjectId.toLowerCase()] = { tenantId, reference, identity, updatedAt: new Date().toISOString() };
+  saveProactiveStore(store);
+}
+
+function storeCreatedConversation(conversation, aadObjectId, tenantId) {
+  const reference = conversation?.reference;
+  const identity = conversation?.identity ?? {};
+  const conversationId = reference?.conversation?.id;
+  if (!reference || !conversationId) {
+    throw new Error("Teams proactive conversation creation returned no conversation reference");
+  }
+  const store = loadProactiveStore();
+  store[aadObjectId.toLowerCase()] = {
+    tenantId,
+    reference,
+    identity,
+    updatedAt: new Date().toISOString(),
+  };
   saveProactiveStore(store);
 }
 
@@ -165,6 +183,47 @@ const agent = new AgentApplication({
   agentAppId: auth.clientId,
 });
 
+function buildProactiveActivity(text, card) {
+  return card
+    ? {
+        type: "message",
+        text,
+        attachments: [
+          {
+            contentType: "application/vnd.microsoft.card.adaptive",
+            content: card,
+          },
+        ],
+      }
+    : text;
+}
+
+async function createPersonalConversationAndSend({ aadObjectId, tenantId, text, card }) {
+  const options = CreateConversationOptionsBuilder
+    .create(auth.clientId, "msteams")
+    .withUser(aadObjectId)
+    .withTenantId(tenantId)
+    .isGroup(false)
+    .build();
+  let messageId = null;
+  const conversation = await agent.proactive.createConversation(
+    adapter,
+    options,
+    async (ctx) => {
+      const result = await ctx.sendActivity(buildProactiveActivity(text, card));
+      messageId = result?.id ?? result?.resourceResponse?.id ?? null;
+    },
+  );
+  if (!messageId) {
+    throw new Error("Teams proactive bootstrap send returned no message id");
+  }
+  storeCreatedConversation(conversation, aadObjectId, tenantId);
+  return {
+    messageId,
+    conversationId: conversation?.reference?.conversation?.id ?? null,
+  };
+}
+
 agent.onActivity("message", async (context) => {
   const activity = context.activity;
   const text = cleanTeamsText(activity);
@@ -276,23 +335,34 @@ server.post("/internal/proactive/send", async (req, res) => {
     return;
   }
   const record = loadProactiveStore()[aadObjectId.toLowerCase()];
-  if (!record || record.tenantId?.toLowerCase() !== tenantId.toLowerCase()) {
-    res.status(404).json({ status: "rejected", error_code: "conversation_not_found" });
+  if (record && record.tenantId?.toLowerCase() !== tenantId.toLowerCase()) {
+    res.status(403).json({ status: "rejected", error_code: "stored_tenant_mismatch" });
     return;
   }
   try {
     let messageId;
-    await adapter.continueConversation(record.identity, record.reference, async (ctx) => {
-      const activity = card
-        ? { type: "message", text, attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: card }] }
-        : text;
-      const result = await ctx.sendActivity(activity);
-      messageId = result?.id ?? result?.resourceResponse?.id ?? null;
-    });
-    if (!messageId && card) messageId = `accepted:${Date.now()}`;
+    let conversationId = record?.reference?.conversation?.id ?? null;
+    let bootstrapCreated = false;
+    if (record) {
+      await adapter.continueConversation(record.identity, record.reference, async (ctx) => {
+        const result = await ctx.sendActivity(buildProactiveActivity(text, card));
+        messageId = result?.id ?? result?.resourceResponse?.id ?? null;
+      });
+    } else {
+      const created = await createPersonalConversationAndSend({ aadObjectId, tenantId, text, card });
+      messageId = created.messageId;
+      conversationId = created.conversationId;
+      bootstrapCreated = true;
+    }
     if (!messageId) throw new Error("Teams proactive send returned no message id");
-    console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, messageId }));
-    res.json({ status: "succeeded", channel: "microsoft_teams", message_id: messageId });
+    console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, conversationId, messageId, bootstrapCreated }));
+    res.json({
+      status: "succeeded",
+      channel: "microsoft_teams",
+      message_id: messageId,
+      conversation_id: conversationId,
+      bootstrap_created: bootstrapCreated,
+    });
   } catch (error) {
     console.error(JSON.stringify({ event: "jason_teams_proactive_failed", aadObjectId, error: String(error?.message ?? error) }));
     res.status(502).json({ status: "failed", error_code: "teams_send_failed" });

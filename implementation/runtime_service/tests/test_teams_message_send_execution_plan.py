@@ -87,7 +87,7 @@ def test_teams_exact_prepared_plan_sends_once(tmp_path, monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
         def read(self):
-            return b'{"status":"succeeded","message_id":"message-1"}'
+            return b'{"status":"succeeded","message_id":"message-1","conversation_id":"conversation-1","bootstrap_created":true}'
 
     calls = []
     def fake_urlopen(req, timeout):
@@ -102,3 +102,5 @@ def test_teams_exact_prepared_plan_sends_once(tmp_path, monkeypatch):
 
     assert len(calls) == 1
     assert result.output["message_id"] == "message-1"
+    assert result.output["conversation_id"] == "conversation-1"
+    assert result.output["bootstrap_created"] is True

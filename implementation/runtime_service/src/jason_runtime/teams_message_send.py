@@ -110,6 +110,8 @@ class TeamsMessageSendInvoker:
                 "provider": PROVIDER,
                 "channel": "microsoft_teams",
                 "message_id": result["message_id"],
+                "conversation_id": result.get("conversation_id"),
+                "bootstrap_created": bool(result.get("bootstrap_created", False)),
             },
             attempts=1,
         )
