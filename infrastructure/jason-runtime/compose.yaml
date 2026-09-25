@@ -41,7 +41,9 @@ services:
       JASON_OPENAI_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/openai/role_id
       JASON_OPENAI_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/openai/secret_id
       JASON_PROVIDER_READ_ACTIVATION_PROFILE: ${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}
-      JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE: ${JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE:-owner-diagnostic-v1}
+      JASON_DATTO_POWERSHELL_READ_PROFILE: ${JASON_DATTO_POWERSHELL_READ_PROFILE:-readonly-v1}
+      JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/datto-rmm-execution/role_id
+      JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/datto-rmm-execution/secret_id
       JASON_HOSTED_SEMANTICS_ENABLED: "true"
       JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
       JASON_HOSTED_CONVERSATION_ENABLED: "true"
@@ -75,6 +77,8 @@ services:
       - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/role_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/secret_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/role-id}:/run/jason-secrets/openbao/datto-rmm-execution/role_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/secret-id}:/run/jason-secrets/openbao/datto-rmm-execution/secret_id:ro
       - ${JASON_SES_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_SES_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/role_id:ro
       - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
       - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
