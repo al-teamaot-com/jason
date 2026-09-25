@@ -79,6 +79,7 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-client-posture.json
         refresh_interval: 30s
+
   - job_name: jason-autonomy-flight-recorder
     scrape_interval: 1m
     scrape_timeout: 15s
@@ -91,5 +92,12 @@ scrape_configs:
     file_sd_configs:
       - files:
           - /etc/prometheus/file_sd/jason-grafana-assurance.json
+        refresh_interval: 30s
+
+
+  - job_name: jason-toner
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-toner.json
         refresh_interval: 30s
 

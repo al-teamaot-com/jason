@@ -116,6 +116,7 @@ Final bounded Datto proof: `docs/sessions/Jason-Datto-RMM-Governed-Execution-Pro
 Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
 
 
+
 ### Governed provider health canaries
 
 `jason-provider-health-canary.timer` runs the synthetic provider probes every fifteen minutes with randomized delay. The host runner invokes the MCP-contained canary module, which uses the dedicated `jason-provider-canary` service identity and `provider-health-canary-v1` policy through JKD-001 and the Central Orchestrator. Provider evidence is discarded before persistence.
@@ -127,3 +128,16 @@ The production-health exporter reads `/var/lib/jason/provider-health-canaries.js
 `reflection_exporter.py` exposes only aggregate REFLECT-001 state from `/var/lib/jason/openclaw/reflection.sqlite3`: store availability, bounded record count, authenticated correction count, current candidate lifecycle counts, bounded signal-kind counts, and passing/failed CI regression counts. It intentionally does not export candidate text, source record IDs, correlation IDs, principals, client identifiers, provider records, or any authority-bearing data.
 
 The **Jason Security & Learning** dashboard source includes these aggregate metrics alongside Resolution Memory. The source, Prometheus discovery configuration, and hardened exporter unit are merged; production activation through the root-owned immutable observability release boundary is tracked separately in GitHub issue #455. Reflection and dashboard state are observational only; neither can test, approve, promote, or execute an improvement.
+
+## AOT Toner Readiness
+
+The production toner-readiness dashboard is observational only. `jason-toner-exporter.service` refreshes a cached read-only KFS snapshot every 15 minutes and exposes it to Prometheus on TCP 9473. The dashboard answers the operational question **Which toner should we ship today?** while failing closed when KFS collection, device reporting, toner telemetry, customer identity, or part-number data is insufficient.
+
+Deployment:
+
+```bash
+JASON_REPO_ROOT="$PWD" infrastructure/showcase/deploy_toner_readiness.sh
+```
+
+This deployment does not create Autotask tickets, purchase orders, or customer communications. Seasonality and Autotask order-correlation remain separate future enrichment gates.
+
