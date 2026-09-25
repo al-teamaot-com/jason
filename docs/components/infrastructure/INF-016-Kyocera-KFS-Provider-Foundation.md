@@ -72,7 +72,7 @@ Meters and consumables use the documented `Device` endpoint. Alerts use
 ## Historical evidence plane
 
 Jason also maintains an append-oriented PostgreSQL history store populated by
-the deterministic nightly KFS collector. The restored Claw history and all new
+the deterministic KFS collector running every 6 hours. The restored Claw history and all new
 Jason collections use the same schema, preserving continuity across the
 migration.
 
@@ -82,7 +82,7 @@ logs, and per-run device deltas. PostgreSQL remains local-only on
 `127.0.0.1:5432`; provider credentials are not stored in the database.
 
 The collector is source-controlled under `infrastructure/kfs-collector/` and
-runs at midnight America/New_York after production cutover. Live provider reads
+runs at 00:00, 06:00, 12:00, and 18:00 America/New_York after production cutover. Live provider reads
 remain authoritative for current-state questions; PostgreSQL history is the
 longitudinal evidence source for prior-state, trend, delta, billing-validation,
 and correlation workflows.

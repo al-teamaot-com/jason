@@ -7,7 +7,7 @@ KFS is treated as a governed read-only data source with two complementary
 planes:
 
 1. Live provider reads through the canonical Jason `print.*` capabilities.
-2. Append-oriented PostgreSQL history populated by the nightly KFS collector.
+2. Append-oriented PostgreSQL history populated by the KFS collector every 6 hours.
 
 The history database preserves device, meter, supply, status, and device-log
 observations so Jason can support trend and prior-state workflows without
@@ -22,7 +22,7 @@ discarding the current KFS API view.
 - Production capability selection remains gated by `JASON_KFS_ENABLED`.
 - The PostgreSQL service is bound only to `127.0.0.1:5432`.
 - Claw must not be retired until Jason live reads, history collection, and the
-  midnight timer are all verified.
+  00:00 / 06:00 / 12:00 / 18:00 America/New_York timer is verified.
 
 ## Components
 
@@ -32,7 +32,7 @@ discarding the current KFS API view.
 - `compose.yaml` - local-only PostgreSQL definition.
 
 - `systemd/jason-kfs-collector.service` - oneshot collector service.
-- `systemd/jason-kfs-collector.timer` - midnight America/New_York schedule.
+- `systemd/jason-kfs-collector.timer` - 00:00 / 06:00 / 12:00 / 18:00 America/New_York schedule.
 - `install.sh` - installs the collector and timer without enabling the timer by default.
 
 ## Authentication

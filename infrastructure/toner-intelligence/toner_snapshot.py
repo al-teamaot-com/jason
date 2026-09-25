@@ -51,7 +51,7 @@ def main(path: str):
     run_times=[dt(r['started_at']) for r in run_rows if dt(r['started_at'])]
     latest_run=max(run_times) if run_times else None
     collector_age_hours=((now-latest_run).total_seconds()/3600) if latest_run else None
-    collector_current=collector_age_hours is not None and collector_age_hours <= 36
+    collector_current=collector_age_hours is not None and collector_age_hours <= 9
 
     grouped=defaultdict(list); meta={}
     for row in query(READINGS_SQL):
@@ -77,7 +77,7 @@ def main(path: str):
         device_state=classify_telemetry(missed_device,0,device_age_days)[0]
         if not collector_current:
             telemetry_state='collection_stale'
-            telemetry_reason='latest successful KFS collection is older than 36 hours'
+            telemetry_reason='latest successful KFS collection is older than 9 hours'
             device_state='collection_stale'
 
         action, reason=apply_safety_gates(f.action,f.reason,telemetry_state,telemetry_reason,

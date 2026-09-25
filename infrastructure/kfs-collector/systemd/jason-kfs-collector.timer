@@ -1,8 +1,11 @@
 [Unit]
-Description=Run Jason Kyocera KFS collector nightly
+Description=Run Jason Kyocera KFS collector every 6 hours
 
 [Timer]
 OnCalendar=*-*-* 00:00:00 America/New_York
+OnCalendar=*-*-* 06:00:00 America/New_York
+OnCalendar=*-*-* 12:00:00 America/New_York
+OnCalendar=*-*-* 18:00:00 America/New_York
 AccuracySec=1min
 Unit=jason-kfs-collector.service
 
