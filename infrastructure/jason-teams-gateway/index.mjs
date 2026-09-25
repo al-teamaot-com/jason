@@ -15,6 +15,7 @@ import {
   postConversationEnvelope,
   replyForRuntimeResult,
 } from "./bridge-core.mjs";
+import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -31,7 +32,9 @@ const REQUEST_TIMEOUT_MS = Number(
 const SAFE_FAILURE_TEXT =
   "Jason could not safely process that request. No action was taken.";
 const PROACTIVE_STORE_PATH = process.env.JASON_TEAMS_PROACTIVE_STORE_PATH ?? "/var/lib/jason-teams/proactive.json";
+const APPROVAL_DECISION_STORE_PATH = process.env.JASON_TEAMS_APPROVAL_DECISION_STORE_PATH ?? "/var/lib/jason-teams/approval-decisions.json";
 const PROACTIVE_TOKEN = nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN);
+const approvalDecisions = createApprovalDecisionStore({ path: APPROVAL_DECISION_STORE_PATH });
 
 function loadProactiveStore() {
   if (!existsSync(PROACTIVE_STORE_PATH)) return {};
@@ -72,6 +75,23 @@ function storeCreatedConversation(conversation, aadObjectId, tenantId) {
 
 function nonBlank(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function parseApprovalSubmit(value) {
+  if (!value || typeof value !== "object") return null;
+  const approvalId = nonBlank(value.approval_id);
+  const decision = nonBlank(value.decision)?.toLowerCase();
+  if (!approvalId || approvalId.length > 256 || !["approve", "deny"].includes(decision)) {
+    return null;
+  }
+  return { approvalId, decision };
+}
+
+function terminalApprovalText(record) {
+  if (record.state === "decided") {
+    return `This approval was already decided: ${record.decision === "approve" ? "Approved" : "Denied"}.`;
+  }
+  return "This approval decision is already being processed or its outcome is uncertain. Review the existing result before retrying.";
 }
 
 function loadOptionalOpenClawTeamsConfig() {
@@ -261,8 +281,34 @@ agent.onActivity("message", async (context) => {
 
   try {
     storeConversationReference(context, aadObjectId, tenantId);
-    const governedText = submitValue?.approval_id && submitValue?.decision
-      ? `Jason approval response: ${String(submitValue.decision)} approval ${String(submitValue.approval_id)}`
+    const approvalSubmit = parseApprovalSubmit(submitValue);
+    if (submitValue && !approvalSubmit) {
+      await context.sendActivity("Jason rejected this approval response because its approval ID or decision was invalid.");
+      return;
+    }
+    if (approvalSubmit) {
+      const claim = approvalDecisions.begin({
+        tenantId,
+        approvalId: approvalSubmit.approvalId,
+        aadObjectId,
+        decision: approvalSubmit.decision,
+        messageId,
+      });
+      if (!claim.accepted) {
+        console.log(JSON.stringify({
+          event: "jason_teams_approval_duplicate_blocked",
+          approvalId: approvalSubmit.approvalId,
+          attemptedDecision: approvalSubmit.decision,
+          existingDecision: claim.record.decision,
+          existingState: claim.record.state,
+          aadObjectId,
+        }));
+        await context.sendActivity(terminalApprovalText(claim.record));
+        return;
+      }
+    }
+    const governedText = approvalSubmit
+      ? `Jason approval response: ${approvalSubmit.decision} approval ${approvalSubmit.approvalId}`
       : text;
     const envelope = buildConversationEnvelope({
       text: governedText,
@@ -283,6 +329,13 @@ agent.onActivity("message", async (context) => {
     });
 
     logRuntimeFailure(result, { conversationId, messageId });
+    if (approvalSubmit && Number(result?.httpStatus ?? 0) < 400 && result?.payload?.status === "completed") {
+      approvalDecisions.finalize({
+        tenantId,
+        approvalId: approvalSubmit.approvalId,
+        resultStatus: String(result.payload.status),
+      });
+    }
     await context.sendActivity(replyForRuntimeResult(result));
 
     console.log(
