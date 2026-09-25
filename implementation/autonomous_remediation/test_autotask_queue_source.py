@@ -20,6 +20,11 @@ class Reads:
                         {"value": "1", "label": "High", "sortOrder": 2, "isActive": True},
                         {"value": "2", "label": "Medium", "sortOrder": 3, "isActive": True},
                     ]},
+                    {"name": "status", "picklistValues": [
+                        {"value": "1", "label": "New", "isActive": True},
+                        {"value": "8", "label": "In Progress", "isActive": True},
+                        {"value": "5", "label": "Complete", "isActive": True},
+                    ]},
                 ]}},
             }
         queue = arguments["filters"]["queueID"]
@@ -116,3 +121,117 @@ def test_configured_jason_resource_assignment_is_eligible_outside_jason_queue():
     assert "22" in found
     assert found["22"].owned_by_jason is True
     assert found["22"].urgent is True
+
+
+
+class ExactReads:
+    def __init__(self, ticket):
+        self.ticket = ticket
+        self.calls = []
+
+    def execute(self, capability, arguments):
+        self.calls.append((capability, dict(arguments)))
+        if capability != "service.ticket.read":
+            raise AssertionError(capability)
+        return {
+            "status": "succeeded",
+            "evidence": {"data": {"items": [dict(self.ticket)]}},
+        }
+
+
+def test_exact_candidate_refresh_uses_separate_targeted_read_port():
+    search_reads = Reads()
+    exact_reads = ExactReads(
+        {
+            "id": 10,
+            "priority": 2,
+            "queueID": 100,
+            "status": 8,
+            "assignedResourceID": 99,
+            "lastTrackedModificationDateTime": "2026-09-25T11:00:00Z",
+            "title": "owned",
+        }
+    )
+    source = AutotaskQueueSource(
+        reads=search_reads,
+        exact_reads=exact_reads,
+        config=config(),
+    )
+
+    candidate = source.read_candidate("10")
+
+    assert candidate is not None
+    assert candidate.resource_id == "10"
+    assert candidate.source_queue == "Jason"
+    assert candidate.owned_by_jason is True
+    assert candidate.source_version == "2026-09-25T11:00:00Z"
+    assert exact_reads.calls == [
+        ("service.ticket.read", {"ticket_id": 10})
+    ]
+    assert not any(
+        capability == "service.ticket.read"
+        for capability, _ in search_reads.calls
+    )
+
+
+def test_exact_candidate_refresh_does_not_resurrect_completed_ticket():
+    exact_reads = ExactReads(
+        {
+            "id": 10,
+            "priority": 2,
+            "queueID": 100,
+            "status": 5,
+            "assignedResourceID": 99,
+            "lastTrackedModificationDateTime": "2026-09-25T11:00:00Z",
+            "title": "complete",
+        }
+    )
+    source = AutotaskQueueSource(
+        reads=Reads(),
+        exact_reads=exact_reads,
+        config=config(),
+    )
+    assert source.read_candidate("10") is None
+
+
+def test_exact_candidate_refresh_does_not_steal_human_assigned_discovery_ticket():
+    exact_reads = ExactReads(
+        {
+            "id": 20,
+            "priority": 1,
+            "queueID": 200,
+            "status": 1,
+            "assignedResourceID": 123,
+            "lastTrackedModificationDateTime": "2026-09-25T11:00:00Z",
+            "title": "human-owned",
+        }
+    )
+    source = AutotaskQueueSource(
+        reads=Reads(),
+        exact_reads=exact_reads,
+        config=config(),
+    )
+    assert source.read_candidate("20") is None
+
+
+def test_exact_candidate_refresh_accepts_verified_jason_assignment():
+    exact_reads = ExactReads(
+        {
+            "id": 22,
+            "priority": 4,
+            "queueID": 200,
+            "status": 1,
+            "assignedResourceID": 999,
+            "lastTrackedModificationDateTime": "2026-09-25T11:00:00Z",
+            "title": "jason-assigned",
+        }
+    )
+    source = AutotaskQueueSource(
+        reads=Reads(),
+        exact_reads=exact_reads,
+        config=config(owned_resource_ids=(999,)),
+    )
+    candidate = source.read_candidate("22")
+    assert candidate is not None
+    assert candidate.owned_by_jason is True
+    assert candidate.urgent is True
