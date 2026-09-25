@@ -2004,6 +2004,59 @@ def _resolve_live_datto_component_name(
     )
 
 
+def _resolve_live_datto_component_uid(
+    component_uid: object,
+) -> tuple[str, str]:
+    """Resolve one exact component UID through complete governed catalog discovery."""
+
+    requested_uid = str(component_uid or "").strip()
+    if not requested_uid:
+        raise ValueError("DATTO_COMPONENT_IDENTITY_REQUIRED")
+
+    lookup = _governed_read(
+        capability_name="automation.component.search",
+        arguments=_canonical_datto_component_search_arguments({}),
+    )
+    if lookup.get("status") != "succeeded":
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+
+    evidence = lookup.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+
+    nested = evidence.get("data")
+    catalog = nested if isinstance(nested, Mapping) else evidence
+    if catalog.get("discovery_complete") is not True:
+        raise ValueError("DATTO_COMPONENT_CATALOG_DISCOVERY_INCOMPLETE")
+
+    matches = catalog.get("resource_matches")
+    if not isinstance(matches, (list, tuple)):
+        raise ValueError("DATTO_COMPONENT_CATALOG_LOOKUP_FAILED")
+
+    exact: list[tuple[str, str]] = []
+    for item in matches:
+        if not isinstance(item, Mapping):
+            continue
+        live_uid = str(item.get("resource_id") or "").strip()
+        if live_uid != requested_uid:
+            continue
+        live_name = str(item.get("name") or "").strip()
+        if not live_name:
+            raise ValueError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+        exact.append((live_uid, live_name))
+
+    if not exact:
+        raise ValueError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+
+    unique = {
+        (uid, name.casefold())
+        for uid, name in exact
+    }
+    if len(unique) != 1:
+        raise ValueError("DATTO_COMPONENT_CATALOG_AMBIGUOUS")
+
+    return exact[0]
+
 
 def _verify_managed_datto_component_target(
     device_uid: object,
@@ -2867,6 +2920,21 @@ def _canonicalize_governed_action_arguments(
         supplied_component_name = (
             live_component_name
         )
+    elif supplied_component_uid:
+        # UID-only callers are common when the component was selected from a
+        # governed catalog result. Re-resolve that UID against the complete live
+        # Datto catalog so a newly added valid component is not rejected merely
+        # because the static approval/classification scope has not learned it.
+        # Live discovery supplies the display name; unclassified components
+        # remain per-run and a stale/unknown UID still fails closed.
+        (
+            live_component_uid,
+            live_component_name,
+        ) = _resolve_live_datto_component_uid(
+            supplied_component_uid
+        )
+        supplied_component_uid = live_component_uid
+        supplied_component_name = live_component_name
 
     selected_component = resolve_datto_component(
         components,
