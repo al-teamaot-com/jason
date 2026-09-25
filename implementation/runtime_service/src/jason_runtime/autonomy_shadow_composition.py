@@ -68,12 +68,13 @@ def build_autonomy_shadow_maintenance(
         execution_ledger=execution_ledger,
         promotion_store=promotion_store,
     )
-    reads = GovernedAutonomyReadPort(
+    shadow_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,
         orchestrator=orchestrator,
+        policy_id="autonomous-shadow-read-v1",
     )
     queue_source = AutotaskQueueSource(
-        reads=reads,
+        reads=shadow_reads,
         config=AutotaskQueueDiscoveryConfig(
             owned_resource_ids=tuple(owned_autotask_resource_ids),
         ),
@@ -96,9 +97,14 @@ def build_autonomy_shadow_maintenance(
         failure_retry_seconds=failure_retry_seconds,
     )
     targeted_store = SQLiteTargetedWakeStore(targeted_wake_db)
+    targeted_reads = GovernedAutonomyReadPort(
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+        policy_id="autonomous-targeted-read-v1",
+    )
     targeted = TargetedWakeMaintenance(
         store=targeted_store,
-        reads=reads,
+        reads=targeted_reads,
         queue_attention=shadow,
         retry_seconds=targeted_wake_retry_seconds,
     )
