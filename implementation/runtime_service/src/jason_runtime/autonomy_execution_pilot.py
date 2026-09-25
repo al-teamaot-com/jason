@@ -166,8 +166,15 @@ class ControlledAutonomyInternalNotePilot:
                 + str(getattr(result, "error_code", None) or getattr(result, "reason_codes", None))
             )
 
-        output = result.output if isinstance(getattr(result, "output", None), Mapping) else {}
-        verification = output.get("jasonVerification")
+        output = (
+            result.output
+            if isinstance(getattr(result, "output", None), Mapping)
+            else {}
+        )
+        provider_data = output.get("data")
+        if not isinstance(provider_data, Mapping):
+            provider_data = output
+        verification = provider_data.get("jasonVerification")
         if not isinstance(verification, Mapping) or verification.get("readbackVerified") is not True:
             raise AutonomyExecutionPilotError(
                 "provider mutation succeeded without required connector readback verification"
