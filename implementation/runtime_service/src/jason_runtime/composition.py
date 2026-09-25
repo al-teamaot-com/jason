@@ -251,6 +251,7 @@ from .datto_site_variable_management import (
     register_site_variable_runtime_foundation,
 )
 from .http import RuntimeHttpApplication
+from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .microsoft_directory import build_microsoft_directory_runtime
 from .provider_reads import (
     build_provider_read_invoker,
@@ -364,6 +365,20 @@ class RuntimeSettings:
         "/var/lib/jason/openclaw/dynamic-conversation-context.sqlite3"
     )
     dynamic_conversation_context_ttl_seconds: int = 3600
+    autonomy_shadow_enabled: bool = False
+    autonomy_shadow_db: Path = Path(
+        "/var/lib/jason/openclaw/autonomy-shadow.sqlite3"
+    )
+    autonomy_promotion_db: Path = Path(
+        "/var/lib/jason/openclaw/playbook-autonomy.sqlite3"
+    )
+    autonomy_playbook_registry: Path = Path(
+        "/app/implementation/autonomous_remediation/playbook_registry.json"
+    )
+    autonomy_owned_autotask_resource_ids: tuple[int, ...] = ()
+    autonomy_max_active_work_items: int = 2
+    autonomy_shadow_interval_seconds: int = 1800
+    autonomy_shadow_failure_retry_seconds: int = 300
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -618,6 +633,43 @@ class RuntimeSettings:
             dynamic_conversation_context_ttl_seconds=int(
                 os.getenv("JASON_DYNAMIC_CONVERSATION_CONTEXT_TTL_SECONDS", "3600")
             ),
+            autonomy_shadow_enabled=os.getenv(
+                "JASON_AUTONOMY_SHADOW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            autonomy_shadow_db=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_SHADOW_DB",
+                    "/var/lib/jason/openclaw/autonomy-shadow.sqlite3",
+                )
+            ),
+            autonomy_promotion_db=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_PROMOTION_DB",
+                    "/var/lib/jason/openclaw/playbook-autonomy.sqlite3",
+                )
+            ),
+            autonomy_playbook_registry=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_PLAYBOOK_REGISTRY",
+                    "/app/implementation/autonomous_remediation/playbook_registry.json",
+                )
+            ),
+            autonomy_owned_autotask_resource_ids=tuple(
+                int(item.strip())
+                for item in os.getenv(
+                    "JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS", ""
+                ).split(",")
+                if item.strip()
+            ),
+            autonomy_max_active_work_items=int(
+                os.getenv("JASON_AUTONOMY_MAX_ACTIVE_WORK_ITEMS", "2")
+            ),
+            autonomy_shadow_interval_seconds=int(
+                os.getenv("JASON_AUTONOMY_SHADOW_INTERVAL_SECONDS", "1800")
+            ),
+            autonomy_shadow_failure_retry_seconds=int(
+                os.getenv("JASON_AUTONOMY_SHADOW_FAILURE_RETRY_SECONDS", "300")
+            ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -627,6 +679,28 @@ class RuntimeSettings:
     def validate(self) -> None:
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
+        if not 1 <= self.autonomy_max_active_work_items <= 100:
+            raise ValueError(
+                "JASON_AUTONOMY_MAX_ACTIVE_WORK_ITEMS must be between 1 and 100"
+            )
+        if self.autonomy_shadow_interval_seconds < 60:
+            raise ValueError(
+                "JASON_AUTONOMY_SHADOW_INTERVAL_SECONDS must be at least 60"
+            )
+        if not (
+            60
+            <= self.autonomy_shadow_failure_retry_seconds
+            <= self.autonomy_shadow_interval_seconds
+        ):
+            raise ValueError(
+                "JASON_AUTONOMY_SHADOW_FAILURE_RETRY_SECONDS must be between "
+                "60 and the shadow interval"
+            )
+        if any(value < 1 for value in self.autonomy_owned_autotask_resource_ids):
+            raise ValueError(
+                "JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS must contain "
+                "positive integers"
+            )
         if self.hosted_semantics_enabled and not self.openai_semantic_model:
             raise ValueError(
                 "JASON_OPENAI_SEMANTIC_MODEL is required when hosted semantics are enabled"
@@ -1572,6 +1646,22 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         flow=flow,
         allowed_machine_identities=settings.allowed_machine_identities,
     )
+    autonomy_maintenance = build_autonomy_shadow_maintenance(
+        enabled=settings.autonomy_shadow_enabled,
+        identity_authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approval_repository,
+        execution_ledger=governed_execution_ledger,
+        orchestrator=orchestrator,
+        shadow_db=settings.autonomy_shadow_db,
+        promotion_db=settings.autonomy_promotion_db,
+        playbook_registry=settings.autonomy_playbook_registry,
+        owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+        max_active_work_items=settings.autonomy_max_active_work_items,
+        interval_seconds=settings.autonomy_shadow_interval_seconds,
+        failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
+    )
+
     return RuntimeHttpApplication(
         ingress=OpenClawReturnPathConversationIngress(
             ingress=governed_ingress,
@@ -1583,4 +1673,5 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,
         microsoft_user_directory=microsoft_directory.directory,
+        maintenance=autonomy_maintenance,
     )
