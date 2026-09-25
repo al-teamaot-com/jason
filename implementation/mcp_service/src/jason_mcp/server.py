@@ -39,6 +39,18 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
+from autonomous_remediation.autonomous_principal import (
+    AutonomousPrincipal,
+    AutonomousRequestFactory,
+)
+from autonomous_remediation.playbook_autonomy_approval import (
+    SQLitePlaybookAutonomyApprovalStore,
+)
+from jason_runtime.autonomy_shadow_runtime import GovernedAutonomyReadPort
+from jason_runtime.autonomy_execution_pilot import (
+    AutonomyInternalNotePilotSpec,
+    ControlledAutonomyInternalNotePilot,
+)
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
 from connectors.dnsfilter.mcp_oauth import (
@@ -335,6 +347,35 @@ def _governed_execution_ledger() -> SQLiteGovernedExecutionLedger:
     ledger = SQLiteGovernedExecutionLedger(path)
     ledger.initialize()
     return ledger
+
+
+@lru_cache(maxsize=1)
+def _playbook_autonomy_store() -> SQLitePlaybookAutonomyApprovalStore:
+    path = Path(
+        os.environ.get(
+            "JASON_AUTONOMY_PROMOTION_DB",
+            "/var/lib/jason/openclaw/playbook-autonomy.sqlite3",
+        ).strip()
+    )
+    return SQLitePlaybookAutonomyApprovalStore(path)
+
+
+_AUTONOMY_ACCEPTANCE_PLAYBOOK_ID = "autonomy_execution_acceptance"
+_AUTONOMY_ACCEPTANCE_PLAYBOOK_VERSION = "1.0.0"
+_AUTONOMY_ACCEPTANCE_POLICY_ID = (
+    "playbook-autonomy:autonomy_execution_acceptance"
+)
+_AUTONOMY_ACCEPTANCE_CAPABILITY = SERVICE_TICKET_NOTE_CREATE
+_AUTONOMY_ACCEPTANCE_TICKET_ID = 8870
+_AUTONOMY_ACCEPTANCE_TICKET_NUMBER = "T20191013.0001"
+_AUTONOMY_ACCEPTANCE_COMPANY_ID = 1158
+_AUTONOMY_ACCEPTANCE_COMPANY_NAME = "XYZ Test Company"
+_AUTONOMY_ACCEPTANCE_NOTE_TITLE = "Jason - Autonomous Execution Acceptance"
+_AUTONOMY_ACCEPTANCE_NOTE_BODY = (
+    "Controlled autonomous service-principal acceptance test. "
+    "No ticket fields or endpoint state changed."
+)
+_AUTONOMY_ACCEPTANCE_PROMOTION_TTL_MINUTES = 30
 
 
 def _auto_enroll_aot_member(
@@ -3584,6 +3625,267 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
     return {
         "status":"succeeded","grant_id":revoked.grant_id,"subject_id":revoked.subject_id,
         "capability":revoked.capability,"status_after":revoked.status,
+    }
+
+
+def _autonomy_acceptance_audit(
+    *,
+    event_type: str,
+    principal: str,
+    outcome: str,
+    reason_codes: tuple[str, ...],
+) -> None:
+    app = _runtime()
+    audit = app.identity_authority.audit
+    if audit is None:
+        raise RuntimeError("AUTONOMY_ACCEPTANCE_AUDIT_UNAVAILABLE")
+    audit.append_authority_audit(
+        event_type=event_type,
+        correlation_id=f"autonomy-acceptance:{uuid4().hex}",
+        principal_id=principal,
+        organization_id="aot",
+        capability=_AUTONOMY_ACCEPTANCE_CAPABILITY,
+        outcome=outcome,
+        reason_codes=reason_codes,
+    )
+
+
+def _active_autonomy_acceptance_promotion():
+    return _playbook_autonomy_store().find_approved(
+        playbook_id=_AUTONOMY_ACCEPTANCE_PLAYBOOK_ID,
+        playbook_version=_AUTONOMY_ACCEPTANCE_PLAYBOOK_VERSION,
+        policy_id=_AUTONOMY_ACCEPTANCE_POLICY_ID,
+        capability=_AUTONOMY_ACCEPTANCE_CAPABILITY,
+    )
+
+
+@mcp.tool()
+def autonomy_execution_acceptance_status() -> dict[str, Any]:
+    """Owner-only: report the exact first autonomous-write acceptance authority state."""
+    try:
+        principal, _ = _authority_admin_owner()
+        app = _runtime()
+        grants = app.identity_authority.grants.list_for_subject(
+            "jason-autonomy-worker"
+        )
+        exact = {
+            grant.capability: {
+                "grant_id": grant.grant_id,
+                "permission": grant.permission.value,
+                "approval_required": grant.approval_required,
+                "status": grant.status,
+                "client_id": grant.client_id,
+            }
+            for grant in grants
+            if grant.capability in {
+                "service.ticket.read",
+                "service.company.read",
+                "service.ticket.notes.search",
+                _AUTONOMY_ACCEPTANCE_CAPABILITY,
+            }
+        }
+        promotion = _active_autonomy_acceptance_promotion()
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.status.read",
+            principal=principal,
+            outcome="succeeded",
+            reason_codes=("ACCEPTANCE_STATUS",),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded",
+        "workload_principal":"jason-autonomy-worker",
+        "required_grants":exact,
+        "promotion": None if promotion is None else {
+            "approval_id":promotion.approval_id,
+            "playbook_id":promotion.playbook_id,
+            "playbook_version":promotion.playbook_version,
+            "policy_id":promotion.policy_id,
+            "allowed_capabilities":list(promotion.allowed_capabilities),
+            "approved_by":promotion.approved_by,
+            "approved_at":promotion.approved_at.isoformat(),
+            "expires_at":promotion.expires_at.isoformat() if promotion.expires_at else None,
+            "status":promotion.status,
+        },
+        "target":{
+            "ticket_id":_AUTONOMY_ACCEPTANCE_TICKET_ID,
+            "ticket_number":_AUTONOMY_ACCEPTANCE_TICKET_NUMBER,
+            "company_id":_AUTONOMY_ACCEPTANCE_COMPANY_ID,
+            "company_name":_AUTONOMY_ACCEPTANCE_COMPANY_NAME,
+        },
+    }
+
+
+@mcp.tool()
+def approve_autonomy_execution_acceptance() -> dict[str, Any]:
+    """Owner-only: approve the exact 30-minute first autonomous-write acceptance policy."""
+    try:
+        principal, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("AUTONOMY_ACCEPTANCE_ORGANIZATION_MISMATCH")
+        existing = _active_autonomy_acceptance_promotion()
+        if existing is not None:
+            return {
+                "status":"succeeded","idempotent":True,
+                "approval_id":existing.approval_id,
+                "expires_at":existing.expires_at.isoformat() if existing.expires_at else None,
+            }
+        store = _playbook_autonomy_store()
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=_AUTONOMY_ACCEPTANCE_PROMOTION_TTL_MINUTES
+        )
+        record = store.new(
+            playbook_id=_AUTONOMY_ACCEPTANCE_PLAYBOOK_ID,
+            playbook_version=_AUTONOMY_ACCEPTANCE_PLAYBOOK_VERSION,
+            policy_id=_AUTONOMY_ACCEPTANCE_POLICY_ID,
+            allowed_capabilities=(_AUTONOMY_ACCEPTANCE_CAPABILITY,),
+            approved_by=principal,
+            expires_at=expires_at,
+        )
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.promotion.requested",
+            principal=principal,
+            outcome="requested",
+            reason_codes=(record.approval_id,),
+        )
+        store.put(record)
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.promotion.created",
+            principal=principal,
+            outcome="succeeded",
+            reason_codes=(record.approval_id,),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded","idempotent":False,
+        "approval_id":record.approval_id,
+        "playbook_id":record.playbook_id,
+        "playbook_version":record.playbook_version,
+        "policy_id":record.policy_id,
+        "allowed_capabilities":list(record.allowed_capabilities),
+        "approved_by":record.approved_by,
+        "expires_at":record.expires_at.isoformat() if record.expires_at else None,
+    }
+
+
+@mcp.tool()
+def revoke_autonomy_execution_acceptance(
+    reason: str = "acceptance_complete",
+) -> dict[str, Any]:
+    """Owner-only: revoke the exact first autonomous-write acceptance promotion."""
+    try:
+        principal, _ = _authority_admin_owner()
+        current = _active_autonomy_acceptance_promotion()
+        if current is None:
+            return {"status":"succeeded","idempotent":True,"revoked":False}
+        revoked = _playbook_autonomy_store().revoke(
+            current.approval_id,
+            revoked_by=principal,
+            reason=str(reason or "acceptance_complete").strip() or "acceptance_complete",
+        )
+        if revoked is None:
+            raise RuntimeError("AUTONOMY_ACCEPTANCE_PROMOTION_NOT_FOUND")
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.promotion.revoked",
+            principal=principal,
+            outcome="succeeded",
+            reason_codes=(revoked.approval_id,),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status":"rejected","error_code":str(exc)}
+    return {
+        "status":"succeeded","idempotent":False,"revoked":True,
+        "approval_id":revoked.approval_id,
+        "revoked_by":revoked.revoked_by,
+        "revoked_at":revoked.revoked_at.isoformat() if revoked.revoked_at else None,
+        "reason":revoked.revoke_reason,
+    }
+
+
+@mcp.tool()
+def run_autonomy_execution_acceptance() -> dict[str, Any]:
+    """Owner-only: run the exact single-note XYZ autonomous execution acceptance once."""
+    try:
+        principal, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("AUTONOMY_ACCEPTANCE_ORGANIZATION_MISMATCH")
+        app = _runtime()
+        store = _playbook_autonomy_store()
+        request_factory = AutonomousRequestFactory(
+            principal=AutonomousPrincipal(),
+            authority=app.identity_authority,
+            capabilities=app.capabilities,
+            approvals=app.identity_authority.approvals,
+            execution_ledger=_governed_execution_ledger(),
+            promotion_store=store,
+        )
+        reads = GovernedAutonomyReadPort(
+            request_factory=request_factory,
+            orchestrator=app.governed_orchestrator,
+            policy_id="autonomous-execution-acceptance-read-v1",
+        )
+        pilot = ControlledAutonomyInternalNotePilot(
+            spec=AutonomyInternalNotePilotSpec(
+                ticket_id=_AUTONOMY_ACCEPTANCE_TICKET_ID,
+                expected_ticket_number=_AUTONOMY_ACCEPTANCE_TICKET_NUMBER,
+                company_id=_AUTONOMY_ACCEPTANCE_COMPANY_ID,
+                expected_company_name=_AUTONOMY_ACCEPTANCE_COMPANY_NAME,
+                playbook_id=_AUTONOMY_ACCEPTANCE_PLAYBOOK_ID,
+                playbook_version=_AUTONOMY_ACCEPTANCE_PLAYBOOK_VERSION,
+                policy_id=_AUTONOMY_ACCEPTANCE_POLICY_ID,
+                note_title=_AUTONOMY_ACCEPTANCE_NOTE_TITLE,
+                note_body=_AUTONOMY_ACCEPTANCE_NOTE_BODY,
+            ),
+            reads=reads,
+            request_factory=request_factory,
+            orchestrator=app.governed_orchestrator,
+            promotion_store=store,
+        )
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.execution.requested",
+            principal=principal,
+            outcome="requested",
+            reason_codes=(str(_AUTONOMY_ACCEPTANCE_TICKET_ID),),
+        )
+        result = pilot.run_once()
+        _autonomy_acceptance_audit(
+            event_type="autonomy.acceptance.execution.completed",
+            principal=principal,
+            outcome=result.status,
+            reason_codes=(str(result.ticket_note_id or 0),),
+        )
+    except Exception as exc:
+        try:
+            _autonomy_acceptance_audit(
+                event_type="autonomy.acceptance.execution.failed",
+                principal=locals().get("principal","unknown"),
+                outcome="failed",
+                reason_codes=(type(exc).__name__,),
+            )
+        except Exception:
+            pass
+        return {
+            "status":"rejected",
+            "error_code":type(exc).__name__,
+            "message":str(exc)[:500],
+        }
+    return {
+        "status":"succeeded",
+        "pilot_status":result.status,
+        "ticket_id":result.ticket_id,
+        "ticket_number":result.ticket_number,
+        "company_id":result.company_id,
+        "company_name":result.company_name,
+        "note_title":result.note_title,
+        "ticket_note_id":result.ticket_note_id,
+        "provider":result.provider,
+        "correlation_id":result.correlation_id,
+        "approval_id":result.approval_id,
+        "idempotency_key":result.idempotency_key,
+        "readback_verified":result.readback_verified,
+        "duplicate_write_avoided":result.duplicate_write_avoided,
     }
 
 
