@@ -45,6 +45,7 @@ jobs:
             implementation/orchestrator/tests/test_provider_read_extended_capabilities.py \
             implementation/connectors/tests/test_autotask_ticket_attachments.py \
             implementation/mcp_service/tests/test_contract_client_context.py \
+            implementation/mcp_service/tests/test_authority_grant_admin.py \
             implementation/orchestrator/tests/test_governed_execution_replay.py \
             implementation/orchestrator/tests/test_approval_continuation_guard.py \
             implementation/tests/test_approval_continuation.py \

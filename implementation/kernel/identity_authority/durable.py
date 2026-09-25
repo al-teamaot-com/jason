@@ -137,6 +137,34 @@ class SQLiteIdentityAuthorityStore:
             result.append(AuthorityGrant(**p))
         return tuple(result)
 
+    def get_grant(self, grant_id: str) -> AuthorityGrant | None:
+        row = self.connection.execute(
+            "SELECT payload FROM authority_grants WHERE grant_id=?", (grant_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        p = json.loads(row["payload"])
+        p["permission"] = PermissionMode(p["permission"])
+        p["effective_from"] = _dt(p.get("effective_from"))
+        p["effective_until"] = _dt(p.get("effective_until"))
+        return AuthorityGrant(**p)
+
+    def revoke_grant(self, grant_id: str) -> AuthorityGrant | None:
+        current = self.get_grant(grant_id)
+        if current is None:
+            return None
+        if current.status == "revoked":
+            return current
+        payload = asdict(current)
+        payload["status"] = "revoked"
+        revoked = AuthorityGrant(**payload)
+        with self.connection:
+            self.connection.execute(
+                "UPDATE authority_grants SET payload=? WHERE grant_id=?",
+                (_encode(revoked), grant_id),
+            )
+        return revoked
+
     def put_approval(self, record: ApprovalRecord) -> None:
         """Persist a formal approval once; identical retries are idempotent.
 
@@ -292,8 +320,12 @@ class SQLiteAuthorityGrantRepository:
     store: SQLiteIdentityAuthorityStore
     def list_for_subject(self, subject_id: str) -> tuple[AuthorityGrant, ...]:
         return self.store.list_grants_for_subject(subject_id)
+    def get(self, grant_id: str) -> AuthorityGrant | None:
+        return self.store.get_grant(grant_id)
     def put(self, record: AuthorityGrant) -> None:
         self.store.put_grant(record)
+    def revoke(self, grant_id: str) -> AuthorityGrant | None:
+        return self.store.revoke_grant(grant_id)
 
 
 @dataclass(frozen=True)
