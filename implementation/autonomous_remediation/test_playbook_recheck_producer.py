@@ -179,6 +179,7 @@ def test_timed_playbook_recheck_persists_exact_wake_and_work_state(tmp_path):
     assert wake.capability_name == "automation.job.read"
     assert wake.arguments == {"resource_id": "J1"}
     assert wake.max_attempts == 2
+    assert wake.resume_work_item is True
     assert store.state(wake.wake_id) is WakeState.PENDING
 
     events = [name for name, _ in audit.events]
@@ -220,6 +221,7 @@ def test_same_recheck_spec_generates_stable_idempotent_wake(tmp_path):
         playbook_id="pb",
         reason="wait",
     )
+    assert first.resume_work_item is True
     second = request.to_wake(
         resource_id="140629",
         playbook_id="pb",
