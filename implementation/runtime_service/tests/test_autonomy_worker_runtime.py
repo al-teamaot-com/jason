@@ -255,3 +255,42 @@ def test_nonhealthy_health_check_runs_one_repair_then_verifies(tmp_path: Path):
     ]
     assert store.get(140933).repair_attempts == 1
     store.close()
+
+
+def test_worker_accepts_provider_native_datto_device_identity(tmp_path: Path):
+    class RawEndpointReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "uid": "device-uid-1",
+                            "hostname": "PC-1",
+                            "online": True,
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=RawEndpointReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.phase == "health_wait"
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
+    store.close()
