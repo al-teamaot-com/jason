@@ -34,6 +34,10 @@ Jason must confirm the alert pertains to the current identified endpoint and not
 - current health verification;
 - internal documentation and escalation.
 
+### Protected server / hypervisor branch
+
+Physical servers, hypervisors, domain controllers, and other protected infrastructure may be investigated read-only, but no autonomous hardware, firmware, storage, reboot, or service-affecting remediation is permitted under this baseline. Recurring POST evidence on a protected host requires escalation unless a separately approved protected-role playbook branch exists.
+
 ### Out of Scope
 - BIOS/UEFI flashing;
 - firmware updates;
@@ -231,6 +235,8 @@ Dependencies may include:
 
 Missing evidence becomes dependency_blocked or inconclusive; it does not justify guessing.
 
+Current controlled-target dependency: #257 tracks a PowerShell 3-compatible/legacy-safe out-of-band/iLO/IML diagnostic path for VZ-HYPER-V. A completed component job with `ScriptRequiresUnmatchedPSVersion` is a diagnostic-tool compatibility failure, not evidence that iLO/OOB is absent.
+
 ## 14. Documentation Requirements
 
 Suggested internal note titles:
@@ -335,7 +341,7 @@ No additional write capability is required for the baseline diagnostic branch.
 
 ## 21. Acceptance Test
 
-**Initial controlled target:** ticket T20260923.0075 / CI 383.
+**Initial controlled target:** ticket T20260923.0075 / CI 383 / VZ-HYPER-V, a physical HP ProLiant DL380p Gen8 Hyper-V host. Production evidence already shows recurrent POST events in June and September 2026 and host-level interruption correlation across guest VMs, so acceptance must exercise the protected-hypervisor escalation branch rather than auto-remediation.
 
 Prove:
 1. trigger recognition;
