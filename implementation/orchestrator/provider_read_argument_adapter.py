@@ -767,6 +767,25 @@ class GovernedProviderReadConnectorInvoker:
 
     delegate: GovernedConnectorCapabilityInvoker
 
+    @staticmethod
+    def _enforce_client_selector_binding(request: OrchestrationRequest, capability_name: str) -> None:
+        if capability_name not in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+            return
+        client_id = str(request.client_id or "").strip()
+        company_id = request.arguments.get("company_id")
+        if not client_id:
+            raise PermissionError("client context is required for contract reads")
+        if company_id is None or isinstance(company_id, bool):
+            raise PermissionError("company_id is required for contract reads")
+        try:
+            canonical_company = str(int(company_id))
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("company_id must be a non-negative Autotask company id") from exc
+        if int(canonical_company) < 0:
+            raise PermissionError("company_id must be a non-negative Autotask company id")
+        if client_id != canonical_company:
+            raise PermissionError("contract company selector does not match governed client context")
+
     def invoke(
         self,
         *,
@@ -777,6 +796,7 @@ class GovernedProviderReadConnectorInvoker:
         if not provider_id:
             raise PermissionError("resolved provider is required before argument adaptation")
 
+        self._enforce_client_selector_binding(request, resolution.capability_name)
         adapted = adapt_provider_read_arguments(
             provider_id=provider_id,
             capability_name=resolution.capability_name,

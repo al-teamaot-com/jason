@@ -184,3 +184,60 @@ def test_autotask_manifest_exposes_company_bound_contract_reads():
     assert operations[SERVICE_CONTRACT_SEARCH].read_only is True
     assert "company_id" in operations[SERVICE_CONTRACT_SEARCH].selector_names
     assert operations[SERVICE_CONTRACT_READ].selector_names == ("company_id", "resource_id")
+
+
+def test_contract_client_selector_binding_rejects_cross_client_before_delegate():
+    from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
+    from orchestrator.contracts import OrchestrationRequest, OrchestrationMode
+    from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
+    from decimal import Decimal
+
+    class Delegate:
+        called = False
+        def invoke(self, **kwargs):
+            self.called = True
+            raise AssertionError("provider delegate must not be called")
+
+    req = OrchestrationRequest(
+        execution_id="e", correlation_id="c", principal_id="p", organization_id="aot",
+        client_id="333", capability_name=SERVICE_CONTRACT_SEARCH, capability_version="1.0",
+        requested_mode="deterministic", orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True, approval_present=False, risk="low",
+        data_handling=DataHandlingPolicy(classification="internal", hosted_processing_allowed=False),
+        budget=ExecutionBudget(maximum_estimated_cost=Decimal("0"), maximum_attempts=1),
+        arguments={"company_id": 311}, authority_context_id="ctx",
+    )
+    resolution = type("R", (), {"selected_provider_id":"autotask", "capability_name":SERVICE_CONTRACT_SEARCH})()
+    delegate=Delegate(); invoker=GovernedProviderReadConnectorInvoker(delegate=delegate)
+    with pytest.raises(PermissionError, match="does not match governed client context"):
+        invoker.invoke(request=req, resolution=resolution)
+    assert delegate.called is False
+
+
+def test_contract_client_selector_binding_allows_matching_client():
+    from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
+    from orchestrator.contracts import OrchestrationRequest, OrchestrationMode
+    from orchestrator.service import InvocationResult
+    from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
+    from decimal import Decimal
+
+    class Delegate:
+        called = False
+        def invoke(self, *, request, resolution):
+            self.called = True
+            assert request.arguments["entity"] == "Contracts"
+            return InvocationResult(output={"provider":"autotask","provider_capability":"autotask.entity.query","data":{"items":[]}})
+
+    req = OrchestrationRequest(
+        execution_id="e", correlation_id="c", principal_id="p", organization_id="aot",
+        client_id="333", capability_name=SERVICE_CONTRACT_SEARCH, capability_version="1.0",
+        requested_mode="deterministic", orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True, approval_present=False, risk="low",
+        data_handling=DataHandlingPolicy(classification="internal", hosted_processing_allowed=False),
+        budget=ExecutionBudget(maximum_estimated_cost=Decimal("0"), maximum_attempts=1),
+        arguments={"company_id": 333, "page_size": 10}, authority_context_id="ctx",
+    )
+    resolution = type("R", (), {"selected_provider_id":"autotask", "capability_name":SERVICE_CONTRACT_SEARCH})()
+    delegate=Delegate(); invoker=GovernedProviderReadConnectorInvoker(delegate=delegate)
+    invoker.invoke(request=req, resolution=resolution)
+    assert delegate.called is True
