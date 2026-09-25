@@ -136,6 +136,63 @@
       }
     },
     {
+      "id": "low_disk_space",
+      "name": "Jason - Windows Low Disk Space",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
+      "trigger": {
+        "title_contains": [
+          "Low Disk Space"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "device_role",
+          "volume_baseline",
+          "recent_activity_check",
+          "safe_cleanup_target",
+          "evidence_fresh",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:low_disk_space"
+      }
+    },
+    {
+      "id": "post_error_investigation",
+      "name": "Jason - Windows POST Error Investigation",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Windows-POST-Error-Investigation.md",
+      "trigger": {
+        "title_contains": [
+          "Power-On-Self-Test (POST) errors",
+          "POST errors occurred"
+        ]
+      },
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "device_role",
+          "recurrence_check",
+          "hardware_evidence",
+          "evidence_fresh",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:post_error_investigation"
+      }
+    },
+    {
       "id": "security_log_self_heal",
       "name": "Security Log Self-Heal",
       "version": "1.0.0",
