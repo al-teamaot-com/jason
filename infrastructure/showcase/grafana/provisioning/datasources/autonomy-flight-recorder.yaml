@@ -5,7 +5,7 @@ datasources:
     uid: jason-autonomy-flight-recorder
     type: yesoreyeram-infinity-datasource
     access: proxy
-    url: http://host.docker.internal:9475
+    url: http://jason-autonomy-flight-recorder:9475
     editable: false
     jsonData:
       global_queries: []
