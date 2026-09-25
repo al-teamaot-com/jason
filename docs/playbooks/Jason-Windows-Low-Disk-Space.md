@@ -226,7 +226,7 @@ Potential dependencies:
 - endpoint/CI association;
 - storage-health evidence.
 
-Known current blocker: GitHub issue #261 records execution-plan authorization rejection for exact approved disk diagnostics on GAI-LT2830. Do not bypass that defect with direct provider access or arbitrary shell execution.
+Production validation on GAI-LT2830 proved the #261 execution-plan authorization defect was corrected: both exact approved read-only diagnostics passed governed plan authorization with exactly one provider attempt and readback. The current safety blocker is #265: Datto/Jason job reads can remain `active` with empty output after the endpoint/UI no longer shows a running execution. Treat such state as pending/unknown; never redispatch until current execution state is positively resolved.
 
 ## 14. Documentation Requirements
 
@@ -348,7 +348,7 @@ Prove:
 10. terminal job readback;
 11. independent free-space verification;
 12. alert/ticket documentation;
-13. issue #261 fails closed if still unresolved.
+13. #261 remains regression-covered as a fixed authorization path; #265 stale/unknown job state fails closed without duplicate dispatch.
 
 No unrelated production object may be modified.
 
@@ -357,7 +357,7 @@ No unrelated production object may be modified.
 Close after:
 - playbook is merged;
 - required diagnostic/read capabilities are reliable;
-- #261 or successor blocker is resolved;
+- #261 remains fixed under regression coverage and #265 stale-job handling is resolved or safely classified;
 - controlled workstation acceptance succeeds;
 - server human-review behavior is proven;
 - safe cleanup capability scopes are separately approved for autonomy;
