@@ -133,3 +133,47 @@ def test_set_env_cannot_override_source_revision(
             harden=True,
             set_env=("JASON_SOURCE_REVISION=wrong",),
         )
+
+
+def test_protected_readonly_bind_uses_docker_probe_when_host_path_is_not_visible(
+    monkeypatch, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing"
+    existing.write_text("existing")
+    monkeypatch.setattr(deploy, "_inspect", lambda name: _live(existing))
+
+    protected = "/opt/jason/protected/role-id"
+    real_exists = deploy.os.path.exists
+    monkeypatch.setattr(
+        deploy.os.path,
+        "exists",
+        lambda path: False if str(path) == protected else real_exists(path),
+    )
+
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return Result()
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+
+    command, _, _, _ = deploy._build_create_command(
+        live="jason-mcp-pilot",
+        image="jason-mcp:test",
+        source_revision="new-revision",
+        harden=True,
+        additional_readonly_binds=(
+            f"{protected}:/run/protected/role_id",
+        ),
+    )
+
+    assert calls
+    assert calls[0][0:3] == ["docker", "run", "--rm"]
+    assert (
+        f"type=bind,src={protected},dst=/run/protected/role_id,readonly"
+        in command
+    )
