@@ -77,6 +77,7 @@ class RecheckRequest:
             "due_at": self.due_at.isoformat() if self.due_at else None,
             "wake_on": self.wake_on,
             "queue_reconciliation_required": self.queue_reconciliation_required,
+            "resume_work_item": True,
         }
         encoded = json.dumps(
             fingerprint_payload,
@@ -94,6 +95,7 @@ class RecheckRequest:
             capability_name=self.capability_name,
             arguments=dict(self.arguments),
             queue_reconciliation_required=self.queue_reconciliation_required,
+            resume_work_item=True,
             max_attempts=self.max_attempts,
         )
 
