@@ -181,6 +181,15 @@ class SQLitePlaybookAutonomyApprovalStore:
             raise ValueError("multiple active playbook autonomy approvals match the same scope")
         return valid[0] if valid else None
 
+    def list_all(self) -> tuple[PlaybookAutonomyApproval, ...]:
+        rows = self._connection.execute(
+            "SELECT payload FROM playbook_autonomy_approvals ORDER BY approval_id"
+        ).fetchall()
+        return tuple(
+            self._decode(str(row["payload"]))
+            for row in rows
+        )
+
     def revoke(self, approval_id: str, *, revoked_by: str, reason: str = "owner_revoked") -> PlaybookAutonomyApproval | None:
         current = self.get(approval_id)
         if current is None:
