@@ -135,6 +135,7 @@ def test_ambiguous_constructs_fail_closed(command):
         r"Get-ChildItem C:\Windows\System32\config\SAM",
         "Get-Process lsass",
         r"Get-ChildItem C:\Users\Bob\AppData\Local\Microsoft\Protect",
+        r"Get-Content C:\Users\Bob\Documents\Payroll.txt",
     ],
 )
 def test_sensitive_reads_have_separate_authority_boundary(command):
