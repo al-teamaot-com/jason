@@ -278,8 +278,10 @@ class DattoRmmReadOnlyPowerShellPolicy:
         path = str(args.get("path") or "").strip()
         if not path or len(path) > 1024:
             raise ValueError("registry path is required")
+        folded_path = path.casefold()
         if not any(
-            path.casefold().startswith(prefix.casefold())
+            folded_path == prefix.casefold()
+            or folded_path.startswith(prefix.casefold() + "\\")
             for prefix in _SAFE_REGISTRY_PREFIXES
         ):
             raise PermissionError("registry path is outside approved read prefixes")
