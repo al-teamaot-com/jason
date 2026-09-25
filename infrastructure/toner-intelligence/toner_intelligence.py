@@ -78,3 +78,25 @@ def forecast(readings: Sequence[Reading], seasonal_factor: float = 1.0) -> Forec
         action = "watch"
     confidence = "high" if len(ordered) >= 8 else "medium" if len(ordered) >= 4 else "low"
     return Forecast(current, adjusted, days, action, confidence, "trend adjusted by customer/device seasonal factor")
+
+
+def classify_telemetry(missed_device_runs: int, missed_toner_runs: int, age_days: float) -> tuple[str, str]:
+    """Classify telemetry freshness against successful KFS collections."""
+    if age_days >= 7:
+        return "long_term_missing", "no fresh device/toner telemetry for at least 7 days"
+    if missed_device_runs >= 2:
+        return "not_reporting", "device missed at least two successful KFS collections"
+    if missed_device_runs == 1:
+        return "stale", "device missed the latest successful KFS collection"
+    if missed_toner_runs >= 1:
+        return "toner_stale", "device reported but this toner did not update in the latest successful collection"
+    return "current", "device and toner are present in the latest successful KFS collection"
+
+
+def apply_safety_gates(action: str, reason: str, telemetry_state: str, telemetry_reason: str,
+                       customer: str, part_number: str) -> tuple[str, str]:
+    if telemetry_state != "current":
+        return "needs_review", telemetry_reason
+    if action in {"ship_today", "ship_soon"} and (not customer.strip() or not part_number.strip()):
+        return "needs_review", "missing customer identity or toner part number"
+    return action, reason
