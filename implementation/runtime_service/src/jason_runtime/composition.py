@@ -372,6 +372,9 @@ class RuntimeSettings:
     autonomy_promotion_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy.sqlite3"
     )
+    autonomy_targeted_wake_db: Path = Path(
+        "/var/lib/jason/openclaw/autonomy-targeted-wakes.sqlite3"
+    )
     autonomy_playbook_registry: Path = Path(
         "/app/implementation/autonomous_remediation/playbook_registry.json"
     )
@@ -379,6 +382,7 @@ class RuntimeSettings:
     autonomy_max_active_work_items: int = 2
     autonomy_shadow_interval_seconds: int = 1800
     autonomy_shadow_failure_retry_seconds: int = 300
+    autonomy_targeted_wake_retry_seconds: int = 300
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -648,6 +652,12 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/playbook-autonomy.sqlite3",
                 )
             ),
+            autonomy_targeted_wake_db=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_TARGETED_WAKE_DB",
+                    "/var/lib/jason/openclaw/autonomy-targeted-wakes.sqlite3",
+                )
+            ),
             autonomy_playbook_registry=Path(
                 os.getenv(
                     "JASON_AUTONOMY_PLAYBOOK_REGISTRY",
@@ -669,6 +679,9 @@ class RuntimeSettings:
             ),
             autonomy_shadow_failure_retry_seconds=int(
                 os.getenv("JASON_AUTONOMY_SHADOW_FAILURE_RETRY_SECONDS", "300")
+            ),
+            autonomy_targeted_wake_retry_seconds=int(
+                os.getenv("JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS", "300")
             ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
@@ -695,6 +708,10 @@ class RuntimeSettings:
             raise ValueError(
                 "JASON_AUTONOMY_SHADOW_FAILURE_RETRY_SECONDS must be between "
                 "60 and the shadow interval"
+            )
+        if self.autonomy_targeted_wake_retry_seconds < 60:
+            raise ValueError(
+                "JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS must be at least 60"
             )
         if any(value < 1 for value in self.autonomy_owned_autotask_resource_ids):
             raise ValueError(
@@ -1656,10 +1673,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         shadow_db=settings.autonomy_shadow_db,
         promotion_db=settings.autonomy_promotion_db,
         playbook_registry=settings.autonomy_playbook_registry,
+        targeted_wake_db=settings.autonomy_targeted_wake_db,
         owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
         max_active_work_items=settings.autonomy_max_active_work_items,
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
+        targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
     )
 
     return RuntimeHttpApplication(
