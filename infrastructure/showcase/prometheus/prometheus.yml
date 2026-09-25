@@ -60,3 +60,9 @@ scrape_configs:
       - files:
           - /etc/prometheus/file_sd/jason-client-posture.json
         refresh_interval: 30s
+  - job_name: jason-autonomy-flight-recorder
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-autonomy-flight-recorder.json
+        refresh_interval: 15s
+
