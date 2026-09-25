@@ -234,8 +234,9 @@ def test_runtime_foundation_stays_dormant_without_existing_datto_profile(monkeyp
         now=datetime.now(timezone.utc),
     )
 
-    capability = capabilities.get_current(
-        capability_name=module.ENDPOINT_POWERSHELL_READ
+    capability = capabilities.get(
+        capability_name=module.ENDPOINT_POWERSHELL_READ,
+        version="1.0",
     )
     provider = providers.get(module.DATTO_RMM_POWERSHELL_READ_PROVIDER)
 
