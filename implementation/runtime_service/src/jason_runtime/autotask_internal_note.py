@@ -63,6 +63,14 @@ AUTOTASK_INTERNAL_NOTE_PROFILE_ENV = (
 
 AUTOTASK_INTERNAL_NOTE_PROFILE = "owner-internal-note-v1"
 
+AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV = (
+    "JASON_AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL"
+)
+AUTOTASK_INTERNAL_NOTE_AUTONOMY_PRINCIPAL = "jason-autonomy-worker"
+_AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS = frozenset(
+    {"teamaot.com", "teamaom.com"}
+)
+
 _PROVIDER_CAPABILITY_MAP = {
     (
         AUTOTASK_INTERNAL_NOTE_PROVIDER,
@@ -87,6 +95,23 @@ class AutotaskInternalNoteActivationState:
     enabled: bool
     provider_ids: tuple[str, ...]
     capability_names: tuple[str, ...]
+
+
+def configured_autotask_internal_note_autonomy_email() -> str | None:
+    """Return the explicit AOT service-principal impersonation email, if configured."""
+
+    raw = os.getenv(
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
+        "",
+    ).strip().casefold()
+    if not raw:
+        return None
+    if raw.count("@") != 1 or any(ch.isspace() for ch in raw):
+        raise RuntimeError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
+    local, domain = raw.rsplit("@", 1)
+    if not local or domain not in _AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS:
+        raise RuntimeError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
+    return raw
 
 
 def autotask_internal_note_mcp_surface_enabled() -> bool:
@@ -292,6 +317,33 @@ class AutotaskInternalNoteConnector(
     AutotaskMutationConnector
 ):
     """Exact TicketNote-create connector with mandatory readback."""
+
+    def __init__(
+        self,
+        *,
+        autonomy_principal_email: str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        normalized = str(autonomy_principal_email or "").strip().casefold()
+        if normalized:
+            if normalized.count("@") != 1 or any(ch.isspace() for ch in normalized):
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
+            _, domain = normalized.rsplit("@", 1)
+            if domain not in _AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS:
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
+        self._autonomy_principal_email = normalized or None
+
+    def _trusted_email(self, request: ConnectorRequest) -> str | None:
+        email = super()._trusted_email(request)
+        if email is not None:
+            return email
+        if (
+            request.context.principal_id == AUTOTASK_INTERNAL_NOTE_AUTONOMY_PRINCIPAL
+            and self._autonomy_principal_email is not None
+        ):
+            return self._autonomy_principal_email
+        return None
 
     capabilities = frozenset(
         {
@@ -995,6 +1047,9 @@ def build_autotask_internal_note_invoker(
         transport=transport,
         audit=audit,
         bindings=bindings,
+        autonomy_principal_email=(
+            configured_autotask_internal_note_autonomy_email()
+        ),
     )
 
     return GovernedConnectorCapabilityInvoker(
