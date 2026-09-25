@@ -639,7 +639,7 @@
                 "value": [
                   {
                     "title": "View Timeline",
-                    "url": "/d/jason-autonomy-action-detail/jason-autonomy-action-detail?var-execution_id=${__data.fields.execution_id}",
+                    "url": "/d/jason-autonomy-action-detail/jason-autonomy-action-detail?var-execution_id=${__value.raw}",
                     "targetBlank": false
                   }
                 ]

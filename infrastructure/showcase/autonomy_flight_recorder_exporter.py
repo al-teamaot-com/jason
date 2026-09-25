@@ -483,7 +483,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "duration_ms": event_payload.get("duration_ms"),
             "execution_id": execution_id,
             "correlation_id": row.get("correlation_id") or "—",
-            "details_link": "View Timeline",
+            "details_link": execution_id,
             "details": _sanitize(raw_details),
         })
 
