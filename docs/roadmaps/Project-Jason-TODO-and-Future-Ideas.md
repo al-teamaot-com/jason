@@ -703,15 +703,15 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-004 — Complete Teams approval and information-request workflow
 
 - **Priority:** P1
-- **Status:** Blocked — external API credit balance
+- **Status:** In progress — API credit/runtime blocker cleared; approval and information-request paths production-proven; typed-override acceptance pending
 - **Risk level:** High
 - **Idea:** Complete and production-verify Jason's governed Microsoft Teams approval and structured information-request workflow, including proactive Adaptive Cards, authenticated Approve/Deny responses, typed technician overrides, and correlation back to the originating Jason action/request.
-- **Current evidence (2026-09-18):** Governed proactive Teams text delivery passed; Adaptive Card delivery passed; Microsoft Teams button interaction returned through the direct Teams gateway; Jason authenticated the Microsoft object ID and tenant correctly. Final decision processing was blocked when the conversation runtime received OpenAI API `429 insufficient_quota / credit_balance_exhausted`.
-- **Already corrected during testing:** Jason's OpenAI reasoning effort was changed from unsupported `minimal` to supported `low` for `gpt-5.4-mini` (commit `811b3af`).
-- **Remaining work:** Restore/confirm OpenAI API credit availability, repeat the same harmless approval-card test, prove that Approve and Deny are deterministically associated with the exact approval ID and authenticated technician, verify a typed override is treated as a modified instruction rather than implicit approval, and persist final audit evidence.
-- **Acceptance test:** Send one harmless governed Teams approval card to the authenticated owner conversation; press Approve or Deny; verify Teams -> gateway -> Jason authenticated ingress -> approval correlation -> terminal decision succeeds without a provider/runtime error and without executing an unrelated operational action. Then separately verify one structured information request and one typed override response.
+- **Current evidence (2026-09-25):** The former OpenAI API credit/runtime blocker is no longer active. Production approval-card interaction now reaches the conversation runtime and returns completed decisions. Controlled test `teams-card-test-4-20260925` completed an authenticated Approve turn, persisted the exact decision, and a later conflicting Deny was blocked before runtime; SUPPORT-CONN-022 is production-closed. The direct Teams conversation also contains authenticated owner-originated operational information requests that Jason processed through the conversation runtime, demonstrating the information-request ingress path. Ordinary non-card Teams messaging remains healthy after the approval-gateway changes.
+- **Already corrected during testing:** Jason's OpenAI reasoning effort was changed from unsupported `minimal` to supported `low` for `gpt-5.4-mini` (commit `811b3af`). Adaptive Card result handling and single-use decision claims were subsequently hardened in PRs #344 and #342.
+- **Remaining work:** Verify one typed owner override is treated as a modified instruction and does not create or consume approval authority for the original request; then persist final acceptance evidence and mark the workflow production-complete.
+- **Acceptance test:** A harmless typed-override fixture `teams-typed-override-test-20260925-1` has been delivered to the authenticated owner conversation. The owner must reply in the Jason bot chat with a modified instruction rather than clicking Approve/Deny. Acceptance requires the typed message to enter as a normal authenticated conversation turn, the original approval ID to remain undecided/unconsumed, no provider mutation to occur, and Jason to treat the text as a changed instruction requiring fresh planning/approval rather than implicit authorization.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** As soon as Jason's OpenAI API balance is restored.
+- **Review trigger:** Complete immediately after the typed-override acceptance reply is observed.
 
 ### TODO-COMM-003 — Secure client portal messaging
 
