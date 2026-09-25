@@ -106,7 +106,7 @@ def cmd_revoke(args) -> int:
             "pass",
             action="revoke",
             approval_id=record.approval_id,
-            status=record.status,
+            record_status=record.status,
             revoked_by=record.revoked_by,
             revoked_at=record.revoked_at.isoformat() if record.revoked_at else None,
             reason=record.revoke_reason,
