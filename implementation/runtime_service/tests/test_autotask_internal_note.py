@@ -18,7 +18,7 @@ from connectors.core.contracts import (
     ConnectorRequest,
 )
 from jason_runtime.autotask_internal_note import (
-    AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
+    AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV,
     AUTOTASK_INTERNAL_NOTE_PROFILE,
     AUTOTASK_INTERNAL_NOTE_PROFILE_ENV,
     AUTOTASK_INTERNAL_NOTE_PROVIDER,
@@ -26,7 +26,7 @@ from jason_runtime.autotask_internal_note import (
     AutotaskInternalNoteConnector,
     AutotaskInternalNoteVerificationError,
     SERVICE_TICKET_NOTE_CREATE,
-    configured_autotask_internal_note_autonomy_email,
+    configured_autotask_internal_note_autonomy_resource_id,
     register_autotask_internal_note_runtime_foundation,
 )
 from kernel.capabilities import (
@@ -356,6 +356,11 @@ class _Transport:
                 "/V1.0/Tickets/12345/Notes"
             )
         ):
+            impersonator = (
+                999
+                if "ImpersonationResourceId" in headers
+                else None
+            )
             return {
                 "items": [
                     {
@@ -369,7 +374,7 @@ class _Transport:
                         "noteType": 3,
                         "publish": 1,
                         "creatorResourceID": self.resource_id,
-                        "impersonatorCreatorResourceID": 999,
+                        "impersonatorCreatorResourceID": impersonator,
                     }
                 ]
             }
@@ -405,14 +410,14 @@ def _connector(
     transport,
     audit,
     *,
-    autonomy_principal_email=None,
+    autonomy_api_resource_id=None,
 ):
     return AutotaskInternalNoteConnector(
         secrets=_Secrets(),
         transport=transport,
         audit=audit,
         bindings=_Bindings(),
-        autonomy_principal_email=autonomy_principal_email,
+        autonomy_api_resource_id=autonomy_api_resource_id,
     )
 
 
@@ -518,31 +523,35 @@ def test_internal_note_connector_never_retries_post_when_readback_fails(
     )
 
 
-def test_autonomy_email_configuration_is_default_empty_and_aot_only(monkeypatch):
-    monkeypatch.delenv(AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV, raising=False)
-    assert configured_autotask_internal_note_autonomy_email() is None
+def test_autonomy_resource_id_configuration_is_default_empty_and_positive(monkeypatch):
+    monkeypatch.delenv(
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV,
+        raising=False,
+    )
+    assert configured_autotask_internal_note_autonomy_resource_id() is None
 
     monkeypatch.setenv(
-        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
-        "JasonRW@teamaot.com",
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV,
+        "29682930",
     )
     assert (
-        configured_autotask_internal_note_autonomy_email()
-        == "jasonrw@teamaot.com"
+        configured_autotask_internal_note_autonomy_resource_id()
+        == 29682930
     )
 
-    monkeypatch.setenv(
-        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
-        "attacker@example.com",
-    )
-    with pytest.raises(
-        RuntimeError,
-        match="AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID",
-    ):
-        configured_autotask_internal_note_autonomy_email()
+    for bad in ("0", "-1", "not-an-id"):
+        monkeypatch.setenv(
+            AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV,
+            bad,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID",
+        ):
+            configured_autotask_internal_note_autonomy_resource_id()
 
 
-def test_autonomous_service_principal_uses_explicit_internal_note_mapping(monkeypatch):
+def test_autonomous_service_principal_uses_direct_api_user_attribution(monkeypatch):
     _enable_mutation(monkeypatch)
     transport = _Transport(
         resource_email="jasonrw@teamaot.com",
@@ -553,7 +562,7 @@ def test_autonomous_service_principal_uses_explicit_internal_note_mapping(monkey
     result = _connector(
         transport,
         audit,
-        autonomy_principal_email="jasonRW@teamaot.com",
+        autonomy_api_resource_id=29682930,
     ).execute(
         _connector_request("jason-autonomy-worker")
     )
@@ -562,7 +571,7 @@ def test_autonomous_service_principal_uses_explicit_internal_note_mapping(monkey
         "readbackVerified": True,
         "ticketNoteId": 222,
         "creatorResourceId": 29682930,
-        "impersonatorRecorded": True,
+        "impersonatorRecorded": False,
     }
 
     posts = [
@@ -571,10 +580,21 @@ def test_autonomous_service_principal_uses_explicit_internal_note_mapping(monkey
         if request["method"] == "POST"
     ]
     assert len(posts) == 1
-    assert posts[0]["headers"]["ImpersonationResourceId"] == "29682930"
+    assert "ImpersonationResourceId" not in posts[0]["headers"]
+
+    preflights = [
+        request
+        for request in transport.requests
+        if request["method"] == "GET"
+        and request["url"].endswith(
+            "/V1.0/TicketNotes/entityInformation"
+        )
+    ]
+    assert len(preflights) == 1
+    assert "ImpersonationResourceId" not in preflights[0]["headers"]
 
 
-def test_autonomous_service_principal_mapping_is_not_available_to_other_services(monkeypatch):
+def test_autonomous_api_user_mode_is_not_available_to_other_services(monkeypatch):
     _enable_mutation(monkeypatch)
     transport = _Transport(
         resource_email="jasonrw@teamaot.com",
@@ -588,7 +608,7 @@ def test_autonomous_service_principal_mapping_is_not_available_to_other_services
         _connector(
             transport,
             _Audit(),
-            autonomy_principal_email="jasonrw@teamaot.com",
+            autonomy_api_resource_id=29682930,
         ).execute(
             _connector_request("some-other-service")
         )
@@ -599,7 +619,7 @@ def test_autonomous_service_principal_mapping_is_not_available_to_other_services
     )
 
 
-def test_autonomous_service_principal_fails_closed_without_mapping(monkeypatch):
+def test_autonomous_service_principal_fails_closed_without_api_resource_id(monkeypatch):
     _enable_mutation(monkeypatch)
     transport = _Transport(
         resource_email="jasonrw@teamaot.com",

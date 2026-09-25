@@ -63,13 +63,10 @@ AUTOTASK_INTERNAL_NOTE_PROFILE_ENV = (
 
 AUTOTASK_INTERNAL_NOTE_PROFILE = "owner-internal-note-v1"
 
-AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV = (
-    "JASON_AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL"
+AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV = (
+    "JASON_AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID"
 )
 AUTOTASK_INTERNAL_NOTE_AUTONOMY_PRINCIPAL = "jason-autonomy-worker"
-_AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS = frozenset(
-    {"teamaot.com", "teamaom.com"}
-)
 
 _PROVIDER_CAPABILITY_MAP = {
     (
@@ -97,22 +94,26 @@ class AutotaskInternalNoteActivationState:
     capability_names: tuple[str, ...]
 
 
-def configured_autotask_internal_note_autonomy_email() -> str | None:
-    """Return the explicit AOT service-principal impersonation email, if configured."""
+def configured_autotask_internal_note_autonomy_resource_id() -> int | None:
+    """Return the explicitly configured Autotask API-user Resource ID."""
 
     raw = os.getenv(
-        AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_ENV,
+        AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_ENV,
         "",
-    ).strip().casefold()
+    ).strip()
     if not raw:
         return None
-    if raw.count("@") != 1 or any(ch.isspace() for ch in raw):
-        raise RuntimeError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
-    local, domain = raw.rsplit("@", 1)
-    if not local or domain not in _AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS:
-        raise RuntimeError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
-    return raw
-
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(
+            "AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID"
+        ) from error
+    if value < 1:
+        raise RuntimeError(
+            "AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID"
+        )
+    return value
 
 def autotask_internal_note_mcp_surface_enabled() -> bool:
     """Require all explicit source/runtime mutation gates."""
@@ -321,35 +322,94 @@ class AutotaskInternalNoteConnector(
     def __init__(
         self,
         *,
-        autonomy_principal_email: str | None = None,
+        autonomy_api_resource_id: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        normalized = str(autonomy_principal_email or "").strip().casefold()
-        if normalized:
-            if normalized.count("@") != 1 or any(ch.isspace() for ch in normalized):
-                raise ValueError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
-            _, domain = normalized.rsplit("@", 1)
-            if domain not in _AUTOTASK_INTERNAL_NOTE_AUTONOMY_DOMAINS:
-                raise ValueError("AUTOTASK_INTERNAL_NOTE_AUTONOMY_EMAIL_INVALID")
-        self._autonomy_principal_email = normalized or None
+        if autonomy_api_resource_id is not None:
+            if isinstance(autonomy_api_resource_id, bool):
+                raise ValueError(
+                    "AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID"
+                )
+            try:
+                parsed = int(autonomy_api_resource_id)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    "AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID"
+                ) from error
+            if parsed < 1:
+                raise ValueError(
+                    "AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID_INVALID"
+                )
+            self._autonomy_api_resource_id = parsed
+        else:
+            self._autonomy_api_resource_id = None
 
-    def _trusted_email(self, request: ConnectorRequest) -> str | None:
-        email = super()._trusted_email(request)
-        if email is not None:
-            return email
-        if (
-            request.context.principal_id == AUTOTASK_INTERNAL_NOTE_AUTONOMY_PRINCIPAL
-            and self._autonomy_principal_email is not None
-        ):
-            return self._autonomy_principal_email
-        return None
+    def _is_autonomous_api_user_request(
+        self,
+        request: ConnectorRequest,
+    ) -> bool:
+        return (
+            request.context.principal_id
+            == AUTOTASK_INTERNAL_NOTE_AUTONOMY_PRINCIPAL
+            and self._autonomy_api_resource_id is not None
+        )
+
+    def _prepare_autonomous_api_user_request(
+        self,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+    ) -> PreparedRequest:
+        """Prepare TicketNote creation as the API user itself.
+
+        No ImpersonationResourceId header is added. Provider access preflight
+        therefore evaluates the API user's native TicketNote permission.
+        """
+
+        prepared = AutotaskConnector.prepare_request(
+            self,
+            request,
+            credentials,
+        )
+        headers = dict(prepared.headers)
+        headers.pop("ImpersonationResourceId", None)
+
+        self._preflight_requester_access(
+            prepared=prepared,
+            headers=headers,
+            operation=request.context.capability,
+        )
+
+        return PreparedRequest(
+            method=prepared.method,
+            url=prepared.url,
+            headers=headers,
+            params=prepared.params,
+            json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+            audit_operation=prepared.audit_operation,
+        )
 
     capabilities = frozenset(
         {
             "autotask.ticket.note.create",
         }
     )
+
+    def prepare_request(
+        self,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+    ) -> PreparedRequest:
+        if self._is_autonomous_api_user_request(request):
+            return self._prepare_autonomous_api_user_request(
+                request,
+                credentials,
+            )
+        return super().prepare_request(
+            request,
+            credentials,
+        )
 
     @staticmethod
     def _expected_payload(
@@ -473,32 +533,38 @@ class AutotaskInternalNoteConnector(
                 credentials,
             )
 
-            email = self._trusted_email(
+            if self._is_autonomous_api_user_request(
                 verify_request
-            )
-
-            if email is None:
-                raise AutotaskInternalNoteVerificationError(
-                    "trusted requester binding unavailable "
-                    "during readback"
+            ):
+                resource_id = self._autonomy_api_resource_id
+                if resource_id is None:
+                    raise AutotaskInternalNoteVerificationError(
+                        "autonomous API-user resource id unavailable "
+                        "during readback"
+                    )
+                headers = dict(prepared.headers)
+                headers.pop("ImpersonationResourceId", None)
+            else:
+                email = self._trusted_email(
+                    verify_request
                 )
-
-            resource_id = (
-                self._resolve_impersonation_resource_id(
-                    prepared=prepared,
-                    email=email,
+                if email is None:
+                    raise AutotaskInternalNoteVerificationError(
+                        "trusted requester binding unavailable "
+                        "during readback"
+                    )
+                resource_id = (
+                    self._resolve_impersonation_resource_id(
+                        prepared=prepared,
+                        email=email,
+                    )
                 )
-            )
+                headers = dict(prepared.headers)
+                headers[
+                    "ImpersonationResourceId"
+                ] = str(resource_id)
         finally:
             credentials.clear()
-
-        headers = dict(
-            prepared.headers
-        )
-
-        headers[
-            "ImpersonationResourceId"
-        ] = str(resource_id)
 
         response = self._transport.request(
             method="GET",
@@ -610,22 +676,38 @@ class AutotaskInternalNoteConnector(
             "impersonatorCreatorResourceID"
         )
 
-        if impersonator in (
-            None,
-            "",
-            0,
-            "0",
+        if self._is_autonomous_api_user_request(
+            request
         ):
-            raise AutotaskInternalNoteVerificationError(
-                "ticket note API impersonator attribution "
-                "was not recorded"
-            )
+            if impersonator not in (
+                None,
+                "",
+                0,
+                "0",
+            ):
+                raise AutotaskInternalNoteVerificationError(
+                    "autonomous API-user note unexpectedly "
+                    "recorded an impersonator"
+                )
+            impersonator_recorded = False
+        else:
+            if impersonator in (
+                None,
+                "",
+                0,
+                "0",
+            ):
+                raise AutotaskInternalNoteVerificationError(
+                    "ticket note API impersonator attribution "
+                    "was not recorded"
+                )
+            impersonator_recorded = True
 
         return {
             "readbackVerified": True,
             "ticketNoteId": note_id,
             "creatorResourceId": resource_id,
-            "impersonatorRecorded": True,
+            "impersonatorRecorded": impersonator_recorded,
         }
 
     def prepare_governed_execution(
@@ -645,7 +727,10 @@ class AutotaskInternalNoteConnector(
         if not autotask_mutation_execution_enabled():
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
         credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
-        prepared = AutotaskMutationConnector.prepare_request(self, normalized_request, credentials)
+        prepared = self.prepare_request(
+            normalized_request,
+            credentials,
+        )
         relative_path = prepared.audit_operation or urlsplit(prepared.url).path
         return ProviderPreparedExecution(
             provider_capability=request.context.capability,
@@ -1047,8 +1132,8 @@ def build_autotask_internal_note_invoker(
         transport=transport,
         audit=audit,
         bindings=bindings,
-        autonomy_principal_email=(
-            configured_autotask_internal_note_autonomy_email()
+        autonomy_api_resource_id=(
+            configured_autotask_internal_note_autonomy_resource_id()
         ),
     )
 
