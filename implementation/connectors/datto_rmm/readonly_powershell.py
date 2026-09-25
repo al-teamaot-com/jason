@@ -56,6 +56,7 @@ SENSITIVE_PATTERNS = tuple(
         r"dpapi",
         r"browser.*(?:cookies|login data|password)",
         r"(?:chrome|edge|firefox).*(?:cookies|login data)",
+        r"(?:get-content|\bgc\b|\bcat\b|\btype\b).*\\users\\[^\\]+\\(?:documents|desktop|downloads)\\",
         r"private\s*key",
         r"\\microsoft\\protect\\",
         r"ntds\.dit",
