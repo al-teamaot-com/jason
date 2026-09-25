@@ -170,6 +170,8 @@ Before production activation:
 9. run a controlled Autotask acceptance pilot;
 10. only then enable unattended queue processing.
 
+As of 2026-09-25, items 1-9 have been proven for the autonomous execution substrate, including a controlled production Autotask write. Item 10 remains intentionally gated at the **operational playbook** level: unattended queue mutation stays disabled until an individual real playbook/version/capability set is separately promoted, accepted, and monitored.
+
 ## Autonomous workload identity
 
 Unattended execution must not impersonate the interactive technician who originally discussed a ticket. Jason uses a dedicated non-human workload identity (`jason-autonomy-worker`) evaluated by JKD-001. The identity receives only exact capability grants. Approval-required actions additionally require a separate durable owner promotion for the exact playbook version and capability, followed by a short-lived exact-action reservation in the governed execution ledger. The Central Orchestrator still binds and consumes the concrete execution plan once.
@@ -182,7 +184,7 @@ The Autotask queue adapter resolves queue IDs and ticket priority ordering from 
 
 Selection order is: urgent work first; then Jason-owned work; then normalized priority; then age/stable identity. This means normal work already owned by Jason is resumed before newly discovered work, while Critical/Emergency work may trigger reconsideration. Among equally urgent work, Jason-owned work remains preferred.
 
-Tickets assigned to a human in another queue are not claimed. An assigned ticket outside the Jason queue is eligible only when its assignee is authoritatively configured as a Jason-owned Autotask resource. Jason currently lacks the provider-neutral Autotask Resources read needed to derive that identity dynamically; GitHub issue #178 tracks that gap. Until then, assignment ownership is never inferred from recurring numeric IDs.
+Tickets assigned to a human in another queue are not claimed. An assigned ticket outside the Jason queue is eligible only when its assignee is authoritatively configured as a Jason-owned Autotask resource. Canonical `service.resource.search` / `service.resource.read` are now production-active, and the 2026-09-25 production identity proof established `29682930` as **Jason ReadWrite** and `29682926` as **Jason Read Only**; `29682899` is **Lindsey Collins**. Production autonomous queue ownership is bound to Resource `29682930`. Assignment ownership must continue to be resolved authoritatively and must never be inferred from recurring numeric IDs.
 
 ## Shadow-mode production checkpoint - 2026-09-25
 
@@ -194,7 +196,7 @@ Findings:
 - The current queue includes recognized shadow playbooks for Datto EDR/AV, Security Log Self-Heal, DNS Agent, VulScan Missing Patch, BackupIQ, and Unexpected Shutdown.
 - Active Jason tickets for POST errors, Idle Log Off, and Low Disk Space do not yet have complete registered playbook source coverage in this branch. Idle Log Off hardening is tracked by #245; the Low Disk Space execution-plan blocker is tracked by #261.
 - Other queues contain human-assigned work, unassigned work, and tickets carrying the same opaque Autotask resource ID seen on Jason-owned tickets. Because Autotask Resources is not yet a governed readable resource, Jason does not infer that opaque ID is itself Jason.
-- No playbook is currently durably promoted for unattended mutation. The playbook catalog is shadow-only and its `allowed_capabilities` sets are empty.
+- No operational playbook is currently durably promoted for unattended mutation. The first autonomous execution substrate acceptance used a temporary acceptance-only promotion; that promotion and all temporary acceptance grants were revoked after proof. Operational playbooks remain shadow-only until separately promoted.
 
 This checkpoint proves queue discovery and classification behavior without granting execution authority.
 
@@ -227,3 +229,94 @@ Security requirements:
 Initial allowlisted targeted reads are limited to ticket state, automation job/output, endpoint state/alerts, and endpoint-backup state/history. Expansion requires source review and tests; a persisted wake cannot self-expand the allowlist.
 
 This implements the provider-neutral scheduling contract from #251: known work is revisited directly, while queue reconciliation remains event/capacity/staleness driven.
+
+
+## Production autonomous execution acceptance - 2026-09-25
+
+The autonomous execution substrate is production-proven. This is a platform/governance acceptance, not blanket playbook authority.
+
+### Controlled target
+
+- Client: XYZ Test Company
+- Company ID: `1158`
+- Ticket: `T20260925.0051`
+- Ticket ID: `141233`
+- Capability: `service.ticket.note.create`
+- Workload principal: `jason-autonomy-worker`
+- Autotask API Resource: `29682930` / Jason ReadWrite
+
+### Successful governed execution
+
+- Execution ID: `exec_autonomy_559d20ebdeaa40f2bb5ccafc4a1cce61`
+- Correlation ID: `corr_autonomy_4b0af623d006492b87e2f3d4ca4ed133`
+- Approval ID: `approval_mcp_aebd2009640046d782f932ff8d80debd`
+- Idempotency key: `idem_mcp_action_2e536a88873d4e0ea70f84737c21d4fc`
+- Intent/action fingerprint: `31fe3a9edada5dae203c08c264d8fd766ebf6ece86c71a12b6ef5c0bf301e555`
+- Execution-plan fingerprint: `42c98ab374d904f7f5cf46dea9e8c02bb873eeb56549aa435d5dc3630369ae7d`
+- Provider: `autotask_internal_note`
+- Provider attempts: exactly 1
+- Governed execution state: `succeeded`
+- Failure reason: none
+
+The normalized provider execution plan targeted only:
+
+`POST /V1.0/Tickets/141233/Notes`
+
+with the exact internal-note payload approved for the acceptance run.
+
+### Provider/readback proof
+
+Autotask created note `30509332`.
+
+Readback proved:
+
+- `creatorResourceID=29682930`;
+- `impersonatorCreatorResourceID=null`;
+- `readbackVerified=true`;
+- verified `ticketNoteId=30509332`;
+- verified `creatorResourceId=29682930`;
+- verified `impersonatorRecorded=false`.
+
+Independent governed `service.ticket.notes.search` observed the same durable note.
+
+The direct API-user attribution is intentional for the autonomous workload. Human-originated internal-note writes continue to use requester impersonation; autonomous Jason uses the dedicated API Resource directly and must not self-impersonate.
+
+### Duplicate suppression and cleanup
+
+A second acceptance run recognized the exact existing marker and returned the already-verified path with duplicate suppression. No second provider write occurred.
+
+After proof:
+
+- every temporary acceptance `PlaybookAutonomyApproval` was revoked;
+- all temporary acceptance JKD-001 grants were revoked;
+- no broad autonomous mutation grant remains;
+- operational queue processing remains shadow-only.
+
+### Production code boundary
+
+The accepted production MCP line includes:
+
+- #325 — exact autonomy acceptance information-release boundary;
+- #328 — direct API-user attribution for autonomous internal notes;
+- #329 — provider-envelope verification extraction.
+
+Production MCP source at the accepted checkpoint: `d3bdf0ced712e6602a46b14ddbaa6e83a139ebc6`.
+
+### Admission rule going forward
+
+This proof establishes that Jason can execute a governed autonomous provider write safely. It does **not** authorize arbitrary writes or automatically promote existing playbooks.
+
+Each operational playbook must still provide, for its exact version and capability set:
+
+1. deterministic playbook match;
+2. current governance pass;
+3. exact JKD-001 authority;
+4. durable owner promotion;
+5. bounded execution-plan authorization;
+6. provider-specific safety/preflight;
+7. independent verification;
+8. duplicate/idempotency protection;
+9. red-team acceptance;
+10. explicit suspension/revocation behavior.
+
+The next production phase is therefore **operational playbook testing and promotion**, not generic autonomy enablement.

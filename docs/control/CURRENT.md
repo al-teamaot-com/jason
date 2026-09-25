@@ -8,7 +8,7 @@
 
 - **Jason fundamentals:** `docs/control/JASON-FUNDAMENTALS.md`
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
-- **Last durable success:** 2026-09-25 governed ticket-attachment production acceptance and exact authority administration; see `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`.
+- **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
 - **Production/runtime boundary:** live runtime/MCP must be verified from container source labels, health, activation profiles, and governance status before consequential change.
 - **Next safe actions:** continue from the canonical roadmap/support backlog; do not reopen completed SEC-007 / OPS-005 baseline / CONN-015 read / CONN-019 work unless new contradictory evidence appears.
 
@@ -21,6 +21,7 @@ Project Jason's major 2026-09-25 work is production-accepted:
 - **CONN-015 read phase:** governed Autotask contract search/read production-accepted; contract writes remain blocked by provider update permission.
 - **CONN-019:** governed Autotask ticket attachment search/read/content-read and approval-required create production-accepted.
 - **Authority administration:** Owner-only exact authority grant list/add/revoke production-deployed; wildcard/administer grant creation is prohibited and execute grants require approval.
+- **Autonomous execution substrate:** first production autonomous provider write completed successfully under `jason-autonomy-worker`, exact JKD-001 grants, durable playbook promotion, execution-plan binding, one provider write, independent readback, and duplicate suppression. All temporary acceptance authority was revoked afterward; operational playbooks remain shadow-only until individually promoted.
 - **Observability:** Security & Learning, Client Security Posture, Resolution Memory, Production Health, Governed Actions, and Command Center surfaces are active under an evidence-not-authority model.
 
 ## Current provider-read profile
@@ -91,18 +92,21 @@ Security/posture metrics must not contain secrets, raw auth context, client name
 
 ## Current source boundary
 
-The production runtime/MCP code line includes merged authority-administration source `6ee8b2cdbc15607cfc9287c18fbac85d4038f91a` and the accepted v8/attachment implementation. Canonical `main` contains subsequent documentation-only acceptance merges as well.
+The production MCP acceptance checkpoint is `d3bdf0ced712e6602a46b14ddbaa6e83a139ebc6`, including the first autonomous-write acceptance fixes and provider-envelope verification. Canonical `main` may advance beyond this checkpoint; verify live container source labels before consequential change.
 
 **Before consequential change:** verify live container source labels, health, activation profiles, and governance status directly; do not treat this file alone as volatile runtime proof.
 
 ## Open follow-up work
 
+- Autonomous execution testing now moves to the first real operational playbook. The execution substrate is proven, but unattended queue mutation remains disabled until an exact playbook version/capability set is separately promoted and accepted.
 - Contract writes remain blocked by Autotask contract update permission.
 - OPS-005 can improve evidence coverage for Microsoft tenant mapping, VulScan, IT Glue, DRMM site-scoped monitoring, and backup-recency policy.
 - Other backlog/support items remain governed by `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md` and `SUPPORT.md`.
 
 ## Durable evidence
 
-Primary 2026-09-25 handoff: `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`.
+Primary autonomy acceptance: `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
+
+Morning handoff: `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`.
 
 Historical production proofs remain under `docs/sessions/`; they should not be rewritten to look current.
