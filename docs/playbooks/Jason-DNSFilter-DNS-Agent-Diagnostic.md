@@ -8,13 +8,14 @@
 - exact ticket/client/device/alert identity is proven;
 - endpoint availability is checked before diagnostics;
 - service/install/version/event/DNSFilter-log/DNS evidence can be collected without per-run approval;
+- where a client-safe DNSFilter boundary is proven, native DNSFilter reads correlate provider-side organization/network/agent/policy state with endpoint-local DRMM evidence;
 - if DNSFilter is required but genuinely missing, Jason can run the exact approved `Install DNSFilter AOT Ver 08262024` component after all install gates pass;
 - both the filtering service and Service Manager are verified after install and during diagnostics;
 - healthy/stale alerts can be resolved through the governed native alert path;
 - one consolidated Autotask note summarizes each work session;
 - uninstall, DNS/NIC changes, registry modification, disabling protection, and reboot remain outside this playbook.
 
-This Section Goal is complete only after the dedicated diagnostic component is deployed, standing-approved, and acceptance-tested.
+The dedicated diagnostic component milestone is complete as of 2026-09-24: `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is deployed, production acceptance-tested, and standing-approved. The full Section Goal remains open until the gated missing-agent installer path is acceptance-tested and native DNSFilter client-network isolation is safe for non-AOT client tickets (tracked in GitHub #253).
 
 ---
 
@@ -44,6 +45,7 @@ Current monitor example:
 - read-only DNS configuration and DNS resolution/filtering tests;
 - approved installation with `Install DNSFilter AOT Ver 08262024` when the endpoint is eligible, DNSFilter is required, installation is genuinely absent, and required site configuration is proven;
 - current DNSFilter vendor release/known-issue research when relevant;
+- governed native DNSFilter read evidence when a validated client-safe organization/network boundary exists;
 - exact DRMM alert resolution after healthy-state verification.
 
 ### Out of Scope
@@ -59,11 +61,13 @@ Current monitor example:
 - disabling DNSFilter;
 - reboot/shutdown;
 - collection of browsing/query history;
-- disclosure of DNSFilter site/registration keys.
+- disclosure of DNSFilter site/registration keys;
+- native DNSFilter policy/site/agent mutations in the current read-only integration phase;
+- using AOT self-company DNSFilter scope as a bypass for a client-scoped ticket.
 
 Preserve all Jason governance, including Central Orchestrator authority and `direct_provider_access=false`.
 
-**Owner policy decision — 2026-09-24:** this workflow is approved for autonomous routine diagnosis and missing-agent installation once the dedicated diagnostic component is deployed/standing-approved and the existing `Install DNSFilter AOT Ver 08262024` component has passed the controlled acceptance gates below. This does not authorize uninstall, DNS/NIC changes, reboot, or repair-over-install of a corrupt existing client.
+**Owner policy decision — 2026-09-24:** this workflow is approved for autonomous routine diagnosis and missing-agent installation once the existing `Install DNSFilter AOT Ver 08262024` component has passed the controlled acceptance gates below. The dedicated diagnostic component is now deployed, acceptance-tested, and standing-approved. This does not authorize uninstall, DNS/NIC changes, reboot, repair-over-install of a corrupt existing client, or native DNSFilter writes.
 
 ---
 
@@ -100,9 +104,10 @@ Healthy DNSFilter Windows state:
 - no unresolved recurring service-start/crash event;
 - normal DNS resolution succeeds;
 - current DNS configuration is consistent with the active agent mode;
-- DRMM DNS Agent monitor is healthy / alert cleared.
+- DRMM DNS Agent monitor is healthy / alert cleared;
+- when native DNSFilter client scope is safely available, the provider-side agent/network/policy evidence agrees with the identified endpoint and does not indicate an unprotected/bypassed/stale state inconsistent with local evidence.
 
-The alert alone does not prove the agent is currently unhealthy.
+The alert alone does not prove the agent is currently unhealthy. A missing native DNSFilter result also does not prove the local client is absent.
 
 ---
 
@@ -124,7 +129,7 @@ The alert alone does not prove the agent is currently unhealthy.
 
 `diagnosing -> evidence_inconclusive -> escalated`
 
-Persist ticket ID, alert UID, device UID, CI ID, whether DNSFilter is required, install-state proof, filtering-service state, Service Manager state, installed version, relevant Windows/DNSFilter log evidence, diagnostic/install job IDs, DNS/filtering test result, classification, and next state.
+Persist ticket ID, alert UID, device UID, CI ID, whether DNSFilter is required, install-state proof, filtering-service state, Service Manager state, installed version, relevant Windows/DNSFilter log evidence, diagnostic/install job IDs, DNS/filtering test result, native DNSFilter scope/read status, classification, and next state.
 
 ---
 
@@ -137,6 +142,33 @@ Persist ticket ID, alert UID, device UID, CI ID, whether DNSFilter is required, 
 - Offline -> `waiting_endpoint`.
 - Alert already resolved and endpoint healthy -> verify and close normally.
 - Alert open -> continue.
+
+### Step 1A — Native DNSFilter posture correlation when client isolation is authorized
+
+Use native DNSFilter reads as complementary provider evidence, not as a replacement for endpoint-local diagnostics.
+
+Preferred reads where authorized:
+- `dns.protection.organization.read`
+- `dns.protection.agent.search`
+- `dns.protection.agent.counts.read`
+- `dns.protection.site.search`
+- `dns.protection.policy.search`
+- bounded `dns.protection.agent.version.report` / site-drift or investigation reads only when they answer a specific diagnostic question.
+
+Rules:
+- always supply the exact Autotask `company_id`;
+- organization/network/site scope must be server-derived and client-isolated;
+- for client tickets, never substitute AOT self-company `company_id=0` merely because the client lives inside AOT's DNSFilter MSP organization;
+- do not collect broad DNS query history during routine endpoint diagnosis;
+- if native provider evidence conflicts with endpoint-local evidence, preserve both and investigate rather than silently choosing one.
+
+Decision:
+- exact provider-side agent match -> record agent state/status/version, authorized network/site, policy relationship where returned, and relevant sync/traffic state;
+- no provider-side match -> continue local install/service diagnostics; absence from the provider search alone is not proof that the local client is absent;
+- multiple or cross-client candidates -> `identification_blocked`;
+- `CONNECTOR_AUTHORIZATION_DENIED` or missing safe client boundary -> document native connector evidence as unavailable, continue with the DRMM diagnostic path, and do not weaken isolation. Current client-network isolation gap is tracked in GitHub #253.
+
+**Production evidence — 2026-09-24:** AOT self-company reads succeeded and returned AOT-50282 as an active/protected Windows agent, version 3.3.6, on the AOT Office network. The same native reads for AVMAC company 1179 failed closed with `CONNECTOR_AUTHORIZATION_DENIED`. Inspection confirmed AOT's DNSFilter organization is an MSP/master container holding multiple client networks, so client enablement requires network/site-level isolation rather than simply mapping every Autotask company to the same DNSFilter organization ID.
 
 ### Step 2 — Native software inventory
 
@@ -159,14 +191,19 @@ These generic standing-safe components may be used immediately under existing po
 
 ### Step 4 — Dedicated DNSFilter-specific read-only component
 
-Create:
+Use the production-accepted component:
 
-`DNSFilter / DNS Agent Diagnostic [WIN] AOT`
+`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`
 
-Standing classification after acceptance:
+Current UID:
+`c3340a58-48d5-457b-bc30-5fd79e5ad8b1`
+
+Standing classification:
 - read-only;
 - non-disruptive;
-- eligible for unsupervised approval.
+- production standing-approved for unsupervised diagnostic use.
+
+**Implementation evidence — 2026-09-24:** the initial AVMAC-1077 acceptance run exposed a PowerShell automatic-variable collision between `$Matches` (created by `-match`) and a script collection named `$matches`. The corrected component renamed the collection to `$logMatches`; the controlled rerun and later production standing-safe rerun both completed successfully with empty stderr. Preserve this regression lesson in future component revisions.
 
 The component must collect only:
 
@@ -320,9 +357,16 @@ Diagnostic approval is not remediation authority.
 ## 9. Remediation
 
 ### Standing-approved diagnostic
-`DNSFilter / DNS Agent Diagnostic [WIN] AOT`
+`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`
+UID: `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`
 
 Classification: read-only / non-disruptive.
+
+### Native DNSFilter integration
+
+Current classification: read-only.
+
+Native provider reads may be used to corroborate agent/network/policy posture only when Jason proves an exact safe client boundary. They do not authorize starting/restarting services, reinstalling agents, changing policies, changing networks, resolving unblock requests, or any other DNSFilter mutation.
 
 ### Service start/restart
 Potentially useful but can interrupt DNS.
@@ -504,16 +548,25 @@ Current:
 - `automation.component.search/execute`
 - `automation.job.read`
 - `automation.job.output.read`
+- `dns.protection.organization.read`
+- `dns.protection.agent.search`
+- `dns.protection.agent.counts.read`
+- `dns.protection.site.search`
+- `dns.protection.policy.search`
+- selected bounded DNSFilter investigation/report reads where a client-safe boundary is proven
 
 Existing standing-safe building blocks:
 - `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` for exact service state/details and relevant Windows events;
 - `Get-DNS Settings AOT Ver 06042025-1` for current DNS configuration.
 
-Implementation gap:
-- create `DNSFilter / DNS Agent Diagnostic [WIN] AOT` focused on DNSFilter-specific install-state correlation, both-service awareness, operational-log parsing, and DNSFilter diagnostic TXT/filtering verification, while reusing existing generic components where practical;
-- review it as read-only/non-disruptive;
-- register it in Jason's durable Datto component approval registry after acceptance;
-- review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting standing use under this playbook.
+Completed implementation milestone:
+- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is deployed;
+- controlled AVMAC-1077 acceptance passed after correcting the `$Matches` collision;
+- the exact diagnostic component is registered in Jason's durable standing-safe Datto component approval registry and has passed a production autonomous retest.
+
+Remaining implementation gaps:
+- review and acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for the gated missing-agent path before granting standing use under this playbook;
+- implement client-network/site isolation for the native DNSFilter integration before enabling non-AOT client boundaries (GitHub #253).
 
 The generic `Run Ad Hoc Command (PowerShell 2-5) [WIN]` must not be promoted to unsupervised authority.
 
@@ -536,6 +589,20 @@ Known baseline:
 - native DRMM software search did not return a DNSFilter product;
 - generic PowerShell diagnostic correctly stopped at the per-run approval gate.
 
+Production acceptance results — 2026-09-24:
+- dedicated diagnostic UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1` ran to terminal completion after the `$Matches` regression was corrected;
+- filtering service `DNS Agent` was Stopped/Auto;
+- `DNS Agent Service Manager` was Running/Auto;
+- expected filtering executable `C:\\Program Files\\DNS Agent\\Agent\\DNS Agent.exe` was missing;
+- Service Manager binary was present, version 3.7.11.0, with valid signature;
+- normal DNS resolution succeeded;
+- DNSFilter diagnostic TXT verification failed;
+- bounded Windows and DNSFilter operational-log evidence was returned;
+- incident classification was correctly `agent_corrupt_or_partial`;
+- no blind reinstall, service restart, DNS/NIC change, uninstall, registry modification, or reboot occurred;
+- the corrected component was subsequently standing-approved and rerun successfully without per-run approval;
+- native DNSFilter client-scoped reads for AVMAC remain blocked pending safe network/site isolation (#253).
+
 Acceptance must prove:
 1. exact identity;
 2. dedicated component runs without per-run approval under standing-safe policy;
@@ -554,14 +621,19 @@ Acceptance must prove:
 
 ## 22. Section Goal Closure
 
-Close only after:
-- dedicated diagnostic component is created in Datto RMM;
-- read-only diagnostic behavior is reviewed;
-- diagnostic component is standing-approved in Jason's durable registry;
+Completed as of 2026-09-24:
+- dedicated diagnostic component created in Datto RMM;
+- read-only diagnostic behavior reviewed;
+- diagnostic component standing-approved in Jason's durable registry;
+- AVMAC-1077 diagnostic acceptance succeeded;
+- partial/corrupt-install classification and fail-closed behavior were proven;
+- production autonomous diagnostic rerun succeeded.
+
+Remaining closure gates:
 - exact `Install DNSFilter AOT Ver 08262024` component passes controlled gated-install acceptance and is approved for the playbook's missing-agent path;
-- AVMAC-1077 acceptance succeeds;
-- note quality and retry behavior are verified;
+- native DNSFilter client-network/site isolation is implemented and production-proven for a non-AOT client before native client reads become a normal playbook dependency (#253);
+- note quality and retry behavior remain verified after future remediation acceptance;
 - limitations/TODOs are documented;
 - Project Jason/Grafana tracking is updated.
 
-Until then, the playbook design is owner-approved, but autonomous diagnostic execution remains capability-blocked.
+Autonomous diagnostic execution is no longer capability-blocked. Autonomous repair-over-install remains intentionally blocked, and the missing-agent install path remains pending its own controlled acceptance.
