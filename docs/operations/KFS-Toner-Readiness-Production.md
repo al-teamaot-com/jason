@@ -17,7 +17,7 @@ The current production implementation is observational only. It reads existing K
 ## Production architecture
 
 ```text
-Nightly KFS collector
+KFS collector (00:00 / 06:00 / 12:00 / 18:00 ET)
         |
         v
 jason-kfs-postgres
@@ -35,6 +35,8 @@ AOT Toner Readiness (Grafana)
 ```
 
 The exporter refreshes its cached KFS analysis every 15 minutes. Prometheus scrapes the cached metrics rather than triggering a KFS database query on every scrape.
+
+The KFS collector itself runs four times per day at **00:00, 06:00, 12:00, and 18:00 America/New_York**. This gives the toner model fresher intra-day observations while keeping provider collection load bounded.
 
 ## Data sensitivity and access boundary
 
@@ -74,7 +76,7 @@ Freshness is measured against successful KFS collections, not calendar days:
 - `not_reporting`: device missed two or more successful collections;
 - `long_term_missing`: no fresh device telemetry for at least 7 days;
 - `toner_stale`: device is current but that toner stream did not update in the latest successful collection;
-- `collection_stale`: the latest successful KFS collection itself is older than 36 hours.
+- `collection_stale`: the latest successful KFS collection itself is older than 9 hours. With the 6-hour production cadence, this provides roughly a 3-hour grace window beyond the expected next collection.
 
 Any non-current state forces the affected toner to `needs_review`. A stale historical toner level must never remain actionable as though it were current.
 
