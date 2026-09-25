@@ -46,6 +46,9 @@ from autonomous_remediation.autonomous_principal import (
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
 )
+from autonomous_remediation.datto_edr_av_playbook import (
+    PLAYBOOK_VERSION as DATTO_EDR_AV_PLAYBOOK_VERSION,
+)
 from jason_runtime.autonomy_shadow_runtime import GovernedAutonomyReadPort
 from jason_runtime.autonomy_execution_pilot import (
     AutonomyInternalNotePilotSpec,
@@ -376,6 +379,26 @@ _AUTONOMY_ACCEPTANCE_NOTE_BODY = (
     "No ticket fields or endpoint state changed."
 )
 _AUTONOMY_ACCEPTANCE_PROMOTION_TTL_MINUTES = 30
+
+_AUTONOMOUS_TICKET_WORKER_PRINCIPAL = "jason-autonomy-worker"
+_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_ID = "datto_edr_av"
+_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_VERSION = DATTO_EDR_AV_PLAYBOOK_VERSION
+_AUTONOMOUS_TICKET_WORKER_POLICY_ID = "playbook-autonomy:datto_edr_av"
+_AUTONOMOUS_TICKET_WORKER_READ_GRANTS = (
+    "service.configuration.read",
+    "endpoint.device.read",
+    "automation.job.read",
+    "automation.job.output.read",
+)
+_AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS = (
+    "automation.component.execute",
+    "service.ticket.note.create",
+    "service.ticket.update",
+)
+_AUTONOMOUS_TICKET_WORKER_REQUIRED_GRANTS = (
+    *_AUTONOMOUS_TICKET_WORKER_READ_GRANTS,
+    *_AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS,
+)
 
 
 def _auto_enroll_aot_member(
@@ -3625,6 +3648,266 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
     return {
         "status":"succeeded","grant_id":revoked.grant_id,"subject_id":revoked.subject_id,
         "capability":revoked.capability,"status_after":revoked.status,
+    }
+
+
+def _active_autonomous_ticket_worker_promotion():
+    return _playbook_autonomy_store().find_scope_approved(
+        playbook_id=_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_ID,
+        playbook_version=_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_VERSION,
+        policy_id=_AUTONOMOUS_TICKET_WORKER_POLICY_ID,
+        required_capabilities=_AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS,
+    )
+
+
+def _ensure_autonomous_ticket_worker_grant(
+    *,
+    app: Any,
+    admin: str,
+    organization: str,
+    capability: str,
+    permission: PermissionMode,
+    approval_required: bool,
+) -> AuthorityGrant:
+    subject = _authority_grant_subject(
+        app,
+        _AUTONOMOUS_TICKET_WORKER_PRINCIPAL,
+        organization,
+    )
+    exact_capability = _exact_authority_capability(app, capability)
+    grant_id = _authority_grant_id(
+        subject=subject,
+        capability=exact_capability,
+        organization=organization,
+        client_id=None,
+        permission=permission,
+        approval_required=approval_required,
+    )
+    candidate = AuthorityGrant(
+        grant_id=grant_id,
+        subject_id=subject,
+        capability=exact_capability,
+        organization_id=organization,
+        client_id=None,
+        permission=permission,
+        approval_required=approval_required,
+        status="active",
+    )
+    repo = app.identity_authority.grants
+    existing = repo.get(grant_id)
+    if existing is not None:
+        if existing != candidate:
+            raise ValueError("AUTONOMOUS_TICKET_WORKER_GRANT_CONFLICT")
+        return existing
+    _authority_grant_audit(
+        app=app,
+        event_type="authority.grant.create.requested",
+        admin_principal=admin,
+        organization=organization,
+        capability=exact_capability,
+        grant_id=grant_id,
+    )
+    repo.put(candidate)
+    _authority_grant_audit(
+        app=app,
+        event_type="authority.grant.created",
+        admin_principal=admin,
+        organization=organization,
+        capability=exact_capability,
+        grant_id=grant_id,
+    )
+    return candidate
+
+
+@mcp.tool()
+def autonomous_ticket_worker_status() -> dict[str, Any]:
+    """Owner-only: report production autonomous ticket-worker authority."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        grants = app.identity_authority.grants.list_for_subject(
+            _AUTONOMOUS_TICKET_WORKER_PRINCIPAL
+        )
+        exact = {
+            grant.capability: {
+                "grant_id": grant.grant_id,
+                "permission": grant.permission.value,
+                "approval_required": grant.approval_required,
+                "status": grant.status,
+                "client_id": grant.client_id,
+            }
+            for grant in grants
+            if grant.capability in _AUTONOMOUS_TICKET_WORKER_REQUIRED_GRANTS
+        }
+        promotion = _active_autonomous_ticket_worker_promotion()
+        app.identity_authority.audit.append_authority_audit(
+            event_type="autonomy.ticket_worker.status.read",
+            correlation_id=f"autonomy-ticket-worker:{uuid4().hex}",
+            principal_id=admin,
+            organization_id=organization,
+            capability="autonomy.ticket_worker",
+            outcome="succeeded",
+            reason_codes=("OWNER_STATUS_READ",),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "workload_principal": _AUTONOMOUS_TICKET_WORKER_PRINCIPAL,
+        "required_grants": exact,
+        "promotion": None
+        if promotion is None
+        else {
+            "approval_id": promotion.approval_id,
+            "playbook_id": promotion.playbook_id,
+            "playbook_version": promotion.playbook_version,
+            "policy_id": promotion.policy_id,
+            "allowed_capabilities": list(promotion.allowed_capabilities),
+            "approved_by": promotion.approved_by,
+            "approved_at": promotion.approved_at.isoformat(),
+            "expires_at": (
+                promotion.expires_at.isoformat()
+                if promotion.expires_at
+                else None
+            ),
+            "status": promotion.status,
+        },
+        "scope": {
+            "queues": ["Help Desk I", "Help Desk II", "Monitoring Alert"],
+            "playbook": "Datto EDR/AV health-only",
+            "disruptive_actions": "approval_required",
+        },
+    }
+
+
+@mcp.tool()
+def approve_autonomous_ticket_worker() -> dict[str, Any]:
+    """Owner-only: enable exact standing authority for the production ticket worker."""
+    try:
+        admin, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("AUTONOMOUS_TICKET_WORKER_ORGANIZATION_MISMATCH")
+        app = _runtime()
+
+        created = []
+        for capability in _AUTONOMOUS_TICKET_WORKER_READ_GRANTS:
+            grant = _ensure_autonomous_ticket_worker_grant(
+                app=app,
+                admin=admin,
+                organization=organization,
+                capability=capability,
+                permission=PermissionMode.OBSERVE,
+                approval_required=False,
+            )
+            created.append(grant.grant_id)
+
+        for capability in _AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS:
+            grant = _ensure_autonomous_ticket_worker_grant(
+                app=app,
+                admin=admin,
+                organization=organization,
+                capability=capability,
+                permission=PermissionMode.EXECUTE,
+                approval_required=True,
+            )
+            created.append(grant.grant_id)
+
+        promotion = _active_autonomous_ticket_worker_promotion()
+        if promotion is None:
+            promotion = _playbook_autonomy_store().new(
+                playbook_id=_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_ID,
+                playbook_version=_AUTONOMOUS_TICKET_WORKER_PLAYBOOK_VERSION,
+                policy_id=_AUTONOMOUS_TICKET_WORKER_POLICY_ID,
+                allowed_capabilities=_AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS,
+                approved_by=admin,
+                expires_at=None,
+            )
+            _playbook_autonomy_store().put(promotion)
+
+        app.identity_authority.audit.append_authority_audit(
+            event_type="autonomy.ticket_worker.enabled",
+            correlation_id=f"autonomy-ticket-worker:{uuid4().hex}",
+            principal_id=admin,
+            organization_id=organization,
+            capability="autonomy.ticket_worker",
+            outcome="succeeded",
+            reason_codes=(
+                promotion.approval_id,
+                "HEALTH_ONLY_EDR_AV",
+                "NO_DISRUPTIVE_ACTIONS",
+            ),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "workload_principal": _AUTONOMOUS_TICKET_WORKER_PRINCIPAL,
+        "grant_ids": created,
+        "promotion_id": promotion.approval_id,
+        "playbook_id": promotion.playbook_id,
+        "playbook_version": promotion.playbook_version,
+        "allowed_capabilities": list(promotion.allowed_capabilities),
+        "expires_at": None,
+    }
+
+
+@mcp.tool()
+def revoke_autonomous_ticket_worker(
+    reason: str = "owner_disabled",
+) -> dict[str, Any]:
+    """Owner-only: revoke standing ticket-worker execution authority."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        current = _active_autonomous_ticket_worker_promotion()
+        revoked_promotion = None
+        if current is not None:
+            revoked_promotion = _playbook_autonomy_store().revoke(
+                current.approval_id,
+                revoked_by=admin,
+                reason=str(reason or "owner_disabled").strip() or "owner_disabled",
+            )
+
+        revoked_grants = []
+        for grant in app.identity_authority.grants.list_for_subject(
+            _AUTONOMOUS_TICKET_WORKER_PRINCIPAL
+        ):
+            if (
+                grant.capability not in _AUTONOMOUS_TICKET_WORKER_REQUIRED_GRANTS
+                or grant.status != "active"
+            ):
+                continue
+            revoked = app.identity_authority.grants.revoke(grant.grant_id)
+            if revoked is not None:
+                revoked_grants.append(revoked.grant_id)
+                _authority_grant_audit(
+                    app=app,
+                    event_type="authority.grant.revoked",
+                    admin_principal=admin,
+                    organization=organization,
+                    capability=revoked.capability,
+                    grant_id=revoked.grant_id,
+                )
+
+        app.identity_authority.audit.append_authority_audit(
+            event_type="autonomy.ticket_worker.disabled",
+            correlation_id=f"autonomy-ticket-worker:{uuid4().hex}",
+            principal_id=admin,
+            organization_id=organization,
+            capability="autonomy.ticket_worker",
+            outcome="succeeded",
+            reason_codes=(str(reason or "owner_disabled"),),
+        )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "revoked_promotion": (
+            revoked_promotion.approval_id
+            if revoked_promotion is not None
+            else None
+        ),
+        "revoked_grant_ids": revoked_grants,
     }
 
 

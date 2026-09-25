@@ -65,6 +65,24 @@ AUTOTASK_TICKET_UPDATE_PROFILE_ENV = (
 
 AUTOTASK_TICKET_UPDATE_PROFILE = "owner-ticket-update-v1"
 
+AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV = (
+    "JASON_AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID"
+)
+AUTOTASK_TICKET_UPDATE_AUTONOMY_PRINCIPAL = "jason-autonomy-worker"
+
+
+def configured_autotask_ticket_update_autonomy_resource_id() -> int | None:
+    raw = os.getenv(AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID") from error
+    if value < 1:
+        raise RuntimeError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID")
+    return value
+
 SAFE_TICKET_UPDATE_FIELDS = frozenset(
     {
         "status",
@@ -318,6 +336,27 @@ def _normalized_due(value: Any) -> str:
 
 
 class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
+    def __init__(self, *, autonomy_api_resource_id: int | None = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if autonomy_api_resource_id is not None:
+            if isinstance(autonomy_api_resource_id, bool):
+                raise ValueError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID")
+            try:
+                parsed = int(autonomy_api_resource_id)
+            except (TypeError, ValueError) as error:
+                raise ValueError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID") from error
+            if parsed < 1:
+                raise ValueError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID")
+            self._autonomy_api_resource_id = parsed
+        else:
+            self._autonomy_api_resource_id = None
+
+    def _is_autonomous_api_user_request(self, request: ConnectorRequest) -> bool:
+        return (
+            request.context.principal_id == AUTOTASK_TICKET_UPDATE_AUTONOMY_PRINCIPAL
+            and self._autonomy_api_resource_id is not None
+        )
+
     capabilities = frozenset(
         {
             "autotask.ticket.update",
@@ -407,6 +446,15 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             request,
             credentials,
         )
+        headers = dict(prepared.headers)
+        if self._is_autonomous_api_user_request(request):
+            headers.pop("ImpersonationResourceId", None)
+            self._preflight_requester_access(
+                prepared=prepared,
+                headers=headers,
+                operation=request.context.capability,
+            )
+            return prepared, headers
         email = self._trusted_email(request)
         if email is None:
             raise PermissionError(
@@ -416,7 +464,6 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             prepared=prepared,
             email=email,
         )
-        headers = dict(prepared.headers)
         headers["ImpersonationResourceId"] = str(resource_id)
         return prepared, headers
 
@@ -642,20 +689,24 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             credentials,
         )
 
-        email = self._trusted_email(request)
-
-        if email is None:
-            raise AutotaskTicketUpdateVerificationError(
-                "trusted requester binding unavailable for readback"
-            )
-
-        resource_id = self._resolve_impersonation_resource_id(
-            prepared=prepared,
-            email=email,
-        )
-
         headers = dict(prepared.headers)
-        headers["ImpersonationResourceId"] = str(resource_id)
+        if self._is_autonomous_api_user_request(request):
+            if self._autonomy_api_resource_id is None:
+                raise AutotaskTicketUpdateVerificationError(
+                    "autonomous API-user resource id unavailable for readback"
+                )
+            headers.pop("ImpersonationResourceId", None)
+        else:
+            email = self._trusted_email(request)
+            if email is None:
+                raise AutotaskTicketUpdateVerificationError(
+                    "trusted requester binding unavailable for readback"
+                )
+            resource_id = self._resolve_impersonation_resource_id(
+                prepared=prepared,
+                email=email,
+            )
+            headers["ImpersonationResourceId"] = str(resource_id)
 
         payload = self._transport.request(
             method=prepared.method,
@@ -1087,6 +1138,9 @@ def build_autotask_ticket_update_invoker(
         transport=transport,
         audit=audit,
         bindings=bindings,
+        autonomy_api_resource_id=(
+            configured_autotask_ticket_update_autonomy_resource_id()
+        ),
     )
 
     return GovernedConnectorCapabilityInvoker(

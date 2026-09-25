@@ -257,6 +257,8 @@ from .datto_site_variable_management import (
 )
 from .http import RuntimeHttpApplication
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
+from .autonomy_worker_composition import build_autonomy_worker_maintenance
+from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
 from .microsoft_directory import build_microsoft_directory_runtime
 from .provider_reads import (
     build_provider_read_invoker,
@@ -388,6 +390,11 @@ class RuntimeSettings:
     autonomy_shadow_interval_seconds: int = 1800
     autonomy_shadow_failure_retry_seconds: int = 300
     autonomy_targeted_wake_retry_seconds: int = 300
+    autonomy_worker_enabled: bool = False
+    autonomy_worker_db: Path = Path(
+        "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"
+    )
+    autonomy_worker_interval_seconds: int = 60
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -688,6 +695,18 @@ class RuntimeSettings:
             autonomy_targeted_wake_retry_seconds=int(
                 os.getenv("JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS", "300")
             ),
+            autonomy_worker_enabled=os.getenv(
+                "JASON_AUTONOMY_WORKER_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            autonomy_worker_db=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_WORKER_DB",
+                    "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3",
+                )
+            ),
+            autonomy_worker_interval_seconds=int(
+                os.getenv("JASON_AUTONOMY_WORKER_INTERVAL_SECONDS", "60")
+            ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -717,6 +736,10 @@ class RuntimeSettings:
         if self.autonomy_targeted_wake_retry_seconds < 60:
             raise ValueError(
                 "JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS must be at least 60"
+            )
+        if self.autonomy_worker_interval_seconds < 30:
+            raise ValueError(
+                "JASON_AUTONOMY_WORKER_INTERVAL_SECONDS must be at least 30"
             )
         if any(value < 1 for value in self.autonomy_owned_autotask_resource_ids):
             raise ValueError(
@@ -1682,7 +1705,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         flow=flow,
         allowed_machine_identities=settings.allowed_machine_identities,
     )
-    autonomy_maintenance = build_autonomy_shadow_maintenance(
+    shadow_autonomy_maintenance = build_autonomy_shadow_maintenance(
         enabled=settings.autonomy_shadow_enabled,
         identity_authority=identity_authority,
         capabilities=capabilities,
@@ -1698,6 +1721,23 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+    )
+    operational_autonomy_maintenance = build_autonomy_worker_maintenance(
+        enabled=settings.autonomy_worker_enabled,
+        identity_authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approval_repository,
+        execution_ledger=governed_execution_ledger,
+        orchestrator=orchestrator,
+        work_db=settings.autonomy_worker_db,
+        promotion_db=settings.autonomy_promotion_db,
+        owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+        max_active_work_items=settings.autonomy_max_active_work_items,
+        interval_seconds=settings.autonomy_worker_interval_seconds,
+    )
+    autonomy_maintenance = CompositeAutonomyMaintenance(
+        operational_autonomy_maintenance,
+        shadow_autonomy_maintenance,
     )
 
     return RuntimeHttpApplication(

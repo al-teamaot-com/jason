@@ -44,6 +44,17 @@ services:
       JASON_DATTO_POWERSHELL_READ_PROFILE: ${JASON_DATTO_POWERSHELL_READ_PROFILE:-readonly-v1}
       JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID: ${JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_UID:-8a1c153c-feee-41c5-9c9b-58a48e0214fe}
       JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME: ${JASON_DATTO_COMPONENT_EXECUTION_COMPONENT_NAME:-Run Ad Hoc Command (PowerShell 2-5) [WIN]}
+      JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE: ${JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE:-}
+      JASON_AUTOTASK_MUTATION_ENABLED: ${JASON_AUTOTASK_MUTATION_ENABLED:-false}
+      JASON_AUTOTASK_TICKET_UPDATE_MCP_PROFILE: ${JASON_AUTOTASK_TICKET_UPDATE_MCP_PROFILE:-}
+      JASON_AUTOTASK_INTERNAL_NOTE_MCP_PROFILE: ${JASON_AUTOTASK_INTERNAL_NOTE_MCP_PROFILE:-}
+      JASON_AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID: ${JASON_AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID:-}
+      JASON_AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID: ${JASON_AUTOTASK_INTERNAL_NOTE_AUTONOMY_RESOURCE_ID:-}
+      JASON_AUTONOMY_SHADOW_ENABLED: ${JASON_AUTONOMY_SHADOW_ENABLED:-false}
+      JASON_AUTONOMY_WORKER_ENABLED: ${JASON_AUTONOMY_WORKER_ENABLED:-false}
+      JASON_AUTONOMY_WORKER_DB: /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
+      JASON_AUTONOMY_WORKER_INTERVAL_SECONDS: ${JASON_AUTONOMY_WORKER_INTERVAL_SECONDS:-60}
+      JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS: ${JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS:-}
       JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/datto-rmm-execution/role_id
       JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/datto-rmm-execution/secret_id
       JASON_HOSTED_SEMANTICS_ENABLED: "true"
@@ -91,6 +102,8 @@ services:
       - ${JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/it-glue/secret_id:ro
       - ${JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/role_id:ro
       - ${JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/autotask/secret_id:ro
+      - ${JASON_AUTOTASK_WRITE_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/autotask-write-approle/role-id}:/run/jason-secrets/openbao/autotask-write/role_id:ro
+      - ${JASON_AUTOTASK_WRITE_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/autotask-write-approle/secret-id}:/run/jason-secrets/openbao/autotask-write/secret_id:ro
       - ${JASON_KFS_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/role-id}:/run/jason-secrets/openbao/kyocera-kfs/role_id:ro
       - ${JASON_KFS_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/secret-id}:/run/jason-secrets/openbao/kyocera-kfs/secret_id:ro
       - ${JASON_BACKUP_NET_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/role-id}:/run/jason-secrets/openbao/backup-net/role_id:ro

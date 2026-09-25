@@ -23,6 +23,7 @@ from .provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_CONFIGURATION_READ,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
@@ -59,6 +60,16 @@ _AUTONOMOUS_ACCEPTANCE_READS = frozenset(
     }
 )
 _AUTONOMOUS_ACCEPTANCE_POLICY = "autonomous-execution-acceptance-read-v1"
+_AUTONOMOUS_WORKER_READS = frozenset(
+    {
+        SERVICE_TICKET_SEARCH,
+        SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_RESOURCE_SEARCH,
+        SERVICE_RESOURCE_READ,
+        SERVICE_CONFIGURATION_READ,
+    }
+)
+_AUTONOMOUS_WORKER_POLICY = "autonomous-worker-read-v1"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -177,6 +188,25 @@ def _autonomous_acceptance_requester_authorization_proven(
     )
 
 
+def _autonomous_worker_requester_authorization_proven(
+    *,
+    request: OrchestrationRequest,
+    capability_name: str,
+) -> bool:
+    """Authorize only the exact production autonomy worker Autotask reads."""
+
+    return bool(
+        capability_name in _AUTONOMOUS_WORKER_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_WORKER_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 def _autonomous_shadow_requester_authorization_proven(
     *,
     request: OrchestrationRequest,
@@ -245,6 +275,17 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "trusted_microsoft_identity_binding",
                     "central_orchestrator_governed_read",
+                )
+            elif _autonomous_worker_requester_authorization_proven(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_production_worker",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_WORKER_POLICY,
                 )
             elif _autonomous_shadow_requester_authorization_proven(
                 request=request,
