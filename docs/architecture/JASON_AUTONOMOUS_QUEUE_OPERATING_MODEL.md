@@ -197,3 +197,33 @@ Findings:
 - No playbook is currently durably promoted for unattended mutation. The playbook catalog is shadow-only and its `allowed_capabilities` sets are empty.
 
 This checkpoint proves queue discovery and classification behavior without granting execution authority.
+
+
+## Targeted wake / recheck contract
+
+Known work must not require a broad Autotask queue reconciliation merely to learn that one dependency changed.
+
+Jason persists bounded wake records for either:
+
+- a timed exact read, such as re-reading one Datto job after a propagation interval;
+- an event-armed exact read, such as re-reading one endpoint when a device-online event is received; or
+- an explicit queue-reconciliation wake when capacity or queue state materially changes.
+
+A targeted wake is bound to a stable wake identifier, work resource, reason, and either an exact future time or named event. Targeted reads additionally bind one allowlisted read-only capability and normalized selector arguments. Reusing a wake identifier with changed scope fails closed.
+
+Runtime execution remains on the existing single-thread maintenance loop. The targeted wake service runs before shadow queue reconciliation in each maintenance tick so a due wake may request one coalesced reconciliation in the same server-thread cycle.
+
+Security requirements:
+
+- targeted wakes cannot invoke write capabilities;
+- the runtime uses an explicit targeted-read capability allowlist in addition to JKD-001 authority;
+- a poisoned wake requesting a mutation fails before provider invocation;
+- read failure does not become mutation or redispatch authority;
+- retries are bounded and end in a durable failed state;
+- event wakes may be scoped to one resource so another ticket/device is not accidentally resumed;
+- queue reconciliation occurs only when the wake explicitly requires it;
+- the Central Orchestrator remains the execution boundary and provides the provider evidence/audit trail.
+
+Initial allowlisted targeted reads are limited to ticket state, automation job/output, endpoint state/alerts, and endpoint-backup state/history. Expansion requires source review and tests; a persisted wake cannot self-expand the allowlist.
+
+This implements the provider-neutral scheduling contract from #251: known work is revisited directly, while queue reconciliation remains event/capacity/staleness driven.
