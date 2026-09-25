@@ -32,7 +32,7 @@ Routine shadow queue reads are excluded from the main history and action counter
 
 ## Data sources
 
-`autonomy_flight_recorder_exporter.py` reads existing Jason SQLite evidence stores read-only:
+The containerized `autonomy_flight_recorder_exporter.py` reads existing Jason SQLite evidence stores through read-only bind mounts:
 
 - orchestration event store;
 - governed execution ledger;
@@ -63,4 +63,4 @@ Run from a clean current checkout:
 infrastructure/showcase/deploy_autonomy_flight_recorder.sh
 ```
 
-The deployment installs/restarts only the Flight Recorder exporter and refreshes Prometheus/Grafana provisioning. It verifies that Jason Runtime, Jason MCP, and OpenBao container IDs did not change.
+The deployment starts/recreates only the Flight Recorder, Prometheus, and Grafana services in the existing observability Compose project. Jason Runtime, Jason MCP, and OpenBao are outside the deployment target and their container IDs are verified unchanged.

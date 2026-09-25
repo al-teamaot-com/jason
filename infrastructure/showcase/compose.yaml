@@ -12,8 +12,6 @@ services:
       - ./prometheus/file_sd:/etc/prometheus/file_sd:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:9090:9090"
     networks:
@@ -48,6 +46,27 @@ services:
     networks:
       - observability
 
+  autonomy-flight-recorder:
+    image: python:3.12-slim
+    container_name: jason-autonomy-flight-recorder
+    restart: unless-stopped
+    command: ["python3", "/app/autonomy_flight_recorder_exporter.py"]
+    environment:
+      JASON_AUTONOMY_FLIGHT_RECORDER_HOST: "0.0.0.0"
+      JASON_AUTONOMY_FLIGHT_RECORDER_PORT: "9475"
+      JASON_ORCHESTRATION_EVENTS_DB: /var/lib/jason/openclaw/orchestration-events.sqlite3
+      JASON_GOVERNED_EXECUTION_DB: /var/lib/jason/openclaw/governed-execution.sqlite3
+      JASON_AUTHORITY_DB: /var/lib/jason/authority/authority.sqlite3
+      JASON_AUTONOMY_SHADOW_DB: /var/lib/jason/openclaw/autonomy-shadow.sqlite3
+    volumes:
+      - ./autonomy_flight_recorder_exporter.py:/app/autonomy_flight_recorder_exporter.py:ro
+      - /var/lib/jason/openclaw:/var/lib/jason/openclaw:ro
+      - /var/lib/jason/authority:/var/lib/jason/authority:ro
+    ports:
+      - "127.0.0.1:9475:9475"
+    networks:
+      - observability
+
   grafana:
     image: grafana/grafana:12.2.1
     container_name: jason-grafana
@@ -67,8 +86,6 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - observability
       - jason-core
