@@ -19,6 +19,7 @@ import re
 import sqlite3
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -90,13 +91,124 @@ def _target_from_plan(plan: dict[str, Any]) -> dict[str, Any]:
         or selectors.get("ticket_id") or selectors.get("ticketID")
         or (plan.get("resource_identifier") if plan.get("resource_type") in {"service_ticket", "service_ticket_note"} else None)
     )
-    device = selectors.get("device_uid") or selectors.get("device_id") or selectors.get("hostname")
+    ticket_number = (payload.get("ticketNumber") or normalized_payload.get("ticketNumber") or selectors.get("ticketNumber"))
+    configuration_item_id = (payload.get("configurationItemID") or normalized_payload.get("configurationItemID") or selectors.get("configurationItemID"))
+    device_name = (payload.get("deviceName") or normalized_payload.get("deviceName") or selectors.get("deviceName") or selectors.get("hostname"))
+    device = ((args.get("device_uid") if isinstance(args, dict) else None) or (args.get("device_id") if isinstance(args, dict) else None) or (args.get("endpoint_uid") if isinstance(args, dict) else None) or normalized_payload.get("device_uid") or normalized_payload.get("device_id") or normalized_payload.get("endpoint_uid") or selectors.get("device_uid") or selectors.get("device_id") or selectors.get("endpoint_uid") or device_name or configuration_item_id or (plan.get("resource_identifier") if str(plan.get("resource_type") or "").startswith("endpoint") else None))
+    client_id = ((plan.get("client_id") if isinstance(plan, dict) else None) or (args.get("client_id") if isinstance(args, dict) else None) or (args.get("companyID") if isinstance(args, dict) else None) or payload.get("companyID") or normalized_payload.get("companyID") or selectors.get("companyID"))
+    client_name = payload.get("companyName") or normalized_payload.get("companyName") or selectors.get("companyName")
     return {
         "ticket_id": str(ticket_id) if ticket_id not in (None, "") else None,
+        "ticket_number": str(ticket_number) if ticket_number not in (None, "") else None,
         "device": str(device) if device not in (None, "") else None,
-        "client_id": plan.get("client_id") if isinstance(plan, dict) else None,
+        "device_name": str(device_name) if device_name not in (None, "") else None,
+        "configuration_item_id": str(configuration_item_id) if configuration_item_id not in (None, "") else None,
+        "client_id": str(client_id) if client_id not in (None, "") else None,
+        "client_name": str(client_name) if client_name not in (None, "") else None,
     }
 
+
+
+
+def _display_time(value: Any) -> str:
+    if not value:
+        return "Unknown time"
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York"))
+        return dt.strftime("%m/%d/%Y %I:%M:%S %p %Z")
+    except Exception:
+        return str(value)
+
+
+def _first_present(mapping: Any, *keys: str) -> Any:
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _action_input(plan: dict[str, Any]) -> Any:
+    args = plan.get("arguments") if isinstance(plan, dict) else {}
+    args = args if isinstance(args, dict) else {}
+    normalized = plan.get("normalized_payload") if isinstance(plan, dict) else {}
+    normalized = normalized if isinstance(normalized, dict) else {}
+    payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
+    for source in (args, normalized, payload):
+        value = _first_present(source, "command", "script", "componentName", "component_name", "name", "title", "description")
+        if value not in (None, ""):
+            return value
+    if normalized:
+        return normalized
+    return args or None
+
+
+def _provider_output(result: dict[str, Any]) -> Any:
+    output = result.get("output") if isinstance(result, dict) else None
+    data = output.get("data") if isinstance(output, dict) and isinstance(output.get("data"), dict) else output
+    if isinstance(data, dict):
+        for key in ("stdout", "output", "result", "message", "description", "stderr"):
+            value = data.get(key)
+            if value not in (None, "", [], {}):
+                return value
+        # Remove verification metadata from the human-facing provider return summary.
+        compact = {k: v for k, v in data.items() if k != "jasonVerification"}
+        if compact:
+            return compact
+    if data not in (None, "", [], {}):
+        return data
+    return None
+
+
+def _timeline(*, row: dict[str, Any], terminal: dict[str, Any] | None, plan: dict[str, Any], result: dict[str, Any], action_name: str, target: dict[str, Any], state: str, failure_reason: str | None, verification: dict[str, Any]) -> list[dict[str, Any]]:
+    started = row.get("created_at")
+    finished = terminal.get("occurred_at") if isinstance(terminal, dict) else row.get("consumed_at") or started
+    action_input = _sanitize(_action_input(plan))
+    provider_output = _sanitize(_provider_output(result))
+    target_bits = []
+    if target.get("ticket_number") or target.get("ticket_id"):
+        target_bits.append(f"ticket {target.get('ticket_number') or target.get('ticket_id')}")
+    if target.get("client_name") or target.get("client_id"):
+        target_bits.append(f"client {target.get('client_name') or target.get('client_id')}")
+    if target.get("device_name") or target.get("device"):
+        target_bits.append(f"device {target.get('device_name') or target.get('device')}")
+    target_text = f" against {', '.join(target_bits)}" if target_bits else ""
+    entries = [{
+        "time": _display_time(started),
+        "event": "Ran",
+        "message": f"Jason ran {action_name}{target_text}.",
+        "input": action_input,
+    }]
+    if provider_output not in (None, "", [], {}):
+        entries.append({
+            "time": _display_time(finished),
+            "event": "Returned",
+            "message": "Provider returned output.",
+            "output": provider_output,
+        })
+    if state == "succeeded":
+        entries.append({
+            "time": _display_time(finished),
+            "event": "Result",
+            "message": "Result: Success.",
+        })
+    else:
+        entries.append({
+            "time": _display_time(finished),
+            "event": "Result",
+            "message": f"Result: Failed — {failure_reason or 'Unspecified failure'}.",
+        })
+    if verification:
+        passed = bool(verification.get("readbackVerified"))
+        entries.append({
+            "time": _display_time(finished),
+            "event": "Verification",
+            "message": "Verification: Passed." if passed else "Verification: Not passed.",
+            "evidence": _sanitize(verification),
+        })
+    return entries
 
 def _approval_metadata(approval_ids: set[str]) -> dict[str, dict[str, Any]]:
     if not approval_ids or not AUTHORITY_DB.exists():
@@ -188,6 +300,12 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
         capability = row.get("capability_name") or plan.get("capability_name")
         provider_cap = plan.get("provider_capability") or event_payload.get("provider_capability")
         state = str(row.get("state") or event_payload.get("status") or "unknown")
+        failure_reason = None
+        if state != "succeeded":
+            failure_reason = row.get("failure_reason") or result.get("error_code") or event_payload.get("failure_reason") or event_payload.get("reason_code")
+            if not failure_reason and isinstance(result.get("reason_codes"), list) and result.get("reason_codes"):
+                failure_reason = ", ".join(str(x) for x in result.get("reason_codes")[:3])
+            failure_reason = str(failure_reason or "Unspecified failure")
         verification = None
         if isinstance(result.get("output"), dict):
             output_data = result["output"].get("data")
@@ -207,7 +325,10 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             payload = plan["normalized_payload"]
             action_title = payload.get("title") or payload.get("componentName") or payload.get("name")
         action_name = str(action_title or provider_cap or capability or "autonomous action")
+        terminal = completion or failed
+        action_timeline = _timeline(row=row, terminal=terminal, plan=plan, result=result, action_name=action_name, target=target, state=state, failure_reason=failure_reason, verification=verification)
         raw_details = {
+            "action_timeline": action_timeline,
             "execution_id": execution_id,
             "correlation_id": row.get("correlation_id"),
             "approval_id": approval_id,
@@ -222,7 +343,7 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
             "provider_capability": provider_cap,
             "provider_attempts": result.get("attempts") or row.get("attempt_count"),
             "state": state,
-            "failure_reason": row.get("failure_reason"),
+            "failure_reason": failure_reason,
             "target": target,
             "execution_plan": plan,
             "result": result,
@@ -237,15 +358,16 @@ def load_actions(limit: int = 200) -> list[dict[str, Any]]:
         actions.append({
             "kind": "action",
             "time": _iso(row.get("created_at")),
-            "ticket": target.get("ticket_id") or "—",
-            "client": str(target.get("client_id") or "—"),
-            "device": target.get("device") or "—",
+            "ticket": target.get("ticket_number") or target.get("ticket_id") or "—",
+            "client": target.get("client_name") or str(target.get("client_id") or "—"),
+            "device": target.get("device_name") or target.get("device") or "—",
             "playbook": meta.get("playbook") or "—",
             "playbook_version": meta.get("playbook_version") or "—",
             "action": action_name,
             "capability": capability or "—",
             "provider": provider or "—",
             "result": state,
+            "failure_reason": failure_reason or "",
             "verified": verified,
             "provider_attempts": int(result.get("attempts") or row.get("attempt_count") or 0),
             "duration_ms": event_payload.get("duration_ms"),

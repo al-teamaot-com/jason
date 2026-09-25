@@ -7,7 +7,7 @@ The Flight Recorder is a read-only Grafana view of Jason's autonomous execution 
 - what Jason ran;
 - which ticket/device/client the governed execution targeted when that context is present;
 - the playbook/version and capability;
-- provider result and attempt count;
+- provider result, concise failure reason when unsuccessful, and attempt count;
 - verification/readback result;
 - full sanitized execution-plan/result/audit details on demand.
 
@@ -26,7 +26,7 @@ Default view:
 - Active autonomy
 - one compact action-history table
 
-The table keeps only operationally useful columns visible. The `Details` cell uses Grafana's native JSON viewer so execution IDs, correlation IDs, fingerprints, normalized plan/payload, provider output, and verification stay hidden until requested.
+The table keeps only operationally useful columns visible. The `Details` cell opens with a plain-English `action_timeline` showing when Jason ran the action, the exact governed input, what the provider returned, the final result/failure reason, and verification. Lower-level execution IDs, correlation IDs, fingerprints, normalized plan/payload, provider output, and verification evidence remain underneath in the same JSON detail record.
 
 Routine shadow queue reads are excluded from the main history and action counters so reconciliation noise does not bury real actions. The JSON API can still expose read-only executions with `kind=read` for diagnostics.
 

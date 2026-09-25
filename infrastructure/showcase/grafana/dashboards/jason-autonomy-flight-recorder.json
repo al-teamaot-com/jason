@@ -354,12 +354,12 @@
             },
             {
               "selector": "client",
-              "text": "Client",
+              "text": "Client / Company",
               "type": "string"
             },
             {
               "selector": "device",
-              "text": "Device",
+              "text": "Device / CI",
               "type": "string"
             },
             {
@@ -375,6 +375,11 @@
             {
               "selector": "result",
               "text": "Result",
+              "type": "string"
+            },
+            {
+              "selector": "failure_reason",
+              "text": "Failure Reason",
               "type": "string"
             },
             {
@@ -451,7 +456,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Client"
+              "options": "Client / Company"
             },
             "properties": [
               {
@@ -463,7 +468,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "Device"
+              "options": "Device / CI"
             },
             "properties": [
               {
@@ -533,6 +538,18 @@
                 "value": {
                   "type": "color-text"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Failure Reason"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
               }
             ]
           },
