@@ -7,8 +7,8 @@
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
-- Registered entities: `191`
-- Effective lifecycle counts: `configured=9, registered=168, verified=14`
+- Registered entities: `233`
+- Effective lifecycle counts: `configured=9, registered=210, verified=14`
 
 ## Verified current operational entities
 
@@ -195,20 +195,62 @@
 | `capability.system-registry-search` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
 | `capability.system-registry-trace` | `capability` | `configured` | `capability-registry-and-runtime-proof` |
 | `component.central-orchestrator` | `component` | `registered` | `runtime-composition-source-and-health` |
+| `component.governed-execution-ledger` | `component` | `registered` | `source-and-regression-proof-v1` |
 | `component.jason-autonomy-flight-recorder` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-kfs-postgres` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-node-exporter` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-ollama` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-work-item-exporter` | `component` | `configured` | `docker-container-inspect-v1` |
+| `component.orchestration-event-store` | `component` | `registered` | `source-and-regression-proof-v1` |
+| `credential.openbao.autotask-read` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.autotask-write` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.aws-ses-sendmail` | `credential_reference` | `registered` | `provider-credential-status` |
+| `credential.openbao.backup-net-full-access` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.backup-net-read` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.datto-edr` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.datto-rmm-execution` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.datto-rmm-readonly` | `credential_reference` | `registered` | `provider-credential-status` |
+| `credential.openbao.dnsfilter` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.it-glue` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `credential.openbao.kyocera-kfs` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.microsoft-graph-directory-read` | `credential_reference` | `registered` | `provider-credential-status` |
+| `credential.openbao.openai` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `governance.client-boundary` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
+| `governance.execution-plan-binding` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
+| `governance.information-release` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
 | `governance.jkd-001` | `governance_gate` | `registered` | `governance-contract-review` |
+| `governance.jkd-002` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
 | `governance.jkd-003` | `governance_gate` | `registered` | `governance-contract-review` |
+| `governance.jkd-004` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
+| `governance.jkd-005` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
+| `governance.jkd-006` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
+| `governance.jkd-007` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
 | `identity-binding.aot-microsoft-al` | `identity_binding` | `registered` | `identity-binding-and-directory-read` |
+| `identity-binding.aot-microsoft-person-entra-9f590a57a07e434b84e95b698161b86a` | `identity_binding` | `registered` | `live-microsoft-identity-binding-store-proof-v1` |
+| `identity-binding.aot-microsoft-person-entra-9f9fa80fe7564fe5ace69bbd2e81d1ba` | `identity_binding` | `registered` | `live-microsoft-identity-binding-store-proof-v1` |
+| `provider.autotask` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.autotask-internal-note` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.autotask-procurement` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.autotask-ticket-attachment` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.autotask-ticket-create` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.autotask-ticket-update` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.aws-ses` | `provider` | `registered` | `governed-cap007-provider-proof` |
+| `provider.backup-net` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.datto-edr` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.datto-edr-scan-execution` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.datto-rmm` | `provider` | `registered` | `governed-provider-read` |
+| `provider.datto-rmm-alert-resolution` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.datto-rmm-component-execution` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.datto-rmm-powershell-read` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.datto-rmm-site-variable-management` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.dnsfilter` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.dnsfilter-mcp` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.dnsfilter-mcp-mutation` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.it-glue` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.kyocera-kfs` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.microsoft-graph` | `provider` | `registered` | `microsoft-exact-user-read` |
+| `provider.microsoft-teams-gateway` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
+| `provider.resolution-memory` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.system-registry` | `provider` | `configured` | `governed-system-registry-read` |
 
 ## Interpretation boundary

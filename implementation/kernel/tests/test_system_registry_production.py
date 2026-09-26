@@ -214,3 +214,33 @@ def test_probe_runner_rejects_unregistered_arbitrary_probe_type() -> None:
             source="test",
             observed_at=NOW,
         )
+
+
+def test_constitutional_governance_path_is_registered() -> None:
+    registry = registry_from_manifest(MANIFEST)
+    ids = {entity.registry_id for entity in registry.list_all()}
+    required = {
+        "governance.jkd-001",
+        "governance.jkd-002",
+        "governance.jkd-003",
+        "governance.jkd-004",
+        "governance.jkd-005",
+        "governance.jkd-006",
+        "governance.jkd-007",
+        "governance.client-boundary",
+        "governance.information-release",
+        "governance.execution-plan-binding",
+        "component.central-orchestrator",
+        "component.orchestration-event-store",
+        "component.governed-execution-ledger",
+    }
+    assert required.issubset(ids)
+
+    orchestrator = registry.get("component.central-orchestrator")
+    assert {
+        "governance.jkd-001",
+        "governance.jkd-002",
+        "governance.jkd-007",
+        "component.orchestration-event-store",
+        "component.governed-execution-ledger",
+    }.issubset(set(orchestrator.dependencies))

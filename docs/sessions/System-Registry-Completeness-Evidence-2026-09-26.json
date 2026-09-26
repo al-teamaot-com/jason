@@ -2018,7 +2018,542 @@
       "user": "1000:1000"
     }
   ],
+  "credential_profiles": [
+    {
+      "modes": [
+        "400",
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "autotask"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "autotask-write"
+    },
+    {
+      "modes": [
+        "600"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "aws-ses"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "backup-net"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "backup-net-full-access"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "datto-edr"
+    },
+    {
+      "modes": [
+        "600",
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "datto-rmm-execution"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "dnsfilter"
+    },
+    {
+      "modes": [
+        "400",
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "it-glue"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot"
+      ],
+      "profile": "kyocera-kfs"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "microsoft-graph"
+    },
+    {
+      "modes": [
+        "640"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "openai"
+    },
+    {
+      "modes": [
+        "600"
+      ],
+      "observed_in": [
+        "jason-mcp-pilot",
+        "jason-runtime"
+      ],
+      "profile": "runtime-default"
+    }
+  ],
+  "identity_bindings": [
+    {
+      "client_id": null,
+      "object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+      "principal_id": "person-al",
+      "status": "active",
+      "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c"
+    },
+    {
+      "client_id": null,
+      "object_id": "9f590a57-a07e-434b-84e9-5b698161b86a",
+      "principal_id": "person-entra-9f590a57a07e434b84e95b698161b86a",
+      "status": "active",
+      "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c"
+    },
+    {
+      "client_id": null,
+      "object_id": "9f9fa80f-e756-4fe5-ace6-9bbd2e81d1ba",
+      "principal_id": "person-entra-9f9fa80fe7564fe5ace69bbd2e81d1ba",
+      "status": "active",
+      "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c"
+    }
+  ],
   "observed_at": "2026-09-26",
+  "providers": [
+    {
+      "approval": "approved",
+      "capabilities": [
+        "service.company.read",
+        "service.company.search",
+        "service.configuration.read",
+        "service.configuration.search",
+        "service.contact.read",
+        "service.contact.search",
+        "service.contract.read",
+        "service.contract.search",
+        "service.entity.describe",
+        "service.entity.fields.describe",
+        "service.notification.history.search",
+        "service.product.read",
+        "service.product.search",
+        "service.product.vendor.search",
+        "service.purchase.order.item.search",
+        "service.purchase.order.read",
+        "service.purchase.order.search",
+        "service.resource.read",
+        "service.resource.search",
+        "service.service.bundle.read",
+        "service.service.bundle.search",
+        "service.service.read",
+        "service.service.search",
+        "service.ticket.attachment.content.read",
+        "service.ticket.attachment.read",
+        "service.ticket.attachment.search",
+        "service.ticket.charge.read",
+        "service.ticket.charge.search",
+        "service.ticket.count",
+        "service.ticket.notes.search",
+        "service.ticket.read",
+        "service.ticket.search"
+      ],
+      "display_name": "Autotask PSA",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "autotask"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "service.ticket.note.create"
+      ],
+      "display_name": "Autotask PSA Internal Note Mutation",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "autotask_internal_note"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "service.product.create",
+        "service.product.update",
+        "service.product.vendor.create",
+        "service.product.vendor.update",
+        "service.purchase.order.create",
+        "service.purchase.order.item.create",
+        "service.purchase.order.item.update",
+        "service.purchase.order.receive",
+        "service.purchase.order.update",
+        "service.service.bundle.create",
+        "service.service.bundle.update",
+        "service.service.create",
+        "service.service.update",
+        "service.ticket.charge.create",
+        "service.ticket.charge.update"
+      ],
+      "display_name": "Autotask Governed Procurement",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "autotask_procurement"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "service.ticket.attachment.create"
+      ],
+      "display_name": "Autotask Governed Ticket Attachments",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "autotask_ticket_attachment"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "service.ticket.create"
+      ],
+      "display_name": "Autotask PSA Governed Ticket Create",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "autotask_ticket_create"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "service.ticket.update"
+      ],
+      "display_name": "Autotask PSA Governed Ticket Update",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "autotask_ticket_update"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "communication.email.send"
+      ],
+      "display_name": "AWS Simple Email Service",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "aws-ses"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "backup.backupiq.alert.search",
+        "backup.endpoint.asset.read",
+        "backup.endpoint.asset.search",
+        "backup.endpoint.backup.search"
+      ],
+      "display_name": "UniView Backup.net Public API",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "backup_net"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "endpoint.security.detection.read",
+        "endpoint.security.detection.search",
+        "endpoint.security.policy.read",
+        "endpoint.security.quarantine.search",
+        "endpoint.security.scan.history.search",
+        "endpoint.security.status.read"
+      ],
+      "display_name": "Datto EDR/AV",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "datto_edr"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "endpoint.security.scan.start"
+      ],
+      "display_name": "Datto EDR Governed AV Scan",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "datto_edr_scan_execution"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "automation.component.search",
+        "automation.job.output.read",
+        "automation.job.read",
+        "endpoint.alert.history.search",
+        "endpoint.alert.search",
+        "endpoint.audit.read",
+        "endpoint.device.read",
+        "endpoint.device.search",
+        "endpoint.patch.search",
+        "endpoint.software.search",
+        "management.alert.search",
+        "management.site.search",
+        "management.site.variable.list"
+      ],
+      "display_name": "Datto RMM",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "datto_rmm"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "endpoint.alert.resolve"
+      ],
+      "display_name": "Datto RMM Governed Alert Resolution",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "datto_rmm_alert_resolution"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "automation.component.execute"
+      ],
+      "display_name": "Datto RMM Governed Component Execution",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "datto_rmm_component_execution"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "endpoint.powershell.read"
+      ],
+      "display_name": "Datto RMM Read-Only PowerShell",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "datto_rmm_powershell_read"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "management.site.variable.create",
+        "management.site.variable.update"
+      ],
+      "display_name": "Datto RMM Governed Site Variable Management",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "datto_rmm_site_variable_management"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "dns.protection.agent.counts.read",
+        "dns.protection.agent.search",
+        "dns.protection.organization.read",
+        "dns.protection.policy.search",
+        "dns.protection.site.search"
+      ],
+      "display_name": "DNSFilter Management API",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "dnsfilter"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "dns.investigation.anomaly.search",
+        "dns.investigation.blocked.traffic.search",
+        "dns.investigation.query.explain",
+        "dns.investigation.query.search",
+        "dns.protection.agent.duplicate.search",
+        "dns.protection.agent.stale.search",
+        "dns.protection.agent.version.report",
+        "dns.protection.policy.category.search",
+        "dns.protection.site.drift.search",
+        "dns.protection.unblock.request.count.read",
+        "dns.protection.unblock.request.search"
+      ],
+      "display_name": "DNSFilter MCP",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "dnsfilter_mcp"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "dns.protection.agent.bulk.remove",
+        "dns.protection.agent.policy.reassign",
+        "dns.protection.agent.uninstall",
+        "dns.protection.block.page.update",
+        "dns.protection.global.list.domain.add",
+        "dns.protection.global.list.domain.remove",
+        "dns.protection.policy.category.block.add",
+        "dns.protection.policy.category.block.remove",
+        "dns.protection.policy.category.set.across.org",
+        "dns.protection.policy.clone",
+        "dns.protection.policy.create",
+        "dns.protection.policy.delete",
+        "dns.protection.policy.domain.allow.add",
+        "dns.protection.policy.domain.allow.bulk.add",
+        "dns.protection.policy.domain.allow.remove",
+        "dns.protection.policy.domain.block.add",
+        "dns.protection.policy.domain.block.bulk.add",
+        "dns.protection.policy.domain.block.remove",
+        "dns.protection.policy.update",
+        "dns.protection.portal.user.invite",
+        "dns.protection.portal.user.password.reset.send",
+        "dns.protection.portal.user.role.update",
+        "dns.protection.site.forwarders.update",
+        "dns.protection.site.policy.assign",
+        "dns.protection.unblock.request.decide"
+      ],
+      "display_name": "DNSFilter MCP Governed Administration",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "dnsfilter_mcp_mutation"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "documentation.attachment.content.read",
+        "documentation.attachment.read",
+        "documentation.attachment.search",
+        "documentation.configuration.read",
+        "documentation.configuration.search",
+        "documentation.contact.read",
+        "documentation.contact.search",
+        "documentation.document.read",
+        "documentation.document.search",
+        "documentation.flexible.asset.read",
+        "documentation.flexible.asset.search",
+        "documentation.flexible.asset.type.read",
+        "documentation.flexible.asset.type.search",
+        "documentation.location.read",
+        "documentation.location.search",
+        "documentation.organization.read",
+        "documentation.organization.search"
+      ],
+      "display_name": "IT Glue",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "it_glue"
+    },
+    {
+      "approval": "blocked",
+      "capabilities": [
+        "print.alert.search",
+        "print.device.read",
+        "print.device.search",
+        "print.meter.read",
+        "print.supplies.read"
+      ],
+      "display_name": "Kyocera Fleet Services",
+      "health": "unavailable",
+      "lifecycle": "planned",
+      "provider_id": "kyocera_kfs"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "communication.mail.attachment.search",
+        "communication.mail.message.read",
+        "communication.mail.message.search",
+        "identity.authentication.methods.read",
+        "identity.conditional.access.search",
+        "identity.directory.role.members.search",
+        "identity.directory.role.search",
+        "identity.user.read",
+        "identity.user.search"
+      ],
+      "display_name": "Microsoft Entra Directory",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "microsoft_graph"
+    },
+    {
+      "approval": "pilot",
+      "capabilities": [
+        "communication.teams.message.send"
+      ],
+      "display_name": "Jason Microsoft Teams Gateway",
+      "health": "unknown",
+      "lifecycle": "planned",
+      "provider_id": "microsoft_teams_gateway"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "operations.resolution.read",
+        "operations.resolution.search",
+        "operations.resolution.summary"
+      ],
+      "display_name": "Jason Operational Resolution Memory",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "resolution_memory"
+    },
+    {
+      "approval": "approved",
+      "capabilities": [
+        "system.registry.read",
+        "system.registry.search",
+        "system.registry.trace"
+      ],
+      "display_name": "Jason System Registry",
+      "health": "healthy",
+      "lifecycle": "available",
+      "provider_id": "system_registry"
+    }
+  ],
   "schema_version": "1.0",
   "source": "live-jason-capability-registry-and-docker-readonly-observation"
 }

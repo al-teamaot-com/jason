@@ -138,7 +138,11 @@
       },
       "dependencies": [
         "component.jason-runtime",
-        "governance.jkd-001"
+        "governance.jkd-001",
+        "governance.jkd-002",
+        "governance.jkd-007",
+        "component.orchestration-event-store",
+        "component.governed-execution-ledger"
       ],
       "verification_methods": [
         "runtime-composition-source-and-health"
@@ -151,9 +155,10 @@
       ],
       "evidence_references": [
         "implementation/runtime_service/src/jason_runtime/composition.py",
-        "implementation/runtime_service/src/jason_runtime/http.py"
+        "implementation/runtime_service/src/jason_runtime/http.py",
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
       ],
-      "source_version": "2026-08-11.1",
+      "source_version": "2026-09-26.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
     },
@@ -305,7 +310,8 @@
       "lifecycle_status": "registered",
       "declared_state": {
         "provider": "openbao",
-        "logical_name": "datto_rmm.readonly"
+        "logical_name": "datto_rmm.readonly",
+        "app_role_profile": "runtime-default"
       },
       "dependencies": [
         "component.openbao",
@@ -320,9 +326,10 @@
         "J-002 Article XIX"
       ],
       "evidence_references": [
-        "07-Operations/Jason-Secret-Provider-Deployment-Record.md"
+        "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
       ],
-      "source_version": "2026-08-11.1",
+      "source_version": "2026-09-26.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
     },
@@ -334,7 +341,8 @@
       "lifecycle_status": "registered",
       "declared_state": {
         "provider": "openbao",
-        "logical_name": "microsoft_graph.directory_read"
+        "logical_name": "microsoft_graph.directory_read",
+        "app_role_profile": "microsoft-graph"
       },
       "dependencies": [
         "component.openbao",
@@ -350,9 +358,10 @@
       ],
       "evidence_references": [
         "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
-        "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md"
+        "07-Operations/INF-010-Microsoft-Cloud-Deployment-Checklist.md",
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
       ],
-      "source_version": "2026-08-11.1",
+      "source_version": "2026-09-26.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
     },
@@ -364,7 +373,8 @@
       "lifecycle_status": "registered",
       "declared_state": {
         "provider": "openbao",
-        "logical_name": "aws_ses.sendmail"
+        "logical_name": "aws_ses.sendmail",
+        "app_role_profile": "aws-ses"
       },
       "dependencies": [
         "component.openbao",
@@ -380,9 +390,10 @@
       ],
       "evidence_references": [
         "07-Operations/Jason-Secret-Provider-Deployment-Record.md",
-        "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md"
+        "07-Operations/CAP-007-AWS-SES-Activation-Runbook.md",
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
       ],
-      "source_version": "2026-08-11.1",
+      "source_version": "2026-09-26.1",
       "created_at": "2026-08-11T15:25:00Z",
       "created_by": "Jason Architecture Authority"
     },
@@ -6506,6 +6517,1382 @@
       ],
       "source_version": "2026-09-26.1",
       "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask",
+      "entity_type": "provider",
+      "display_name": "Autotask PSA",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "32"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-read"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask-internal-note",
+      "entity_type": "provider",
+      "display_name": "Autotask PSA Internal Note Mutation",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask_internal_note",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-write"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask-procurement",
+      "entity_type": "provider",
+      "display_name": "Autotask Governed Procurement",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask_procurement",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "15"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-write"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask-ticket-attachment",
+      "entity_type": "provider",
+      "display_name": "Autotask Governed Ticket Attachments",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask_ticket_attachment",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-write"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask-ticket-create",
+      "entity_type": "provider",
+      "display_name": "Autotask PSA Governed Ticket Create",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask_ticket_create",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-write"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.autotask-ticket-update",
+      "entity_type": "provider",
+      "display_name": "Autotask PSA Governed Ticket Update",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "autotask_ticket_update",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.autotask-write"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.backup-net",
+      "entity_type": "provider",
+      "display_name": "UniView Backup.net Public API",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "backup_net",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "4"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.backup-net-full-access"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-edr",
+      "entity_type": "provider",
+      "display_name": "Datto EDR/AV",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_edr",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "6"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-edr"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-edr-scan-execution",
+      "entity_type": "provider",
+      "display_name": "Datto EDR Governed AV Scan",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_edr_scan_execution",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-edr"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-rmm-alert-resolution",
+      "entity_type": "provider",
+      "display_name": "Datto RMM Governed Alert Resolution",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_rmm_alert_resolution",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-rmm-execution"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-rmm-component-execution",
+      "entity_type": "provider",
+      "display_name": "Datto RMM Governed Component Execution",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_rmm_component_execution",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-rmm-execution"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-rmm-powershell-read",
+      "entity_type": "provider",
+      "display_name": "Datto RMM Read-Only PowerShell",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_rmm_powershell_read",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-rmm-execution"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.datto-rmm-site-variable-management",
+      "entity_type": "provider",
+      "display_name": "Datto RMM Governed Site Variable Management",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "datto_rmm_site_variable_management",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "2"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.datto-rmm-execution"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.dnsfilter",
+      "entity_type": "provider",
+      "display_name": "DNSFilter Management API",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "dnsfilter",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "5"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.dnsfilter"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.dnsfilter-mcp",
+      "entity_type": "provider",
+      "display_name": "DNSFilter MCP",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "dnsfilter_mcp",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "11"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.dnsfilter-mcp-mutation",
+      "entity_type": "provider",
+      "display_name": "DNSFilter MCP Governed Administration",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "dnsfilter_mcp_mutation",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "25"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.it-glue",
+      "entity_type": "provider",
+      "display_name": "IT Glue",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "it_glue",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "17"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.it-glue"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.kyocera-kfs",
+      "entity_type": "provider",
+      "display_name": "Kyocera Fleet Services",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "kyocera_kfs",
+        "provider_lifecycle": "planned",
+        "health": "unavailable",
+        "approval": "blocked",
+        "capability_count": "5"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.kyocera-kfs"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.microsoft-teams-gateway",
+      "entity_type": "provider",
+      "display_name": "Jason Microsoft Teams Gateway",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "microsoft_teams_gateway",
+        "provider_lifecycle": "planned",
+        "health": "unknown",
+        "approval": "pilot",
+        "capability_count": "1"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "provider.resolution-memory",
+      "entity_type": "provider",
+      "display_name": "Jason Operational Resolution Memory",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "resolution_memory",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "3"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-execution-provider-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:45:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "identity-binding.aot-microsoft-person-entra-9f590a57a07e434b84e95b698161b86a",
+      "entity_type": "identity_binding",
+      "display_name": "AOT Microsoft Identity Binding for person-entra-9f590a57a07e434b84e95b698161b86a",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+        "object_id": "9f590a57-a07e-434b-84e9-5b698161b86a",
+        "principal_id": "person-entra-9f590a57a07e434b84e95b698161b86a",
+        "status": "active"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "provider.microsoft-graph",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-microsoft-identity-binding-store-proof-v1"
+      ],
+      "steward": "identity-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article XIX",
+        "JKD-001"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:50:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "identity-binding.aot-microsoft-person-entra-9f9fa80fe7564fe5ace69bbd2e81d1ba",
+      "entity_type": "identity_binding",
+      "display_name": "AOT Microsoft Identity Binding for person-entra-9f9fa80fe7564fe5ace69bbd2e81d1ba",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+        "object_id": "9f9fa80f-e756-4fe5-ace6-9bbd2e81d1ba",
+        "principal_id": "person-entra-9f9fa80fe7564fe5ace69bbd2e81d1ba",
+        "status": "active"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "provider.microsoft-graph",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-microsoft-identity-binding-store-proof-v1"
+      ],
+      "steward": "identity-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article XIX",
+        "JKD-001"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:50:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.orchestration-event-store",
+      "entity_type": "component",
+      "display_name": "JKD-009 Durable Orchestration Event Store",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "durable-orchestration-audit-evidence",
+        "implementation_host": "component.jason-runtime"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IX",
+        "J-002 Article XIX",
+        "JKD-009"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/event_store.py",
+        "implementation/orchestrator/tests/test_event_store.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.governed-execution-ledger",
+      "entity_type": "component",
+      "display_name": "Governed Execution Ledger",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "approval-consumption-replay-and-execution-plan-binding",
+        "implementation_host": "component.jason-runtime"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article IX",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/governed_execution_ledger.py",
+        "implementation/orchestrator/tests/test_governed_execution_replay.py",
+        "implementation/orchestrator/tests/test_execution_plan_binding.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.jkd-002",
+      "entity_type": "governance_gate",
+      "display_name": "JKD-002 Evidence and Memory Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "evidence-provenance-before-assertion",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "component.orchestration-event-store"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article VIII",
+        "J-002 Article IX",
+        "JKD-002"
+      ],
+      "evidence_references": [
+        "docs/components/kernel/JKD-002-Evidence-and-Memory-Service.md",
+        "implementation/orchestrator/tests/test_conversation_evidence_support.py",
+        "implementation/orchestrator/tests/test_resource_evidence.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.jkd-004",
+      "entity_type": "governance_gate",
+      "display_name": "JKD-004 Execution Policy Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "risk-cost-policy-and-approval-requirement-evaluation",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article VI",
+        "JKD-004"
+      ],
+      "evidence_references": [
+        "docs/components/kernel/JKD-004-Execution-Policy-Engine.md",
+        "implementation/kernel/tests/test_execution_policy.py",
+        "implementation/orchestrator/tests/test_gates.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.jkd-005",
+      "entity_type": "governance_gate",
+      "display_name": "JKD-005 Execution Provider Registry Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "governed-provider-registration-and-eligibility",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "JKD-005"
+      ],
+      "evidence_references": [
+        "docs/components/kernel/JKD-005-Execution-Provider-Registry.md",
+        "implementation/kernel/execution_providers/service.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.jkd-006",
+      "entity_type": "governance_gate",
+      "display_name": "JKD-006 Capability Registry Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "governed-capability-registration-and-lifecycle",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "JKD-006"
+      ],
+      "evidence_references": [
+        "docs/components/kernel/JKD-006-Capability-Registry.md",
+        "implementation/kernel/capabilities/service.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.jkd-007",
+      "entity_type": "governance_gate",
+      "display_name": "JKD-007 Governed Capability Resolution Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "capability-provider-policy-resolution",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "governance.jkd-004",
+        "governance.jkd-005",
+        "governance.jkd-006"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article VI",
+        "JKD-007"
+      ],
+      "evidence_references": [
+        "docs/components/kernel/JKD-007-Governed-Capability-Resolution-Engine.md",
+        "implementation/kernel/resolution/service.py",
+        "implementation/cap-001/tests/test_kernel_resolution_integration.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.client-boundary",
+      "entity_type": "governance_gate",
+      "display_name": "Provider Client Boundary Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "provider-client-and-tenant-isolation",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article XVIII",
+        "J-405"
+      ],
+      "evidence_references": [
+        "implementation/kernel/client_boundaries/",
+        "implementation/kernel/tests/test_client_boundaries.py",
+        "implementation/kernel/tests/test_client_boundaries_sqlite.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.information-release",
+      "entity_type": "governance_gate",
+      "display_name": "Information Release Authorization Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "requester-information-release-and-derived-output-authorization",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "governance.jkd-001",
+        "governance.client-boundary",
+        "governance.jkd-007"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article XVIII",
+        "J-405"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/information_authorization.py",
+        "implementation/orchestrator/provider_read_information_authorizer.py",
+        "implementation/orchestrator/tests/test_information_release_boundary.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "governance.execution-plan-binding",
+      "entity_type": "governance_gate",
+      "display_name": "Execution Plan Binding Gate",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "purpose": "approved-provider-target-payload-binding-and-replay-protection",
+        "execution_authority": "central-orchestrator"
+      },
+      "dependencies": [
+        "governance.jkd-001",
+        "governance.jkd-007",
+        "component.governed-execution-ledger"
+      ],
+      "verification_methods": [
+        "source-and-regression-proof-v1"
+      ],
+      "steward": "architecture-authority",
+      "authority_references": [
+        "J-002 Article II",
+        "J-002 Article IX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "implementation/orchestrator/execution_plan.py",
+        "implementation/orchestrator/governed_execution_ledger.py",
+        "implementation/orchestrator/tests/test_execution_plan_binding.py"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:55:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.autotask-read",
+      "entity_type": "credential_reference",
+      "display_name": "Autotask Read AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "autotask.read",
+        "app_role_profile": "autotask"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.autotask-write",
+      "entity_type": "credential_reference",
+      "display_name": "Autotask Write AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "autotask.write",
+        "app_role_profile": "autotask-write"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.backup-net-read",
+      "entity_type": "credential_reference",
+      "display_name": "Backup.net Read AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "backup_net.read_only",
+        "app_role_profile": "backup-net"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.backup-net-full-access",
+      "entity_type": "credential_reference",
+      "display_name": "Backup.net Full Access AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "backup_net.full_access",
+        "app_role_profile": "backup-net-full-access"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.datto-edr",
+      "entity_type": "credential_reference",
+      "display_name": "Datto EDR AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "datto_edr",
+        "app_role_profile": "datto-edr"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.datto-rmm-execution",
+      "entity_type": "credential_reference",
+      "display_name": "Datto RMM Execution AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "datto_rmm.execution",
+        "app_role_profile": "datto-rmm-execution"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.dnsfilter",
+      "entity_type": "credential_reference",
+      "display_name": "DNSFilter AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "dnsfilter",
+        "app_role_profile": "dnsfilter"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.it-glue",
+      "entity_type": "credential_reference",
+      "display_name": "IT Glue AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "it_glue",
+        "app_role_profile": "it-glue"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.kyocera-kfs",
+      "entity_type": "credential_reference",
+      "display_name": "Kyocera KFS AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "kyocera_kfs",
+        "app_role_profile": "kyocera-kfs"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.openai",
+      "entity_type": "credential_reference",
+      "display_name": "OpenAI Hosted Model AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "openai",
+        "app_role_profile": "openai"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T23:00:00Z",
       "created_by": "Jason Constitutional Certification"
     }
   ]

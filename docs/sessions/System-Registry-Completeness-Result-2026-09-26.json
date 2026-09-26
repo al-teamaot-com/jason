@@ -1,0 +1,17 @@
+{
+  "missing_capabilities": [],
+  "missing_components": [],
+  "missing_credential_profiles": [],
+  "missing_identity_bindings": [],
+  "missing_providers": [],
+  "stale_components": [],
+  "status": "pass",
+  "summary": {
+    "missing_capability_count": 0,
+    "missing_component_count": 0,
+    "missing_credential_profile_count": 0,
+    "missing_identity_binding_count": 0,
+    "missing_provider_count": 0,
+    "stale_component_count": 0
+  }
+}

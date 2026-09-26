@@ -51,6 +51,9 @@ def test_complete_inventory_passes():
             component_entity("jason-runtime"),
         ),
         capability_payload=capability_payload("service.ticket.read"),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=[{"name": "jason-runtime"}],
     )
     assert result.passed
@@ -61,6 +64,9 @@ def test_missing_active_capability_fails_closed():
     result = MODULE.audit(
         manifest=manifest(),
         capability_payload=capability_payload("service.ticket.read"),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=[],
     )
     assert not result.passed
@@ -71,6 +77,9 @@ def test_missing_live_component_fails_closed():
     result = MODULE.audit(
         manifest=manifest(),
         capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=[{"name": "jason-runtime"}],
     )
     assert not result.passed
@@ -81,6 +90,9 @@ def test_stale_operational_component_fails_closed():
     result = MODULE.audit(
         manifest=manifest(component_entity("retired-but-still-configured")),
         capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=[],
     )
     assert not result.passed
@@ -91,6 +103,9 @@ def test_nonoperational_component_does_not_require_live_observation():
     result = MODULE.audit(
         manifest=manifest(component_entity("future", lifecycle="registered")),
         capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=[],
     )
     assert result.passed
@@ -100,7 +115,54 @@ def test_explicit_ephemeral_container_ignore_is_bounded():
     result = MODULE.audit(
         manifest=manifest(),
         capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
         container_payload=["buildx-builder"],
         ignored_live_containers=("buildx-builder",),
     )
     assert result.passed
+
+
+def test_missing_live_provider_fails_closed():
+    result = MODULE.audit(
+        manifest=manifest(),
+        capability_payload=capability_payload(),
+        provider_payload=[{"provider_id": "autotask"}],
+        identity_binding_payload=[],
+        credential_profile_payload=[],
+        container_payload=[],
+    )
+    assert not result.passed
+    assert result.missing_providers == ("autotask",)
+
+
+def test_missing_live_identity_binding_fails_closed():
+    result = MODULE.audit(
+        manifest=manifest(),
+        capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[{
+            "tenant_id": "tenant-a",
+            "object_id": "object-a",
+            "principal_id": "person-a",
+            "status": "active",
+        }],
+        credential_profile_payload=[],
+        container_payload=[],
+    )
+    assert not result.passed
+    assert result.missing_identity_bindings == ("tenant-a|object-a|person-a",)
+
+
+def test_missing_live_credential_profile_fails_closed():
+    result = MODULE.audit(
+        manifest=manifest(),
+        capability_payload=capability_payload(),
+        provider_payload=[],
+        identity_binding_payload=[],
+        credential_profile_payload=[{"profile": "autotask-write"}],
+        container_payload=[],
+    )
+    assert not result.passed
+    assert result.missing_credential_profiles == ("autotask-write",)
