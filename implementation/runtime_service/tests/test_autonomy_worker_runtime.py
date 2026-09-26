@@ -1657,3 +1657,61 @@ def test_disk_bad_block_diagnostic_does_not_guess_physical_mapping(tmp_path: Pat
     assert "RemovableDeviceHints=1" in notes[0]["description"]
     assert "did not guess" in notes[0]["description"]
     store.close()
+
+
+def idle_logoff_candidate():
+    return QueueCandidate(
+        resource_id="141066",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id":141066,"ticketNumber":"T20260924.0043",
+            "title":"[Get Idle Log Off Status AOT Ver 08202024] - Compliant: False () for AVMAC-1096",
+            "companyID":1179,"configurationItemID":1583,
+        },
+    )
+
+
+def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
+    class IdleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability=="service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":1179,"isActive":True,
+                    "referenceNumber":"idle-device-1","referenceTitle":"AVMAC-1096"}}}}
+            if capability=="endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":True,
+                    "device_type":{"category":"Desktop","type":"Desktop"},
+                    "operating_system":"Microsoft Windows 11 Pro"}}}
+            if capability=="endpoint.alert.history.search":
+                return {"status":"succeeded","evidence":{"data":{"alerts":[{
+                    "alertUid":"idle-alert","ticketNumber":"T20260924.0043","timestamp":1790416800000,
+                    "diagnostics":"Invalid MyFileDestination",
+                    "alertContext":{"description":"Get Idle Log Off Status - Compliant: False"}
+                }]}}}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
+        max_active_work_items=2,interval_seconds=30,monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final=store.get(141066)
+    assert final is not None and final.phase=="escalated"
+    assert "monitor/plumbing failure" in final.last_reason
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+    notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
+    assert len(notes)==1
+    assert "Classification=monitor_execution_failure" in notes[0]["description"]
+    assert "setter" in notes[0]["description"].casefold()
+    store.close()
