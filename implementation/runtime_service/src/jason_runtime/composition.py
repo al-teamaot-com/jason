@@ -1755,44 +1755,47 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         investigation_client=hosted_conversation_client,
     )
 
-    owner_ids = approval_owner_identities()
-    playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
-        settings.autonomy_promotion_db
-    )
-    playbook_review_repository = SQLiteApprovalRequestRepository(
-        settings.autonomy_review_db
-    )
-    playbook_review_service = PlaybookAutonomyReviewService(
-        registry_path=settings.autonomy_playbook_registry,
-        promotion_store=playbook_promotion_store,
-        owner_identity_ids=owner_ids,
-        audit_path=settings.autonomy_review_audit_path,
-    )
-    playbook_approval_service = ApprovalRequestService(
-        repository=playbook_review_repository,
-        authority=OwnerOnlyPlaybookAutonomyAuthority(owner_ids),
-    )
-    playbook_approval_flow = PlaybookAutonomyApprovalInteractionFlow(
-        bindings=bindings,
-        approval_service=playbook_approval_service,
-        review_service=playbook_review_service,
-    )
-    playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
-        gateway_url=settings.teams_gateway_internal_url,
-        token_file=settings.teams_proactive_token_file,
-        bindings=bindings,
-        owner_identity_ids=owner_ids,
-    )
-    playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
-        enabled=settings.autonomy_review_enabled,
-        registry_path=settings.autonomy_playbook_registry,
-        request_repository=playbook_review_repository,
-        approval_service=playbook_approval_service,
-        review_service=playbook_review_service,
-        sender=playbook_approval_sender,
-        promotion_store=playbook_promotion_store,
-        interval_seconds=settings.autonomy_review_interval_seconds,
-    )
+    playbook_approval_flow = None
+    playbook_review_maintenance = None
+    if settings.autonomy_review_enabled:
+        owner_ids = approval_owner_identities()
+        playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
+            settings.autonomy_promotion_db
+        )
+        playbook_review_repository = SQLiteApprovalRequestRepository(
+            settings.autonomy_review_db
+        )
+        playbook_review_service = PlaybookAutonomyReviewService(
+            registry_path=settings.autonomy_playbook_registry,
+            promotion_store=playbook_promotion_store,
+            owner_identity_ids=owner_ids,
+            audit_path=settings.autonomy_review_audit_path,
+        )
+        playbook_approval_service = ApprovalRequestService(
+            repository=playbook_review_repository,
+            authority=OwnerOnlyPlaybookAutonomyAuthority(owner_ids),
+        )
+        playbook_approval_flow = PlaybookAutonomyApprovalInteractionFlow(
+            bindings=bindings,
+            approval_service=playbook_approval_service,
+            review_service=playbook_review_service,
+        )
+        playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+            gateway_url=settings.teams_gateway_internal_url,
+            token_file=settings.teams_proactive_token_file,
+            bindings=bindings,
+            owner_identity_ids=owner_ids,
+        )
+        playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
+            enabled=True,
+            registry_path=settings.autonomy_playbook_registry,
+            request_repository=playbook_review_repository,
+            approval_service=playbook_approval_service,
+            review_service=playbook_review_service,
+            sender=playbook_approval_sender,
+            promotion_store=playbook_promotion_store,
+            interval_seconds=settings.autonomy_review_interval_seconds,
+        )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
