@@ -170,7 +170,7 @@ Before production activation:
 9. run a controlled Autotask acceptance pilot;
 10. only then enable unattended queue processing.
 
-As of 2026-09-25, items 1-10 have been completed for the first operational playbook. `datto_edr_av@1.3.0` has a separate durable owner promotion for its health-only branch and the production worker is enabled. Every additional playbook/version remains independently gated and must complete the same promotion, acceptance, and monitoring process before unattended mutation.
+As of 2026-09-26, items 1-10 have been completed for the current production autonomous operating model. All ten production playbooks presently registered have a separately promoted safe branch. Each version remains independently gated, and autonomy is branch-specific rather than blanket playbook authority. A promoted diagnostic branch does not authorize a remediation, disruptive, cleanup, closure, or client-facing branch that is not explicitly included in that playbook's production scope.
 
 ## Autonomous workload identity
 
@@ -196,7 +196,7 @@ Findings:
 - The current queue includes recognized shadow playbooks for Datto EDR/AV, Security Log Self-Heal, DNS Agent, VulScan Missing Patch, BackupIQ, and Unexpected Shutdown.
 - Active Jason tickets for POST errors, Idle Log Off, and Low Disk Space do not yet have complete registered playbook source coverage in this branch. Idle Log Off hardening is tracked by #245; the Low Disk Space execution-plan blocker is tracked by #261.
 - Other queues contain human-assigned work, unassigned work, and tickets carrying the same opaque Autotask resource ID seen on Jason-owned tickets. Because Autotask Resources is not yet a governed readable resource, Jason does not infer that opaque ID is itself Jason.
-- The shadow checkpoint originally had no operational playbook promotion. Later on 2026-09-25, the EDR/AV health-only branch was separately promoted as `datto_edr_av@1.3.0` under promotion `pbauto_d754251d9ae140fe9a3fa11b090eaf49`; other playbooks remain shadow-only until separately promoted.
+- The shadow checkpoint originally had no operational playbook promotion. The EDR/AV health-only branch was separately promoted on 2026-09-25. On 2026-09-26, the remaining production playbooks received bounded safe-branch implementations, validation, durable promotions, and production deployment. The current registry therefore has no shadow-only playbooks among this ten-playbook production set, while unsafe/remediation sub-branches remain separately gated.
 
 This checkpoint proves queue discovery and classification behavior without granting execution authority.
 
@@ -319,7 +319,7 @@ Each operational playbook must still provide, for its exact version and capabili
 9. red-team acceptance;
 10. explicit suspension/revocation behavior.
 
-The production model is therefore **per-playbook testing and promotion**, not generic autonomy enablement. The first such operational promotion is recorded below; additional playbooks remain separately gated.
+The production model is therefore **per-playbook-version and per-safe-branch testing and promotion**, not generic autonomy enablement. The current ten production playbooks all have a promoted safe branch, but each retains explicit non-autonomous boundaries where remediation, disruptive action, automatic closure, or another higher-risk capability has not been accepted.
 
 ## Production worker activation - 2026-09-25
 
@@ -328,3 +328,36 @@ The bounded production worker is active for the separately promoted EDR/AV healt
 The first real reconciliation found a normalization mismatch between canonical endpoint evidence (`resource_id`) and provider-native Datto evidence (`uid`). PR #349 corrected the normalization to accept `resource_id`, `uid`, or `deviceUid` while preserving exact CI UID and hostname equality requirements. The corrected worker was deployed at revision `aaa536cef3e10edac8a1cc41595caee19be570c6` and verified healthy.
 
 Full production operating details, recovery rules, current authority, and the procedure for promoting additional playbooks are documented in `docs/operations/JASON_AUTONOMOUS_TICKET_WORKER.md`.
+
+
+## Production safe-branch coverage - 2026-09-26
+
+The current production registry has autonomous activation for the following exact playbook versions:
+
+- `datto_edr_av@1.3.0`
+- `dns_agent_diagnostic@1.0.0`
+- `security_log_self_heal@1.0.0`
+- `post_error_investigation@1.0.0`
+- `unexpected_shutdown@1.0.0`
+- `backupiq_endpoint_backup@1.0.0`
+- `low_disk_space@1.0.0`
+- `vulscan_missing_patch@1.0.0`
+- `disk_bad_block_event_7@1.0.0`
+- `idle_log_off@1.0.0`
+
+This list means each playbook has at least one unattended branch that has passed source review, runtime tests, durable owner promotion, and production deployment. It does **not** mean the whole playbook is autonomous.
+
+Examples of intentionally retained hard boundaries:
+
+- EDR/AV threat response and disruptive remediation remain gated.
+- DNS repair/install remains gated.
+- Security Log alert/SOC side-effect cleanup remains gated.
+- POST firmware/hardware changes and automatic closure remain gated.
+- Unexpected Shutdown automatic closure remains gated.
+- BackupIQ reinstall/policy/retention/restore/delete operations remain gated.
+- Low Disk cleanup/file deletion remains gated, and servers remain human-reviewed.
+- VulScan patch approval/install/Windows Update repair/reboot remain gated.
+- Disk Event ID 7 physical-disk mapping/repair/alert resolution remain gated.
+- Idle Log Off setter execution remains per-run approved because of future user-session impact.
+
+The architectural invariant is: **autonomy stops at the branch boundary, not at the ticket boundary**. A matching ticket may be claimed and worked automatically through its exact approved branch, then transition to an escalated/waiting/approval state when the next step requires authority that is not part of that branch.
