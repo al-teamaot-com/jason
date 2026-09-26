@@ -55,7 +55,7 @@ def test_registered_scope_requires_source_autonomous_activation(tmp_path: Path):
 
 
 def test_owner_can_promote_exact_registered_scope(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("JASON_AUTONOMY_APPROVAL_OWNER_IDS", "person-al")
+    monkeypatch.setenv("JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES", "person-al")
     path = _registry(tmp_path / "registry.json")
     store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotion.sqlite3")
     try:
@@ -89,7 +89,7 @@ def test_owner_can_promote_exact_registered_scope(monkeypatch, tmp_path: Path):
 
 
 def test_nonowner_cannot_promote(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("JASON_AUTONOMY_APPROVAL_OWNER_IDS", "person-al")
+    monkeypatch.setenv("JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES", "person-al")
     path = _registry(tmp_path / "registry.json")
     store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotion.sqlite3")
     try:
