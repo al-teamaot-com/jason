@@ -1,6 +1,6 @@
 # J-405 Exception — Temporary IT Glue Jason-Managed Requester Authorization
 
-**Status:** Approved transitional exception; remediation tracked in GitHub #176  
+**Status:** Retired 2026-09-26; superseded by ADR-011 permanent requester-authorization architecture
 **Effective date:** 2026-09-12  
 **Formalization date:** 2026-09-26  
 **Review no later than:** 2026-10-15  
@@ -55,24 +55,20 @@ Primary evidence:
 - IT Glue Jason-managed information-authorizer tests;
 - live MCP governance status showing Central Orchestrator execution and `direct_provider_access=false`.
 
-## Review / expiration rule
+## Retirement decision — 2026-09-26
 
-This exception must be reviewed no later than 2026-10-15. At review, the Architecture Authority must either:
-1. retire it after provider-native/delegated requester authorization is accepted;
-2. replace it with a stronger supported provider authorization design; or
-3. explicitly renew it with updated evidence, risk review, and a new review date.
+The exception is retired by ADR-011. IT Glue API access is API-key based and exposes resource restriction/access evidence rather than a durable requester-impersonated read mechanism. J-405 now explicitly permits Jason-managed requester authorization where provider-native requester execution is unavailable or unsuitable, while preserving provider restrictions as one-way narrowing controls.
 
-The exception must not silently become permanent architecture.
+The implementation was tightened as part of retirement:
+- explicitly unrestricted documents may be released only after Jason requester authority is proven;
+- restricted document and attachment content requires positive provider ACL evidence;
+- explicit ACL denial is authoritative;
+- missing ACL evidence or unknown restriction state fails closed for protected content;
+- document search releases only explicitly unrestricted, sanitized metadata;
+- credential-like fields remain redacted/derived-only where applicable.
 
-## Retirement criteria
-
-Retire this exception when:
-- a supported provider-native/delegated requester model is documented;
-- Microsoft tenant/object identity remains the stable requester identity and aliases remain mapping data;
-- restricted-document ACL/restriction semantics remain authoritative;
-- bounded production proof and regression tests demonstrate safe requester enforcement;
-- rollback evidence exists.
+Microsoft tenant/object identity remains the stable requester identity and email/UPN aliases remain mapping data only.
 
 ## Constitutional effect
 
-This record grants no new provider, client, write, or autonomous authority. It formalizes an existing transitional read compatibility condition and its compensating controls.
+Retiring this exception grants no new provider, client, write, or autonomous authority. It replaces a temporary exception with the canonical governed architecture defined by ADR-011 and strengthens protected-document release behavior.

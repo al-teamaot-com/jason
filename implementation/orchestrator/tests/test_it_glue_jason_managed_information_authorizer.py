@@ -179,7 +179,7 @@ def test_sensitive_jason_managed_it_glue_output_is_derived_only() -> None:
     assert envelope.require_allowed(InformationAction.RELEASE).allowed is True
 
 
-def test_document_search_remains_sanitized_under_jason_managed_release() -> None:
+def test_document_search_releases_only_unrestricted_sanitized_metadata() -> None:
     output = {
         "provider": "it_glue",
         "provider_capability": "it_glue.document.search",
@@ -189,13 +189,24 @@ def test_document_search_remains_sanitized_under_jason_managed_release() -> None
                     "id": "73",
                     "type": "documents",
                     "attributes": {
-                        "name": "Network Notes",
+                        "name": "Restricted Network Notes",
                         "restricted": True,
                         "content": "secret body",
                         "rendered-content": "rendered secret body",
                         "sections": [{"content": "section secret"}],
                     },
-                }
+                },
+                {
+                    "id": "74",
+                    "type": "documents",
+                    "attributes": {
+                        "name": "General Network Notes",
+                        "restricted": False,
+                        "content": "public body",
+                        "rendered-content": "rendered public body",
+                        "sections": [{"content": "section public"}],
+                    },
+                },
             ],
             "included": [{"type": "users", "attributes": {"email": "al@example.com"}}],
         },
@@ -208,8 +219,9 @@ def test_document_search_remains_sanitized_under_jason_managed_release() -> None
         resolution=_resolution(DOCUMENTATION_DOCUMENT_SEARCH),
     )
 
+    assert len(invocation.output["data"]["data"]) == 1
     attributes = invocation.output["data"]["data"][0]["attributes"]
-    assert attributes == {"name": "Network Notes", "restricted": True}
+    assert attributes == {"name": "General Network Notes", "restricted": False}
     assert "included" not in invocation.output["data"]
     release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
     assert release.allowed is True
@@ -296,3 +308,89 @@ def test_flexible_asset_credential_fields_are_redacted_before_release() -> None:
     assert envelope is not None
     assert envelope.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
     assert envelope.require_allowed(InformationAction.RELEASE).allowed is True
+
+
+def test_unrestricted_document_read_is_releasable_under_jason_managed_authority() -> None:
+    output = {
+        "provider": "it_glue",
+        "provider_capability": "it_glue.document.read",
+        "data": {
+            "data": {
+                "id": "74",
+                "type": "documents",
+                "attributes": {
+                    "name": "General Network Notes",
+                    "restricted": False,
+                    "content": "normal operational documentation",
+                },
+            }
+        },
+    }
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(DOCUMENTATION_DOCUMENT_READ),
+        resolution=_resolution(DOCUMENTATION_DOCUMENT_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is True
+    assert "jason_managed" in release.authorization_basis
+    assert "it_glue_unrestricted_document" in release.authorization_basis
+
+
+def test_restricted_document_without_acl_evidence_fails_closed() -> None:
+    output = {
+        "provider": "it_glue",
+        "provider_capability": "it_glue.document.read",
+        "data": {
+            "data": {
+                "id": "75",
+                "type": "documents",
+                "attributes": {
+                    "name": "Restricted Network Notes",
+                    "restricted": True,
+                },
+            }
+        },
+    }
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(DOCUMENTATION_DOCUMENT_READ),
+        resolution=_resolution(DOCUMENTATION_DOCUMENT_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is False
+    assert release.reason_code == "IT_GLUE_AUTHORIZED_USERS_RELATIONSHIP_REQUIRED"
+    assert "jason_managed" not in release.authorization_basis
+
+
+def test_document_with_unknown_restriction_state_fails_closed() -> None:
+    output = {
+        "provider": "it_glue",
+        "provider_capability": "it_glue.document.read",
+        "data": {
+            "data": {
+                "id": "76",
+                "type": "documents",
+                "attributes": {
+                    "name": "Unknown Restriction State",
+                },
+            }
+        },
+    }
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output),
+        bindings=_Bindings(),
+    ).invoke(
+        request=_request(DOCUMENTATION_DOCUMENT_READ),
+        resolution=_resolution(DOCUMENTATION_DOCUMENT_READ),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is False
+    assert release.reason_code == "IT_GLUE_DOCUMENT_RESTRICTION_STATE_UNKNOWN"

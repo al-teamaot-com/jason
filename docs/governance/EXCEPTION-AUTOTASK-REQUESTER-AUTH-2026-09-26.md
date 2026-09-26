@@ -1,6 +1,6 @@
 # J-405 Exception — Temporary Autotask Jason-Managed Requester Authorization
 
-**Status:** Approved transitional exception; remediation tracked in GitHub #175  
+**Status:** Retired 2026-09-26; superseded by ADR-011 permanent requester-authorization architecture
 **Effective date:** 2026-09-11  
 **Formalization date:** 2026-09-26  
 **Review no later than:** 2026-10-15  
@@ -60,24 +60,16 @@ Primary evidence:
 - provider-read authority and information-release regression tests;
 - live MCP governance status showing Central Orchestrator execution and `direct_provider_access=false`.
 
-## Review / expiration rule
+## Retirement decision — 2026-09-26
 
-This exception must be reviewed no later than 2026-10-15. At review, the Architecture Authority must either:
-1. retire the exception after successful provider-native/delegated requester authorization acceptance;
-2. replace it with a stronger supported provider authorization design; or
-3. explicitly renew the exception with updated evidence, risk review, and a new review date.
+The exception is retired by ADR-011. J-405 now explicitly separates provider FETCH authority from requester USE / PROCESS / RELEASE authority and permits Jason-managed requester authorization when provider-native requester execution is unavailable, unreliable, or unsuitable for the read path.
 
-The exception must not silently become permanent architecture.
+Current Autotask production evidence shows requester-impersonated reads are not reliable in the AOT environment, while the dedicated API-only service identity can fetch the same evidence. Jason therefore retains `jason_managed` as the accepted read architecture under ADR-011, with trusted Microsoft identity binding, JKD-001, validated authority context, client scope, observe-only permission, Central Orchestrator, information-release controls, sensitivity handling, and fail-closed behavior.
 
-## Retirement criteria
+Autotask write paths remain separate and retain dedicated write credentials, provider impersonation where required, approvals, execution-plan binding, and post-write verification.
 
-Retire this exception when:
-- the Autotask impersonation HTTP 500 root cause is understood and corrected, or an equivalent supported delegated requester model is available;
-- requester identity aliases are handled without making mutable email strings root authority;
-- bounded production proof confirms provider-native/delegated requester enforcement;
-- regression tests prove ambiguous or unauthorized requester mappings fail closed;
-- rollback evidence exists.
+Provider-native requester impersonation may be reintroduced for reads later after bounded acceptance, but it is no longer a prerequisite for constitutional compliance.
 
 ## Constitutional effect
 
-This record grants no new business, provider, client, write, or autonomous authority. It formalizes an existing transitional read compatibility condition and its compensating controls.
+Retiring this exception grants no new business, provider, client, write, or autonomous authority. It replaces a temporary exception with the canonical governed architecture defined by ADR-011.

@@ -99,6 +99,20 @@ Technical access never creates business authority.
 
 Policy and authority decisions shall be made through the governed identity, policy, approval, and orchestration layers designated by canonical architecture.
 
+## Provider-read requester authorization
+
+Provider fetch authority and requester information-release authority are distinct boundaries.
+
+Provider-native requester impersonation or delegation should be used when the provider supports it reliably for the required read, stable requester identity can be mapped safely, and doing so does not require widening unrelated provider privilege.
+
+Where provider-native requester execution is unavailable, unreliable, or unsuitable for the read path, Jason may use a dedicated least-privileged service/API identity for FETCH while independently authorizing USE, PROCESS, and RELEASE through Jason's governed identity, JKD-001 authority, client/tenant scope, Central Orchestrator, information-release, sensitivity, evidence, and audit boundaries.
+
+Service/API credential fetch authority shall never imply requester release authority.
+
+Provider-native ACL or restriction evidence remains authoritative as a narrowing control. An explicit provider denial shall not be overridden by Jason-managed requester authorization. For protected content, missing or unverifiable provider ACL evidence shall fail closed where the provider's restriction model applies.
+
+The canonical design for this boundary is defined by `ADR-011-Provider-Read-Requester-Authorization.md`.
+
 ## Data, evidence, and client separation
 
 Cross-client isolation is mandatory across context, evidence, credentials, provider responses, cached state, logs, model inputs/outputs, and operational artifacts.

@@ -11,7 +11,7 @@
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
 - **Production/runtime boundary:** live runtime/MCP must be verified from container source labels, health, activation profiles, and governance status before consequential change.
-- **Next safe actions:** continue constitutional certification remediation before broad capability expansion. #56, #165, and #378 are reconciled/closed; Article XIX/System Registry completeness is proven; production-equivalent MCP constitutional certification now passes from the real MCP image dependency set. Remaining priorities are retiring/replacing the formal Autotask/IT Glue requester-authorization exceptions (#175/#176) and explicitly reviewing the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles. Do not claim 100% constitutional certification until no FAIL/PARTIAL/EXCEPTION items remain.
+- **Next safe actions:** constitutional certification remediation is substantively complete on PR #381. All nineteen J-002 articles are PROVEN on the reviewed branch, including Article XIX, production-equivalent MCP certification, ADR-011 requester authorization, continuity, stewardship, simplicity, architecture-first, and living documentation. Required next step is normal protected-main merge of PR #381; only after merge should #175/#176 be closed and authoritative `main` described as 100% constitutionally certified. Continue to re-run certification after any material constitutional architecture or production-boundary change.
 
 ## Current production state
 
