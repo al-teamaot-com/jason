@@ -212,3 +212,43 @@ test("failed runtime reply does not expose absent raw provider data", () => {
   assert.doesNotMatch(reply, /authorization/i);
   assert.doesNotMatch(reply, /bearer/i);
 });
+
+test("binds governed card approval interaction into the signed envelope", () => {
+  const value = buildConversationEnvelope({
+    text: "Jason approval response",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-approval",
+    messageId: "message-approval",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "approval.submit",
+      approval_id: "pbautreq-1",
+      decision: "request_changes",
+      channel_response_id: "message-approval",
+    },
+  });
+  assert.deepEqual(value.interaction, {
+    kind: "approval.submit",
+    approval_id: "pbautreq-1",
+    decision: "request_changes",
+    channel_response_id: "message-approval",
+  });
+});
+
+test("rejects invalid approval interaction decisions before signing", () => {
+  assert.throws(() => buildConversationEnvelope({
+    text: "Jason approval response",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-approval",
+    messageId: "message-approval",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "approval.submit",
+      approval_id: "pbautreq-1",
+      decision: "self_promote",
+      channel_response_id: "message-approval",
+    },
+  }), /decision is invalid/);
+});

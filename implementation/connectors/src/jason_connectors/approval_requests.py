@@ -8,9 +8,13 @@ repository before execution can continue.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
+import json
+import os
+import sqlite3
+from pathlib import Path
 from typing import Protocol
 
 
@@ -20,11 +24,27 @@ class ApprovalRequestStatus(StrEnum):
     DENIED = "denied"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
+    CHANGES_REQUESTED = "changes_requested"
 
 
 class ApprovalDecision(StrEnum):
     APPROVE = "approve"
     DENY = "deny"
+    REQUEST_CHANGES = "request_changes"
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalPresentation:
+    title: str
+    summary: str
+    facts: tuple[tuple[str, str], ...] = ()
+
+    def validate(self) -> None:
+        if not self.title.strip() or not self.summary.strip():
+            raise ValueError("approval presentation title and summary must be non-empty")
+        for label, value in self.facts:
+            if not str(label).strip() or not str(value).strip():
+                raise ValueError("approval presentation facts must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +74,8 @@ class ApprovalRequest:
     expires_at: datetime
     authorized_approver_ids: tuple[str, ...]
     evidence_references: tuple[ApprovalEvidenceReference, ...] = ()
+    presentation: ApprovalPresentation | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
     status: ApprovalRequestStatus = ApprovalRequestStatus.PENDING
 
     def validate(self) -> None:
@@ -81,6 +103,11 @@ class ApprovalRequest:
             reference.validate()
             if reference.organization_id != self.organization_id:
                 raise ValueError("approval evidence organization must match approval organization")
+        if self.presentation is not None:
+            self.presentation.validate()
+        for key, value in self.metadata.items():
+            if not str(key).strip() or not str(value).strip():
+                raise ValueError("approval metadata keys and values must be non-empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +166,7 @@ class ApprovalAuthorityChecker(Protocol):
 class ApprovalRequestRepository(Protocol):
     def get(self, approval_id: str) -> ApprovalRequest | None: ...
     def put(self, request: ApprovalRequest) -> None: ...
+    def list_all(self) -> tuple[ApprovalRequest, ...]: ...
 
 
 @dataclass
@@ -150,6 +178,155 @@ class InMemoryApprovalRequestRepository:
 
     def put(self, request: ApprovalRequest) -> None:
         self.records[request.approval_id] = request
+
+    def list_all(self) -> tuple[ApprovalRequest, ...]:
+        return tuple(self.records[key] for key in sorted(self.records))
+
+
+class SQLiteApprovalRequestRepository:
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS approval_requests (
+        approval_id TEXT PRIMARY KEY,
+        payload TEXT NOT NULL
+    );
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)
+        self._connection.row_factory = sqlite3.Row
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=FULL")
+        self._connection.executescript(self._SCHEMA)
+        os.chmod(self.path, 0o600)
+
+    def get(self, approval_id: str) -> ApprovalRequest | None:
+        row = self._connection.execute(
+            "SELECT payload FROM approval_requests WHERE approval_id=?", (approval_id,)
+        ).fetchone()
+        return None if row is None else self._decode(str(row["payload"]))
+
+    def put(self, request: ApprovalRequest) -> None:
+        request.validate()
+        payload = self._encode(request)
+        with self._connection:
+            row = self._connection.execute(
+                "SELECT payload FROM approval_requests WHERE approval_id=?",
+                (request.approval_id,),
+            ).fetchone()
+            if row is not None:
+                existing = self._decode(str(row["payload"]))
+                if self._immutable_scope(existing) != self._immutable_scope(request):
+                    raise ValueError(
+                        "approval request id cannot be reused with changed immutable scope"
+                    )
+                if not self._valid_status_transition(existing.status, request.status):
+                    raise ValueError("invalid approval request status transition")
+            self._connection.execute(
+                "INSERT INTO approval_requests(approval_id,payload) VALUES(?,?) "
+                "ON CONFLICT(approval_id) DO UPDATE SET payload=excluded.payload",
+                (request.approval_id, payload),
+            )
+
+    def list_all(self) -> tuple[ApprovalRequest, ...]:
+        rows = self._connection.execute(
+            "SELECT payload FROM approval_requests ORDER BY approval_id"
+        ).fetchall()
+        return tuple(self._decode(str(row["payload"])) for row in rows)
+
+    def close(self) -> None:
+        self._connection.close()
+
+    @staticmethod
+    def _immutable_scope(request: ApprovalRequest) -> tuple:
+        metadata = tuple(
+            sorted(
+                (str(key), str(value))
+                for key, value in request.metadata.items()
+                if key != "delivery_message_ids"
+            )
+        )
+        presentation = None
+        if request.presentation is not None:
+            presentation = (
+                request.presentation.title,
+                request.presentation.summary,
+                tuple(request.presentation.facts),
+            )
+        evidence = tuple(
+            (ref.artifact_id, ref.organization_id, ref.content_sha256)
+            for ref in request.evidence_references
+        )
+        return (
+            request.approval_id,
+            request.request_id,
+            request.correlation_id,
+            request.organization_id,
+            request.client_id,
+            request.requested_by,
+            request.capability,
+            request.requested_mode,
+            request.requested_at,
+            request.expires_at,
+            tuple(request.authorized_approver_ids),
+            evidence,
+            presentation,
+            metadata,
+        )
+
+    @staticmethod
+    def _valid_status_transition(
+        previous: ApprovalRequestStatus, current: ApprovalRequestStatus
+    ) -> bool:
+        if previous is current:
+            return True
+        if previous is ApprovalRequestStatus.PENDING:
+            return current in {
+                ApprovalRequestStatus.APPROVED,
+                ApprovalRequestStatus.DENIED,
+                ApprovalRequestStatus.CHANGES_REQUESTED,
+                ApprovalRequestStatus.EXPIRED,
+                ApprovalRequestStatus.CANCELLED,
+            }
+        return False
+
+    @staticmethod
+    def _encode(request: ApprovalRequest) -> str:
+        body = asdict(request)
+        body["requested_at"] = request.requested_at.isoformat()
+        body["expires_at"] = request.expires_at.isoformat()
+        body["status"] = request.status.value
+        body["evidence_references"] = [asdict(ref) for ref in request.evidence_references]
+        if request.presentation is not None:
+            body["presentation"] = {
+                "title": request.presentation.title,
+                "summary": request.presentation.summary,
+                "facts": [list(item) for item in request.presentation.facts],
+            }
+        return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _decode(payload: str) -> ApprovalRequest:
+        body = json.loads(payload)
+        body["requested_at"] = datetime.fromisoformat(body["requested_at"])
+        body["expires_at"] = datetime.fromisoformat(body["expires_at"])
+        body["status"] = ApprovalRequestStatus(body["status"])
+        body["authorized_approver_ids"] = tuple(body["authorized_approver_ids"])
+        body["evidence_references"] = tuple(
+            ApprovalEvidenceReference(**item) for item in body.get("evidence_references") or ()
+        )
+        presentation = body.get("presentation")
+        body["presentation"] = (
+            ApprovalPresentation(
+                title=presentation["title"],
+                summary=presentation["summary"],
+                facts=tuple((str(a), str(b)) for a, b in presentation.get("facts") or ()),
+            )
+            if presentation else None
+        )
+        body["metadata"] = dict(body.get("metadata") or {})
+        return ApprovalRequest(**body)
 
 
 @dataclass
@@ -193,11 +370,12 @@ class ApprovalRequestService:
         ):
             raise PermissionError("Jason authority denied approver authorization")
 
-        final_status = (
-            ApprovalRequestStatus.APPROVED
-            if response.decision is ApprovalDecision.APPROVE
-            else ApprovalRequestStatus.DENIED
-        )
+        if response.decision is ApprovalDecision.APPROVE:
+            final_status = ApprovalRequestStatus.APPROVED
+        elif response.decision is ApprovalDecision.REQUEST_CHANGES:
+            final_status = ApprovalRequestStatus.CHANGES_REQUESTED
+        else:
+            final_status = ApprovalRequestStatus.DENIED
         self.repository.put(replace(request, status=final_status))
         return AcceptedApproval(
             approval_id=request.approval_id,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -67,4 +67,59 @@ test("processing claim survives restart and blocks a retry with uncertain outcom
 
   const persisted = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(Object.keys(persisted).length, 1);
+});
+
+test("definitively unauthorized claim can be released for the real owner", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jason-approval-release-"));
+  const path = join(dir, "decisions.json");
+  try {
+    const store = createApprovalDecisionStore({ path });
+    const first = store.begin({
+      tenantId: "tenant-1",
+      approvalId: "approval-1",
+      aadObjectId: "tech-object",
+      decision: "approve",
+      messageId: "message-tech",
+    });
+    assert.equal(first.accepted, true);
+    store.release({
+      tenantId: "tenant-1",
+      approvalId: "approval-1",
+      aadObjectId: "tech-object",
+      decision: "approve",
+    });
+    const owner = store.begin({
+      tenantId: "tenant-1",
+      approvalId: "approval-1",
+      aadObjectId: "owner-object",
+      decision: "approve",
+      messageId: "message-owner",
+    });
+    assert.equal(owner.accepted, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release refuses a mismatched sender or decision", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jason-approval-release-scope-"));
+  const path = join(dir, "decisions.json");
+  try {
+    const store = createApprovalDecisionStore({ path });
+    store.begin({
+      tenantId: "tenant-1",
+      approvalId: "approval-1",
+      aadObjectId: "tech-object",
+      decision: "approve",
+      messageId: "message-tech",
+    });
+    assert.throws(() => store.release({
+      tenantId: "tenant-1",
+      approvalId: "approval-1",
+      aadObjectId: "other-object",
+      decision: "approve",
+    }), /scope mismatch/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

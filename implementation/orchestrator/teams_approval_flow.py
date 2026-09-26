@@ -96,11 +96,12 @@ class TeamsApprovalFlow:
 
             stage = "approval_authority"
             accepted = self.approval_service.accept_response(response, now=now)
-            outcome_type = (
-                ApprovalAuditEventType.RESPONSE_ACCEPTED
-                if accepted.status == "approved"
-                else ApprovalAuditEventType.RESPONSE_DENIED
-            )
+            if accepted.status == "approved":
+                outcome_type = ApprovalAuditEventType.RESPONSE_ACCEPTED
+            elif accepted.status == "changes_requested":
+                outcome_type = ApprovalAuditEventType.RESPONSE_CHANGES_REQUESTED
+            else:
+                outcome_type = ApprovalAuditEventType.RESPONSE_DENIED
             self._record(
                 event_type=outcome_type,
                 approval_id=accepted.approval_id,

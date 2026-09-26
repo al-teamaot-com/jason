@@ -173,3 +173,40 @@ The backend approval architecture and approval replay/idempotency protection are
 The execution-plan binding described above began at commit `56b0e91fe376fb270ac521c5c1754bfa12aafdb5`. Follow-on remediation on `fix/security-remediation-20260923` hardened deterministic secret-safe plan serialization and Autotask method/path/target revalidation at `0ed6911`, adapted the remaining identified approval-governed action surface at `e41e572`, and completed shared deadline plus continuation/recovery hardening at `bf072af`. Site-variable secret values are authority-bound through SHA-256 commitments without entering persisted plan/audit material. Shared opaque prepared state is excluded from normal `repr()`. Provider maximum execution time is one absolute deadline across first prepare, independent re-prepare, and invocation. Continuation and recovery retry flows retain one-time external guards and are also dual-plan-bound before provider invocation. The generic recovery retry implementation requires exact scope, fresh JKD-001 authority, durable one-time recovery consumption, and Central Orchestrator routing. The consolidated security regression set is **186/186 PASS**. A complete orchestrator-suite comparison reports only three pre-existing IT Glue/provider-read failures that reproduce unchanged at baseline `10d1e9c`. The control is still **not deployed or production-accepted**; the last verified production security boundary remains the approval-replay deployment revision `5f89f3af82081e75e97d66e523222e5564648163`. Production deployment, clean-build/rollback proof, and bounded XYZ live acceptance remain pending and must not be represented as completed.
 
 Live Microsoft/Teams approval-channel validation also remains an independent operational task and requires the Jason host, OpenBao-backed credential binding, Microsoft application configuration, organization-specific Team/channel targets, and a controlled end-to-end test approval.
+
+## Playbook autonomy owner approval via Teams
+
+Playbook construction and autonomy authority are deliberately separate responsibilities.
+
+A technician may create, test, document, and submit a playbook or playbook revision. Source metadata may nominate the exact production-safe branch with `autonomy.activation=autonomous`, but that source state is not standing execution authority. Jason must not create its own durable autonomy promotion from source metadata alone.
+
+For an autonomy-ready production playbook/version with no matching durable promotion, the runtime may create an owner-review request and send a Microsoft Teams Adaptive Card. The card is bound to the exact source-controlled review scope and displays the playbook ID/name, version, review status, allowed capabilities, source path, requester, and canonical registry-entry SHA-256 fingerprint.
+
+The Teams card supports three decisions:
+
+- **Approve** — only an authenticated Microsoft principal bound to a configured Jason owner identity may authorize the exact reviewed scope. Jason then mechanically creates or reuses the matching durable `PlaybookAutonomyApproval`.
+- **Deny** — no promotion is created. The same fingerprint is not automatically re-requested.
+- **Request Changes** — no promotion is created. The same fingerprint is not automatically re-requested; a material source change produces a new fingerprint and may be submitted again.
+
+Expired/cancelled requests may be reissued for the same unchanged scope. Duplicate pending requests for the same fingerprint fail closed.
+
+### Authority boundary
+
+The Teams button is evidence, not authority. The approval path requires all of the following before promotion:
+
+1. the inbound Teams activity was authenticated by Bot Framework and transported in Jason's signed conversation envelope;
+2. the card interaction is present as structured signed `approval.submit` evidence rather than inferred from natural-language text;
+3. the Microsoft tenant/object identity resolves to an active Jason identity;
+4. that Jason identity is explicitly configured as an autonomy approval owner;
+5. the approval request is still pending and unexpired;
+6. the current registry still contains the exact reviewed playbook ID/version/policy/capability set;
+7. the current canonical registry-entry fingerprint exactly matches the fingerprint shown to the owner;
+8. the durable promotion store does not contain a conflicting active promotion.
+
+Any version, policy, capability, or fingerprint drift after the card is issued causes the approval-to-promotion step to fail closed. A technician, Teams channel membership, card forwarding, copied payload, typed message such as "approve", or source repository access cannot substitute for owner authority.
+
+The resulting operating lifecycle is:
+
+`Draft -> Tested/Accepted -> Production Autonomy Candidate -> Teams Owner Review -> Durable Promotion -> Autonomous Safe Branch`
+
+A material change creates a new review fingerprint and requires new owner approval before that changed scope can gain standing autonomy.

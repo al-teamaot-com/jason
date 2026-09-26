@@ -91,6 +91,10 @@ class TeamsApprovalDeliveryChannel:
                         {"title": "Mode", "value": card.requested_mode},
                         {"title": "Expires", "value": card.expires_at},
                         {"title": "Approval ID", "value": card.approval_id},
+                        *[
+                            {"title": str(label), "value": str(value)}
+                            for label, value in card.facts
+                        ],
                     ],
                 },
             ],
@@ -111,6 +115,15 @@ class TeamsApprovalDeliveryChannel:
                         "approval_id": card.approval_id,
                         "organization_id": card.organization_id,
                         "decision": "deny",
+                    },
+                },
+                {
+                    "type": "Action.Submit",
+                    "title": "Request Changes",
+                    "data": {
+                        "approval_id": card.approval_id,
+                        "organization_id": card.organization_id,
+                        "decision": "request_changes",
                     },
                 },
             ],

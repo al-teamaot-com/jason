@@ -48,3 +48,9 @@ test("failed runtime responses log only bounded correlation metadata", () => {
     assert.doesNotMatch(failureBlock[0], forbidden);
   }
 });
+
+test("approval card submit path supports request_changes and signs structured interaction", () => {
+  assert.match(source, /"approve", "deny", "request_changes"/);
+  assert.match(source, /kind: "approval\.submit"/);
+  assert.match(source, /channel_response_id: messageId/);
+});

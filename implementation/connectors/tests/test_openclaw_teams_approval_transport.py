@@ -96,3 +96,11 @@ def test_unexpected_delivery_channel_fails_closed():
     delivery, _ = channel(response={"messageId": "m-1", "channel": "slack"})
     with pytest.raises(RuntimeError):
         delivery.deliver(request())
+
+
+def test_card_exposes_request_changes_as_non_approval_decision():
+    delivery, gateway = channel()
+    delivery.deliver(request())
+    card = gateway.calls[0][1]["payload"]["channelData"]["msteams"]["presentationCard"]
+    assert card["actions"][2]["title"] == "Request Changes"
+    assert card["actions"][2]["data"]["decision"] == "request_changes"

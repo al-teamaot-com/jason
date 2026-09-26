@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -96,3 +97,67 @@ class ApprovalRequestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_request_changes_is_terminal_without_approval():
+    repo = InMemoryApprovalRequestRepository()
+    service = ApprovalRequestService(repo, Authority(True))
+    service.create(request(), now=NOW)
+    accepted = service.accept_response(ApprovalResponse(
+        approval_id="apr-1", organization_id="org-a", approver_identity_id="user-approver",
+        decision=ApprovalDecision.REQUEST_CHANGES, decided_at=NOW + timedelta(minutes=1),
+        channel="microsoft_teams", channel_response_id="teams-1",
+    ), now=NOW + timedelta(minutes=1))
+    assert accepted.status == "changes_requested"
+    assert repo.get("apr-1").status.value == "changes_requested"
+
+
+def test_sqlite_approval_request_round_trips_presentation_and_metadata(tmp_path):
+    from implementation.connectors.src.jason_connectors.approval_requests import (
+        ApprovalPresentation,
+        SQLiteApprovalRequestRepository,
+    )
+    original = replace(
+        request(),
+        presentation=ApprovalPresentation(
+            title="Approve playbook",
+            summary="Exact autonomy scope",
+            facts=(("Version", "1.2.3"), ("Capabilities", "a.b,c.d")),
+        ),
+        metadata={"playbook_id": "pb", "entry_sha256": "c" * 64},
+    )
+    repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
+    repo.put(original)
+    loaded = repo.get(original.approval_id)
+    assert loaded == original
+    assert repo.list_all() == (original,)
+    repo.close()
+
+
+def test_playbook_presentation_is_rendered_into_teams_card():
+    from implementation.connectors.src.jason_connectors.approval_requests import ApprovalPresentation
+    card = render_approval_card(replace(
+        request(),
+        presentation=ApprovalPresentation(
+            title="Approve Jason autonomy",
+            summary="Owner review required",
+            facts=(("Playbook", "low_disk_space"), ("Version", "1.1.0")),
+        ),
+    ))
+    assert card.title == "Approve Jason autonomy"
+    assert card.summary == "Owner review required"
+    assert ("Playbook", "low_disk_space") in card.facts
+
+
+def test_sqlite_repository_rejects_changed_scope_for_same_approval_id(tmp_path):
+    from implementation.connectors.src.jason_connectors.approval_requests import SQLiteApprovalRequestRepository
+    repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
+    original = request()
+    repo.put(original)
+    try:
+        repo.put(replace(original, requested_mode="administer"))
+    except ValueError as exc:
+        assert "changed immutable scope" in str(exc)
+    else:
+        raise AssertionError("changed immutable scope was accepted")
+    repo.close()

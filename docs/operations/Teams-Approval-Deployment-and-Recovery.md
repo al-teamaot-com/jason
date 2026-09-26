@@ -153,3 +153,36 @@ Stop and fail closed when any of the following occurs:
 ## Production rule
 
 Teams is the human interface. OpenClaw is transport and authenticated-ingress infrastructure. Microsoft authentication is identity evidence. Provider-neutral Jason approval policy determines whether the response is acceptable. JKD-001 creates execution authority. Central Orchestrator alone resumes or retries execution. Audit and INF-013 preserve the evidence required to prove that chain.
+
+## Playbook autonomy approval cards
+
+Project Jason may use the existing authenticated Teams gateway to request owner approval for an exact playbook autonomy scope. This is a control-plane approval workflow, not a provider remediation action.
+
+### Automatic request generation
+
+When enabled, the runtime reviews the production playbook registry on a bounded interval. A card is generated only when:
+
+- the registry entry is `production` and `enabled=true`;
+- `autonomy.activation=autonomous` nominates a safe branch;
+- an exact version, policy ID, and non-wildcard capability set are present; and
+- no matching durable `PlaybookAutonomyApproval` already exists.
+
+The review request is persisted before delivery. Delivery is then attempted through the direct Teams gateway using the existing authenticated Microsoft identity binding for the configured owner. The card contains no secret material.
+
+### Owner decision handling
+
+Adaptive Card button values are included in Jason's signed Teams transport envelope as structured `approval.submit` evidence. The runtime does not interpret ordinary chat text as an approval-card response.
+
+On **Approve**, Jason re-reads the current source registry and requires the exact version, policy ID, capability set, and canonical entry fingerprint to match what the owner reviewed. Only then is the durable promotion created. On **Deny** or **Request Changes**, no promotion is created.
+
+A non-owner Microsoft/Jason identity fails authorization even if it can see or click the card. Teams remains transport/UI; configured Jason owner authority remains decisive.
+
+### Production settings
+
+- `JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED` — disabled by source default; explicitly enable in production after acceptance.
+- `JASON_PLAYBOOK_AUTONOMY_REVIEW_DB` — durable pending/decided request store.
+- `JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS` — bounded review cadence, minimum 60 seconds; production default 300 seconds.
+- `JASON_PLAYBOOK_AUTONOMY_REVIEW_AUDIT` — durable promotion audit path.
+- owner identities are drawn from the existing configured owner-approval identity set.
+
+Do not delete or edit a decided review record to obtain another approval prompt. A denied or changes-requested playbook must change materially and produce a new fingerprint before returning to owner review. Expired/cancelled requests may be regenerated.
