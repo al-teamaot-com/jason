@@ -126,15 +126,16 @@ The following current-main test families were executed together and passed:
 
 The earlier host-venv MCP proof gap is now resolved. `tools/run_mcp_constitutional_certification.sh` builds Jason's actual MCP production Dockerfile from the source revision under test, layers only the test runner, and executes the constitutional MCP contract suite with the same MCP/PyJWT/runtime dependency set as production. During its first execution it exposed two Datto governed component-identity fail-closed regressions that the host environment had not surfaced; both were corrected before certification was allowed to pass. Production-equivalent certification passed for source revision `aa92ac17ed37640ecb8daf08c718afdd0ca08546`. Durable result: `docs/sessions/MCP-Constitutional-Certification-Result-2026-09-26.json`.
 
-## Immediate remediation plan
+## Continuing certification requirements
 
-1. Merge PR #381 through the normal protected-branch path after all required checks pass.
-2. Close GitHub #175 and #176 after the ADR-011 requester-authorization architecture is present on authoritative `main`.
-3. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
-4. Re-run the certification if any material constitutional architecture or production boundary changes.
+1. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
+2. Re-run constitutional certification after any material constitutional architecture, authority, identity, provider-boundary, recovery, or production-topology change.
+3. Treat future drift, new exceptions, failed constitutional tests, or unregistered production state as conditions that can invalidate this certification until remediated.
 
 ## Certification decision
 
-**Decision: ALL CONSTITUTIONAL ARTICLES PROVEN ON THE REVIEWED BRANCH; AUTHORITATIVE 100% CERTIFICATION PENDING PROTECTED-MAIN MERGE.**
+**Decision: 100% CONSTITUTIONALLY CERTIFIED AGAINST J-002 AS OF 2026-09-26.**
 
-All nineteen J-002 articles are classified PROVEN in this review. Article XIX/System Registry completeness, production-equivalent MCP certification-runner coverage, Autotask/IT Glue requester authorization, and the previously subjective/partial owner-architecture articles have all been remediated or reviewed against the Constitution's actual requirements. No substantive constitutional defect or active exception remains in the reviewed branch. The certification becomes authoritative for the repository when PR #381 is merged into protected `main`; until then, `main` remains the authoritative production source and must not be described as 100% certified solely from branch state.
+All nineteen J-002 articles are classified PROVEN. Article XIX/System Registry completeness, production-equivalent MCP certification-runner coverage, Autotask/IT Glue requester authorization, recovery readiness, governance restoration, and the owner/architecture-reviewed principle articles are all proven or remediated against the Constitution's actual requirements. PR #381 merged through protected `main` as `bb0aad018ec40fb975a32b69594bdc6d6806fd1c`; GitHub #175 and #176 were then closed. No substantive constitutional defect or active constitutional exception remains in the certified state.
+
+This certification is evidence-bound to the reviewed state. It does not waive constitutional review for future material changes and must be re-evaluated when relevant architecture or production boundaries change.
