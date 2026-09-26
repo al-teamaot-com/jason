@@ -2462,7 +2462,7 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": ticket_id,
         "queueID": "Jason",
-        "status": "Human Review",
+        "status": "In Progress",
         "billingCodeID": "Remote Support",
     }
 

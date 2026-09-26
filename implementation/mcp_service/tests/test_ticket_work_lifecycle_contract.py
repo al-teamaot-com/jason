@@ -100,7 +100,7 @@ def test_start_captures_original_queue_and_status(monkeypatch):
         {"ticket_id": 123, "begin_work": True, "work_kind": "diagnostic"},
     )
     assert result["payload"]["queueID"] == "Jason"
-    assert result["payload"]["status"] == "Human Review"
+    assert result["payload"]["status"] == "In Progress"
     assert result["jason_original_queue_id"] == 29682833
     assert result["jason_original_status_id"] == 1
 
@@ -356,7 +356,7 @@ def test_start_moves_monitoring_or_helpdesk_ticket_to_jason_before_work(
     )
 
     assert result["payload"]["queueID"] == "Jason"
-    assert result["payload"]["status"] == "Human Review"
+    assert result["payload"]["status"] == "In Progress"
     assert result["jason_original_queue_id"] == source_queue
 
 
@@ -388,7 +388,7 @@ def test_start_is_idempotent_for_ticket_already_claimed_by_jason(monkeypatch):
     )
 
     assert result["payload"]["queueID"] == "Jason"
-    assert result["payload"]["status"] == "Human Review"
+    assert result["payload"]["status"] == "In Progress"
     assert result["jason_original_queue_id"] == 29682833
     assert result["jason_original_status_id"] == 1
 
