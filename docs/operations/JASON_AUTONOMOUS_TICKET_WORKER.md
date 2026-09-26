@@ -2,7 +2,8 @@
 
 **Production status:** Active  
 **Activated:** 2026-09-25  
-**Production revision at activation:** `aaa536cef3e10edac8a1cc41595caee19be570c6`  
+**Production revision at initial activation:** `aaa536cef3e10edac8a1cc41595caee19be570c6`  
+**Current documented production revision:** `6499a3d2a2fb67b0fdda797e8f5a901097033bbb`  
 **Workload principal:** `jason-autonomy-worker`
 
 ## Purpose
@@ -20,7 +21,22 @@ The default active-work limit is two. Tickets that are waiting, blocked, approva
 
 ## Current production autonomous scope
 
-The first production resolver is the health-only branch of **Jason - Datto EDR/AV Diagnose & Repair v1.3.0**.
+As of 2026-09-26, all ten production playbooks in the current registry have a separately promoted autonomous safe branch. This does **not** mean every remediation branch is autonomous. Each resolver is limited to the exact source-controlled capability set and its documented stop conditions.
+
+| Playbook | Version | Autonomous production scope | Important gated boundary |
+| --- | --- | --- | --- |
+| `datto_edr_av` | 1.3.0 | health diagnosis plus one bounded standing-safe repair and independent verification | threat-response, clean uninstall, reboot, and other disruptive actions |
+| `dns_agent_diagnostic` | 1.0.0 | DNS Agent/DNSFilter diagnostic component and evidence note | repair/install branch |
+| `security_log_self_heal` | 1.0.0 | Quick Test, at most one Self-Heal, independent Quick Test verification | alert/SOC side-effect cleanup and unrelated security-ticket closure |
+| `post_error_investigation` | 1.0.0 | read-only POST recurrence/device-role diagnostic | firmware/hardware change and automatic closure |
+| `unexpected_shutdown` | 1.0.0 | 30-day recurrence and same-site ±15-minute physical-device correlation | automatic closure and any disruptive remediation |
+| `backupiq_endpoint_backup` | 1.0.0 | DRMM plus Backup.net/UniView asset/alert classification | reinstall, clean install, policy/retention change, restore/delete, automatic closure |
+| `low_disk_space` | 1.0.0 | read-only disk baseline, device-role, and storage-risk diagnostic | file deletion/cleanup; servers remain human-reviewed |
+| `vulscan_missing_patch` | 1.0.0 | exact-KB extraction and DRMM patch-state classification | patch approval, forced install, Windows Update repair, reboot, automatic closure |
+| `disk_bad_block_event_7` | 1.0.0 | Event ID 7/bad-block alert recovery and read-only storage evidence collection | physical-disk mapping, alert resolution, disk repair, completion |
+| `idle_log_off` | 1.0.0 | endpoint/alert diagnostic and monitor/plumbing-failure classification | setter remains per-run approval because it has future user-session impact |
+
+The EDR/AV health branch remains the most complete autonomous remediation branch. The other promoted playbooks intentionally stop at the exact safety boundary documented in their playbook files.
 
 A ticket must pass all deterministic admission gates before Jason can claim it:
 
@@ -80,14 +96,20 @@ Operational execute grants are bounded to:
 
 Required read grants include exact ticket, CI, resource, endpoint, automation-job, and output reads needed for deterministic admission and verification. The runtime cannot create or broaden these grants.
 
-The production durable playbook promotion created for the EDR/AV health branch is:
+Current operational durable promotions are:
 
-- Promotion ID: `pbauto_d754251d9ae140fe9a3fa11b090eaf49`
-- Playbook: `datto_edr_av@1.3.0`
-- Status: approved
-- Allowed capabilities: `automation.component.execute`, `service.ticket.note.create`, `service.ticket.update`
+- `datto_edr_av@1.3.0` — `pbauto_d754251d9ae140fe9a3fa11b090eaf49`
+- `dns_agent_diagnostic@1.0.0` — `pbauto_1220425a8fe24bfb8b7215203894c6c8`
+- `security_log_self_heal@1.0.0` — `pbauto_cef78c667da94c32abdd4b5c1cf3b264`
+- `post_error_investigation@1.0.0` — `pbauto_85ae7847089548dc95403fba2a307529`
+- `unexpected_shutdown@1.0.0` — `pbauto_f7d432db2bfc4800aa7897917a3cee57`
+- `backupiq_endpoint_backup@1.0.0` — `pbauto_e7f4424d9d334031aff1a1308266b41c`
+- `low_disk_space@1.0.0` — `pbauto_34c69f767b964547ba92e130ee3d2bba`
+- `vulscan_missing_patch@1.0.0` — `pbauto_dc728e1460844ab0aad7ef791d9738cb`
+- `disk_bad_block_event_7@1.0.0` — `pbauto_198a735413704d18bc45ce233beea25f`
+- `idle_log_off@1.0.0` — `pbauto_49092826d1744f41b5b07e2aabd2b1b0`
 
-Standing-safe Datto components used by this resolver are maintained in the durable component-approval registry. Generic PowerShell remains per-run and is rejected for autonomous execution.
+Standing-safe Datto components used by autonomous resolvers remain independently governed in the durable component-approval registry. Generic PowerShell remains per-run and is rejected for autonomous execution. A playbook promotion never makes a component standing-safe by itself.
 
 ## Runtime and persistent state
 
@@ -184,3 +206,16 @@ The operator utility must not be used to bypass an unfinished acceptance gate. C
 - `implementation/mcp_service/src/jason_mcp/autonomy_admin.py`
 - `docs/architecture/JASON_AUTONOMOUS_QUEUE_OPERATING_MODEL.md`
 - `docs/sessions/Jason-Autonomous-Ticket-Worker-2026-09-25.md`
+
+
+## 2026-09-26 production expansion checkpoint
+
+The 2026-09-26 expansion completed the safe autonomous branch for every production playbook currently registered. Significant production proofs included:
+
+- the autonomous Autotask ticket-update preparation defect was corrected in PR #356 so `jason-autonomy-worker` uses the intended API-user path rather than a human trusted-principal binding;
+- POST ticket `T20260923.0075` / `VZ-HYPER-V` was successfully claimed and diagnosed after that fix, then escalated because the endpoint was protected/recurring;
+- BackupIQ ticket `T20260925.0003` / `APD-50399` was classified as an inactive/offline endpoint from exact DRMM and provider asset evidence, with no reinstall attempted;
+- VulScan ticket `T20260925.0001` / `GAI-DT2850` exposed a normalized patch-evidence shape defect. PR #361 corrected the worker to consume `evidence.data.patches`; rerun then correctly classified `KB5124008` and `KB5126052` as `NOT_APPROVED` and performed no approval/install/reboot action;
+- Low Disk Space, Disk Event ID 7, and Idle Log Off were promoted only for read-only/diagnostic branches. Cleanup, physical-disk mapping, and the Idle Log Off setter remain gated exactly as documented.
+
+The current operating principle is now: Jason may automatically start and carry a matching ticket through the exact promoted safe branch, but it must stop at the first unapproved or disruptive boundary. No ticket-by-ticket owner approval is required merely to begin an already-promoted safe branch.
