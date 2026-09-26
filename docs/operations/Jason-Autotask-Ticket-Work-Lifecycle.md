@@ -55,7 +55,21 @@ The handoff transition:
 
 A ticket that is only waiting for a Jason-owned retry/recheck or an approval that would allow Jason to continue remains in the **Jason** queue. A ticket is handed back only when responsibility for the next meaningful action has transferred to a human/provider/client outside Jason's autonomous path.
 
-After a handoff, automatic reclaim is fail-closed until evidence demonstrates that the previously recorded blocker changed. This prevents queue ping-pong.
+### Human-review handoff exception
+
+When Jason reaches a terminal or sticky state whose **next meaningful action is human technician review** (for example `escalation_required`, `security_incident_escalation`, or an equivalent playbook-defined human-review gate), the destination is standardized rather than restored from the pre-claim queue:
+
+1. create an internal handoff/escalation note that summarizes the reason for review, completed diagnostics/remediation, authoritative verification evidence, remaining risk/question, and the exact recommended technician next step;
+2. move the ticket to queue **Help Desk I** (production queue ID `29682833`);
+3. set/preserve status **In Progress**;
+4. preserve Work Type **Remote Support**, device/configuration association, priority, classification, and all existing ticket evidence unless another approved workflow explicitly changes them;
+5. require post-mutation readback confirming **Help Desk I + In Progress**;
+6. persist `handoff_reason=human_review` and the blocker/escalation fingerprint;
+7. release the ticket from Jason's active-work slot immediately after verified handoff.
+
+This exception applies only when a human technician now owns the next decision. It does **not** apply to Jason-owned retries/rechecks, temporary endpoint unavailability, or approvals after which Jason will continue execution; those remain in the **Jason** queue.
+
+After a handoff, automatic reclaim is fail-closed until evidence demonstrates that the previously recorded blocker changed or a technician deliberately returns the ticket to Jason. This prevents queue ping-pong.
 
 ## Device association rule
 
