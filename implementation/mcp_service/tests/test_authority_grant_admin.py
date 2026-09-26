@@ -154,3 +154,76 @@ def test_list_exact_grants_defaults_to_owner_subject(owner):
     assert result["subject_id"] == "person-al"
     assert len(result["grants"]) == 1
     assert result["grants"][0]["capability"] == "service.ticket.attachment.create"
+
+
+def test_generic_execute_surface_can_grant_exact_authority(owner):
+    result=server.execute_governed_capability(
+        capability="admin.authority.grant_exact",
+        arguments={
+            "subject_id":"person-al",
+            "capability":"service.ticket.attachment.create",
+            "permission":"execute",
+            "approval_required":True,
+            "client_id":"1158",
+        },
+    )
+    assert result["status"] == "succeeded"
+    grant=owner.identity_authority.grants.get(result["grant_id"])
+    assert grant is not None
+    assert grant.client_id == "1158"
+    assert grant.permission is PermissionMode.EXECUTE
+    assert grant.approval_required is True
+
+
+def test_generic_execute_surface_keeps_owner_gate(monkeypatch):
+    runtime=app()
+    monkeypatch.setattr(server,"_runtime",lambda:runtime)
+    monkeypatch.setattr(server,"_authenticated_write_identity",lambda:("person-tech","aot","entra",None))
+    monkeypatch.setattr(server,"approval_owner_identities",lambda:frozenset({"person-al"}))
+    result=server.execute_governed_capability(
+        capability="admin.authority.grant_exact",
+        arguments={
+            "subject_id":"person-tech",
+            "capability":"service.ticket.update",
+            "permission":"execute",
+            "approval_required":True,
+        },
+    )
+    assert result == {"status":"rejected","error_code":"AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
+    assert runtime.identity_authority.grants.list_for_subject("person-tech") == ()
+
+
+def test_generic_execute_surface_rejects_execute_without_approval(owner):
+    result=server.execute_governed_capability(
+        capability="admin.authority.grant_exact",
+        arguments={
+            "subject_id":"person-al",
+            "capability":"service.ticket.update",
+            "permission":"execute",
+            "approval_required":False,
+        },
+    )
+    assert result == {"status":"rejected","error_code":"AUTHORITY_GRANT_EXECUTE_REQUIRES_APPROVAL"}
+
+def test_generic_execute_surface_lists_and_revokes_exact_grant(owner):
+    created=server.execute_governed_capability(
+        capability="admin.authority.grant_exact",
+        arguments={
+            "subject_id":"person-al",
+            "capability":"service.ticket.update",
+            "permission":"execute",
+            "approval_required":True,
+        },
+    )
+    listed=server.execute_governed_capability(
+        capability="admin.authority.list_exact",
+        arguments={"subject_id":"person-al"},
+    )
+    assert listed["status"] == "succeeded"
+    assert any(g["grant_id"] == created["grant_id"] for g in listed["grants"])
+    revoked=server.execute_governed_capability(
+        capability="admin.authority.revoke_exact",
+        arguments={"grant_id":created["grant_id"]},
+    )
+    assert revoked["status"] == "succeeded"
+    assert revoked["status_after"] == "revoked"

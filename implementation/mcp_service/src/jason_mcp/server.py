@@ -5570,6 +5570,34 @@ def execute_governed_capability(
 
     execution_arguments = dict(arguments or {})
 
+    # Stable internal-admin aliases ride the already-exposed generic MCP tool.
+    # This avoids making owner control-plane availability depend on a client
+    # refreshing its named MCP tool catalog. The underlying helpers still
+    # authenticate the Entra caller, require an allowlisted owner, enforce exact
+    # organization/capability/client scope, and append the normal authority audit.
+    if capability_name == "admin.authority.grant_exact":
+        return grant_exact_authority(
+            subject_id=str(execution_arguments.get("subject_id") or ""),
+            capability=str(execution_arguments.get("capability") or ""),
+            permission=str(execution_arguments.get("permission") or "execute"),
+            approval_required=execution_arguments.get("approval_required", True) is True,
+            client_id=(
+                None
+                if execution_arguments.get("client_id") is None
+                else str(execution_arguments.get("client_id"))
+            ),
+        )
+
+    if capability_name == "admin.authority.list_exact":
+        return list_exact_authority_grants(
+            subject_id=str(execution_arguments.get("subject_id") or ""),
+        )
+
+    if capability_name == "admin.authority.revoke_exact":
+        return revoke_exact_authority_grant(
+            grant_id=str(execution_arguments.get("grant_id") or ""),
+        )
+
     # The live MCP contract intentionally exposes only capability + arguments.
     # Carry current conversational approval inside the governed argument
     # envelope so approval does not depend on an out-of-band tool parameter.
