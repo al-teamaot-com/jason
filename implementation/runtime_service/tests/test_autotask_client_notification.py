@@ -70,3 +70,33 @@ def test_test_mode_rejects_when_profile_is_not_enabled(monkeypatch):
             contact_company_id=1158,
             contact_email="xyz.client.test@gmail.com",
         )
+
+
+def test_exact_profile_activates_only_client_notification(monkeypatch):
+    from datetime import datetime, timezone
+    from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+    from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
+    from jason_runtime.autotask_client_notification import (
+        AUTOTASK_CLIENT_NOTIFICATION_PROVIDER,
+        register_autotask_client_notification_runtime_foundation,
+    )
+
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+    )
+    capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+    providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
+    state = register_autotask_client_notification_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime.now(timezone.utc),
+    )
+    assert state.enabled is True
+    assert capabilities.get(
+        capability_name="service.ticket.client.notification.create",
+        version="1.0",
+    ).lifecycle_status.value == "active"
+    assert providers.get(
+        AUTOTASK_CLIENT_NOTIFICATION_PROVIDER
+    ).lifecycle_status.value == "available"
