@@ -93,6 +93,7 @@ from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_NAME,
     DATTO_AD_HOC_POWERSHELL_UID,
+    DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
     configured_datto_components,
     effective_datto_component_approval_mode,
@@ -3000,16 +3001,31 @@ def _canonicalize_governed_action_arguments(
     elif supplied_component_uid:
         # UID-only callers are common when the component was selected from a
         # governed catalog result. Re-resolve that UID against the complete live
-        # Datto catalog so a newly added valid component is not rejected merely
-        # because the static approval/classification scope has not learned it.
-        # Live discovery supplies the display name; unclassified components
-        # remain per-run and a stale/unknown UID still fails closed.
-        (
-            live_component_uid,
-            live_component_name,
-        ) = _resolve_live_datto_component_uid(
-            supplied_component_uid
+        # Datto catalog. Resolver lookup failures are normalized to the governed
+        # identity-mismatch reason so implementation lookup details never escape
+        # the fail-closed boundary.
+        legacy_single_component_scope = (
+            not os.environ.get(DATTO_EXECUTION_COMPONENTS_JSON_ENV, "").strip()
+            and len(components) == 1
         )
+        if (
+            legacy_single_component_scope
+            and supplied_component_uid != components[0].uid
+        ):
+            raise ValueError("DATTO_COMPONENT_IDENTITY_MISMATCH")
+        try:
+            (
+                live_component_uid,
+                live_component_name,
+            ) = _resolve_live_datto_component_uid(
+                supplied_component_uid
+            )
+        except ValueError:
+            raise
+        except (KeyError, LookupError) as exc:
+            raise ValueError(
+                "DATTO_COMPONENT_IDENTITY_MISMATCH"
+            ) from exc
         supplied_component_uid = live_component_uid
         supplied_component_name = live_component_name
 
