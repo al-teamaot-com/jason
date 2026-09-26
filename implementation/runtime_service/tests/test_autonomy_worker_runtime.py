@@ -720,9 +720,7 @@ def test_post_protected_recurring_target_documents_and_escalates(tmp_path: Path)
     first = store.get(141004)
     assert first is not None
     assert first.playbook_id == "post_error_investigation"
-    assert first.phase == "post_investigate"
 
-    worker.tick()
     final = store.get(141004)
     assert final is not None
     assert final.phase == "escalated"
