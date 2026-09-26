@@ -352,6 +352,16 @@ Prove:
 
 No unrelated production object may be modified.
 
+## 21A. Autonomous Diagnostic Scope
+
+`autonomous_allowed: diagnostic_only`
+
+Approval owner: person-al.  
+Approval date: 2026-09-26.  
+Approved scope: exact `low_disk_space@1.0.0` diagnostic branch using governed endpoint/device/audit/alert reads plus internal ticket work-start and note updates. The branch may establish exact identity, current logical-disk baseline, workstation/server role, and storage-risk indicators, then document/escalate. It may not delete files, run cleanup components, alter BitLocker, stop services/processes, reboot, or perform any other user-disruptive action.
+
+Cleanup remains separately gated until an exact safe target/action is positively identified and its standing-safe authority is explicitly promoted. Servers/protected roles remain human-reviewed.
+
 ## 22. Section Goal Closure
 
 Close after:

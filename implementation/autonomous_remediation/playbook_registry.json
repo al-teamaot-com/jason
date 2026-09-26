@@ -160,8 +160,9 @@
           "Low Disk Space"
         ]
       },
+      "review_status": "diagnostic_autonomous_cleanup_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -173,7 +174,10 @@
           "governance_precheck",
           "autonomy_approved"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:low_disk_space"
       }
     },

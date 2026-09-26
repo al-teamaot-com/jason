@@ -107,6 +107,15 @@ BACKUPIQ_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+LOW_DISK_SCOPE = PlaybookScope(
+    playbook_id="low_disk_space",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:low_disk_space",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -114,6 +123,7 @@ PLAYBOOK_SCOPES = {
     POST_SCOPE.playbook_id: POST_SCOPE,
     UNEXPECTED_SHUTDOWN_SCOPE.playbook_id: UNEXPECTED_SHUTDOWN_SCOPE,
     BACKUPIQ_SCOPE.playbook_id: BACKUPIQ_SCOPE,
+    LOW_DISK_SCOPE.playbook_id: LOW_DISK_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -485,6 +495,15 @@ class OperationalAutonomyMaintenance:
         title = str(ticket.get("title") or "").strip().casefold()
         return title.startswith("backupiq:") and "backup" in title
 
+    @staticmethod
+    def _is_low_disk_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return (
+            "low disk space" in title
+            or "critical low disk space" in title
+            or "hard disk full" in title
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -498,6 +517,8 @@ class OperationalAutonomyMaintenance:
             return UNEXPECTED_SHUTDOWN_SCOPE
         if self._is_backupiq_ticket(ticket):
             return BACKUPIQ_SCOPE
+        if self._is_low_disk_ticket(ticket):
+            return LOW_DISK_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -614,6 +635,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "shutdown_investigate"
             elif work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
                 next_phase = "backupiq_investigate"
+            elif work.playbook_id == LOW_DISK_SCOPE.playbook_id:
+                next_phase = "low_disk_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -646,6 +669,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
             if work.phase == "backupiq_investigate":
                 self._investigate_backupiq(work, ticket)
+                return
+
+        if work.playbook_id == LOW_DISK_SCOPE.playbook_id:
+            if work.phase == "low_disk_investigate":
+                self._investigate_low_disk(work)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -754,6 +782,140 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    def _investigate_low_disk(self, work: OperationalWork) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "Low-disk device identity changed during execution.")
+            return
+        if endpoint.get("online") is not True:
+            self._block(work, "Low-disk target went offline before evidence collection.")
+            return
+
+        audit = self._read_data(
+            "endpoint.audit.read", {"resource_id": work.device_uid}
+        )
+        logical_disks = audit.get("logicalDisks")
+        if logical_disks is None and isinstance(audit.get("audit"), Mapping):
+            logical_disks = audit["audit"].get("logicalDisks")
+        if not isinstance(logical_disks, list) or not logical_disks:
+            self._block(work, "Low-disk endpoint audit contained no logical-disk evidence.")
+            return
+
+        fixed = [
+            disk for disk in logical_disks
+            if isinstance(disk, Mapping)
+            and str(disk.get("description") or "").casefold() == "local fixed disk"
+        ]
+        candidates = fixed or [disk for disk in logical_disks if isinstance(disk, Mapping)]
+        disk = min(
+            candidates,
+            key=lambda item: (
+                (float(item.get("freespace") or 0) / float(item.get("size") or 1))
+                if float(item.get("size") or 0) > 0 else 1.0
+            ),
+        )
+        size = float(disk.get("size") or 0)
+        free = float(disk.get("freespace") or 0)
+        free_pct = (free / size * 100.0) if size > 0 else 0.0
+        drive = str(disk.get("diskIdentifier") or "unknown")
+
+        role = endpoint.get("device_type")
+        role_text = (
+            json.dumps(role, sort_keys=True, default=str)
+            if isinstance(role, (Mapping, list))
+            else str(role or "")
+        )
+        role_material = (
+            f"{role_text} {endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
+        ).casefold()
+        protected = any(
+            token in role_material
+            for token in (
+                "server",
+                "domain controller",
+                "hyper-v",
+                "hyperv",
+                "database",
+                "backup repository",
+            )
+        )
+
+        alerts_data = self._read_data(
+            "endpoint.alert.history.search", {"resource_id": work.device_uid}
+        )
+        alerts = alerts_data.get("alerts")
+        if not isinstance(alerts, list):
+            alerts = []
+        storage_risk_hits = 0
+        for alert in alerts:
+            if not isinstance(alert, Mapping):
+                continue
+            material = json.dumps(alert, sort_keys=True, default=str).casefold()
+            if any(
+                token in material
+                for token in (
+                    '"code":"7"',
+                    '"code": "7"',
+                    "bad block",
+                    "ntfs",
+                    "storport",
+                    "storage controller",
+                    "smart error",
+                )
+            ):
+                storage_risk_hits += 1
+
+        note = (
+            "Jason autonomous low-disk diagnostic completed using governed read-only "
+            "endpoint audit and alert-history evidence. "
+            f"Device={work.hostname}; Drive={drive}; "
+            f"SizeGB={size / (1024**3):.2f}; FreeGB={free / (1024**3):.2f}; "
+            f"FreePercent={free_pct:.2f}; DeviceType={role_text[:180] or 'unknown'}; "
+            f"ProtectedRole={'Yes' if protected else 'No'}; "
+            f"StorageRiskEvidenceCount={storage_risk_hits}; "
+            f"RebootRequired={'Yes' if bool(endpoint.get('reboot_required')) else 'No'}. "
+            "No files were deleted, no cleanup component was run, and no service, "
+            "process, BitLocker, reboot, or other user-disruptive change was attempted. "
+        )
+        if protected:
+            reason = "Low-disk diagnostic complete; protected/server role requires human review."
+            note += "Server/protected-role cleanup is intentionally not autonomous."
+        elif storage_risk_hits:
+            reason = "Low-disk diagnostic complete; storage-health evidence requires technician review."
+            note += "Storage-health evidence takes priority over space cleanup."
+        else:
+            reason = (
+                "Low-disk diagnostic complete; exact safe-cleanup target and cleanup "
+                "authority remain separately gated."
+            )
+            note += (
+                "Workstation diagnostics are complete, but cleanup remains gated until an "
+                "exact standing-safe target/action is positively identified."
+            )
+
+        self._write_note(work, note, "Jason - Autonomous Low Disk Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=reason,
             )
         )
 
@@ -1524,7 +1686,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+        if work.playbook_id == LOW_DISK_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous low-disk diagnostic stopped for technician review. "
+                f"{reason} No file deletion, cleanup component, BitLocker change, reboot, "
+                "service change, or other user-disruptive action was attempted."
+            )
+            title = "Jason - Autonomous Low Disk Escalation"
+        elif work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
             body = (
                 "Jason autonomous BackupIQ diagnostic stopped for technician review. "
                 f"{reason} No reinstall, clean install, backup deletion, retention/policy "
