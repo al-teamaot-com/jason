@@ -2,8 +2,8 @@
 
 Version: 0.1.0  
 Playbook ID: `windows_unexpected_shutdown`  
-Status: implementation-ready; live acceptance pending Jason runtime availability  
-Autonomous execution: disabled pending acceptance and explicit approval
+Status: diagnostic branch implementation-ready; isolated-event closure acceptance still pending  
+Autonomous execution: diagnostic/correlation branch approved; automatic closure remains gated
 
 ## 1. Section Goal
 
@@ -417,10 +417,11 @@ Close only after:
 
 ## 23. Autonomous Execution Eligibility
 
-`autonomous_allowed: false`
+`autonomous_allowed: diagnostic_only`
 
-Approval owner: pending.  
-Approval date: pending.  
-Approved version/fingerprint: pending.
+Approval owner: person-al.  
+Approval date: 2026-09-26.  
+Approved scope: exact `unexpected_shutdown@1.0.0` diagnostic/correlation branch using governed reads plus internal ticket note/work-start updates. Automatic completion remains gated until isolated-event live acceptance succeeds.  
+Material changes invalidate this approval until re-reviewed.
 
 Material changes invalidate any future autonomous approval until re-reviewed.
