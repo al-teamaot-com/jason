@@ -166,6 +166,14 @@ A new playbook is not autonomous merely because source metadata says `autonomous
 
 Client-facing communications remain separately governed even when the technical remediation playbook is autonomous.
 
+### Durable promotion administration
+
+Source metadata is nomination, not authority. Each autonomous playbook/version still requires a separate durable promotion in `playbook-autonomy.sqlite3` for its exact policy ID and allowed-capability set.
+
+The preferred path is the authenticated owner-only MCP promotion control. If a newly deployed MCP admin control is not yet present in the current ChatGPT tool catalog, the repository also provides the bounded operator utility `python -m jason_mcp.autonomy_admin <playbook_id> --approved-by <owner-id>`. This utility is a control-plane fallback only: it performs no provider access, accepts only an owner identifier already present in `JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES`, reads the source-controlled production playbook registry, refuses any playbook not already marked `autonomy.activation=autonomous`, derives the exact version/policy/capability scope from that registry, writes the normal immutable promotion store, and appends a local JSONL audit event including the registry SHA-256 fingerprint.
+
+The operator utility must not be used to bypass an unfinished acceptance gate. Changing source metadata to `autonomous` remains a reviewed/merged source change; the utility cannot make a shadow playbook autonomous on its own.
+
 ## Related source and documentation
 
 - `implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py`
@@ -173,5 +181,6 @@ Client-facing communications remain separately governed even when the technical 
 - `implementation/runtime_service/src/jason_runtime/datto_component_execution.py`
 - `implementation/runtime_service/src/jason_runtime/autotask_ticket_update.py`
 - `implementation/orchestrator/autotask_information_authorizer.py`
+- `implementation/mcp_service/src/jason_mcp/autonomy_admin.py`
 - `docs/architecture/JASON_AUTONOMOUS_QUEUE_OPERATING_MODEL.md`
 - `docs/sessions/Jason-Autonomous-Ticket-Worker-2026-09-25.md`
