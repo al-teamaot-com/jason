@@ -1284,3 +1284,156 @@ def test_backupiq_offline_endpoint_is_classified_without_reinstall(tmp_path: Pat
     assert "Classification=inactive_or_offline_device" in body
     assert "did not reinstall" in body
     store.close()
+
+
+def low_disk_candidate():
+    return QueueCandidate(
+        resource_id="141101",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141101,
+            "ticketNumber": "T20260924.0078",
+            "title": "Low Disk Space - GAI-LT2830",
+            "companyID": 597,
+            "configurationItemID": 280,
+        },
+    )
+
+
+def test_low_disk_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(low_disk_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(141101) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_low_disk_workstation_diagnostic_is_read_only(tmp_path: Path):
+    class LowDiskReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 280,
+                                "companyID": 597,
+                                "isActive": True,
+                                "referenceNumber": "disk-device-1",
+                                "referenceTitle": "GAI-LT2830",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "disk-device-1",
+                            "hostname": "GAI-LT2830",
+                            "online": True,
+                            "reboot_required": False,
+                            "device_type": {"category": "Laptop", "type": "Notebook"},
+                            "operating_system": "Microsoft Windows 11 Pro",
+                        }
+                    },
+                }
+            if capability == "endpoint.audit.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "audit": {
+                            "logicalDisks": [
+                                {
+                                    "description": "Local Fixed Disk",
+                                    "diskIdentifier": "C:",
+                                    "freespace": 10 * 1024**3,
+                                    "size": 250 * 1024**3,
+                                }
+                            ]
+                        },
+                    },
+                }
+            if capability == "endpoint.alert.history.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"alerts": []}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(low_disk_candidate()),
+        reads=LowDiskReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+                "low_disk_space",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    final = store.get(141101)
+    assert final is not None
+    assert final.playbook_id == "low_disk_space"
+    assert final.phase == "escalated"
+    assert "cleanup authority remain separately gated" in final.last_reason
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_calls == []
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    body = note_calls[0]["description"]
+    assert "Drive=C:" in body
+    assert "ProtectedRole=No" in body
+    assert "No files were deleted" in body
+    store.close()
