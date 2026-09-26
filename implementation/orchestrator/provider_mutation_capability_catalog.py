@@ -16,6 +16,7 @@ from kernel.capabilities import (
 SERVICE_TICKET_CREATE = "service.ticket.create"
 SERVICE_TICKET_UPDATE = "service.ticket.update"
 SERVICE_TICKET_NOTE_CREATE = "service.ticket.note.create"
+SERVICE_TICKET_CLIENT_NOTIFICATION_CREATE = "service.ticket.client.notification.create"
 SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
 SERVICE_TICKET_ATTACHMENT_CREATE = "service.ticket.attachment.create"
 SERVICE_TICKET_CHARGE_CREATE = "service.ticket.charge.create"
@@ -39,6 +40,7 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_CREATE,
         SERVICE_TICKET_UPDATE,
         SERVICE_TICKET_NOTE_CREATE,
+        SERVICE_TICKET_CLIENT_NOTIFICATION_CREATE,
         SERVICE_TICKET_NOTE_UPDATE,
         SERVICE_TICKET_ATTACHMENT_CREATE,
         SERVICE_TICKET_CHARGE_CREATE,
@@ -197,6 +199,18 @@ def autotask_mutation_capability_definitions(
             display_name="Create Service Ticket Note",
             business_purpose="Create one authorized note on a resolved service ticket.",
             resource_types="service_ticket_note,ticket_note",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_CLIENT_NOTIFICATION_CREATE,
+            display_name="Create Client Ticket Notification",
+            business_purpose=(
+                "Create one explicitly approved client-facing ticket communication "
+                "within the current XYZ Test Company-only pilot boundary."
+            ),
+            resource_types="service_ticket_notification,ticket_note,client_communication",
             operation="create",
             idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
