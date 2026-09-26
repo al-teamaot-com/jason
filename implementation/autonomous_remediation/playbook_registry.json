@@ -213,8 +213,9 @@
           "Windows Security Log unreadable"
         ]
       },
+      "review_status": "repair_autonomous_alert_cleanup_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -222,7 +223,11 @@
           "evidence_fresh",
           "governance_precheck"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "automation.component.execute",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:security_log_self_heal"
       }
     },
