@@ -9,7 +9,7 @@ COPY implementation /opt/jason-src/implementation
 
 RUN chmod -R a+rX /opt/jason-src/implementation
 
-ENV PYTHONPATH=/opt/jason-src/implementation/runtime_service/src:/opt/jason-src/implementation:/opt/jason-src/implementation/connectors/openclaw/src:/opt/jason-src/implementation/cap-007/src
+ENV PYTHONPATH=/opt/jason-src:/opt/jason-src/implementation/runtime_service/src:/opt/jason-src/implementation:/opt/jason-src/implementation/connectors/openclaw/src:/opt/jason-src/implementation/cap-007/src
 
 COPY implementation/mcp_service/pyproject.toml /tmp/jason-mcp/pyproject.toml
 COPY implementation/mcp_service/constraints-proven-pilot.txt /tmp/jason-mcp/constraints-proven-pilot.txt
