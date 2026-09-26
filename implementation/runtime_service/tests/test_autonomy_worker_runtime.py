@@ -1121,3 +1121,166 @@ def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation
     assert "PhysicalDevicesInPlusMinus15Min=2" in body
     assert "No reboot" in body
     store.close()
+
+
+def backupiq_candidate():
+    return QueueCandidate(
+        resource_id="141185",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141185,
+            "ticketNumber": "T20260925.0003",
+            "title": "BackupIQ: Backup for asset is not available for Atomic Plumbing & Drain Cleaning",
+            "companyID": 333,
+            "configurationItemID": 1259,
+            "createDate": "2026-09-25T09:00:00Z",
+        },
+    )
+
+
+def test_backupiq_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(141185) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_backupiq_offline_endpoint_is_classified_without_reinstall(tmp_path: Path):
+    class BackupReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1259,
+                                "companyID": 333,
+                                "isActive": True,
+                                "referenceNumber": "backup-device-1",
+                                "referenceTitle": "APD-50399",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "backup-device-1",
+                            "hostname": "APD-50399",
+                            "online": False,
+                            "reboot_required": False,
+                        }
+                    },
+                }
+            if capability == "backup.endpoint.asset.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "HYCDTGV8G",
+                                    "name": "APD-50399",
+                                    "status": "offline",
+                                    "backupEnabled": True,
+                                    "lastSuccessfulBackupTimestamp": "2026-09-22T06:10:03.505Z",
+                                    "lastOnlineTimestamp": "2026-09-26T11:14:07.930834Z",
+                                }
+                            ]
+                        }
+                    },
+                }
+            if capability == "backup.backupiq.alert.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": []}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=BackupReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    final = store.get(141185)
+    assert final is not None
+    assert final.playbook_id == "backupiq_endpoint_backup"
+    assert final.phase == "escalated"
+    assert "inactive/offline endpoint" in final.last_reason
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_calls == []
+
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [{
+        "id": 141185,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }]
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    body = note_calls[0]["description"]
+    assert "Classification=inactive_or_offline_device" in body
+    assert "did not reinstall" in body
+    store.close()

@@ -98,12 +98,22 @@ UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+BACKUPIQ_SCOPE = PlaybookScope(
+    playbook_id="backupiq_endpoint_backup",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:backupiq_endpoint_backup",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
     SECURITY_LOG_SCOPE.playbook_id: SECURITY_LOG_SCOPE,
     POST_SCOPE.playbook_id: POST_SCOPE,
     UNEXPECTED_SHUTDOWN_SCOPE.playbook_id: UNEXPECTED_SHUTDOWN_SCOPE,
+    BACKUPIQ_SCOPE.playbook_id: BACKUPIQ_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -470,6 +480,11 @@ class OperationalAutonomyMaintenance:
             and "unexpected" in title
         )
 
+    @staticmethod
+    def _is_backupiq_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return title.startswith("backupiq:") and "backup" in title
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -481,6 +496,8 @@ class OperationalAutonomyMaintenance:
             return POST_SCOPE
         if self._is_unexpected_shutdown_ticket(ticket):
             return UNEXPECTED_SHUTDOWN_SCOPE
+        if self._is_backupiq_ticket(ticket):
+            return BACKUPIQ_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -546,7 +563,10 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
-        if endpoint.get("online") is not True:
+        if (
+            endpoint.get("online") is not True
+            and scope.playbook_id != BACKUPIQ_SCOPE.playbook_id
+        ):
             raise OperationalAutonomyError("endpoint is not currently online")
 
         return OperationalWork(
@@ -592,6 +612,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "post_investigate"
             elif work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
                 next_phase = "shutdown_investigate"
+            elif work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+                next_phase = "backupiq_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -619,6 +641,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
             if work.phase == "shutdown_investigate":
                 self._investigate_unexpected_shutdown(work)
+                return
+
+        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+            if work.phase == "backupiq_investigate":
+                self._investigate_backupiq(work, ticket)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -727,6 +754,184 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    @staticmethod
+    def _parse_iso_timestamp(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _investigate_backupiq(
+        self,
+        work: OperationalWork,
+        ticket: Mapping[str, Any],
+    ) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "BackupIQ device identity changed during execution.")
+            return
+
+        asset_data = self._read_data(
+            "backup.endpoint.asset.search",
+            {
+                "company_id": work.company_id,
+                "name": work.hostname,
+                "page_size": 100,
+            },
+        )
+        items = asset_data.get("items")
+        if not isinstance(items, list):
+            self._block(work, "BackupIQ provider asset evidence is unavailable or malformed.")
+            return
+        exact_assets = [
+            item for item in items
+            if isinstance(item, Mapping)
+            and str(item.get("name") or "").strip().casefold() == work.hostname.casefold()
+        ]
+        if len(exact_assets) != 1:
+            classification = (
+                "asset_identity_or_lifecycle_issue"
+                if len(exact_assets) == 0
+                else "duplicate_or_ambiguous_provider_asset"
+            )
+            self._write_note(
+                work,
+                (
+                    "Jason autonomous BackupIQ diagnostic stopped before remediation. "
+                    f"Device={work.hostname}; ExactProviderAssetMatches={len(exact_assets)}; "
+                    f"Classification={classification}. Exact DRMM/provider asset identity "
+                    "was not uniquely proven. No reinstall, clean install, policy change, "
+                    "backup deletion, retention change, or other modifying backup action "
+                    "was attempted."
+                ),
+                "Jason - Autonomous BackupIQ Asset Validation",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="escalated",
+                    last_reason=(
+                        "BackupIQ provider asset identity was not uniquely established; "
+                        "technician review required."
+                    ),
+                )
+            )
+            return
+
+        asset = exact_assets[0]
+        provider_status = str(asset.get("status") or "").strip().casefold()
+        backup_enabled = asset.get("backupEnabled") is True
+        last_success = self._parse_iso_timestamp(
+            asset.get("lastSuccessfulBackupTimestamp")
+        )
+        last_online = self._parse_iso_timestamp(asset.get("lastOnlineTimestamp"))
+        ticket_created = self._parse_iso_timestamp(ticket.get("createDate"))
+        endpoint_online = endpoint.get("online") is True
+
+        alert_data = self._read_data(
+            "backup.backupiq.alert.search",
+            {
+                "company_id": work.company_id,
+                "asset_name": work.hostname,
+                "page_size": 100,
+            },
+        )
+        alert_items = alert_data.get("items")
+        if not isinstance(alert_items, list):
+            self._block(work, "BackupIQ alert evidence is unavailable or malformed.")
+            return
+
+        recovered_after_ticket = (
+            last_success is not None
+            and ticket_created is not None
+            and last_success >= ticket_created
+        )
+        if not backup_enabled:
+            classification = "backup_configuration_issue"
+        elif not endpoint_online and provider_status != "online":
+            classification = "inactive_or_offline_device"
+        elif endpoint_online and provider_status != "online":
+            classification = "backup_agent_connectivity_failure"
+        elif recovered_after_ticket:
+            classification = "stale_or_recovered_alert"
+        elif endpoint_online and provider_status == "online":
+            classification = "backup_failure_or_stale_success"
+        else:
+            classification = "provider_endpoint_state_conflict"
+
+        note = (
+            "Jason autonomous BackupIQ diagnostic completed using governed DRMM and "
+            "Backup.net/UniView read evidence. "
+            f"Device={work.hostname}; DRMMOnline={'Yes' if endpoint_online else 'No'}; "
+            f"ProviderAssetId={str(asset.get('id') or '')[:80] or 'unknown'}; "
+            f"ProviderStatus={provider_status or 'unknown'}; "
+            f"BackupEnabled={'Yes' if backup_enabled else 'No'}; "
+            f"LastSuccessfulBackup={last_success.isoformat() if last_success else 'unknown'}; "
+            f"LastProviderOnline={last_online.isoformat() if last_online else 'unknown'}; "
+            f"CurrentBackupIQAlerts={len(alert_items)}; "
+            f"Classification={classification}. "
+            "No reinstall, clean install, token/encryption retrieval, policy change, "
+            "backup deletion, retention change, restore, or other modifying backup "
+            "action was attempted. "
+        )
+        if classification == "stale_or_recovered_alert":
+            note += (
+                "Provider evidence shows a successful backup at or after ticket creation. "
+                "Automatic completion remains gated until the recovered-alert closure "
+                "branch has completed live acceptance."
+            )
+            reason = (
+                "BackupIQ diagnostic complete; recovered-alert closure branch not yet promoted."
+            )
+        elif classification == "inactive_or_offline_device":
+            note += (
+                "Both management/provider evidence indicate an offline/inactive condition; "
+                "the playbook correctly did not reinstall while the endpoint is offline."
+            )
+            reason = (
+                "BackupIQ diagnostic classified an inactive/offline endpoint; waiting/recheck "
+                "automation remains separately gated."
+            )
+        else:
+            note += (
+                "Technician review or a separately accepted remediation branch is required "
+                "before any modifying backup action."
+            )
+            reason = (
+                f"BackupIQ diagnostic classified {classification}; remediation remains gated."
+            )
+
+        self._write_note(work, note, "Jason - Autonomous BackupIQ Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=reason,
             )
         )
 
@@ -1319,7 +1524,15 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
+        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous BackupIQ diagnostic stopped for technician review. "
+                f"{reason} No reinstall, clean install, backup deletion, retention/policy "
+                "change, restore, credential disclosure, or other modifying backup action "
+                "was attempted."
+            )
+            title = "Jason - Autonomous BackupIQ Escalation"
+        elif work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
             body = (
                 "Jason autonomous unexpected-shutdown diagnostic stopped for technician review. "
                 f"{reason} No reboot, shutdown, firmware change, storage repair, service "

@@ -290,12 +290,12 @@ Close the Section Goal after:
 
 ## 23. Autonomous Execution Eligibility
 
-autonomous_allowed: false
+autonomous_allowed: diagnostic_only
 
-Approval owner: pending
-Approval date: pending
-Approved version/fingerprint: pending
+Approval owner: person-al
+Approval date: 2026-09-26
+Approved scope: exact `backupiq_endpoint_backup@1.0.0` diagnostic/classification branch using governed DRMM and Backup.net/UniView reads plus internal ticket note/work-start updates.
 
-This playbook is not eligible for autonomous remediation until the API integration, acceptance test, and explicit playbook-level autonomy review are complete.
+The provider/API integration and client isolation are live. The autonomous branch may identify the exact DRMM/provider asset, classify offline/inactive, provider-connectivity, configuration, stale/recovered, and identity/lifecycle conditions, and document the result. It may not reinstall or clean-install the Endpoint Backup agent, retrieve or expose registration/encryption values, change backup policy/retention, delete provider assets/backups, restore data, or automatically close the ticket.
 
-Read-only provider/DRMM diagnostics may later be considered for autonomous execution after approval. Any action that can disrupt a user or materially alter backup configuration remains governed and approval-bound.
+Remediation, scheduled rechecks, and recovered-alert completion remain gated until their individual live acceptance criteria are satisfied. Material changes invalidate this approval until re-reviewed.
