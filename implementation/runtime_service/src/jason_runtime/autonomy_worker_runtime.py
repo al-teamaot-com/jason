@@ -89,11 +89,21 @@ POST_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
+    playbook_id="unexpected_shutdown",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:unexpected_shutdown",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
     SECURITY_LOG_SCOPE.playbook_id: SECURITY_LOG_SCOPE,
     POST_SCOPE.playbook_id: POST_SCOPE,
+    UNEXPECTED_SHUTDOWN_SCOPE.playbook_id: UNEXPECTED_SHUTDOWN_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -452,6 +462,14 @@ class OperationalAutonomyMaintenance:
             or "post errors occurred" in title
         )
 
+    @staticmethod
+    def _is_unexpected_shutdown_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return (
+            "previous system shutdown" in title
+            and "unexpected" in title
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -461,6 +479,8 @@ class OperationalAutonomyMaintenance:
             return SECURITY_LOG_SCOPE
         if self._is_post_error_ticket(ticket):
             return POST_SCOPE
+        if self._is_unexpected_shutdown_ticket(ticket):
+            return UNEXPECTED_SHUTDOWN_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -570,6 +590,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "security_quick_dispatch"
             elif work.playbook_id == POST_SCOPE.playbook_id:
                 next_phase = "post_investigate"
+            elif work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
+                next_phase = "shutdown_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -592,6 +614,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == POST_SCOPE.playbook_id:
             if work.phase == "post_investigate":
                 self._investigate_post_error(work)
+                return
+
+        if work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
+            if work.phase == "shutdown_investigate":
+                self._investigate_unexpected_shutdown(work)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -700,6 +727,210 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    @staticmethod
+    def _unexpected_shutdown_alert(alert: Mapping[str, Any]) -> bool:
+        context = alert.get("alertContext")
+        if isinstance(context, Mapping):
+            code = str(context.get("code") or "").strip()
+            description = str(context.get("description") or "").casefold()
+            if code == "6008" or (
+                "previous system shutdown" in description
+                and "unexpected" in description
+            ):
+                return True
+        material = json.dumps(alert, sort_keys=True, default=str).casefold()
+        return (
+            "previous system shutdown" in material
+            and "unexpected" in material
+        )
+
+    @staticmethod
+    def _alert_timestamp_ms(alert: Mapping[str, Any]) -> int | None:
+        value = alert.get("timestamp")
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    @staticmethod
+    def _physical_device(endpoint: Mapping[str, Any]) -> bool | None:
+        device_type = endpoint.get("device_type")
+        material = (
+            json.dumps(device_type, sort_keys=True, default=str)
+            if isinstance(device_type, (Mapping, list))
+            else str(device_type or "")
+        ).casefold()
+        if any(token in material for token in ("virtual machine", "vmware", "virtualbox", "xen")):
+            return False
+        if any(
+            token in material
+            for token in (
+                "main system chassis",
+                "desktop",
+                "laptop",
+                "notebook",
+                "workstation",
+                "server",
+            )
+        ):
+            return True
+        return None
+
+    def _investigate_unexpected_shutdown(self, work: OperationalWork) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "Unexpected-shutdown device identity changed during execution.")
+            return
+        if endpoint.get("online") is not True:
+            self._block(work, "Unexpected-shutdown target went offline before evidence collection.")
+            return
+
+        history = self._read_data(
+            "endpoint.alert.history.search",
+            {"resource_id": work.device_uid},
+        )
+        alerts = history.get("alerts")
+        if not isinstance(alerts, list):
+            self._block(work, "Unexpected-shutdown alert history is unavailable or malformed.")
+            return
+        shutdown_alerts = [
+            item for item in alerts
+            if isinstance(item, Mapping) and self._unexpected_shutdown_alert(item)
+        ]
+        incident = next(
+            (
+                item for item in shutdown_alerts
+                if str(item.get("ticketNumber") or "").strip() == work.ticket_number
+            ),
+            None,
+        )
+        if incident is None and shutdown_alerts:
+            incident = max(
+                shutdown_alerts,
+                key=lambda item: self._alert_timestamp_ms(item) or 0,
+            )
+        incident_ms = self._alert_timestamp_ms(incident) if incident is not None else None
+        if incident_ms is None:
+            self._escalate(
+                work,
+                "Exact shutdown incident timestamp could not be recovered from governed alert history.",
+            )
+            return
+
+        thirty_days_ms = 30 * 24 * 60 * 60 * 1000
+        recurrence = [
+            item for item in shutdown_alerts
+            if (
+                (ts := self._alert_timestamp_ms(item)) is not None
+                and incident_ms - thirty_days_ms <= ts <= incident_ms + 5 * 60 * 1000
+            )
+        ]
+
+        site = str(endpoint.get("site") or "").strip()
+        physical_hits: set[str] = set()
+        ambiguous_peers = 0
+        checked_peers = 0
+        if self._physical_device(endpoint) is True:
+            physical_hits.add(work.device_uid)
+        if site:
+            site_data = self._read_data("endpoint.device.search", {"site": site})
+            matches = site_data.get("resource_matches")
+            if isinstance(matches, list):
+                for match in matches[:50]:
+                    if not isinstance(match, Mapping):
+                        continue
+                    uid = str(match.get("resource_id") or "").strip()
+                    if not uid or uid == work.device_uid:
+                        continue
+                    peer = self._read_record("endpoint.device.read", {"resource_id": uid})
+                    physical = self._physical_device(peer)
+                    if physical is None:
+                        ambiguous_peers += 1
+                        continue
+                    if physical is False:
+                        continue
+                    checked_peers += 1
+                    peer_history = self._read_data(
+                        "endpoint.alert.history.search", {"resource_id": uid}
+                    )
+                    peer_alerts = peer_history.get("alerts")
+                    if not isinstance(peer_alerts, list):
+                        continue
+                    if any(
+                        isinstance(item, Mapping)
+                        and self._unexpected_shutdown_alert(item)
+                        and (ts := self._alert_timestamp_ms(item)) is not None
+                        and abs(ts - incident_ms) <= 15 * 60 * 1000
+                        for item in peer_alerts
+                    ):
+                        physical_hits.add(uid)
+
+        recurring = len(recurrence) >= 2
+        site_wide = len(physical_hits) >= 2
+        role = endpoint.get("device_type")
+        role_text = (
+            json.dumps(role, sort_keys=True, default=str)
+            if isinstance(role, (Mapping, list))
+            else str(role or "")
+        )
+        note = (
+            "Jason autonomous unexpected-shutdown diagnostic completed using governed "
+            "read-only endpoint and alert-history evidence. "
+            f"Device={work.hostname}; Site={site or 'unknown'}; "
+            f"IncidentTimestampMs={incident_ms}; "
+            f"ShutdownEvents30d={len(recurrence)}; Recurring={'Yes' if recurring else 'No'}; "
+            f"PhysicalDevicesInPlusMinus15Min={len(physical_hits)}; "
+            f"PossibleSiteWideEvent={'Yes' if site_wide else 'No'}; "
+            f"PhysicalPeersChecked={checked_peers}; AmbiguousPhysicalPeers={ambiguous_peers}; "
+            f"DeviceType={role_text[:180] or 'unknown'}; "
+            f"RebootRequired={'Yes' if bool(endpoint.get('reboot_required')) else 'No'}. "
+            "VM/virtual devices are excluded from the physical-device threshold when "
+            "provider classification identifies them as virtual. No reboot, shutdown, "
+            "firmware, storage repair, service change, or PowerShell action was attempted. "
+        )
+        if recurring or site_wide or ambiguous_peers:
+            note += (
+                "Technician review is required because recurrence, site-wide correlation, "
+                "or ambiguous physical-device classification remains material."
+            )
+            reason = (
+                "Unexpected-shutdown diagnostic complete; recurrence/site-correlation "
+                "requires technician review."
+            )
+        else:
+            note += (
+                "No recurrence or multi-physical-device site threshold was proven. "
+                "Automatic closure remains gated until isolated-event live acceptance is complete."
+            )
+            reason = (
+                "Unexpected-shutdown diagnostic complete; isolated closure branch not yet promoted."
+            )
+        self._write_note(work, note, "Jason - Autonomous Unexpected Shutdown Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=reason,
             )
         )
 
@@ -1088,7 +1319,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == POST_SCOPE.playbook_id:
+        if work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous unexpected-shutdown diagnostic stopped for technician review. "
+                f"{reason} No reboot, shutdown, firmware change, storage repair, service "
+                "change, or PowerShell action was attempted."
+            )
+            title = "Jason - Autonomous Unexpected Shutdown Escalation"
+        elif work.playbook_id == POST_SCOPE.playbook_id:
             body = (
                 "Jason autonomous POST diagnostic stopped for technician review. "
                 f"{reason} No reboot, firmware change, hardware mutation, service "
