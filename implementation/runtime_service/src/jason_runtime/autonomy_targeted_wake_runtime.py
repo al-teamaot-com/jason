@@ -19,6 +19,52 @@ class QueueAttentionPort(Protocol):
     def request_reconcile(self, reason: str) -> None: ...
 
 
+class AutonomyAttentionEventIngress:
+    """Provider-neutral bridge from trusted runtime events into scheduler attention.
+
+    Known work is signaled by exact resource ID so only matching armed wakes become
+    due. Broad queue reconciliation is opt-in and must be declared by the producer;
+    ordinary known-work events never imply a whole-queue scan.
+    """
+
+    def __init__(
+        self,
+        *,
+        store: SQLiteTargetedWakeStore,
+        queue_attention: QueueAttentionPort,
+    ) -> None:
+        self.store = store
+        self.queue_attention = queue_attention
+
+    def signal(
+        self,
+        *,
+        event: str,
+        resource_id: str,
+        queue_reconciliation_required: bool = False,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        normalized_event = str(event or "").strip()
+        normalized_resource = str(resource_id or "").strip()
+        if not normalized_event:
+            raise ValueError("attention event must be non-empty")
+        if not normalized_resource:
+            raise ValueError("attention resource_id must be non-empty")
+        if any(token in normalized_resource for token in ("*", "?", "[", "]")):
+            raise ValueError("attention resource_id must be exact")
+
+        wake_ids = self.store.signal(
+            normalized_event,
+            resource_id=normalized_resource,
+            now=now,
+        )
+        if queue_reconciliation_required:
+            self.queue_attention.request_reconcile(
+                f"event:{normalized_event}:{normalized_resource}"
+            )
+        return wake_ids
+
+
 DEFAULT_TARGETED_READ_CAPABILITIES = frozenset(
     {
         "service.ticket.read",

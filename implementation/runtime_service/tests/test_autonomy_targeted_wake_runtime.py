@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from autonomous_remediation.targeted_recheck import (
     SQLiteTargetedWakeStore,
     TargetedWake,
@@ -179,3 +181,62 @@ def test_composite_maintenance_runs_services_on_same_tick():
     assert composite.tick() is True
     assert first.calls == 1
     assert second.calls == 1
+
+
+def test_attention_event_ingress_wakes_only_exact_known_work(tmp_path):
+    from autonomous_remediation.targeted_recheck import TargetedWake, WakeKind, WakeState
+    from jason_runtime.autonomy_targeted_wake_runtime import AutonomyAttentionEventIngress
+
+    store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    store.schedule(TargetedWake(
+        wake_id="wake-1",
+        resource_id="T1",
+        reason="wait for approval",
+        kind=WakeKind.TARGETED_READ,
+        wake_on="approval_received",
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+    ))
+    store.schedule(TargetedWake(
+        wake_id="wake-2",
+        resource_id="T2",
+        reason="wait for approval",
+        kind=WakeKind.TARGETED_READ,
+        wake_on="approval_received",
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 2},
+    ))
+    queue = QueueAttention()
+    ingress = AutonomyAttentionEventIngress(store=store, queue_attention=queue)
+    ids = ingress.signal(event="approval_received", resource_id="T1")
+    assert ids == ("wake-1",)
+    assert store.state("wake-1") is WakeState.PENDING
+    assert store.state("wake-2") is WakeState.ARMED
+    assert queue.reasons == []
+    store.close()
+
+
+def test_attention_event_ingress_queue_reconcile_is_explicit(tmp_path):
+    from jason_runtime.autonomy_targeted_wake_runtime import AutonomyAttentionEventIngress
+
+    store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    queue = QueueAttention()
+    ingress = AutonomyAttentionEventIngress(store=store, queue_attention=queue)
+
+    assert ingress.signal(
+        event="ticket_entered",
+        resource_id="T100",
+        queue_reconciliation_required=True,
+    ) == ()
+    assert queue.reasons == ["event:ticket_entered:T100"]
+    store.close()
+
+
+def test_attention_event_ingress_rejects_nonexact_resource(tmp_path):
+    from jason_runtime.autonomy_targeted_wake_runtime import AutonomyAttentionEventIngress
+
+    store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    ingress = AutonomyAttentionEventIngress(store=store, queue_attention=QueueAttention())
+    with pytest.raises(ValueError):
+        ingress.signal(event="approval_received", resource_id="T*")
+    store.close()
