@@ -638,6 +638,21 @@ def test_post_ticket_requires_separate_promotion(tmp_path: Path):
 def test_post_protected_recurring_target_documents_and_escalates(tmp_path: Path):
     class PostReads(Reads):
         def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 311,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "PC-1",
+                            }
+                        }
+                    },
+                }
             if capability == "endpoint.device.read":
                 return {
                     "status": "succeeded",
