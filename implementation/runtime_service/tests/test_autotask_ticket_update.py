@@ -471,8 +471,10 @@ def test_completion_plan_is_stable_single_write_and_readback_verified(monkeypatc
                 return {"id": 12345, "status": 5}
             raise AssertionError((method, url))
 
+    attention = []
     connector = AutotaskTicketUpdateConnector(
-        secrets=Secrets(), transport=Transport(), audit=SimpleNamespace(record=lambda *a, **k: None), bindings=None
+        secrets=Secrets(), transport=Transport(), audit=SimpleNamespace(record=lambda *a, **k: None), bindings=None,
+        ticket_attention=lambda **event: attention.append(event),
     )
 
     base = PreparedRequest(
@@ -514,6 +516,7 @@ def test_completion_plan_is_stable_single_write_and_readback_verified(monkeypatc
         "ticketId": 12345,
         "verifiedFields": ["status"],
     }
+    assert attention == [{"event": "ticket_changed", "ticket_id": 12345}]
 
 
 def autonomy_request(payload):

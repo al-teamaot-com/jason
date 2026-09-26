@@ -418,3 +418,29 @@ def test_offline_device_read_does_not_emit_online_event(tmp_path):
     }) == ()
     assert store.state("wait-d1") is WakeState.ARMED
     store.close()
+
+
+def test_ticket_attention_relay_forwards_verified_create_and_change_events():
+    from jason_runtime.autonomy_targeted_wake_runtime import TicketAttentionRelay
+
+    queue = QueueAttention()
+    relay = TicketAttentionRelay()
+    relay.notify(event="ticket_created", ticket_id=10)
+    assert queue.reasons == []
+    relay.bind(queue)
+    relay.notify(event="ticket_created", ticket_id=10)
+    relay.notify(event="ticket_changed", ticket_id=11)
+    assert queue.reasons == [
+        "autotask:ticket_created:10",
+        "autotask:ticket_changed:11",
+    ]
+
+
+def test_composite_attention_forwards_only_to_attention_capable_services():
+    from jason_runtime.autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
+
+    queue = QueueAttention()
+    passive = Service(False)
+    composite = CompositeAutonomyMaintenance(passive, queue)
+    composite.request_reconcile("autotask:ticket_changed:12")
+    assert queue.reasons == ["autotask:ticket_changed:12"]

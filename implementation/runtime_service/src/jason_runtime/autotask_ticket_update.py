@@ -336,8 +336,15 @@ def _normalized_due(value: Any) -> str:
 
 
 class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
-    def __init__(self, *, autonomy_api_resource_id: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        autonomy_api_resource_id: int | None = None,
+        ticket_attention=None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
+        self._ticket_attention = ticket_attention
         if autonomy_api_resource_id is not None:
             if isinstance(autonomy_api_resource_id, bool):
                 raise ValueError("AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_INVALID")
@@ -350,6 +357,14 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             self._autonomy_api_resource_id = parsed
         else:
             self._autonomy_api_resource_id = None
+
+    def _notify_ticket_attention(self, event: str, ticket_id: int) -> None:
+        if self._ticket_attention is None:
+            return
+        try:
+            self._ticket_attention(event=event, ticket_id=int(ticket_id))
+        except Exception:
+            pass
 
     def _is_autonomous_api_user_request(self, request: ConnectorRequest) -> bool:
         return (
@@ -960,6 +975,7 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             "ticketId": expected["id"],
             "verifiedFields": sorted(key for key in expected if key != "id"),
         }
+        self._notify_ticket_attention("ticket_changed", int(expected["id"]))
         return ConnectorResult(
             capability=result.capability,
             provider=result.provider,
@@ -1166,6 +1182,7 @@ def build_autotask_ticket_update_invoker(
     transport: HttpTransport,
     audit: AuditSink,
     bindings: TrustedPrincipalBindingResolver,
+    ticket_attention=None,
 ) -> CapabilityInvoker:
     secrets = OpenBaoSecretResolver(
         base_url=openbao_url,

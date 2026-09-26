@@ -266,6 +266,7 @@ from .datto_site_variable_management import (
 )
 from .http import RuntimeHttpApplication
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
+from .autonomy_targeted_wake_runtime import TicketAttentionRelay
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
 from .datto_component_approval_registry import approval_owner_identities
@@ -1318,6 +1319,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             (DATTO_EDR_PROVIDER, ENDPOINT_SECURITY_QUARANTINE_SEARCH): "datto_edr.quarantine.search",
         },
     )
+    ticket_attention_relay = TicketAttentionRelay()
     provider_read_invoker = build_provider_read_invoker(
         secrets=openbao,
         transport=http_transport,
@@ -1330,6 +1332,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
+        ticket_attention=ticket_attention_relay.notify,
     )
     internal_note_invoker = build_autotask_internal_note_invoker(
         openbao_url=settings.openbao_url,
@@ -1354,6 +1357,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
+        ticket_attention=ticket_attention_relay.notify,
     )
     procurement_invoker = build_autotask_procurement_invoker(
         openbao_url=settings.openbao_url,
@@ -1863,6 +1867,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         operational_autonomy_maintenance,
         shadow_autonomy_maintenance,
     )
+    ticket_attention_relay.bind(autonomy_maintenance)
 
     return RuntimeHttpApplication(
         ingress=OpenClawReturnPathConversationIngress(
