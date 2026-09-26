@@ -44,6 +44,20 @@ export function createApprovalDecisionStore({ path, now = () => new Date() }) {
       save(path, records);
       return { accepted: true, record };
     },
+    release({ tenantId, approvalId, aadObjectId, decision }) {
+      const records = load(path);
+      const key = keyFor(tenantId, approvalId);
+      const current = records[key];
+      if (!current) return null;
+      if (current.state !== "processing") return current;
+      if (current.aadObjectId !== aadObjectId || current.decision !== decision) {
+        throw new Error("approval decision release scope mismatch");
+      }
+      delete records[key];
+      save(path, records);
+      return null;
+    },
+
     finalize({ tenantId, approvalId, resultStatus }) {
       const records = load(path);
       const key = keyFor(tenantId, approvalId);

@@ -467,3 +467,25 @@ When the acceptance test succeeds:
 - mark the Section Goal complete
 
 Any unresolved capability gaps should become explicit follow-up TODO items rather than hidden exceptions.
+
+---
+
+## 23. Autonomous Execution Eligibility and Owner Review
+
+Playbook authors/technicians may define and test the proposed autonomous safe branch, but they do not grant standing autonomy.
+
+Document:
+
+- `autonomous_allowed`: `false`, `diagnostic_only`, or the exact bounded scope;
+- exact playbook version;
+- exact allowed capabilities;
+- explicit actions that remain approval-bound;
+- standing-safe component requirements, if any;
+- acceptance-test result and known limitations;
+- review status describing the promoted branch boundary.
+
+When the source-controlled production entry is ready for autonomy review, it may nominate `autonomy.activation=autonomous`. That nomination causes no unattended authority by itself. Jason requires a separate durable owner promotion.
+
+The preferred production approval path is a Teams Adaptive Card sent to a configured owner identity. The card is bound to the exact playbook/version/policy/capabilities and source-entry fingerprint. Owner **Approve** creates the matching durable promotion mechanically; **Deny** and **Request Changes** create no promotion.
+
+Any material playbook/version/capability/fingerprint change requires a new owner review before the changed branch can execute autonomously.

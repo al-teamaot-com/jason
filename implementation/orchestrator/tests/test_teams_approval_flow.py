@@ -260,3 +260,24 @@ class TeamsApprovalFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_request_changes_is_audited_and_never_resumes_execution():
+    suite = TeamsApprovalFlowTests()
+    bridge = StubResumeBridge(resumed=ResumedRequest())
+    flow, sink = suite.flow(
+        StubTokenVerifier(suite.principal()),
+        StubIngress(response=object()),
+        StubApprovalService(suite.accepted(status="changes_requested")),
+        bridge,
+    )
+    result = flow.handle_response(
+        token="signed-token",
+        payload={"approval_id": "approval-1"},
+        original_request=OriginalRequest(),
+        decided_at=NOW,
+        now=NOW,
+    )
+    assert result.resumed_request is None
+    assert bridge.calls == 0
+    assert sink.events[-1].event_type is ApprovalAuditEventType.RESPONSE_CHANGES_REQUESTED

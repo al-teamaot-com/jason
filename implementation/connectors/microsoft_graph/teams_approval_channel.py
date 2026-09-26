@@ -27,20 +27,27 @@ class TeamsApprovalCard:
     requested_mode: str
     expires_at: str
     evidence_artifact_ids: tuple[str, ...]
+    facts: tuple[tuple[str, str], ...] = ()
 
 
 def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
     """Render only non-secret approval metadata for delivery to Teams."""
     request.validate()
+    presentation = request.presentation
     return TeamsApprovalCard(
         approval_id=request.approval_id,
         organization_id=request.organization_id,
-        title="Jason approval required",
-        summary=f"{request.requested_by} requests {request.requested_mode} for {request.capability}",
+        title=(presentation.title if presentation is not None else "Jason approval required"),
+        summary=(
+            presentation.summary
+            if presentation is not None
+            else f"{request.requested_by} requests {request.requested_mode} for {request.capability}"
+        ),
         capability=request.capability,
         requested_mode=request.requested_mode,
         expires_at=request.expires_at.isoformat(),
         evidence_artifact_ids=tuple(ref.artifact_id for ref in request.evidence_references),
+        facts=(presentation.facts if presentation is not None else ()),
     )
 
 
@@ -56,8 +63,12 @@ def parse_teams_response(
     boundary, never from a user-editable card field.
     """
     raw_decision = payload.get("decision", "").strip().lower()
-    if raw_decision not in {ApprovalDecision.APPROVE.value, ApprovalDecision.DENY.value}:
-        raise ValueError("Teams approval decision must be approve or deny")
+    if raw_decision not in {
+        ApprovalDecision.APPROVE.value,
+        ApprovalDecision.DENY.value,
+        ApprovalDecision.REQUEST_CHANGES.value,
+    }:
+        raise ValueError("Teams approval decision must be approve, deny, or request_changes")
     return ApprovalResponse(
         approval_id=payload.get("approval_id", ""),
         organization_id=payload.get("organization_id", ""),

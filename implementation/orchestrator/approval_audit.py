@@ -23,6 +23,7 @@ class ApprovalAuditEventType(StrEnum):
     RESPONSE_AUTHENTICATED = "approval.response.authenticated"
     RESPONSE_ACCEPTED = "approval.response.accepted"
     RESPONSE_DENIED = "approval.response.denied"
+    RESPONSE_CHANGES_REQUESTED = "approval.response.changes_requested"
     REQUEST_EXPIRED = "approval.request.expired"
     AUTHORIZATION_REJECTED = "approval.authorization.rejected"
     JKD_REAUTHORIZED = "approval.jkd.reauthorized"

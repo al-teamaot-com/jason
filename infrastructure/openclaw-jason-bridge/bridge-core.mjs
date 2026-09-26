@@ -40,6 +40,7 @@ export function buildConversationEnvelope({
   requestId = randomUUID(),
   correlationId = randomUUID(),
   nonce = randomBytes(16).toString("hex"),
+  interaction = undefined,
 }) {
   const cleanText = String(text ?? "").trim();
   const cleanTenant = String(microsoftTenantId ?? "").trim();
@@ -56,6 +57,30 @@ export function buildConversationEnvelope({
   if (!cleanKeyId) throw new Error("transport key id is required");
   if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new Error("current time is invalid");
   if (!Number.isFinite(ttlMs) || ttlMs <= 0 || ttlMs > 60_000) throw new Error("request ttl is invalid");
+
+  let cleanInteraction;
+  if (interaction !== undefined && interaction !== null) {
+    if (typeof interaction !== "object" || Array.isArray(interaction)) {
+      throw new Error("interaction must be an object");
+    }
+    if (interaction.kind !== "approval.submit") {
+      throw new Error("interaction kind is invalid");
+    }
+    const approvalId = String(interaction.approval_id ?? "").trim();
+    const decision = String(interaction.decision ?? "").trim().toLowerCase();
+    const channelResponseId = String(interaction.channel_response_id ?? "").trim();
+    if (!approvalId || approvalId.length > 256) throw new Error("approval interaction id is invalid");
+    if (!["approve", "deny", "request_changes"].includes(decision)) {
+      throw new Error("approval interaction decision is invalid");
+    }
+    if (!channelResponseId) throw new Error("approval interaction response id is required");
+    cleanInteraction = {
+      kind: "approval.submit",
+      approval_id: approvalId,
+      decision,
+      channel_response_id: channelResponseId,
+    };
+  }
 
   const expires = new Date(now.getTime() + ttlMs);
   return {
@@ -74,6 +99,7 @@ export function buildConversationEnvelope({
     },
     conversation_id: cleanConversation,
     message_id: cleanMessage,
+    ...(cleanInteraction ? { interaction: cleanInteraction } : {}),
     key_id: cleanKeyId,
   };
 }

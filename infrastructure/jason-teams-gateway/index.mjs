@@ -82,7 +82,7 @@ function parseApprovalSubmit(value) {
   if (!value || typeof value !== "object") return null;
   const approvalId = nonBlank(value.approval_id);
   const decision = nonBlank(value.decision)?.toLowerCase();
-  if (!approvalId || approvalId.length > 256 || !["approve", "deny"].includes(decision)) {
+  if (!approvalId || approvalId.length > 256 || !["approve", "deny", "request_changes"].includes(decision)) {
     return null;
   }
   return { approvalId, decision };
@@ -90,7 +90,8 @@ function parseApprovalSubmit(value) {
 
 function terminalApprovalText(record) {
   if (record.state === "decided") {
-    return `This approval was already decided: ${record.decision === "approve" ? "Approved" : "Denied"}.`;
+    const label = record.decision === "approve" ? "Approved" : record.decision === "request_changes" ? "Changes requested" : "Denied";
+    return `This approval was already decided: ${label}.`;
   }
   return "This approval decision is already being processed or its outcome is uncertain. Review the existing result before retrying.";
 }
@@ -325,6 +326,14 @@ agent.onActivity("message", async (context) => {
       conversationId,
       messageId,
       keyId: KEY_ID,
+      interaction: approvalSubmit
+        ? {
+            kind: "approval.submit",
+            approval_id: approvalSubmit.approvalId,
+            decision: approvalSubmit.decision,
+            channel_response_id: messageId,
+          }
+        : undefined,
     });
     const signed = loadAndSignConversationEnvelope(
       envelope,
@@ -342,6 +351,16 @@ agent.onActivity("message", async (context) => {
         tenantId,
         approvalId: approvalSubmit.approvalId,
         resultStatus: String(result.payload.status),
+      });
+    } else if (approvalSubmit && ["denied", "rejected"].includes(String(result?.payload?.status ?? ""))) {
+      // A definitively unauthorized/malformed interaction created no approval authority.
+      // Release only this exact sender/decision claim so an unauthorized click cannot
+      // permanently prevent the actual owner from deciding the still-pending request.
+      approvalDecisions.release({
+        tenantId,
+        approvalId: approvalSubmit.approvalId,
+        aadObjectId,
+        decision: approvalSubmit.decision,
       });
     }
     await context.sendActivity(replyForRuntimeResult(result));

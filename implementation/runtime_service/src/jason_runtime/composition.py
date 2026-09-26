@@ -13,6 +13,10 @@ from decision_memory.resolution_service import ResolutionMemoryService
 from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
 
 from connectors.core.contracts import ConnectorContext
+from connectors.src.jason_connectors.approval_requests import (
+    ApprovalRequestService,
+    SQLiteApprovalRequestRepository,
+)
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
@@ -259,6 +263,15 @@ from .http import RuntimeHttpApplication
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
+from .datto_component_approval_registry import approval_owner_identities
+from .playbook_autonomy_review import (
+    OwnerOnlyPlaybookAutonomyAuthority,
+    PlaybookAutonomyApprovalInteractionFlow,
+    PlaybookAutonomyReviewMaintenance,
+    TeamsGatewayPlaybookApprovalSender,
+)
+from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
+from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
 from .microsoft_directory import build_microsoft_directory_runtime
 from .provider_reads import (
     build_provider_read_invoker,
@@ -395,6 +408,18 @@ class RuntimeSettings:
         "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"
     )
     autonomy_worker_interval_seconds: int = 60
+    autonomy_review_enabled: bool = False
+    autonomy_review_db: Path = Path(
+        "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
+    )
+    autonomy_review_interval_seconds: int = 300
+    autonomy_review_audit_path: Path = Path(
+        "/var/lib/jason/openclaw/autonomy-promotion-admin.jsonl"
+    )
+    teams_gateway_internal_url: str = "http://jason-teams-gateway:3979"
+    teams_proactive_token_file: Path = Path(
+        "/run/jason-secrets/teams-proactive/token"
+    )
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -707,6 +732,33 @@ class RuntimeSettings:
             autonomy_worker_interval_seconds=int(
                 os.getenv("JASON_AUTONOMY_WORKER_INTERVAL_SECONDS", "60")
             ),
+            autonomy_review_enabled=os.getenv(
+                "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            autonomy_review_db=Path(
+                os.getenv(
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_DB",
+                    "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3",
+                )
+            ),
+            autonomy_review_interval_seconds=int(
+                os.getenv("JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS", "300")
+            ),
+            autonomy_review_audit_path=Path(
+                os.getenv(
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_AUDIT",
+                    "/var/lib/jason/openclaw/autonomy-promotion-admin.jsonl",
+                )
+            ),
+            teams_gateway_internal_url=os.getenv(
+                "JASON_TEAMS_GATEWAY_INTERNAL_URL", "http://jason-teams-gateway:3979"
+            ).strip(),
+            teams_proactive_token_file=Path(
+                os.getenv(
+                    "JASON_TEAMS_PROACTIVE_TOKEN_FILE",
+                    "/run/jason-secrets/teams-proactive/token",
+                )
+            ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -741,6 +793,12 @@ class RuntimeSettings:
             raise ValueError(
                 "JASON_AUTONOMY_WORKER_INTERVAL_SECONDS must be at least 30"
             )
+        if self.autonomy_review_interval_seconds < 60:
+            raise ValueError(
+                "JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS must be at least 60"
+            )
+        if not self.teams_gateway_internal_url:
+            raise ValueError("JASON_TEAMS_GATEWAY_INTERNAL_URL must be non-empty")
         if any(value < 1 for value in self.autonomy_owned_autotask_resource_ids):
             raise ValueError(
                 "JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS must contain "
@@ -1697,6 +1755,45 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         investigation_client=hosted_conversation_client,
     )
 
+    owner_ids = approval_owner_identities()
+    playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
+        settings.autonomy_promotion_db
+    )
+    playbook_review_repository = SQLiteApprovalRequestRepository(
+        settings.autonomy_review_db
+    )
+    playbook_review_service = PlaybookAutonomyReviewService(
+        registry_path=settings.autonomy_playbook_registry,
+        promotion_store=playbook_promotion_store,
+        owner_identity_ids=owner_ids,
+        audit_path=settings.autonomy_review_audit_path,
+    )
+    playbook_approval_service = ApprovalRequestService(
+        repository=playbook_review_repository,
+        authority=OwnerOnlyPlaybookAutonomyAuthority(owner_ids),
+    )
+    playbook_approval_flow = PlaybookAutonomyApprovalInteractionFlow(
+        bindings=bindings,
+        approval_service=playbook_approval_service,
+        review_service=playbook_review_service,
+    )
+    playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+        gateway_url=settings.teams_gateway_internal_url,
+        token_file=settings.teams_proactive_token_file,
+        bindings=bindings,
+        owner_identity_ids=owner_ids,
+    )
+    playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
+        enabled=settings.autonomy_review_enabled,
+        registry_path=settings.autonomy_playbook_registry,
+        request_repository=playbook_review_repository,
+        approval_service=playbook_approval_service,
+        review_service=playbook_review_service,
+        sender=playbook_approval_sender,
+        promotion_store=playbook_promotion_store,
+        interval_seconds=settings.autonomy_review_interval_seconds,
+    )
+
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
         authenticator=trusted_keys.build_authenticator(),
@@ -1704,6 +1801,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         audit=SQLiteIngressSecurityAudit(settings.security_audit_db),
         flow=flow,
         allowed_machine_identities=settings.allowed_machine_identities,
+        approval_flow=playbook_approval_flow,
     )
     shadow_autonomy_maintenance = build_autonomy_shadow_maintenance(
         enabled=settings.autonomy_shadow_enabled,
@@ -1736,6 +1834,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         interval_seconds=settings.autonomy_worker_interval_seconds,
     )
     autonomy_maintenance = CompositeAutonomyMaintenance(
+        playbook_review_maintenance,
         operational_autonomy_maintenance,
         shadow_autonomy_maintenance,
     )

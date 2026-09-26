@@ -219,3 +219,11 @@ The 2026-09-26 expansion completed the safe autonomous branch for every producti
 - Low Disk Space, Disk Event ID 7, and Idle Log Off were promoted only for read-only/diagnostic branches. Cleanup, physical-disk mapping, and the Idle Log Off setter remain gated exactly as documented.
 
 The current operating principle is now: Jason may automatically start and carry a matching ticket through the exact promoted safe branch, but it must stop at the first unapproved or disruptive boundary. No ticket-by-ticket owner approval is required merely to begin an already-promoted safe branch.
+
+## Automatic owner promotion workflow
+
+Technicians may create and improve playbooks without receiving authority to make them autonomous. For a production playbook whose source registry nominates an autonomous safe branch, the runtime can detect that the exact durable promotion is missing and submit a Teams owner-approval card.
+
+The owner card is bound to the exact playbook version, policy ID, allowed capability set, source path, review status, and canonical registry-entry fingerprint. An authenticated configured owner may Approve, Deny, or Request Changes. Approval mechanically creates the exact durable `PlaybookAutonomyApproval`; it does not broaden any capability, component, or remediation branch beyond the reviewed source scope.
+
+A changed fingerprint invalidates the old review scope. A non-owner response, copied card payload, typed approval text, or Teams membership cannot create autonomy authority.

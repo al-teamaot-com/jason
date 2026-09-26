@@ -85,3 +85,12 @@ class TeamsApprovalDeliveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_card_exposes_request_changes_action():
+    suite = TeamsApprovalDeliveryTests()
+    channel, transport = suite.channel()
+    channel.deliver(request())
+    card = transport.calls[0][2]["attachments"][0]["content"]
+    assert card["actions"][2]["title"] == "Request Changes"
+    assert card["actions"][2]["data"]["decision"] == "request_changes"
