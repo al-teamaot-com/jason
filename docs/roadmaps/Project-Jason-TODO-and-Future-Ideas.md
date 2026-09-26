@@ -1205,6 +1205,21 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Continue immediately with client-bound evidence mapping.
 
+
+### TODO-OPS-009 — Human-review handoff to Help Desk I
+
+- **Priority:** P1
+- **Status:** Planned — lifecycle documentation change proposed in PR #368; production runtime acceptance still required
+- **Risk level:** Moderate
+- **Idea:** When Jason reaches a terminal or sticky state where the next meaningful action belongs to a human technician, automatically hand the Autotask ticket from the Jason queue to **Help Desk I**, keep the ticket **In Progress**, document the handoff, verify the queue/status change, and release Jason's active-work slot.
+- **Why it matters:** A ticket awaiting human review should not remain in the Jason queue or consume Jason's active-work capacity. Standardized handoff makes responsibility visible to technicians and prevents stalled security/escalation tickets from being mistaken for autonomous work still in progress.
+- **Current production example:** `T20260925.0050` / Atomic-50291 reached the Datto EDR/AV human-review gate after automated containment and verification. The intended live handoff write to Help Desk I was blocked before provider execution by the current safety/governance path, so the production acceptance is not yet complete.
+- **Required behavior:** Create a concise internal handoff note; move the ticket to Help Desk I; keep status In Progress; preserve Remote Support, device association, priority, and classification; require post-write readback; persist `handoff_reason=human_review`; release the active-work slot; prevent immediate auto-reclaim until the blocker changes or a technician explicitly returns the ticket to Jason.
+- **Why not now:** The documentation change is pending review/merge and the live governed ticket-update path blocked the immediate Atomic acceptance attempt.
+- **Prerequisites:** Merge the lifecycle change; confirm the governed ticket-update binding permits this exact server-controlled handoff; add regression coverage for human-review handoff and no queue ping-pong; run one controlled production acceptance.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Resume immediately after PR #368 merges or the governed ticket-update blocker is corrected.
+
 ---
 
 ## New-item template
