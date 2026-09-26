@@ -574,3 +574,18 @@ The Section Goal closes when:
 - known limitations and follow-up engineering items are recorded.
 
 Do not create or preserve a provider-policy remediation task solely from historical ticket text. Create a new Support/TODO item only when a current provider object and an actual unresolved defect are proven.
+
+
+---
+
+## 23. Autonomous Execution Eligibility
+
+`autonomous_allowed: diagnostic_only`
+
+Approval owner: person-al.  
+Approval date: 2026-09-26.  
+Approved scope: exact `idle_log_off@1.0.0` diagnostic branch using governed endpoint and alert-history reads plus internal ticket work-start/note updates.
+
+The autonomous branch may identify exact ticket/CI/device identity, classify protected/exception roles, distinguish known monitor/plumbing failures such as Invalid MyFileDestination from a genuine noncompliance signal, and document the result. It may not run the setter, independently alter Idle Log Off policy, resolve the alert, force a logoff, run generic PowerShell, reboot, or automatically complete the ticket.
+
+`Set Idle Log Off AOT Ver 02042026-1` remains per-run approved because it intentionally affects future user sessions and Component Control rejected standing-safe promotion. Material changes invalidate this diagnostic approval until re-reviewed.

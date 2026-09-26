@@ -135,6 +135,15 @@ DISK_BAD_BLOCK_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+IDLE_LOG_OFF_SCOPE = PlaybookScope(
+    playbook_id="idle_log_off",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:idle_log_off",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -145,6 +154,7 @@ PLAYBOOK_SCOPES = {
     LOW_DISK_SCOPE.playbook_id: LOW_DISK_SCOPE,
     VULSCAN_SCOPE.playbook_id: VULSCAN_SCOPE,
     DISK_BAD_BLOCK_SCOPE.playbook_id: DISK_BAD_BLOCK_SCOPE,
+    IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -544,6 +554,14 @@ class OperationalAutonomyMaintenance:
             or ("\\device\\harddisk" in material and "\\dr" in material)
         )
 
+    @staticmethod
+    def _is_idle_log_off_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return (
+            "get idle log off status" in title
+            and ("compliant: false" in title or "enabled: false" in title)
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -563,6 +581,8 @@ class OperationalAutonomyMaintenance:
             return VULSCAN_SCOPE
         if self._is_disk_bad_block_ticket(ticket):
             return DISK_BAD_BLOCK_SCOPE
+        if self._is_idle_log_off_ticket(ticket):
+            return IDLE_LOG_OFF_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -688,6 +708,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "vulscan_investigate"
             elif work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
                 next_phase = "disk_bad_block_investigate"
+            elif work.playbook_id == IDLE_LOG_OFF_SCOPE.playbook_id:
+                next_phase = "idle_log_off_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -735,6 +757,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
             if work.phase == "disk_bad_block_investigate":
                 self._investigate_disk_bad_block(work)
+                return
+
+        if work.playbook_id == IDLE_LOG_OFF_SCOPE.playbook_id:
+            if work.phase == "idle_log_off_investigate":
+                self._investigate_idle_log_off(work)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -844,6 +871,110 @@ class OperationalAutonomyMaintenance:
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
             )
+        )
+
+    def _investigate_idle_log_off(self, work: OperationalWork) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "Idle Log Off device identity changed during execution.")
+            return
+
+        role = endpoint.get("device_type")
+        role_text = (
+            json.dumps(role, sort_keys=True, default=str)
+            if isinstance(role, (Mapping, list))
+            else str(role or "")
+        )
+        role_material = (
+            f"{role_text} {endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
+        ).casefold()
+        protected = any(
+            token in role_material
+            for token in ("server", "domain controller", "rds", "terminal server", "kiosk")
+        )
+
+        history = self._read_data(
+            "endpoint.alert.history.search", {"resource_id": work.device_uid}
+        )
+        alerts = history.get("alerts")
+        if not isinstance(alerts, list):
+            alerts = []
+        idle_alerts: list[Mapping[str, Any]] = []
+        for alert in alerts:
+            if not isinstance(alert, Mapping):
+                continue
+            material = json.dumps(alert, sort_keys=True, default=str).casefold()
+            if "idle log off" in material or "compliant: false" in material or "enabled: false" in material:
+                idle_alerts.append(alert)
+        exact = next(
+            (
+                item for item in idle_alerts
+                if str(item.get("ticketNumber") or "").strip() == work.ticket_number
+            ),
+            None,
+        )
+        if exact is None and idle_alerts:
+            exact = max(idle_alerts, key=lambda item: int(item.get("timestamp") or 0))
+
+        alert_material = (
+            json.dumps(exact, sort_keys=True, default=str).casefold()
+            if exact is not None
+            else work.title.casefold()
+        )
+        plumbing_error = any(
+            token in alert_material
+            for token in (
+                "invalid myfiledestination",
+                "powershell",
+                "runtime mismatch",
+                "missing variable",
+                "script exception",
+            )
+        )
+        if protected:
+            classification = "protected_or_exception_role"
+            reason = "Idle Log Off diagnostic complete; protected/exception role requires human policy review."
+        elif plumbing_error:
+            classification = "monitor_execution_failure"
+            reason = "Idle Log Off diagnostic identified monitor/plumbing failure; endpoint noncompliance is not proven."
+        else:
+            classification = "reported_noncompliance_policy_verification_required"
+            reason = (
+                "Idle Log Off diagnostic found a noncompliance signal; applicability and "
+                "per-run setter approval remain required."
+            )
+
+        note = (
+            "Jason autonomous Idle Log Off diagnostic completed using governed endpoint "
+            "and alert-history evidence. "
+            f"Device={work.hostname}; Online={'Yes' if endpoint.get('online') is True else 'No'}; "
+            f"DeviceType={role_text[:180] or 'unknown'}; "
+            f"ProtectedOrExceptionRole={'Yes' if protected else 'No'}; "
+            f"MatchingIdleAlerts={len(idle_alerts)}; "
+            f"Classification={classification}. "
+            "The setter 'Set Idle Log Off AOT Ver 02042026-1' remains per-run approval "
+            "only because it intentionally affects future user sessions and Component "
+            "Control rejected standing-safe promotion. Jason did not run the setter, "
+            "resolve an alert, force a logoff, change policy, run generic PowerShell, "
+            "or perform any other modifying/user-disruptive action."
+        )
+        self._write_note(work, note, "Jason - Autonomous Idle Log Off Diagnostic")
+        self.store.put(
+            self._replace(work, phase="escalated", last_reason=reason)
         )
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
@@ -1978,7 +2109,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
+        if work.playbook_id == IDLE_LOG_OFF_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous Idle Log Off diagnostic stopped for technician review. "
+                f"{reason} The setter was not run and no alert resolution, forced logoff, "
+                "policy change, generic PowerShell, reboot, or other modifying action was attempted."
+            )
+            title = "Jason - Autonomous Idle Log Off Escalation"
+        elif work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
             body = (
                 "Jason autonomous Disk Event ID 7 diagnostic stopped for technician review. "
                 f"{reason} No disk repair, CHKDSK repair, formatting, firmware/driver "
