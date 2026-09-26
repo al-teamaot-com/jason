@@ -70,6 +70,23 @@ class AutonomyAttentionEventIngress:
             )
         return wake_ids
 
+    def approval_received(
+        self,
+        resource_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        resource = str(resource_id or "").strip()
+        if not resource:
+            raise ValueError("approval attention resource_id must be non-empty")
+        if any(token in resource for token in ("*", "?", "[", "]")):
+            raise ValueError("approval attention resource_id must be exact")
+        return self.store.signal_subject(
+            "approval_received",
+            event_subject_id=resource,
+            now=now,
+        )
+
     def observe_datto_job_read(
         self,
         result,
