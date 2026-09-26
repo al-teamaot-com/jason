@@ -23,7 +23,7 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 1. temporary Jason-managed requester-authorization compatibility modes for Autotask and IT Glue remain active exceptions pending retirement, although they are now formally governed under J-405 with review due 2026-10-15;
 2. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
 3. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists and the original P0 #56 has been reconciled/closed;
-4. Article XIX/System Registry completeness has not yet been exhaustively proven across every production component/capability/provider/dependency/identity binding/governance path;
+4. Article XIX/System Registry completeness is now a confirmed FAIL: the structurally valid registry has 31 entities while the live capability registry exposes 160 active capabilities, and multiple live components are unregistered; remediation is tracked in P0 #378;
 5. MCP-server tests still need a production-equivalent certification runner because the host venv lacks MCP runtime dependencies;
 6. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
 
@@ -49,7 +49,7 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 | XVI — Modularity and Reversibility | PROVEN | Provider/capability boundaries, lifecycle states, rollback images/checkpoints, profile gating, and fail-closed activation provide strong reversibility evidence. |
 | XVII — Living Documentation | PARTIAL | Documentation control plane and J-404 are strong, but `CURRENT.md` staleness demonstrates the process is not yet perfect. This review updates the resume point and creates a formal certification record. |
 | XVIII — Trust | PARTIAL | Current fail-closed behavior, approval boundaries, auditability, and no-bypass decisions support trust; unresolved temporary exceptions prevent a 100% trust certification. |
-| XIX — Authoritative Operational State | PARTIAL | System Registry architecture and verification mechanisms exist and current runtime state is independently checked before consequential work. This audit did not exhaustively prove every production component/capability/dependency is registered and verified, so full Article XIX certification remains open. |
+| XIX — Authoritative Operational State | **FAIL** | The registry is structurally valid and its verification tests pass, but the live completeness audit disproved full coverage: the production registry contains 31 total entities while live capability discovery exposes 160 active governed capabilities, and several live production components are absent from the registry. This directly violates Article XIX's requirement that production components/capabilities/providers/dependencies/identity/governance paths be registered with verification methods before being considered operational. Tracked as P0 #378. |
 
 ## Subordinate platform-integrity review (J-405)
 
@@ -132,8 +132,8 @@ The host venv could not collect two MCP server test modules because it lacks the
 ## Immediate remediation plan
 
 1. Continue provider-native/delegated requester-authorization investigation and retire the formally governed Autotask #175 and IT Glue #176 compatibility exceptions when safe; mandatory exception review is due no later than 2026-10-15.
-2. Add a production-equivalent constitutional test runner that includes MCP dependencies and produces a durable certification artifact tied to a source revision.
-3. Audit System Registry completeness against Article XIX: every production component/capability/provider/dependency/identity binding/governance path must be registered with a verification method and observed/verified state.
+2. Resolve P0 #378 by restoring Article XIX/System Registry completeness and adding deterministic completeness enforcement against current production components/capabilities/providers/dependencies/identity/governance paths.
+3. Add a production-equivalent constitutional test runner that includes MCP dependencies and produces a durable certification artifact tied to a source revision.
 4. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
 5. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
 6. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
