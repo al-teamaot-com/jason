@@ -1205,6 +1205,22 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Continue immediately with client-bound evidence mapping.
 
+
+### TODO-OPS-009 — Human-review handoff to Help Desk I
+
+- **Priority:** P1
+- **Status:** Implementation in PR #368 — server-controlled human-review routing and regression coverage added; production acceptance still required
+- **Risk level:** Moderate
+- **Idea:** When Jason reaches a terminal or sticky state where the next meaningful action belongs to a human technician, automatically hand the Autotask ticket from the Jason queue to **Help Desk I**, keep the ticket **In Progress**, document the handoff, verify the queue/status change, and release Jason's active-work slot.
+- **Why it matters:** A ticket awaiting human review should not remain in the Jason queue or consume Jason's active-work capacity. Standardized handoff makes responsibility visible to technicians and prevents stalled security/escalation tickets from being mistaken for autonomous work still in progress.
+- **Current production example:** `T20260925.0050` / Atomic-50291 reached the Datto EDR/AV human-review gate after automated containment and verification. The intended live handoff write to Help Desk I was blocked before provider execution by the current safety/governance path, so the production acceptance is not yet complete.
+- **Required behavior:** Create a concise internal handoff note; move the ticket to Help Desk I; keep status In Progress; preserve Remote Support, device association, priority, and classification; require post-write readback; persist `handoff_reason=human_review`; release the active-work slot; prevent immediate auto-reclaim until the blocker changes or a technician explicitly returns the ticket to Jason.
+- **Current blocker:** Production acceptance waits on merge/deploy of the implementation in PR #368; the previous Atomic acceptance attempt was correctly blocked before provider execution by the old handoff path.
+- **Implementation checkpoint (2026-09-26):** human_review is the canonical handoff reason; legacy human_intervention_required is accepted as an alias. The server-controlled handoff resolves the destination to **Help Desk I + In Progress** while other handoff reasons retain trusted pre-claim restoration. Claim-store blocker fingerprints prevent immediate reclaim for an unchanged human-review blocker.
+- **Remaining acceptance:** Merge/deploy PR #368 and run one controlled production handoff with provider write/readback evidence.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Resume immediately after PR #368 merges or the governed ticket-update blocker is corrected.
+
 ---
 
 ## New-item template

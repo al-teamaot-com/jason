@@ -2577,6 +2577,7 @@ def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
 
     reason_class = str(raw.get("handoff_reason_class") or "").strip().casefold()
     allowed_reasons = {
+        "human_review",
         "human_intervention_required",
         "physical_intervention_required",
         "client_clarification_required",
@@ -2585,6 +2586,9 @@ def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
     if reason_class not in allowed_reasons:
         raise ValueError("AUTOTASK_TICKET_WORK_HANDOFF_REASON_REQUIRED")
+    if reason_class == "human_intervention_required":
+        # Backward-compatible alias for the standardized technician-review handoff.
+        reason_class = "human_review"
 
     blocker_fingerprint = str(raw.get("blocker_fingerprint") or "").strip()
     if not blocker_fingerprint:
@@ -2594,12 +2598,21 @@ def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     if claim is None or claim.state != "claimed":
         raise ValueError("AUTOTASK_TICKET_WORK_NOT_CLAIMED")
 
-    return {
-        "payload": {
+    if reason_class == "human_review":
+        payload = {
+            "id": ticket_id,
+            "queueID": "Help Desk I",
+            "status": "In Progress",
+        }
+    else:
+        payload = {
             "id": ticket_id,
             "queueID": claim.original_queue_id,
             "status": claim.original_status_id,
-        },
+        }
+
+    return {
+        "payload": payload,
         "jason_policy_class": "ticket_work_handoff",
         "jason_handoff_reason_class": reason_class,
         "jason_blocker_fingerprint": blocker_fingerprint,

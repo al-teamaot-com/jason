@@ -105,10 +105,40 @@ def test_start_captures_original_queue_and_status(monkeypatch):
     assert result["jason_original_status_id"] == 1
 
 
-def test_handoff_restores_only_trusted_preclaim_state(monkeypatch):
+def test_human_review_handoff_routes_to_helpdesk_i_in_progress(monkeypatch):
     claim = SimpleNamespace(
         state="claimed",
-        original_queue_id=29682833,
+        original_queue_id=8,
+        original_status_id=1,
+    )
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "return_work": True,
+            "handoff_reason_class": "human_review",
+            "blocker_fingerprint": "security-review-required",
+        },
+    )
+    assert result["payload"] == {
+        "id": 123,
+        "queueID": "Help Desk I",
+        "status": "In Progress",
+    }
+    assert result["jason_policy_class"] == "ticket_work_handoff"
+    assert result["jason_handoff_reason_class"] == "human_review"
+
+
+def test_legacy_human_intervention_alias_routes_to_human_review(monkeypatch):
+    claim = SimpleNamespace(
+        state="claimed",
+        original_queue_id=8,
         original_status_id=1,
     )
     monkeypatch.setattr(
@@ -123,12 +153,38 @@ def test_handoff_restores_only_trusted_preclaim_state(monkeypatch):
             "ticket_id": 123,
             "return_work": True,
             "handoff_reason_class": "human_intervention_required",
-            "blocker_fingerprint": "needs-onsite-access",
+            "blocker_fingerprint": "needs-technician-review",
+        },
+    )
+    assert result["payload"]["queueID"] == "Help Desk I"
+    assert result["payload"]["status"] == "In Progress"
+    assert result["jason_handoff_reason_class"] == "human_review"
+
+
+def test_non_human_review_handoff_restores_only_trusted_preclaim_state(monkeypatch):
+    claim = SimpleNamespace(
+        state="claimed",
+        original_queue_id=8,
+        original_status_id=1,
+    )
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "return_work": True,
+            "handoff_reason_class": "provider_blocked",
+            "blocker_fingerprint": "provider-403",
         },
     )
     assert result["payload"] == {
         "id": 123,
-        "queueID": 29682833,
+        "queueID": 8,
         "status": 1,
     }
     assert result["jason_policy_class"] == "ticket_work_handoff"

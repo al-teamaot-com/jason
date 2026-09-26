@@ -17,12 +17,13 @@ def test_claim_store_preserves_original_state_and_marks_returned(tmp_path: Path)
 
     returned = store.mark_returned(
         123,
-        reason_class="human_intervention_required",
+        reason_class="human_review",
         blocker_fingerprint="needs-onsite-usb",
     )
     assert returned.state == "returned"
     assert returned.original_queue_id == 8
     assert returned.original_status_id == 1
+    assert returned.handoff_reason_class == "human_review"
     assert returned.blocker_fingerprint == "needs-onsite-usb"
 
 
@@ -56,5 +57,28 @@ def test_claim_store_allows_reclaim_when_blocker_changes(tmp_path: Path) -> None
     next_claim = store.stage(
         {"id": 123, "queueID": 8, "status": 1},
         blocker_fingerprint="provider-restored",
+    )
+    assert next_claim.state == "pending"
+
+
+def test_claim_store_blocks_reclaim_after_human_review_until_blocker_changes(tmp_path: Path) -> None:
+    store = TicketWorkClaimStore(tmp_path / "claims.json")
+    store.stage({"id": 321, "queueID": 8, "status": 1})
+    store.mark_claimed(321)
+    store.mark_returned(
+        321,
+        reason_class="human_review",
+        blocker_fingerprint="security-review-required",
+    )
+
+    with pytest.raises(ValueError, match="BLOCKER_UNCHANGED"):
+        store.stage(
+            {"id": 321, "queueID": 29682833, "status": 8},
+            blocker_fingerprint="security-review-required",
+        )
+
+    next_claim = store.stage(
+        {"id": 321, "queueID": 29682833, "status": 8},
+        blocker_fingerprint="technician-returned-to-jason",
     )
     assert next_claim.state == "pending"
