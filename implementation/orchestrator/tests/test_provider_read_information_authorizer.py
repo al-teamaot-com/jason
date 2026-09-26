@@ -216,8 +216,7 @@ def test_document_search_strips_body_content_and_still_denies_until_per_record_a
         resolution=_resolution(DOCUMENTATION_DOCUMENT_SEARCH),
     )
 
-    attributes = invocation.output["data"]["data"][0]["attributes"]
-    assert attributes == {"name": "Network Notes", "restricted": True}
+    assert invocation.output["data"]["data"] == []
     assert "included" not in invocation.output["data"]
     decision = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
     assert decision.allowed is False

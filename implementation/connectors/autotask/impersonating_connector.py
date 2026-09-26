@@ -76,7 +76,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
     map that trusted email to exactly one Autotask Resource, and supply
     Autotask's ``ImpersonationResourceId`` header.
 
-    In temporary ``jason_managed`` mode the provider request is intentionally
+    In ``jason_managed`` read mode the provider request is intentionally
     executed only as the API service account. Requester authorization and
     release remain separate and are enforced by Jason's identity/authority,
     Central Orchestrator, and information-release boundary. This mode does not

@@ -63,16 +63,6 @@ _DOCUMENT_AUTHORIZATION_RELATIONSHIPS = frozenset(
         "group-resource-accesses",
     }
 )
-_DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES = frozenset(
-    {
-        "SOURCE_PRINCIPAL_EMAIL_REQUIRED",
-        "IT_GLUE_DOCUMENT_AUTHORIZATION_PAYLOAD_INVALID",
-        "IT_GLUE_DOCUMENT_RESTRICTION_STATE_UNKNOWN",
-        "IT_GLUE_AUTHORIZED_USERS_RELATIONSHIP_REQUIRED",
-    }
-)
-
-
 def _decision(
     action: InformationAction,
     *,
@@ -183,11 +173,11 @@ def _jason_managed_requester_authorization_proven(
 ) -> bool:
     """Require positive identity/authority facts before requester release.
 
-    This is the temporary IT Glue compatibility path approved for governed reads.
-    Service-account fetch authority never becomes requester release authority by
-    implication: authenticated human identity, an active trusted Microsoft/Jason
-    binding, allowed JKD-001 authority, a validated authority context, observe-only
-    permission, and Central Orchestrator EXECUTE mode are all required.
+    Jason-managed requester authorization is a governed provider-read mode, not a
+    provider-access shortcut. Service-account fetch authority never becomes requester
+    release authority by implication: authenticated human identity, an active trusted
+    Microsoft/Jason binding, allowed JKD-001 authority, a validated authority context,
+    observe-only permission, and Central Orchestrator EXECUTE mode are all required.
     """
 
     return bool(
@@ -307,6 +297,29 @@ def _it_glue_document_acl_envelope(
             reason_code="IT_GLUE_DOCUMENT_RESTRICTION_STATE_UNKNOWN",
         )
 
+    if attributes.get("restricted") is False:
+        sensitivity = assess_sensitive_evidence(attributes)
+        handling_class = (
+            InformationHandlingClass.DERIVED_OUTPUT_ONLY
+            if sensitivity.sensitive
+            else InformationHandlingClass.RELEASABLE
+        )
+        sensitivity_basis = tuple(
+            sorted({f"sensitivity:{finding.kind.value}" for finding in sensitivity.findings})
+        )
+        return _authorized_envelope(
+            provider_id=IT_GLUE_PROVIDER,
+            resource_type="document",
+            handling_class=handling_class,
+            basis=(
+                SourceAuthorizationMode.JASON_MANAGED.value,
+                "it_glue_unrestricted_document",
+                principal_basis,
+                "jkd001_authority_context",
+                "central_orchestrator_governed_read",
+            ) + sensitivity_basis,
+        )
+
     authorized_refs = _relationship_data(resource, "authorized_users", "authorized-users")
     if authorized_refs is None:
         return _service_only_envelope(
@@ -417,7 +430,7 @@ def _sanitize_it_glue_attachment_output(output: Mapping[str, Any]) -> dict[str, 
 
 
 def _sanitize_it_glue_document_search_output(output: Mapping[str, Any]) -> dict[str, Any]:
-    """Defense in depth: document search never carries document body content."""
+    """Release only explicitly unrestricted document metadata and never body content."""
 
     result = dict(output)
     payload = result.get("data")
@@ -434,12 +447,13 @@ def _sanitize_it_glue_document_search_output(output: Mapping[str, Any]) -> dict[
                 continue
             sanitized_record = dict(record)
             attributes = record.get("attributes")
-            if isinstance(attributes, Mapping):
-                sanitized_record["attributes"] = {
-                    str(key): value
-                    for key, value in attributes.items()
-                    if str(key) not in _SENSITIVE_DOCUMENT_SEARCH_ATTRIBUTE_KEYS
-                }
+            if not isinstance(attributes, Mapping) or attributes.get("restricted") is not False:
+                continue
+            sanitized_record["attributes"] = {
+                str(key): value
+                for key, value in attributes.items()
+                if str(key) not in _SENSITIVE_DOCUMENT_SEARCH_ATTRIBUTE_KEYS
+            }
             sanitized_record.pop("included", None)
             sanitized_records.append(sanitized_record)
         sanitized_payload["data"] = sanitized_records
@@ -482,12 +496,11 @@ class ProviderReadInformationAuthorizingInvoker:
     preventing the service identity's privilege from becoming requester disclosure
     authority.
 
-    IT Glue document reads retain the provider-native ACL-mirrored path when positive
-    source authorization is available. The approved temporary Jason-managed path is a
-    bounded fallback for registered IT Glue read capabilities and requires the same
-    positive identity, authority, observe-only, and Central Orchestrator facts used by
-    the temporary Autotask requester-authorization path. An explicit provider-native
-    document ACL denial remains authoritative and is never overridden by the fallback.
+    IT Glue document reads retain provider restriction evidence as an authoritative
+    narrowing control. Jason-managed requester authorization is the accepted governed
+    read mode for provider-neutral IT Glue capabilities, but protected document content
+    is released only when provider ACL evidence positively establishes requester access.
+    Explicit denial, missing ACL evidence, or unknown restriction state fails closed.
     """
 
     delegate: CapabilityInvoker
@@ -519,19 +532,6 @@ class ProviderReadInformationAuthorizingInvoker:
                 )
             )
             output = _sanitize_it_glue_attachment_output(invocation.output)
-            release_decision = authorization.require_allowed(InformationAction.RELEASE)
-            if (
-                not release_decision.allowed
-                and release_decision.reason_code in _DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES
-                and _jason_managed_requester_authorization_proven(
-                    request=request,
-                    bindings=self.bindings,
-                )
-            ):
-                authorization = _jason_managed_it_glue_envelope(
-                    capability_name=resolution.capability_name,
-                    output=output,
-                )
         elif provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_READ:
             payload = invocation.output.get("data")
             authorization = (
@@ -548,25 +548,6 @@ class ProviderReadInformationAuthorizingInvoker:
                 )
             )
             output = _sanitize_it_glue_document_read_output(invocation.output)
-
-            # Provider-native ACL evidence is authoritative when it establishes a
-            # positive or negative requester decision. The temporary Jason-managed
-            # fallback is permitted only when provider ACL evidence is unavailable or
-            # unverifiable, never when IT Glue positively establishes no access.
-            release_decision = authorization.require_allowed(InformationAction.RELEASE)
-            if (
-                not release_decision.allowed
-                and release_decision.reason_code in _DOCUMENT_JASON_MANAGED_FALLBACK_REASON_CODES
-                and resolution.capability_name in IT_GLUE_CAPABILITIES
-                and _jason_managed_requester_authorization_proven(
-                    request=request,
-                    bindings=self.bindings,
-                )
-            ):
-                authorization = _jason_managed_it_glue_envelope(
-                    capability_name=resolution.capability_name,
-                    output=output,
-                )
         elif provider_id == IT_GLUE_PROVIDER and resolution.capability_name == DOCUMENTATION_DOCUMENT_SEARCH:
             output = _sanitize_it_glue_document_search_output(invocation.output)
             if (

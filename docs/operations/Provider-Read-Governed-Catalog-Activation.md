@@ -44,38 +44,32 @@ The governed-catalog profile removes the second per-resource activation allowlis
 
 Adding a new read capability to an already trusted provider's registered catalog therefore does not require another production activation list entry. Adding a new provider still requires an explicit provider-trust decision.
 
-## Temporary Autotask requester authorization mode
+## Autotask requester authorization mode
 
-Autotask provider-native requester impersonation is currently blocked by an HTTP 500 after the requester identity mapping succeeds. To restore read availability without broadening Autotask permissions, Jason temporarily supports requester authorization mode:
+Autotask provider-native requester impersonation exists, but bounded AOT production proof established that requester mapping succeeds while requester-impersonated Ticket and Company reads return provider HTTP 500. Jason therefore uses the accepted ADR-011 requester-authorization mode:
 
 `JASON_AUTOTASK_REQUESTER_AUTH_MODE=jason_managed`
 
-This temporary mode means:
+This mode means:
 
 - the dedicated Autotask API-only service identity performs the provider read;
-- Jason does **not** add `ImpersonationResourceId` to that request;
+- Jason does **not** add `ImpersonationResourceId` to that read request;
 - service-account fetch authority does not automatically become requester release authority;
 - release is allowed only for a registered Autotask read capability after Jason has a positive authenticated human binding, an allowed JKD-001 authority decision, a validated authority context, observe-only permission mode, and Central-Orchestrator-governed execution;
 - sensitive evidence remains subject to the existing information-sensitivity and derived-output controls;
-- this requester-read compatibility mode grants no provider-write authority; any active write remains separately profile-gated, credential-separated, authority-checked, and approval-governed.
+- requester-read authorization grants no provider-write authority; active writes remain separately profile-gated, credential-separated, authority-checked, approval-governed, execution-plan-bound, and readback-verified.
 
-The legacy provider-native mode remains available as:
+Provider-native mode remains available as:
 
 `JASON_AUTOTASK_REQUESTER_AUTH_MODE=impersonated`
 
-Unknown requester-authorization mode values fail closed.
+It may be selected for reads only after bounded acceptance proves the exact provider path reliable. Unknown requester-authorization mode values fail closed.
 
-## Priority long-term fix
-
-**Priority:** replace the temporary Jason-managed Autotask requester-authorization mode with a durable provider-native/delegated authorization design. This work is tracked in GitHub issue #175.
-
-The long-term work must determine and correct the Autotask impersonation HTTP 500 root cause, including the provider security-level/impersonation contract and requester identity-alias handling. Microsoft tenant/object identity should remain the stable authenticated identity; mutable email aliases should be mapping data rather than the root authority. The final design should restore provider-enforced requester authorization where practical without requiring broad Add/Edit/Delete permissions and without making matching ChatGPT, Microsoft, and Autotask email strings a prerequisite.
-
-Until that work is complete, `jason_managed` is a compatibility mode, not the intended permanent architecture.
+Microsoft tenant/object identity remains the stable authenticated identity; mutable email aliases are mapping data rather than root authority.
 
 ## What this does not change
 
-This profile and temporary requester mode do **not**:
+This profile and requester mode do **not**:
 
 - grant provider-write authority merely because reads are active;
 - bypass the separately governed mutation profiles for Add/Edit/Delete operations;

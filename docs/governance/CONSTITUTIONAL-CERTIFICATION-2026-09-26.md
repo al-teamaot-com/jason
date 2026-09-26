@@ -20,10 +20,9 @@ Project Jason is operating under its constitutional model, but it is **not yet 1
 
 Certification is blocked by unresolved governance debt and proof gaps, principally:
 
-1. temporary Jason-managed requester-authorization compatibility modes for Autotask and IT Glue remain active exceptions pending retirement, although they are now formally governed under J-405 with review due 2026-10-15;
-2. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
-3. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists and the original P0 #56 has been reconciled/closed;
-4. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
+1. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
+2. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists and the original P0 #56 has been reconciled/closed;
+3. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
 
 ## Constitutional article matrix
 
@@ -46,7 +45,7 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 | XV — Continuity and Resilience | PARTIAL / EXCEPTION | OpenBao recovery now has verified sealed→unsealed proof, bootstrap retirement, protected recovery control, and an owner-approved single-host pilot exception. Full-host reboot acceptance remains pending explicit disruptive approval; long-term multi-host/KMS or split-custody design remains hardening work. |
 | XVI — Modularity and Reversibility | PROVEN | Provider/capability boundaries, lifecycle states, rollback images/checkpoints, profile gating, and fail-closed activation provide strong reversibility evidence. |
 | XVII — Living Documentation | PARTIAL | Documentation control plane and J-404 are strong, but `CURRENT.md` staleness demonstrates the process is not yet perfect. This review updates the resume point and creates a formal certification record. |
-| XVIII — Trust | PARTIAL | Current fail-closed behavior, approval boundaries, auditability, and no-bypass decisions support trust; unresolved temporary exceptions prevent a 100% trust certification. |
+| XVIII — Trust | PROVEN | Fail-closed behavior, approval boundaries, auditability, no-bypass decisions, exact authority controls, and requester-information release boundaries are current and tested. The Autotask/IT Glue temporary requester-authorization exceptions were retired by ADR-011 without broadening provider or write authority. |
 | XIX — Authoritative Operational State | **PROVEN** | Article XIX was remediated during this audit. The System Registry now contains 233 entities and the deterministic live completeness gate reports zero missing active capabilities, providers, non-ephemeral live components, active Microsoft→Jason identity bindings, and mounted OpenBao credential profiles; no stale operational containers were detected. The live governance path is explicitly registered, including JKD-001 through JKD-007, client-boundary enforcement, information-release authorization, execution-plan binding, Central Orchestrator, durable orchestration event store, and governed execution ledger. Nine bounded host probes verify successfully and the full System Registry/governance regression battery passes. Durable evidence: `docs/sessions/System-Registry-Completeness-Result-2026-09-26.json` and `docs/sessions/System-Registry-Verification-Final-2026-09-26.json`. P0 #378 resolved. |
 
 ## Subordinate platform-integrity review (J-405)
@@ -62,19 +61,19 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 - Secret values are excluded from ordinary documentation/evidence by policy and current runbooks.
 - Direct datastore/provider bypasses were explicitly refused during current engineering work rather than used to escape governance.
 
-### Current exceptions / partials
+### Resolved requester-authorization exceptions
 
 #### Autotask requester authorization — GitHub #175
 
-Current production reads use temporary `JASON_AUTOTASK_REQUESTER_AUTH_MODE=jason_managed` because provider-native `ImpersonationResourceId` reads hit an Autotask HTTP 500. Compensating controls preserve authenticated human binding, JKD-001 authority, validated authority context, observe-only mode, Central Orchestrator execution, information-release authorization, sensitivity handling, and separate write governance.
+Production reads use `JASON_AUTOTASK_REQUESTER_AUTH_MODE=jason_managed` because bounded production proof established that provider-native `ImpersonationResourceId` reads return Autotask HTTP 500 after requester mapping succeeds. ADR-011 now defines Jason-managed requester authorization as the accepted read architecture when provider-native requester execution is unavailable or unreliable.
 
-**Certification:** EXCEPTION. The control remains temporary, governed, and fail-closed. A formal J-405 exception record now exists at `docs/governance/EXCEPTION-AUTOTASK-REQUESTER-AUTH-2026-09-26.md` with approving authority, scope, compensating controls, evidence, retirement criteria, and mandatory review no later than 2026-10-15. The exception continues to block a 100% certification until retired or replaced by a stronger accepted requester-authorization design.
+**Certification:** RESOLVED / EXCEPTION RETIRED. Service-account FETCH authority remains separate from requester RELEASE authority. Trusted Microsoft identity binding, JKD-001, validated authority context, client scope, observe-only permission, Central Orchestrator, information-release controls, sensitivity handling, and fail-closed behavior remain mandatory. Autotask write governance is unchanged and remains separately credentialed, impersonated where required, approval-governed, execution-plan-bound, and readback-verified.
 
 #### IT Glue requester authorization — GitHub #176
 
-IT Glue uses a parallel temporary Jason-managed requester-authorization model with provider/source-native restriction semantics preserved where available.
+ADR-011 now defines Jason-managed requester authorization as the accepted IT Glue read architecture while preserving provider restriction evidence as a one-way narrowing control.
 
-**Certification:** EXCEPTION. Security controls remain intact and a formal J-405 exception record now exists at `docs/governance/EXCEPTION-ITGLUE-REQUESTER-AUTH-2026-09-26.md` with approving authority, scope, compensating controls, evidence, retirement criteria, and mandatory review no later than 2026-10-15. The active exception still blocks 100% certification until retired or replaced.
+**Certification:** RESOLVED / EXCEPTION RETIRED. The implementation was tightened during retirement: unrestricted documents may release under proven Jason requester authority; restricted document/attachment content requires positive provider ACL evidence; explicit denial, missing ACL evidence, and unknown restriction state fail closed; document search releases only explicitly unrestricted sanitized metadata; and credential-like fields remain redacted/derived-only where applicable.
 
 ## Stale-tracking review
 
@@ -129,13 +128,12 @@ The earlier host-venv MCP proof gap is now resolved. `tools/run_mcp_constitution
 
 ## Immediate remediation plan
 
-1. Continue provider-native/delegated requester-authorization investigation and retire the formally governed Autotask #175 and IT Glue #176 compatibility exceptions when safe; mandatory exception review is due no later than 2026-10-15.
-2. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
-3. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
-4. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
+1. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
+2. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
+3. Re-run this certification after that review. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
 
 ## Certification decision
 
 **Decision: NOT 100% CERTIFIED as of 2026-09-26.**
 
-Jason's current operational behavior is strongly constitutional and its most important authority/execution boundaries are functioning correctly. Article XIX/System Registry completeness and production-equivalent MCP certification-runner coverage have both been remediated and proven during this audit. The remaining blockers to a 100% certification are the still-active Autotask and IT Glue requester-authorization exceptions and explicit owner/architecture review of the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles—not evidence that Jason is currently acting as an uncontrolled autonomous authority.
+Jason's current operational behavior is strongly constitutional and its most important authority/execution boundaries are functioning correctly. Article XIX/System Registry completeness, production-equivalent MCP certification-runner coverage, and the Autotask/IT Glue requester-authorization exceptions have all been remediated. The remaining blocker to a 100% certification is explicit owner/architecture review of the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles—not evidence that Jason is currently acting as an uncontrolled autonomous authority.

@@ -234,8 +234,8 @@ class AutotaskImpersonationInformationAuthorizer:
     canonical Company/Ticket operations whose connector requests carry Autotask's
     requester impersonation header may be upgraded from service-only release.
 
-    Temporary ``jason_managed`` mode does not treat service-account fetch authority
-    as requester authority. It upgrades only a capability from the registered
+    ``jason_managed`` mode does not treat service-account fetch authority as requester
+    authority. It upgrades only a capability from the registered
     Autotask read catalog after the authenticated human has an active trusted
     Microsoft/Jason binding, an allowed JKD-001 decision, an authority context that
     Central Orchestrator has validated, and observe-only execution. All other cases
