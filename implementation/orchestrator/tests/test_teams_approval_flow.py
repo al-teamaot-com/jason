@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from connectors.microsoft_graph.teams_approval_ingress import VerifiedMicrosoftPrincipal
@@ -281,3 +281,63 @@ def test_request_changes_is_audited_and_never_resumes_execution():
     assert result.resumed_request is None
     assert bridge.calls == 0
     assert sink.events[-1].event_type is ApprovalAuditEventType.RESPONSE_CHANGES_REQUESTED
+
+
+@dataclass
+class AttentionSink:
+    calls: list[tuple[str, datetime]]
+
+    def approval_received(self, resource_id: str, *, now=None):
+        self.calls.append((resource_id, now))
+        return ("wake-1",)
+
+
+def test_approved_response_wakes_exact_bound_attention_resource():
+    suite = TeamsApprovalFlowTests()
+    accepted = replace(suite.accepted(), attention_resource_id="T123")
+    sink = AttentionSink([])
+    audit_sink = InMemoryApprovalAuditSink()
+    flow = TeamsApprovalFlow(
+        token_verifier=StubTokenVerifier(suite.principal()),
+        ingress=StubIngress(response=object()),
+        approval_service=StubApprovalService(accepted),
+        resume_bridge=StubResumeBridge(resumed=ResumedRequest()),
+        audit=ApprovalAuditRecorder(audit_sink),
+        attention_sink=sink,
+    )
+    result = flow.handle_response(
+        token="signed-token",
+        payload={"approval_id": "approval-1"},
+        original_request=OriginalRequest(),
+        decided_at=NOW,
+        now=NOW,
+    )
+    assert result.resumed_request is not None
+    assert sink.calls == [("T123", NOW)]
+
+
+def test_denied_response_never_wakes_attention_resource():
+    suite = TeamsApprovalFlowTests()
+    accepted = replace(
+        suite.accepted(status="denied"),
+        attention_resource_id="T123",
+    )
+    sink = AttentionSink([])
+    audit_sink = InMemoryApprovalAuditSink()
+    flow = TeamsApprovalFlow(
+        token_verifier=StubTokenVerifier(suite.principal()),
+        ingress=StubIngress(response=object()),
+        approval_service=StubApprovalService(accepted),
+        resume_bridge=StubResumeBridge(resumed=ResumedRequest()),
+        audit=ApprovalAuditRecorder(audit_sink),
+        attention_sink=sink,
+    )
+    result = flow.handle_response(
+        token="signed-token",
+        payload={"approval_id": "approval-1"},
+        original_request=OriginalRequest(),
+        decided_at=NOW,
+        now=NOW,
+    )
+    assert result.resumed_request is None
+    assert sink.calls == []
