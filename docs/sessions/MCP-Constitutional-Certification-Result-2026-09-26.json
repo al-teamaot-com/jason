@@ -1,0 +1,18 @@
+{
+  "base_runtime_image": "jason-mcp:generic-governed-8f1e864947a2",
+  "certification_image": "jason-mcp:constitutional-cert-aa92ac17ed37",
+  "runtime_image": "jason-mcp:constitutional-runtime-aa92ac17ed37",
+  "schema_version": "1.0",
+  "source_revision": "aa92ac17ed37640ecb8daf08c718afdd0ca08546",
+  "status": "pass",
+  "suite": "mcp-constitutional-production-equivalent",
+  "tested_contracts": [
+    "generic-governed-execution",
+    "authority-grant-admin",
+    "client-context",
+    "read-authority-admin",
+    "capability-discovery",
+    "governed-read-failure",
+    "ticket-work-lifecycle"
+  ]
+}
