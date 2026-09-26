@@ -20,11 +20,11 @@ Project Jason is operating under its constitutional model, but it is **not yet 1
 
 Certification is blocked by unresolved governance debt and proof gaps, principally:
 
-1. temporary Jason-managed requester-authorization compatibility modes for Autotask and IT Glue;
-2. incomplete formal J-405 exception metadata for those compatibility modes, especially explicit review/expiry and a single approving-authority record;
-3. the post-baseline governance restoration checklist (#165) has not been formally re-proven/closed even though many of its controls now exist;
-4. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
-5. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists;
+1. temporary Jason-managed requester-authorization compatibility modes for Autotask and IT Glue remain active exceptions pending retirement, although they are now formally governed under J-405 with review due 2026-10-15;
+2. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
+3. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists and the original P0 #56 has been reconciled/closed;
+4. Article XIX/System Registry completeness has not yet been exhaustively proven across every production component/capability/provider/dependency/identity binding/governance path;
+5. MCP-server tests still need a production-equivalent certification runner because the host venv lacks MCP runtime dependencies;
 6. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
 
 ## Constitutional article matrix
@@ -70,13 +70,13 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 
 Current production reads use temporary `JASON_AUTOTASK_REQUESTER_AUTH_MODE=jason_managed` because provider-native `ImpersonationResourceId` reads hit an Autotask HTTP 500. Compensating controls preserve authenticated human binding, JKD-001 authority, validated authority context, observe-only mode, Central Orchestrator execution, information-release authorization, sensitivity handling, and separate write governance.
 
-**Certification:** EXCEPTION / PARTIAL. The control is governed and fail-closed, but the long-term provider-native/delegated authorization objective remains open. The audit did not find a single J-405 exception record containing every required field, especially explicit review/expiry and one approving-authority record.
+**Certification:** EXCEPTION. The control remains temporary, governed, and fail-closed. A formal J-405 exception record now exists at `docs/governance/EXCEPTION-AUTOTASK-REQUESTER-AUTH-2026-09-26.md` with approving authority, scope, compensating controls, evidence, retirement criteria, and mandatory review no later than 2026-10-15. The exception continues to block a 100% certification until retired or replaced by a stronger accepted requester-authorization design.
 
 #### IT Glue requester authorization — GitHub #176
 
 IT Glue uses a parallel temporary Jason-managed requester-authorization model with provider/source-native restriction semantics preserved where available.
 
-**Certification:** EXCEPTION / PARTIAL for the same reason: security controls remain intact, but the temporary compatibility mode and incomplete formal exception metadata block 100% certification.
+**Certification:** EXCEPTION. Security controls remain intact and a formal J-405 exception record now exists at `docs/governance/EXCEPTION-ITGLUE-REQUESTER-AUTH-2026-09-26.md` with approving authority, scope, compensating controls, evidence, retirement criteria, and mandatory review no later than 2026-10-15. The active exception still blocks 100% certification until retired or replaced.
 
 ## Stale-tracking review
 
@@ -93,13 +93,13 @@ The issue was opened when recovery custody, bootstrap disposition, and recovery-
 - explicit owner-approved single-host pilot exception;
 - fail-closed recovery conditions and evidence references.
 
-**Certification:** STALE TRACKING pending issue reconciliation. The original P0 condition appears corrected for the approved single-host pilot. The remaining full-host reboot test is separately gated because reboot is user-disruptive, and long-term multi-host/KMS or split-custody hardening remains documented.
+**Certification:** RESOLVED / ISSUE CLOSED. The original P0 condition is corrected for the approved single-host pilot. Focused recovery-readiness and production-closeout tests passed 14/14 during this audit, including missing-field/custody denial and no-bypass behavior. GitHub #56 was reconciled with current evidence and closed on 2026-09-26. The remaining full-host reboot test is separately gated because reboot is user-disruptive, and long-term multi-host/KMS or split-custody hardening remains documented.
 
 ### GitHub #165 — governance restoration checklist
 
 The issue still shows all eight restoration controls unchecked, but current architecture/tests/production evidence demonstrate that many are now implemented: authenticated ingress, identity/organization authorization, capability authorization, target invariance, approval controls, evidence-before-assertion, deterministic execution-plan validation, and outbound/audit controls all have later implementation evidence.
 
-**Certification:** STALE TRACKING / NOT YET RE-CERTIFIED. Do not close from inference alone. Re-run the checklist against current architecture and evidence, record each proof, then close or rewrite the issue to contain only genuine remaining gaps.
+**Certification:** RESOLVED / ISSUE CLOSED. The eight restoration gates were re-audited against current architecture and a combined focused suite covering authenticated ingress, identity/organization binding, capability/target authority, approval resume, execution-plan binding, evidence support, approval audit persistence, and return-path correlation. The suite passed completely, and later production proof/ADRs supersede the historical working-first checkpoint. GitHub #165 was reconciled and closed on 2026-09-26.
 
 ## Verification performed in this audit
 
@@ -131,14 +131,12 @@ The host venv could not collect two MCP server test modules because it lacks the
 
 ## Immediate remediation plan
 
-1. Reconcile #56 against the current OpenBao recovery record; close it only if the issue's completion criteria are explicitly demonstrated by the durable record.
-2. Re-audit #165 item-by-item using current tests and production evidence; mark each restored gate with proof rather than closing by inference.
-3. Create formal time-bounded J-405 exception records for Autotask #175 and IT Glue #176 containing exact requirement, justification, scope, risk/compensating controls, approving authority, start date, review/expiry date, evidence, and retirement criteria.
-4. Continue provider-native/delegated requester-authorization investigation and retire compatibility modes when safe.
-5. Add a production-equivalent constitutional test runner that includes MCP dependencies and produces a durable certification artifact tied to a source revision.
-6. Audit System Registry completeness against Article XIX: every production component/capability/provider/dependency/identity binding/governance path must be registered with a verification method and observed/verified state.
-7. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
-8. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
+1. Continue provider-native/delegated requester-authorization investigation and retire the formally governed Autotask #175 and IT Glue #176 compatibility exceptions when safe; mandatory exception review is due no later than 2026-10-15.
+2. Add a production-equivalent constitutional test runner that includes MCP dependencies and produces a durable certification artifact tied to a source revision.
+3. Audit System Registry completeness against Article XIX: every production component/capability/provider/dependency/identity binding/governance path must be registered with a verification method and observed/verified state.
+4. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
+5. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
+6. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
 
 ## Certification decision
 
