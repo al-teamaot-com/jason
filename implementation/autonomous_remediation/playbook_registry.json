@@ -76,8 +76,9 @@
           "Event ID 7"
         ]
       },
+      "review_status": "diagnostic_autonomous_physical_mapping_and_resolution_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -85,7 +86,10 @@
           "evidence_fresh",
           "governance_precheck"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:disk_bad_block_event_7"
       }
     },
