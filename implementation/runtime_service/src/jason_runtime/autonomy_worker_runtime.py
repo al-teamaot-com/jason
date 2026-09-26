@@ -74,15 +74,26 @@ DNS_SCOPE = PlaybookScope(
     policy_id="playbook-autonomy:dns_agent_diagnostic",
     required_action_capabilities=REQUIRED_ACTION_CAPABILITIES,
 )
+SECURITY_LOG_SCOPE = PlaybookScope(
+    playbook_id="security_log_self_heal",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:security_log_self_heal",
+    required_action_capabilities=REQUIRED_ACTION_CAPABILITIES,
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
+    SECURITY_LOG_SCOPE.playbook_id: SECURITY_LOG_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
 REPAIR_COMPONENT_NAME = "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"
 DNS_DIAGNOSTIC_COMPONENT_NAME = "DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026"
 DNS_DIAGNOSTIC_COMPONENT_UID = "c3340a58-48d5-457b-bc30-5fd79e5ad8b1"
+SECURITY_LOG_QUICK_TEST_NAME = "Security Log Quick Test [WIN] AOT Ver 12012025-1"
+SECURITY_LOG_QUICK_TEST_UID = "a50d486b-2cce-4658-9e11-64fb6bf9ab9d"
+SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
+SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 
 
@@ -403,11 +414,18 @@ class OperationalAutonomyMaintenance:
         title = str(ticket.get("title") or "").strip().casefold()
         return "dns agent" in title or "dnsfilter" in title
 
+    @staticmethod
+    def _is_security_log_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return "security log unreadable" in title
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
         if self._is_dns_agent_ticket(ticket):
             return DNS_SCOPE
+        if self._is_security_log_ticket(ticket):
+            return SECURITY_LOG_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -509,11 +527,16 @@ class OperationalAutonomyMaintenance:
                     }
                 },
             )
-            next_phase = (
-                "health_dispatch"
-                if work.playbook_id == EDR_SCOPE.playbook_id
-                else "dns_diagnostic_dispatch"
-            )
+            if work.playbook_id == EDR_SCOPE.playbook_id:
+                next_phase = "health_dispatch"
+            elif work.playbook_id == DNS_SCOPE.playbook_id:
+                next_phase = "dns_diagnostic_dispatch"
+            elif work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
+                next_phase = "security_quick_dispatch"
+            else:
+                raise OperationalAutonomyError(
+                    f"unsupported autonomous playbook: {work.playbook_id}"
+                )
             work = self._replace(work, phase=next_phase)
             self.store.put(work)
 
@@ -527,6 +550,36 @@ class OperationalAutonomyMaintenance:
                 return
             if work.phase == "dns_diagnostic_wait":
                 self._poll_dns_diagnostic(work)
+                return
+
+        if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
+            if work.phase == "security_quick_dispatch":
+                self._dispatch_component(
+                    work,
+                    SECURITY_LOG_QUICK_TEST_NAME,
+                    "security_quick_wait",
+                )
+                return
+            if work.phase == "security_repair_dispatch":
+                self._dispatch_component(
+                    work,
+                    SECURITY_LOG_SELF_HEAL_NAME,
+                    "security_repair_wait",
+                )
+                return
+            if work.phase == "security_verify_dispatch":
+                self._dispatch_component(
+                    work,
+                    SECURITY_LOG_QUICK_TEST_NAME,
+                    "security_verify_wait",
+                )
+                return
+            if work.phase in {
+                "security_quick_wait",
+                "security_repair_wait",
+                "security_verify_wait",
+            }:
+                self._poll_security_log(work)
                 return
 
         if work.phase == "health_dispatch":
@@ -552,6 +605,18 @@ class OperationalAutonomyMaintenance:
             component_uid = DNS_DIAGNOSTIC_COMPONENT_UID
             resolved_component_name = DNS_DIAGNOSTIC_COMPONENT_NAME
             step = "dns_diagnostic"
+        elif component_name == SECURITY_LOG_QUICK_TEST_NAME:
+            component_uid = SECURITY_LOG_QUICK_TEST_UID
+            resolved_component_name = SECURITY_LOG_QUICK_TEST_NAME
+            step = (
+                "security_verify"
+                if next_phase == "security_verify_wait"
+                else "security_quick"
+            )
+        elif component_name == SECURITY_LOG_SELF_HEAL_NAME:
+            component_uid = SECURITY_LOG_SELF_HEAL_UID
+            resolved_component_name = SECURITY_LOG_SELF_HEAL_NAME
+            step = "security_repair"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
             component_uid = identity.uid
@@ -582,7 +647,9 @@ class OperationalAutonomyMaintenance:
         job_uid = str(data.get("job_uid") or "").strip()
         if not job_uid:
             raise OperationalAutonomyError("component dispatch returned no durable job UID")
-        repair_attempts = work.repair_attempts + (1 if step == "repair" else 0)
+        repair_attempts = work.repair_attempts + (
+            1 if step in {"repair", "security_repair"} else 0
+        )
         self.store.put(
             self._replace(
                 work,
@@ -592,6 +659,109 @@ class OperationalAutonomyMaintenance:
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
             )
+        )
+
+    def _poll_security_log(self, work: OperationalWork) -> None:
+        if not work.job_uid or not work.component_uid:
+            self._block(work, "Persisted Security Log job identity is incomplete.")
+            return
+        job_data = self._read_data(
+            "automation.job.read", {"resource_id": work.job_uid}
+        )
+        job = job_data.get("job") if isinstance(job_data.get("job"), Mapping) else job_data
+        status = str(job.get("status") or "").strip().casefold()
+        if status in {"active", "running", "queued", "pending", "scheduled"}:
+            return
+        if status in {"stale_or_unknown", "unknown"}:
+            self._block(
+                work,
+                "Security Log job state became stale or unknown; no redispatch allowed.",
+            )
+            return
+        if status not in {"completed", "complete", "success", "succeeded", "finished"}:
+            self._escalate(
+                work,
+                f"Security Log job ended with provider status {status or 'unknown'}.",
+            )
+            return
+
+        if work.phase == "security_repair_wait":
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="security_verify_dispatch",
+                    job_uid=None,
+                    component_uid=None,
+                    last_reason=(
+                        "Security Log Self-Heal completed; independent Quick Test "
+                        "verification is required."
+                    ),
+                )
+            )
+            return
+
+        output = self._read_data(
+            "automation.job.output.read",
+            {
+                "resource_id": work.job_uid,
+                "device_uid": work.device_uid,
+                "component_uid": work.component_uid,
+                "stream": "stdout",
+            },
+        )
+        text = self._output_text(output)
+        if not text:
+            self._block(work, "Security Log Quick Test produced no readable stdout.")
+            return
+
+        if self._status_healthy(text):
+            summary = self._bounded_health_summary(text)
+            body = (
+                "Jason autonomous Security Log playbook verified the endpoint "
+                f"Security Log healthy on {work.hostname}. "
+                + (
+                    "One standing-safe Security Log Self-Heal attempt was used. "
+                    if work.repair_attempts
+                    else "No repair was required. "
+                )
+                + f"Verification: {summary}. "
+                "Alert/SOC side-effect correlation and cleanup remain a separately "
+                "gated completion branch; no unrelated security alert or ticket was "
+                "closed automatically."
+            )
+            self._write_note(work, body, "Jason - Autonomous Security Log Verification")
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="escalated",
+                    job_uid=None,
+                    component_uid=None,
+                    last_reason=(
+                        "Security Log verified healthy; exact alert and process-generated "
+                        "security-ticket cleanup remains separately gated."
+                    ),
+                )
+            )
+            return
+
+        if work.phase == "security_quick_wait" and work.repair_attempts == 0:
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="security_repair_dispatch",
+                    job_uid=None,
+                    component_uid=None,
+                    last_reason=(
+                        "Security Log Quick Test confirmed unhealthy; one standing-safe "
+                        "Self-Heal attempt is permitted."
+                    ),
+                )
+            )
+            return
+
+        self._escalate(
+            work,
+            "Security Log remains unhealthy after the single standing-safe Self-Heal attempt.",
         )
 
     def _poll_dns_diagnostic(self, work: OperationalWork) -> None:
@@ -769,7 +939,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == DNS_SCOPE.playbook_id:
+        if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous Security Log playbook stopped for technician review. "
+                f"{reason} No reboot, generic PowerShell, or unrelated endpoint/security "
+                "action was attempted."
+            )
+            title = "Jason - Autonomous Security Log Escalation"
+        elif work.playbook_id == DNS_SCOPE.playbook_id:
             body = (
                 "Jason autonomous DNS Agent diagnostic stopped for technician review. "
                 f"{reason} No service restart, DNS/NIC change, reinstall, uninstall, "
