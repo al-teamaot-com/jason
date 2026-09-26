@@ -120,6 +120,7 @@ def test_docker_container_probe_can_verify_runtime_security_state() -> None:
     registry = registry_from_manifest(MANIFEST)
     plan = load_verification_plan(PLAN, registry=registry)
     check = next(item for item in plan.checks if item.registry_id == "component.jason-runtime")
+    declared_image = registry.get("component.jason-runtime").declared_state["image"]
 
     def command(arguments) -> str:
         assert tuple(arguments) == ("docker", "inspect", "jason-runtime")
@@ -130,7 +131,7 @@ def test_docker_container_probe_can_verify_runtime_security_state() -> None:
                     "State": {"Status": "running", "Health": {"Status": "healthy"}},
                     "Image": "sha256:adf4c9d75f226d5968117b732b6d3cc660d712a9755914bcd02bb18a8b00639a",
                     "Config": {
-                        "Image": "jason-runtime:production",
+                        "Image": declared_image,
                         "User": "1000:1000",
                         "Labels": {
                             "com.teamaot.jason.source_revision": "6e4e4c0979f3762b8dbd3b8b277850a1899deb18"

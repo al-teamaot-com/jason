@@ -90,7 +90,7 @@
       "lifecycle_status": "configured",
       "declared_state": {
         "container_name": "jason-runtime",
-        "image": "jason-runtime:production",
+        "image": "jason-runtime:candidate-1b5c9fd",
         "service_state": "running",
         "health": "healthy",
         "user": "1000:1000",
@@ -119,9 +119,10 @@
       "evidence_references": [
         "infrastructure/jason-runtime/production-deploy.sh",
         "infrastructure/jason-runtime/compose.yaml",
-        "docs/sessions/2026-09-23.md"
+        "docs/sessions/2026-09-23.md",
+        "docs/sessions/System-Registry-Verification-2026-09-26.json"
       ],
-      "source_version": "2026-09-23.2",
+      "source_version": "1b5c9fdd5ffacce8c4943aa8d959cc377c19208f",
       "created_at": "2026-09-23T16:02:26Z",
       "created_by": "Jason Production Reconciliation"
     },
@@ -194,7 +195,7 @@
       "declared_state": {
         "container_name": "openclaw-openclaw-gateway-1",
         "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs",
-        "sha256": "40e6084d45418d259d74971776cea65677c56a898e8057900fa2f78b896a95e4"
+        "sha256": "8ba81c2e4a4cfbb9535d4ab3ffc0ea4c16894694cc2d2d228a47fa7ddaab599b"
       },
       "dependencies": [
         "component.openclaw-gateway",
@@ -213,7 +214,8 @@
         "infrastructure/openclaw-jason-bridge/openclaw.plugin.json",
         "08-Session-Records/Teams-CAP-007-End-to-End-Operational-Proof-2026-08-11.md",
         "08-Session-Records/System-Registry-Bridge-Drift-Reconciliation-2026-08-11.md",
-        "08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md"
+        "08-Session-Records/OpenClaw-Bridge-Governed-Deployment-Declaration-2026-08-11.md",
+        "docs/sessions/System-Registry-Verification-2026-09-26.json"
       ],
       "source_version": "2026-08-11.3",
       "created_at": "2026-08-11T15:25:00Z",
@@ -1074,6 +1076,5437 @@
       "source_version": "2026-09-09.1",
       "created_at": "2026-09-09T17:52:33Z",
       "created_by": "Jason Architecture Authority"
+    },
+    {
+      "registry_id": "component.jason-autonomy-flight-recorder",
+      "entity_type": "component",
+      "display_name": "Jason Autonomy Flight Recorder",
+      "environment": "production-pilot",
+      "lifecycle_status": "configured",
+      "declared_state": {
+        "container_name": "jason-autonomy-flight-recorder",
+        "image": "python:3.12-slim",
+        "service_state": "running",
+        "health": "not-configured",
+        "user": "",
+        "read_only": "false",
+        "networks": "jason-observability"
+      },
+      "dependencies": [
+        "component.jason-runtime"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.jason-kfs-postgres",
+      "entity_type": "component",
+      "display_name": "Jason KFS Toner PostgreSQL Store",
+      "environment": "production-pilot",
+      "lifecycle_status": "configured",
+      "declared_state": {
+        "container_name": "jason-kfs-postgres",
+        "image": "postgres:16",
+        "service_state": "running",
+        "health": "not-configured",
+        "user": "",
+        "read_only": "false",
+        "networks": "bridge"
+      },
+      "dependencies": [],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.jason-node-exporter",
+      "entity_type": "component",
+      "display_name": "Jason Node Exporter",
+      "environment": "production-pilot",
+      "lifecycle_status": "configured",
+      "declared_state": {
+        "container_name": "jason-node-exporter",
+        "image": "prom/node-exporter:v1.9.1",
+        "service_state": "running",
+        "health": "not-configured",
+        "user": "nobody",
+        "read_only": "false",
+        "networks": "jason-observability"
+      },
+      "dependencies": [
+        "component.jason-prometheus"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.jason-ollama",
+      "entity_type": "component",
+      "display_name": "Jason Ollama Local Model Runtime",
+      "environment": "production-pilot",
+      "lifecycle_status": "configured",
+      "declared_state": {
+        "container_name": "jason-ollama",
+        "image": "ollama/ollama:0.32.5",
+        "service_state": "running",
+        "health": "healthy",
+        "user": "",
+        "read_only": "false",
+        "networks": "jason-observability"
+      },
+      "dependencies": [],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "component.jason-work-item-exporter",
+      "entity_type": "component",
+      "display_name": "Jason Work Item Exporter",
+      "environment": "production-pilot",
+      "lifecycle_status": "configured",
+      "declared_state": {
+        "container_name": "jason-work-item-exporter",
+        "image": "python:3.12-slim",
+        "service_state": "running",
+        "health": "not-configured",
+        "user": "1000:1000",
+        "read_only": "true",
+        "networks": "jason-observability"
+      },
+      "dependencies": [
+        "component.jason-prometheus"
+      ],
+      "verification_methods": [
+        "docker-container-inspect-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article XIX",
+        "J-103"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.automation.component.execute",
+      "entity_type": "capability",
+      "display_name": "Execute Approved Automation Component",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "automation.component.execute",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "execute",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.automation.component.search",
+      "entity_type": "capability",
+      "display_name": "Search Automation Components",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "automation.component.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.automation.job.output.read",
+      "entity_type": "capability",
+      "display_name": "Read Automation Job Output",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "automation.job.output.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.automation.job.read",
+      "entity_type": "capability",
+      "display_name": "Read Automation Job",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "automation.job.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.backup.backupiq.alert.search",
+      "entity_type": "capability",
+      "display_name": "Search BackupIQ Alerts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "backup.backupiq.alert.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.backup.endpoint.asset.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Backup Asset",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "backup.endpoint.asset.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.backup.endpoint.asset.search",
+      "entity_type": "capability",
+      "display_name": "Search Endpoint Backup Assets",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "backup.endpoint.asset.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.backup.endpoint.backup.search",
+      "entity_type": "capability",
+      "display_name": "Search Endpoint Backup History",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "backup.endpoint.backup.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.communication.mail.attachment.search",
+      "entity_type": "capability",
+      "display_name": "Search Mail Attachment Metadata",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "communication.mail.attachment.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.communication.mail.message.read",
+      "entity_type": "capability",
+      "display_name": "Read Approved Mailbox Message",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "communication.mail.message.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.communication.mail.message.search",
+      "entity_type": "capability",
+      "display_name": "Search Approved Mailbox Messages",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "communication.mail.message.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.communication.teams.message.send",
+      "entity_type": "capability",
+      "display_name": "Send Governed Microsoft Teams Message",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "communication.teams.message.send",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "send",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.investigation.anomaly.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Traffic Anomalies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.investigation.anomaly.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.investigation.blocked.traffic.search",
+      "entity_type": "capability",
+      "display_name": "Search Blocked DNS Traffic",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.investigation.blocked.traffic.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.investigation.query.explain",
+      "entity_type": "capability",
+      "display_name": "Explain DNS Query Decision",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.investigation.query.explain",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.investigation.query.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Query Evidence",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.investigation.query.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.bulk.remove",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Agent Bulk Remove",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.bulk.remove",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "delete",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.counts.read",
+      "entity_type": "capability",
+      "display_name": "Read DNS Protection Agent Counts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.counts.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.duplicate.search",
+      "entity_type": "capability",
+      "display_name": "Search Duplicate DNS Protection Agents",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.duplicate.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.policy.reassign",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Agent Policy Reassign",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.policy.reassign",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Protection Agents",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.stale.search",
+      "entity_type": "capability",
+      "display_name": "Search Stale DNS Protection Agents",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.stale.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.uninstall",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Agent Uninstall",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.uninstall",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "delete",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.agent.version.report",
+      "entity_type": "capability",
+      "display_name": "Read DNS Protection Agent Version Report",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.agent.version.report",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.block.page.update",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Block Page Update",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.block.page.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.global.list.domain.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Global List Domain Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.global.list.domain.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.global.list.domain.remove",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Global List Domain Remove",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.global.list.domain.remove",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.organization.read",
+      "entity_type": "capability",
+      "display_name": "Read DNS Protection Organization",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.organization.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.category.block.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Category Block Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.category.block.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.category.block.remove",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Category Block Remove",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.category.block.remove",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.category.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Policy Category Coverage",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.category.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.category.set.across.org",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Category Set Across Org",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.category.set.across.org",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.clone",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Clone",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.clone",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.create",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Create",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.delete",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Delete",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.delete",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "delete",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.allow.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Allow Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.allow.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.allow.bulk.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Allow Bulk Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.allow.bulk.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.allow.remove",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Allow Remove",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.allow.remove",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.block.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Block Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.block.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.block.bulk.add",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Block Bulk Add",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.block.bulk.add",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.domain.block.remove",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Domain Block Remove",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.domain.block.remove",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Protection Policies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.policy.update",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Policy Update",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.policy.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.portal.user.invite",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Portal User Invite",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.portal.user.invite",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.portal.user.password.reset.send",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Portal User Password Reset Send",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.portal.user.password.reset.send",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "send",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.portal.user.role.update",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Portal User Role Update",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.portal.user.role.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.site.drift.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Site Policy Drift",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.site.drift.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.site.forwarders.update",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Site Forwarders Update",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.site.forwarders.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.site.policy.assign",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Site Policy Assign",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.site.policy.assign",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.site.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Protection Sites",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.site.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.unblock.request.count.read",
+      "entity_type": "capability",
+      "display_name": "Read Pending DNS Unblock Request Count",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.unblock.request.count.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.unblock.request.decide",
+      "entity_type": "capability",
+      "display_name": "Dns Protection Unblock Request Decide",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.unblock.request.decide",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.dns.protection.unblock.request.search",
+      "entity_type": "capability",
+      "display_name": "Search DNS Unblock Requests",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "dns.protection.unblock.request.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.attachment.content.read",
+      "entity_type": "capability",
+      "display_name": "Read Document Attachment Content",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.attachment.content.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "content_read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.attachment.read",
+      "entity_type": "capability",
+      "display_name": "Read Document Attachment Metadata",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.attachment.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.attachment.search",
+      "entity_type": "capability",
+      "display_name": "Search Document Attachments",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.attachment.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.configuration.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Configuration",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.configuration.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.configuration.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Configurations",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.configuration.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.contact.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Contact",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.contact.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.contact.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Contacts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.contact.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.document.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Policy or Procedure",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.document.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.document.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Policies and Procedures",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.document.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.flexible.asset.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Flexible Asset",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.flexible.asset.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.flexible.asset.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Flexible Assets",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.flexible.asset.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.flexible.asset.type.read",
+      "entity_type": "capability",
+      "display_name": "Read Flexible Asset Type",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.flexible.asset.type.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.flexible.asset.type.search",
+      "entity_type": "capability",
+      "display_name": "Search Flexible Asset Types",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.flexible.asset.type.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.location.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Location",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.location.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.location.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Locations",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.location.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.organization.read",
+      "entity_type": "capability",
+      "display_name": "Read Documented Organization",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.organization.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.documentation.organization.search",
+      "entity_type": "capability",
+      "display_name": "Search Documented Organizations",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "documentation.organization.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.alert.history.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Alert History",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.alert.history.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.alert.resolve",
+      "entity_type": "capability",
+      "display_name": "Resolve Endpoint Alert",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.alert.resolve",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "medium",
+        "operation": "resolve",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.alert.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Alerts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.alert.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.audit.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Audit",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.audit.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.patch.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Patches",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.patch.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.powershell.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint State with PowerShell",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.powershell.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "medium",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.detection.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Security Detection",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.detection.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.detection.search",
+      "entity_type": "capability",
+      "display_name": "Search Endpoint Security Detections",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.detection.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.policy.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Security Policies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.policy.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.quarantine.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Security Quarantine",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.quarantine.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.scan.history.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Security Scan History",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.scan.history.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.scan.start",
+      "entity_type": "capability",
+      "display_name": "Start Datto AV Scan",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.scan.start",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "medium",
+        "operation": "scan_start",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.security.status.read",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Security Status",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.security.status.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.endpoint.software.search",
+      "entity_type": "capability",
+      "display_name": "Read Endpoint Software",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "endpoint.software.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.authentication.methods.read",
+      "entity_type": "capability",
+      "display_name": "Read Entra Authentication Methods",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.authentication.methods.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.conditional.access.search",
+      "entity_type": "capability",
+      "display_name": "Search Entra Conditional Access Policies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.conditional.access.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.directory.role.members.search",
+      "entity_type": "capability",
+      "display_name": "Search Entra Directory Role Members",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.directory.role.members.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.directory.role.search",
+      "entity_type": "capability",
+      "display_name": "Search Entra Directory Roles",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.directory.role.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.user.read",
+      "entity_type": "capability",
+      "display_name": "Read Microsoft Entra User",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.user.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.identity.user.search",
+      "entity_type": "capability",
+      "display_name": "Search Microsoft Entra Users",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "identity.user.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.management.alert.search",
+      "entity_type": "capability",
+      "display_name": "Search Managed Alerts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "management.alert.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.management.site.search",
+      "entity_type": "capability",
+      "display_name": "Search Managed Sites",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "management.site.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.management.site.variable.create",
+      "entity_type": "capability",
+      "display_name": "Create Managed Site Variable",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "management.site.variable.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "medium",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.management.site.variable.list",
+      "entity_type": "capability",
+      "display_name": "Read Managed Site Variables",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "management.site.variable.list",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "medium",
+        "operation": "list",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.management.site.variable.update",
+      "entity_type": "capability",
+      "display_name": "Update Managed Site Variable",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "management.site.variable.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "medium",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.operations.resolution.read",
+      "entity_type": "capability",
+      "display_name": "Read Operational Resolution Case",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "operations.resolution.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.operations.resolution.search",
+      "entity_type": "capability",
+      "display_name": "Search Operational Resolution Memory",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "operations.resolution.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.operations.resolution.summary",
+      "entity_type": "capability",
+      "display_name": "Summarize Operational Resolution Memory",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "operations.resolution.summary",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "summary",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.print.alert.search",
+      "entity_type": "capability",
+      "display_name": "Search Print Device Alerts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "print.alert.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.print.device.read",
+      "entity_type": "capability",
+      "display_name": "Read Managed Print Device",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "print.device.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.print.device.search",
+      "entity_type": "capability",
+      "display_name": "Search Managed Print Devices",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "print.device.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.print.meter.read",
+      "entity_type": "capability",
+      "display_name": "Read Print Device Meters",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "print.meter.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.print.supplies.read",
+      "entity_type": "capability",
+      "display_name": "Read Print Device Supplies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "print.supplies.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.company.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Company",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.company.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.company.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Companies",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.company.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.configuration.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Configuration Item",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.configuration.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.configuration.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Configuration Items",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.configuration.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.contact.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Contact",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.contact.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.contact.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Contacts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.contact.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.contract.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Contract",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.contract.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.contract.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Contracts",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.contract.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.entity.describe",
+      "entity_type": "capability",
+      "display_name": "Describe Service Entity Schema",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.entity.describe",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "describe",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.entity.fields.describe",
+      "entity_type": "capability",
+      "display_name": "Describe Service Entity Fields",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.entity.fields.describe",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "describe_fields",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.notification.history.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Notification History",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.notification.history.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Product",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Product",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Products",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.update",
+      "entity_type": "capability",
+      "display_name": "Update Service Product",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.vendor.create",
+      "entity_type": "capability",
+      "display_name": "Create Product Vendor Association",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.vendor.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.vendor.search",
+      "entity_type": "capability",
+      "display_name": "Search Product Vendors",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.vendor.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.product.vendor.update",
+      "entity_type": "capability",
+      "display_name": "Update Product Vendor Association",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.product.vendor.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.create",
+      "entity_type": "capability",
+      "display_name": "Create Purchase Order",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.item.create",
+      "entity_type": "capability",
+      "display_name": "Create Purchase Order Item",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.item.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.item.search",
+      "entity_type": "capability",
+      "display_name": "Search Purchase Order Items",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.item.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.item.update",
+      "entity_type": "capability",
+      "display_name": "Update Purchase Order Item",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.item.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.read",
+      "entity_type": "capability",
+      "display_name": "Read Purchase Order",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.receive",
+      "entity_type": "capability",
+      "display_name": "Receive Purchase Order Item",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.receive",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "receive",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.search",
+      "entity_type": "capability",
+      "display_name": "Search Purchase Orders",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.purchase.order.update",
+      "entity_type": "capability",
+      "display_name": "Update Purchase Order",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.purchase.order.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.resource.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Resource",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.resource.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.resource.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Resources",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.resource.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.bundle.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Bundle",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.bundle.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.bundle.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Bundle",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.bundle.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.bundle.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Bundles",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.bundle.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.bundle.update",
+      "entity_type": "capability",
+      "display_name": "Update Service Bundle",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.bundle.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.create",
+      "entity_type": "capability",
+      "display_name": "Create Catalog Service",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Catalog Service",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Catalog Services",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.service.update",
+      "entity_type": "capability",
+      "display_name": "Update Catalog Service",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.service.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.attachment.content.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Ticket Attachment Content",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.attachment.content.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "content_read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.attachment.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Ticket Attachment",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.attachment.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.attachment.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Ticket Attachment Metadata",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.attachment.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.attachment.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Ticket Attachments",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.attachment.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.charge.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Ticket Charge",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.charge.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.charge.read",
+      "entity_type": "capability",
+      "display_name": "Read Ticket Charge",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.charge.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.charge.search",
+      "entity_type": "capability",
+      "display_name": "Search Ticket Charges",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.charge.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.charge.update",
+      "entity_type": "capability",
+      "display_name": "Update Service Ticket Charge",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.charge.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.client.notification.create",
+      "entity_type": "capability",
+      "display_name": "Create Client Ticket Notification",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.client.notification.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.count",
+      "entity_type": "capability",
+      "display_name": "Count Service Tickets",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.count",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "count",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Ticket",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.note.create",
+      "entity_type": "capability",
+      "display_name": "Create Service Ticket Note",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.note.create",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "create",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.notes.search",
+      "entity_type": "capability",
+      "display_name": "Read Service Ticket Notes",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.notes.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.read",
+      "entity_type": "capability",
+      "display_name": "Read Service Ticket",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.read",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "read",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.search",
+      "entity_type": "capability",
+      "display_name": "Search Service Tickets",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.search",
+        "provider_neutral": "true",
+        "read_only": "true",
+        "risk": "low",
+        "operation": "search",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "capability.service.ticket.update",
+      "entity_type": "capability",
+      "display_name": "Update Service Ticket",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/sessions/System-Registry-Completeness-Evidence-2026-09-26.json"
+      ],
+      "source_version": "2026-09-26.1",
+      "created_at": "2026-09-26T22:40:00Z",
+      "created_by": "Jason Constitutional Certification"
     }
   ]
 }

@@ -1,0 +1,2024 @@
+{
+  "capabilities": [
+    {
+      "capability": "automation.component.execute",
+      "display_name": "Execute Approved Automation Component",
+      "lifecycle": "active",
+      "operation": "execute",
+      "read_only": false,
+      "resource_types": [
+        "automation_component",
+        "automation_job",
+        "endpoint"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "automation.component.search",
+      "display_name": "Search Automation Components",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "automation_component"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "automation.job.output.read",
+      "display_name": "Read Automation Job Output",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "automation_job_output",
+        "automation_job",
+        "automation_component",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "automation.job.read",
+      "display_name": "Read Automation Job",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "automation_job"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "backup.backupiq.alert.search",
+      "display_name": "Search BackupIQ Alerts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "backup_backupiq_alert",
+        "backup_alert"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "backup.endpoint.asset.read",
+      "display_name": "Read Endpoint Backup Asset",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "backup_endpoint_asset",
+        "backup_asset"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "backup.endpoint.asset.search",
+      "display_name": "Search Endpoint Backup Assets",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "backup_endpoint_asset",
+        "backup_asset"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "backup.endpoint.backup.search",
+      "display_name": "Search Endpoint Backup History",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "backup_endpoint_backup",
+        "backup_record"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "communication.mail.attachment.search",
+      "display_name": "Search Mail Attachment Metadata",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "communication_mail_attachment",
+        "email_attachment"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "communication.mail.message.read",
+      "display_name": "Read Approved Mailbox Message",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "communication_mail_message",
+        "email_message",
+        "mailbox_message"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "communication.mail.message.search",
+      "display_name": "Search Approved Mailbox Messages",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "communication_mail_message",
+        "email_message",
+        "mailbox_message"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "communication.teams.message.send",
+      "display_name": "Send Governed Microsoft Teams Message",
+      "lifecycle": "active",
+      "operation": "send",
+      "read_only": false,
+      "resource_types": [
+        "communication_message",
+        "microsoft_teams"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.investigation.anomaly.search",
+      "display_name": "Search DNS Traffic Anomalies",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_anomaly",
+        "dns_query"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.investigation.blocked.traffic.search",
+      "display_name": "Search Blocked DNS Traffic",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_query",
+        "dns_blocked_traffic"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.investigation.query.explain",
+      "display_name": "Explain DNS Query Decision",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "dns_query",
+        "dns_policy_decision"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.investigation.query.search",
+      "display_name": "Search DNS Query Evidence",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_query",
+        "dns_event",
+        "dns_investigation"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.agent.bulk.remove",
+      "display_name": "Dns Protection Agent Bulk Remove",
+      "lifecycle": "active",
+      "operation": "delete",
+      "read_only": false,
+      "resource_types": [
+        "dns_agent"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.agent.counts.read",
+      "display_name": "Read DNS Protection Agent Counts",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "dns_agent_count",
+        "dns_protection_coverage"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.agent.duplicate.search",
+      "display_name": "Search Duplicate DNS Protection Agents",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_agent",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.agent.policy.reassign",
+      "display_name": "Dns Protection Agent Policy Reassign",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_agent",
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.agent.search",
+      "display_name": "Search DNS Protection Agents",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_agent",
+        "dns_roaming_client",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.agent.stale.search",
+      "display_name": "Search Stale DNS Protection Agents",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_agent",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.agent.uninstall",
+      "display_name": "Dns Protection Agent Uninstall",
+      "lifecycle": "active",
+      "operation": "delete",
+      "read_only": false,
+      "resource_types": [
+        "dns_agent"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.agent.version.report",
+      "display_name": "Read DNS Protection Agent Version Report",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "dns_agent",
+        "endpoint",
+        "dns_agent_version"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.block.page.update",
+      "display_name": "Dns Protection Block Page Update",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_block_page"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.global.list.domain.add",
+      "display_name": "Dns Protection Global List Domain Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_global_list",
+        "dns_domain",
+        "dns_protection_tenant"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.global.list.domain.remove",
+      "display_name": "Dns Protection Global List Domain Remove",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_global_list",
+        "dns_domain",
+        "dns_protection_tenant"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.organization.read",
+      "display_name": "Read DNS Protection Organization",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "dns_organization",
+        "dns_protection_tenant"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.policy.category.block.add",
+      "display_name": "Dns Protection Policy Category Block Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_category"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.category.block.remove",
+      "display_name": "Dns Protection Policy Category Block Remove",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_category"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.category.search",
+      "display_name": "Search DNS Policy Category Coverage",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_policy",
+        "dns_category"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.policy.category.set.across.org",
+      "display_name": "Dns Protection Policy Category Set Across Org",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_category",
+        "dns_protection_tenant"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.clone",
+      "display_name": "Dns Protection Policy Clone",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.create",
+      "display_name": "Dns Protection Policy Create",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.delete",
+      "display_name": "Dns Protection Policy Delete",
+      "lifecycle": "active",
+      "operation": "delete",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.allow.add",
+      "display_name": "Dns Protection Policy Domain Allow Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.allow.bulk.add",
+      "display_name": "Dns Protection Policy Domain Allow Bulk Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.allow.remove",
+      "display_name": "Dns Protection Policy Domain Allow Remove",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.block.add",
+      "display_name": "Dns Protection Policy Domain Block Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.block.bulk.add",
+      "display_name": "Dns Protection Policy Domain Block Bulk Add",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.domain.block.remove",
+      "display_name": "Dns Protection Policy Domain Block Remove",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy",
+        "dns_domain"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.policy.search",
+      "display_name": "Search DNS Protection Policies",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_policy",
+        "dns_exception"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.policy.update",
+      "display_name": "Dns Protection Policy Update",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.portal.user.invite",
+      "display_name": "Dns Protection Portal User Invite",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "dns_portal_user"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.portal.user.password.reset.send",
+      "display_name": "Dns Protection Portal User Password Reset Send",
+      "lifecycle": "active",
+      "operation": "send",
+      "read_only": false,
+      "resource_types": [
+        "dns_portal_user"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.portal.user.role.update",
+      "display_name": "Dns Protection Portal User Role Update",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_portal_user"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.site.drift.search",
+      "display_name": "Search DNS Site Policy Drift",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_site",
+        "dns_policy",
+        "dns_configuration_drift"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.site.forwarders.update",
+      "display_name": "Dns Protection Site Forwarders Update",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_site",
+        "dns_forwarder"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.site.policy.assign",
+      "display_name": "Dns Protection Site Policy Assign",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_site",
+        "dns_policy"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.site.search",
+      "display_name": "Search DNS Protection Sites",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_site",
+        "dns_network"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.unblock.request.count.read",
+      "display_name": "Read Pending DNS Unblock Request Count",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "dns_unblock_request_count"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "dns.protection.unblock.request.decide",
+      "display_name": "Dns Protection Unblock Request Decide",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "dns_unblock_request"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "dns.protection.unblock.request.search",
+      "display_name": "Search DNS Unblock Requests",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "dns_unblock_request",
+        "dns_policy_request"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.attachment.content.read",
+      "display_name": "Read Document Attachment Content",
+      "lifecycle": "active",
+      "operation": "content_read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.attachment.read",
+      "display_name": "Read Document Attachment Metadata",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.attachment.search",
+      "display_name": "Search Document Attachments",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.configuration.read",
+      "display_name": "Read Documented Configuration",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_configuration",
+        "configuration"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.configuration.search",
+      "display_name": "Search Documented Configurations",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_configuration",
+        "configuration"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.contact.read",
+      "display_name": "Read Documented Contact",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_contact",
+        "contact"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.contact.search",
+      "display_name": "Search Documented Contacts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_contact",
+        "contact"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.document.read",
+      "display_name": "Read Documented Policy or Procedure",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_document",
+        "document",
+        "policy",
+        "procedure",
+        "sop"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.document.search",
+      "display_name": "Search Documented Policies and Procedures",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_document",
+        "document",
+        "policy",
+        "procedure",
+        "sop"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.flexible.asset.read",
+      "display_name": "Read Documented Flexible Asset",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_flexible_asset",
+        "flexible_asset",
+        "structured_documentation"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.flexible.asset.search",
+      "display_name": "Search Documented Flexible Assets",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_flexible_asset",
+        "flexible_asset",
+        "structured_documentation"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.flexible.asset.type.read",
+      "display_name": "Read Flexible Asset Type",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_flexible_asset_type",
+        "flexible_asset_type",
+        "structured_documentation_schema"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.flexible.asset.type.search",
+      "display_name": "Search Flexible Asset Types",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_flexible_asset_type",
+        "flexible_asset_type",
+        "structured_documentation_schema"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.location.read",
+      "display_name": "Read Documented Location",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_location",
+        "location"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.location.search",
+      "display_name": "Search Documented Locations",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_location",
+        "location"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.organization.read",
+      "display_name": "Read Documented Organization",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "documentation_organization",
+        "organization"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "documentation.organization.search",
+      "display_name": "Search Documented Organizations",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "documentation_organization",
+        "organization"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.alert.history.search",
+      "display_name": "Read Endpoint Alert History",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_alert",
+        "alert",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.alert.resolve",
+      "display_name": "Resolve Endpoint Alert",
+      "lifecycle": "active",
+      "operation": "resolve",
+      "read_only": false,
+      "resource_types": [
+        "endpoint_alert",
+        "endpoint"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "endpoint.alert.search",
+      "display_name": "Read Endpoint Alerts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_alert",
+        "alert",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.audit.read",
+      "display_name": "Read Endpoint Audit",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_audit",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.device.read",
+      "display_name": "Read Managed Endpoint",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.device.search",
+      "display_name": "Search Managed Endpoints",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.patch.search",
+      "display_name": "Read Endpoint Patches",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_patch",
+        "patch",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.powershell.read",
+      "display_name": "Read Endpoint State with PowerShell",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "endpoint",
+        "managed_endpoint",
+        "powershell_diagnostic"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "endpoint.security.detection.read",
+      "display_name": "Read Endpoint Security Detection",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security_detection",
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.security.detection.search",
+      "display_name": "Search Endpoint Security Detections",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security_detection",
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.security.policy.read",
+      "display_name": "Read Endpoint Security Policies",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security_policy",
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.security.quarantine.search",
+      "display_name": "Read Endpoint Security Quarantine",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security_quarantine",
+        "endpoint_security_detection",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.security.scan.history.search",
+      "display_name": "Read Endpoint Security Scan History",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security_scan",
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.security.scan.start",
+      "display_name": "Start Datto AV Scan",
+      "lifecycle": "active",
+      "operation": "scan_start",
+      "read_only": false,
+      "resource_types": [
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "endpoint.security.status.read",
+      "display_name": "Read Endpoint Security Status",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_security",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "endpoint.software.search",
+      "display_name": "Read Endpoint Software",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "endpoint_software",
+        "endpoint"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.authentication.methods.read",
+      "display_name": "Read Entra Authentication Methods",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "identity_authentication_methods",
+        "identity_user",
+        "entra_user"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.conditional.access.search",
+      "display_name": "Search Entra Conditional Access Policies",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "identity_conditional_access",
+        "conditional_access",
+        "policy"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.directory.role.members.search",
+      "display_name": "Search Entra Directory Role Members",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "identity_directory_role_member",
+        "directory_role_member",
+        "privileged_identity"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.directory.role.search",
+      "display_name": "Search Entra Directory Roles",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "identity_directory_role",
+        "directory_role",
+        "privileged_role"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.user.read",
+      "display_name": "Read Microsoft Entra User",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "identity_user",
+        "user",
+        "entra_user"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "identity.user.search",
+      "display_name": "Search Microsoft Entra Users",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "identity_user",
+        "user",
+        "entra_user"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "management.alert.search",
+      "display_name": "Search Managed Alerts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "alert"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "management.site.search",
+      "display_name": "Search Managed Sites",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "management_site"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "management.site.variable.create",
+      "display_name": "Create Managed Site Variable",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "management_site_variable"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "management.site.variable.list",
+      "display_name": "Read Managed Site Variables",
+      "lifecycle": "active",
+      "operation": "list",
+      "read_only": true,
+      "resource_types": [
+        "management_site_variable"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "management.site.variable.update",
+      "display_name": "Update Managed Site Variable",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "management_site_variable"
+      ],
+      "risk": "medium"
+    },
+    {
+      "capability": "operations.resolution.read",
+      "display_name": "Read Operational Resolution Case",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "resolution_case",
+        "resolution_memory"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "operations.resolution.search",
+      "display_name": "Search Operational Resolution Memory",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "resolution_case",
+        "resolution_memory"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "operations.resolution.summary",
+      "display_name": "Summarize Operational Resolution Memory",
+      "lifecycle": "active",
+      "operation": "summary",
+      "read_only": true,
+      "resource_types": [
+        "resolution_case",
+        "resolution_memory"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "print.alert.search",
+      "display_name": "Search Print Device Alerts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "print_alert",
+        "print_device"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "print.device.read",
+      "display_name": "Read Managed Print Device",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "print_device"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "print.device.search",
+      "display_name": "Search Managed Print Devices",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "print_device"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "print.meter.read",
+      "display_name": "Read Print Device Meters",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "print_meter",
+        "print_device"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "print.supplies.read",
+      "display_name": "Read Print Device Supplies",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "print_supply",
+        "print_device"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.company.read",
+      "display_name": "Read Service Company",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_company",
+        "organization"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.company.search",
+      "display_name": "Search Service Companies",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_company",
+        "organization"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.configuration.read",
+      "display_name": "Read Service Configuration Item",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_configuration",
+        "configuration"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.configuration.search",
+      "display_name": "Search Service Configuration Items",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_configuration",
+        "configuration"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.contact.read",
+      "display_name": "Read Service Contact",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_contact",
+        "contact"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.contact.search",
+      "display_name": "Search Service Contacts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_contact",
+        "contact"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.contract.read",
+      "display_name": "Read Service Contract",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_contract",
+        "contract",
+        "billing_agreement"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.contract.search",
+      "display_name": "Search Service Contracts",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_contract",
+        "contract",
+        "billing_agreement"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.entity.describe",
+      "display_name": "Describe Service Entity Schema",
+      "lifecycle": "active",
+      "operation": "describe",
+      "read_only": true,
+      "resource_types": [
+        "service_schema"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.entity.fields.describe",
+      "display_name": "Describe Service Entity Fields",
+      "lifecycle": "active",
+      "operation": "describe_fields",
+      "read_only": true,
+      "resource_types": [
+        "service_schema",
+        "service_field_schema"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.notification.history.search",
+      "display_name": "Search Service Notification History",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_notification",
+        "notification_history",
+        "notification_template"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.product.create",
+      "display_name": "Create Service Product",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_product",
+        "product",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.product.read",
+      "display_name": "Read Service Product",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_product",
+        "product",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.product.search",
+      "display_name": "Search Service Products",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_product",
+        "product",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.product.update",
+      "display_name": "Update Service Product",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_product",
+        "product",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.product.vendor.create",
+      "display_name": "Create Product Vendor Association",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_product_vendor",
+        "product_vendor",
+        "vendor"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.product.vendor.search",
+      "display_name": "Search Product Vendors",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_product_vendor",
+        "product_vendor",
+        "vendor"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.product.vendor.update",
+      "display_name": "Update Product Vendor Association",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_product_vendor",
+        "product_vendor",
+        "vendor"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.purchase.order.create",
+      "display_name": "Create Purchase Order",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_purchase_order",
+        "purchase_order",
+        "procurement"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.purchase.order.item.create",
+      "display_name": "Create Purchase Order Item",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_purchase_order_item",
+        "purchase_order_item",
+        "procurement"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.purchase.order.item.search",
+      "display_name": "Search Purchase Order Items",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_purchase_order_item",
+        "purchase_order_item",
+        "procurement"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.purchase.order.item.update",
+      "display_name": "Update Purchase Order Item",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_purchase_order_item",
+        "purchase_order_item",
+        "procurement"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.purchase.order.read",
+      "display_name": "Read Purchase Order",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_purchase_order",
+        "purchase_order",
+        "procurement"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.purchase.order.receive",
+      "display_name": "Receive Purchase Order Item",
+      "lifecycle": "active",
+      "operation": "receive",
+      "read_only": false,
+      "resource_types": [
+        "service_purchase_order_receipt",
+        "purchase_order_item",
+        "procurement"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.purchase.order.search",
+      "display_name": "Search Purchase Orders",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_purchase_order",
+        "purchase_order",
+        "procurement"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.purchase.order.update",
+      "display_name": "Update Purchase Order",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_purchase_order",
+        "purchase_order",
+        "procurement"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.resource.read",
+      "display_name": "Read Service Resource",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_resource",
+        "technician",
+        "service_person"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.resource.search",
+      "display_name": "Search Service Resources",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_resource",
+        "technician",
+        "service_person"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.service.bundle.create",
+      "display_name": "Create Service Bundle",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_bundle",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.service.bundle.read",
+      "display_name": "Read Service Bundle",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_bundle",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.service.bundle.search",
+      "display_name": "Search Service Bundles",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_bundle",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.service.bundle.update",
+      "display_name": "Update Service Bundle",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_bundle",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.service.create",
+      "display_name": "Create Catalog Service",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_catalog_service",
+        "service",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.service.read",
+      "display_name": "Read Service Catalog Service",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_catalog_service",
+        "service",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.service.search",
+      "display_name": "Search Service Catalog Services",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_catalog_service",
+        "service",
+        "catalog_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.service.update",
+      "display_name": "Update Catalog Service",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_catalog_service",
+        "service",
+        "catalog_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.attachment.content.read",
+      "display_name": "Read Service Ticket Attachment Content",
+      "lifecycle": "active",
+      "operation": "content_read",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_attachment",
+        "ticket_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.attachment.create",
+      "display_name": "Create Service Ticket Attachment",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket_attachment",
+        "ticket_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.attachment.read",
+      "display_name": "Read Service Ticket Attachment Metadata",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_attachment",
+        "ticket_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.attachment.search",
+      "display_name": "Search Service Ticket Attachments",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_attachment",
+        "ticket_attachment",
+        "attachment",
+        "file"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.charge.create",
+      "display_name": "Create Service Ticket Charge",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket_charge",
+        "ticket_charge",
+        "billing_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.charge.read",
+      "display_name": "Read Ticket Charge",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_charge",
+        "ticket_charge",
+        "billing_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.charge.search",
+      "display_name": "Search Ticket Charges",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_charge",
+        "ticket_charge",
+        "billing_item"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.charge.update",
+      "display_name": "Update Service Ticket Charge",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket_charge",
+        "ticket_charge",
+        "billing_item"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.client.notification.create",
+      "display_name": "Create Client Ticket Notification",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket_note",
+        "ticket_note"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.count",
+      "display_name": "Count Service Tickets",
+      "lifecycle": "active",
+      "operation": "count",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket",
+        "ticket"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.create",
+      "display_name": "Create Service Ticket",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket",
+        "ticket"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.note.create",
+      "display_name": "Create Service Ticket Note",
+      "lifecycle": "active",
+      "operation": "create",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket_note",
+        "ticket_note"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "service.ticket.notes.search",
+      "display_name": "Read Service Ticket Notes",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket_note",
+        "ticket_note",
+        "ticket"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.read",
+      "display_name": "Read Service Ticket",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket",
+        "ticket"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.search",
+      "display_name": "Search Service Tickets",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "service_ticket",
+        "ticket"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "service.ticket.update",
+      "display_name": "Update Service Ticket",
+      "lifecycle": "active",
+      "operation": "update",
+      "read_only": false,
+      "resource_types": [
+        "service_ticket",
+        "ticket"
+      ],
+      "risk": "high"
+    },
+    {
+      "capability": "system.registry.read",
+      "display_name": "Read Jason System Registry Entity",
+      "lifecycle": "active",
+      "operation": "read",
+      "read_only": true,
+      "resource_types": [
+        "system_registry"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "system.registry.search",
+      "display_name": "Search Jason System Registry",
+      "lifecycle": "active",
+      "operation": "search",
+      "read_only": true,
+      "resource_types": [
+        "system_registry"
+      ],
+      "risk": "low"
+    },
+    {
+      "capability": "system.registry.trace",
+      "display_name": "Trace Jason System Registry Topology",
+      "lifecycle": "active",
+      "operation": "trace",
+      "read_only": true,
+      "resource_types": [
+        "system_registry"
+      ],
+      "risk": "low"
+    }
+  ],
+  "containers": [
+    {
+      "health": "not-configured",
+      "image": "python:3.12-slim",
+      "name": "jason-autonomy-flight-recorder",
+      "networks": "jason-observability",
+      "read_only": "false",
+      "service_state": "running",
+      "user": ""
+    },
+    {
+      "health": "not-configured",
+      "image": "postgres:16",
+      "name": "jason-kfs-postgres",
+      "networks": "bridge",
+      "read_only": "false",
+      "service_state": "running",
+      "user": ""
+    },
+    {
+      "health": "not-configured",
+      "image": "prom/node-exporter:v1.9.1",
+      "name": "jason-node-exporter",
+      "networks": "jason-observability",
+      "read_only": "false",
+      "service_state": "running",
+      "user": "nobody"
+    },
+    {
+      "health": "healthy",
+      "image": "ollama/ollama:0.32.5",
+      "name": "jason-ollama",
+      "networks": "jason-observability",
+      "read_only": "false",
+      "service_state": "running",
+      "user": ""
+    },
+    {
+      "health": "not-configured",
+      "image": "python:3.12-slim",
+      "name": "jason-work-item-exporter",
+      "networks": "jason-observability",
+      "read_only": "true",
+      "service_state": "running",
+      "user": "1000:1000"
+    }
+  ],
+  "observed_at": "2026-09-26",
+  "schema_version": "1.0",
+  "source": "live-jason-capability-registry-and-docker-readonly-observation"
+}
