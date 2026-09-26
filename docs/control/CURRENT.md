@@ -1,7 +1,7 @@
 # Project Jason — Current Resume Point
 
 **Updated:** 2026-09-26
-**Production status:** Healthy governed runtime/MCP; Central Orchestrator authoritative; `direct_provider_access=false`; constitutional certification review active and not yet at 100%.
+**Production status:** Healthy governed runtime/MCP; Central Orchestrator authoritative; `direct_provider_access=false`; Project Jason is 100% constitutionally certified against J-002 as of authoritative main revision `bb0aad018ec40fb975a32b69594bdc6d6806fd1c` plus this closeout record.
 **Current certification record:** `docs/governance/CONSTITUTIONAL-CERTIFICATION-2026-09-26.md`
 **Morning checkpoint:** `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`
 
@@ -11,7 +11,7 @@
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
 - **Production/runtime boundary:** live runtime/MCP must be verified from container source labels, health, activation profiles, and governance status before consequential change.
-- **Next safe actions:** constitutional certification remediation is substantively complete on PR #381. All nineteen J-002 articles are PROVEN on the reviewed branch, including Article XIX, production-equivalent MCP certification, ADR-011 requester authorization, continuity, stewardship, simplicity, architecture-first, and living documentation. Required next step is normal protected-main merge of PR #381; only after merge should #175/#176 be closed and authoritative `main` described as 100% constitutionally certified. Continue to re-run certification after any material constitutional architecture or production-boundary change.
+- **Next safe actions:** constitutional certification remediation is complete. All nineteen J-002 articles are PROVEN on authoritative `main`; #175/#176 are closed; Article XIX and production-equivalent MCP certification are proven; ADR-011 is canonical. Resume normal roadmap work, but re-run constitutional certification after any material constitutional architecture, authority, identity, provider-boundary, recovery, or production-topology change. Certification is evidence tied to reviewed state, not a permanent waiver for future changes.
 
 ## Current production state
 
