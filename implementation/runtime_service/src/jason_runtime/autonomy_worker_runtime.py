@@ -887,7 +887,7 @@ class OperationalAutonomyMaintenance:
         note = (
             "Jason autonomous BackupIQ diagnostic completed using governed DRMM and "
             "Backup.net/UniView read evidence. "
-            f"Device={work.hostname}; D RMMOnline={'Yes' if endpoint_online else 'No'}; "
+            f"Device={work.hostname}; DRMMOnline={'Yes' if endpoint_online else 'No'}; "
             f"ProviderAssetId={str(asset.get('id') or '')[:80] or 'unknown'}; "
             f"ProviderStatus={provider_status or 'unknown'}; "
             f"BackupEnabled={'Yes' if backup_enabled else 'No'}; "
