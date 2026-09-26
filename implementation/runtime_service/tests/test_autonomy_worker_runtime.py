@@ -901,3 +901,223 @@ def test_offline_high_priority_candidates_do_not_starve_online_post_ticket(tmp_p
     assert len(note_calls) == 1
     assert note_calls[0]["ticketID"] == 141004
     store.close()
+
+
+def unexpected_shutdown_candidate():
+    return QueueCandidate(
+        resource_id="141099",
+        priority=95,
+        source_queue="Monitoring Alert",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 141099,
+            "ticketNumber": "T20260926.0100",
+            "title": (
+                "The previous system shutdown at 10:00:00 AM on 9/26/2026 "
+                "was unexpected. for PC-1"
+            ),
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+
+
+def test_unexpected_shutdown_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(unexpected_shutdown_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(141099) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation(
+    tmp_path: Path,
+):
+    incident_ms = 1790416800000
+
+    class ShutdownReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.read":
+                rid = str(arguments["resource_id"])
+                if rid == "device-uid-1":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "record": {
+                                "resource_id": "device-uid-1",
+                                "hostname": "PC-1",
+                                "site": "Site A",
+                                "online": True,
+                                "reboot_required": False,
+                                "device_type": {
+                                    "category": "Desktop",
+                                    "type": "Desktop",
+                                },
+                            }
+                        },
+                    }
+                if rid == "device-uid-2":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "record": {
+                                "resource_id": "device-uid-2",
+                                "hostname": "PC-2",
+                                "site": "Site A",
+                                "online": True,
+                                "device_type": {
+                                    "category": "Desktop",
+                                    "type": "Desktop",
+                                },
+                            }
+                        },
+                    }
+                if rid == "device-uid-vm":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "record": {
+                                "resource_id": "device-uid-vm",
+                                "hostname": "VM-1",
+                                "site": "Site A",
+                                "online": True,
+                                "device_type": {
+                                    "category": "Server",
+                                    "type": "Virtual Machine",
+                                },
+                            }
+                        },
+                    }
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "resource_matches": [
+                            {"resource_id": "device-uid-1", "hostname": "PC-1"},
+                            {"resource_id": "device-uid-2", "hostname": "PC-2"},
+                            {"resource_id": "device-uid-vm", "hostname": "VM-1"},
+                        ]
+                    },
+                }
+            if capability == "endpoint.alert.history.search":
+                rid = str(arguments["resource_id"])
+                if rid == "device-uid-1":
+                    alerts = [
+                        {
+                            "alertUid": "shutdown-current",
+                            "ticketNumber": "T20260926.0100",
+                            "timestamp": incident_ms,
+                            "alertContext": {
+                                "code": "6008",
+                                "description": "The previous system shutdown was unexpected.",
+                            },
+                        },
+                        {
+                            "alertUid": "shutdown-prior",
+                            "ticketNumber": "T20260920.0001",
+                            "timestamp": incident_ms - 5 * 24 * 60 * 60 * 1000,
+                            "alertContext": {
+                                "code": "6008",
+                                "description": "The previous system shutdown was unexpected.",
+                            },
+                        },
+                    ]
+                elif rid == "device-uid-2":
+                    alerts = [
+                        {
+                            "alertUid": "shutdown-peer",
+                            "ticketNumber": "T20260926.0101",
+                            "timestamp": incident_ms + 4 * 60 * 1000,
+                            "alertContext": {
+                                "code": "6008",
+                                "description": "The previous system shutdown was unexpected.",
+                            },
+                        }
+                    ]
+                else:
+                    alerts = [
+                        {
+                            "alertUid": "shutdown-vm",
+                            "ticketNumber": "T20260926.0102",
+                            "timestamp": incident_ms + 2 * 60 * 1000,
+                            "alertContext": {
+                                "code": "6008",
+                                "description": "The previous system shutdown was unexpected.",
+                            },
+                        }
+                    ]
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"alerts": alerts}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(unexpected_shutdown_candidate()),
+        reads=ShutdownReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    final = store.get(141099)
+    assert final is not None
+    assert final.playbook_id == "unexpected_shutdown"
+    assert final.phase == "escalated"
+    assert "recurrence/site-correlation" in final.last_reason
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_calls == []
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    body = note_calls[0]["description"]
+    assert "ShutdownEvents30d=2" in body
+    assert "PossibleSiteWideEvent=Yes" in body
+    assert "PhysicalDevicesInPlusMinus15Min=2" in body
+    assert "No reboot" in body
+    store.close()
