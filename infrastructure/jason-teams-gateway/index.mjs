@@ -34,8 +34,23 @@ const SAFE_FAILURE_TEXT =
   "Jason could not safely process that request. No action was taken.";
 const PROACTIVE_STORE_PATH = process.env.JASON_TEAMS_PROACTIVE_STORE_PATH ?? "/var/lib/jason-teams/proactive.json";
 const APPROVAL_DECISION_STORE_PATH = process.env.JASON_TEAMS_APPROVAL_DECISION_STORE_PATH ?? "/var/lib/jason-teams/approval-decisions.json";
-const PROACTIVE_TOKEN = nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN);
+const PROACTIVE_TOKEN_FILE = nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN_FILE);
+const PROACTIVE_TOKEN = loadProactiveToken();
 const approvalDecisions = createApprovalDecisionStore({ path: APPROVAL_DECISION_STORE_PATH });
+
+function loadProactiveToken() {
+  if (PROACTIVE_TOKEN_FILE) {
+    if (!existsSync(PROACTIVE_TOKEN_FILE)) {
+      throw new Error("Jason Teams proactive token file is missing");
+    }
+    const token = nonBlank(readFileSync(PROACTIVE_TOKEN_FILE, "utf8"));
+    if (!token) {
+      throw new Error("Jason Teams proactive token file is empty");
+    }
+    return token;
+  }
+  return nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN);
+}
 
 function loadProactiveStore() {
   if (!existsSync(PROACTIVE_STORE_PATH)) return {};
