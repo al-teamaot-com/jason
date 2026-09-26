@@ -860,7 +860,9 @@ class OperationalAutonomyMaintenance:
                 {"resource_id": work.device_uid, "kb": kb},
             )
             items = patch_data.get("items")
-            if not isinstance(items, list) or len(items) != 1:
+            if items is None:
+                items = patch_data.get("patches")
+            if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or len(items) != 1:
                 rows.append((kb, "AMBIGUOUS_OR_MISSING", False))
                 continue
             item = items[0]
