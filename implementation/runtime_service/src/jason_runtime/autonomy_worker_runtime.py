@@ -126,6 +126,15 @@ VULSCAN_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+DISK_BAD_BLOCK_SCOPE = PlaybookScope(
+    playbook_id="disk_bad_block_event_7",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:disk_bad_block_event_7",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -135,6 +144,7 @@ PLAYBOOK_SCOPES = {
     BACKUPIQ_SCOPE.playbook_id: BACKUPIQ_SCOPE,
     LOW_DISK_SCOPE.playbook_id: LOW_DISK_SCOPE,
     VULSCAN_SCOPE.playbook_id: VULSCAN_SCOPE,
+    DISK_BAD_BLOCK_SCOPE.playbook_id: DISK_BAD_BLOCK_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -523,6 +533,17 @@ class OperationalAutonomyMaintenance:
             or "missing critical security patch" in title
         )
 
+    @staticmethod
+    def _is_disk_bad_block_ticket(ticket: Mapping[str, Any]) -> bool:
+        material = (
+            str(ticket.get("title") or "") + " " + str(ticket.get("description") or "")
+        ).casefold()
+        return (
+            "bad block" in material
+            or "event id 7" in material
+            or ("\\device\\harddisk" in material and "\\dr" in material)
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -540,6 +561,8 @@ class OperationalAutonomyMaintenance:
             return LOW_DISK_SCOPE
         if self._is_vulscan_ticket(ticket):
             return VULSCAN_SCOPE
+        if self._is_disk_bad_block_ticket(ticket):
+            return DISK_BAD_BLOCK_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -663,6 +686,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "low_disk_investigate"
             elif work.playbook_id == VULSCAN_SCOPE.playbook_id:
                 next_phase = "vulscan_investigate"
+            elif work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
+                next_phase = "disk_bad_block_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -705,6 +730,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == VULSCAN_SCOPE.playbook_id:
             if work.phase == "vulscan_investigate":
                 self._investigate_vulscan(work, ticket)
+                return
+
+        if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
+            if work.phase == "disk_bad_block_investigate":
+                self._investigate_disk_bad_block(work)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -813,6 +843,119 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "Disk Event ID 7 device identity changed during execution.")
+            return
+        if endpoint.get("online") is not True:
+            self._block(work, "Disk Event ID 7 target went offline before evidence collection.")
+            return
+
+        history = self._read_data(
+            "endpoint.alert.history.search", {"resource_id": work.device_uid}
+        )
+        alerts = history.get("alerts")
+        if not isinstance(alerts, list):
+            alerts = []
+        bad_block_alerts: list[Mapping[str, Any]] = []
+        for alert in alerts:
+            if not isinstance(alert, Mapping):
+                continue
+            context = alert.get("alertContext")
+            context_map = context if isinstance(context, Mapping) else {}
+            code = str(context_map.get("code") or "").strip()
+            description = str(context_map.get("description") or "")
+            material = json.dumps(alert, sort_keys=True, default=str).casefold()
+            if code == "7" or "bad block" in description.casefold() or "bad block" in material:
+                bad_block_alerts.append(alert)
+
+        exact = next(
+            (
+                item for item in bad_block_alerts
+                if str(item.get("ticketNumber") or "").strip() == work.ticket_number
+            ),
+            None,
+        )
+        if exact is None and bad_block_alerts:
+            exact = max(
+                bad_block_alerts,
+                key=lambda item: int(item.get("timestamp") or 0),
+            )
+        if exact is None:
+            self._escalate(
+                work,
+                "No authoritative Event ID 7/bad-block alert was found in governed history.",
+            )
+            return
+
+        context = exact.get("alertContext")
+        context_map = context if isinstance(context, Mapping) else {}
+        description = str(context_map.get("description") or "").strip()
+        disk_match = re.search(
+            r"\\Device\\Harddisk(\d+)\\DR(\d+)",
+            description,
+            flags=re.IGNORECASE,
+        )
+        harddisk = disk_match.group(1) if disk_match else "unknown"
+        dr = disk_match.group(2) if disk_match else "unknown"
+
+        audit = self._read_data("endpoint.audit.read", {"resource_id": work.device_uid})
+        attached = audit.get("attachedDevices")
+        logical = audit.get("logicalDisks")
+        if attached is None and isinstance(audit.get("audit"), Mapping):
+            attached = audit["audit"].get("attachedDevices")
+            logical = audit["audit"].get("logicalDisks")
+        attached = attached if isinstance(attached, list) else []
+        logical = logical if isinstance(logical, list) else []
+        removable_hints = 0
+        for device in attached:
+            if not isinstance(device, Mapping):
+                continue
+            material = json.dumps(device, sort_keys=True, default=str).casefold()
+            if any(token in material for token in ("usb", "removable", "mass-storage", "sd card")):
+                removable_hints += 1
+
+        note = (
+            "Jason autonomous Disk Event ID 7 diagnostic completed using governed "
+            "read-only alert-history and endpoint-audit evidence. "
+            f"Device={work.hostname}; AlertUid={str(exact.get('alertUid') or '')[:90] or 'unknown'}; "
+            f"HarddiskX={harddisk}; DRX={dr}; "
+            f"LogicalDiskCount={len(logical)}; AttachedDeviceCount={len(attached)}; "
+            f"RemovableDeviceHints={removable_hints}. "
+            "Current provider audit does not authoritatively map Windows HarddiskX/DRX "
+            "to a physical disk model/serial/bus. The preferred comprehensive storage "
+            "diagnostic remains standing-safe blocked by Component Control, so Jason did "
+            "not guess whether the affected disk is internal or removable. No disk repair, "
+            "CHKDSK repair, formatting, firmware/driver change, alert resolution, ticket "
+            "completion, reboot, or other modifying action was attempted."
+        )
+        self._write_note(work, note, "Jason - Autonomous Disk Event ID 7 Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=(
+                    "Disk Event ID 7 diagnostic complete; authoritative physical-disk "
+                    "mapping remains component/technician gated."
+                ),
             )
         )
 
@@ -1835,7 +1978,15 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == VULSCAN_SCOPE.playbook_id:
+        if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous Disk Event ID 7 diagnostic stopped for technician review. "
+                f"{reason} No disk repair, CHKDSK repair, formatting, firmware/driver "
+                "change, alert resolution, ticket completion, reboot, or other modifying "
+                "action was attempted."
+            )
+            title = "Jason - Autonomous Disk Event ID 7 Escalation"
+        elif work.playbook_id == VULSCAN_SCOPE.playbook_id:
             body = (
                 "Jason autonomous VulScan diagnostic stopped for technician review. "
                 f"{reason} No patch approval, forced install, Windows Update repair, "
