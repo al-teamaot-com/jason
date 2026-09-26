@@ -136,8 +136,9 @@
           "Compliant: False"
         ]
       },
+      "review_status": "diagnostic_autonomous_setter_per_run_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -148,7 +149,10 @@
           "governance_precheck",
           "autonomy_approved"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:idle_log_off"
       }
     },
