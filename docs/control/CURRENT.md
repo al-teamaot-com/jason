@@ -1,7 +1,8 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-25
-**Production status:** Healthy governed runtime/MCP; Central Orchestrator authoritative; `direct_provider_access=false`.
+**Updated:** 2026-09-26
+**Production status:** Healthy governed runtime/MCP; Central Orchestrator authoritative; `direct_provider_access=false`; constitutional certification review active and not yet at 100%.
+**Current certification record:** `docs/governance/CONSTITUTIONAL-CERTIFICATION-2026-09-26.md`
 **Morning checkpoint:** `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`
 
 ## Continuity control anchors
@@ -10,7 +11,7 @@
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
 - **Production/runtime boundary:** live runtime/MCP must be verified from container source labels, health, activation profiles, and governance status before consequential change.
-- **Next safe actions:** continue from the canonical roadmap/support backlog; do not reopen completed SEC-007 / OPS-005 baseline / CONN-015 read / CONN-019 work unless new contradictory evidence appears.
+- **Next safe actions:** continue constitutional certification remediation before broad capability expansion. #56 and #165 are reconciled/closed; Article XIX/System Registry completeness is now proven and P0 #378 is ready to close. Remaining priorities are retiring/replacing the formal Autotask/IT Glue requester-authorization exceptions (#175/#176), adding production-equivalent MCP certification-runner coverage, and explicitly reviewing the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles. Do not claim 100% constitutional certification until no FAIL/PARTIAL/EXCEPTION items remain.
 
 ## Current production state
 

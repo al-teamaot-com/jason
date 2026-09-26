@@ -120,6 +120,7 @@ def test_docker_container_probe_can_verify_runtime_security_state() -> None:
     registry = registry_from_manifest(MANIFEST)
     plan = load_verification_plan(PLAN, registry=registry)
     check = next(item for item in plan.checks if item.registry_id == "component.jason-runtime")
+    declared_image = registry.get("component.jason-runtime").declared_state["image"]
 
     def command(arguments) -> str:
         assert tuple(arguments) == ("docker", "inspect", "jason-runtime")
@@ -130,7 +131,7 @@ def test_docker_container_probe_can_verify_runtime_security_state() -> None:
                     "State": {"Status": "running", "Health": {"Status": "healthy"}},
                     "Image": "sha256:adf4c9d75f226d5968117b732b6d3cc660d712a9755914bcd02bb18a8b00639a",
                     "Config": {
-                        "Image": "jason-runtime:production",
+                        "Image": declared_image,
                         "User": "1000:1000",
                         "Labels": {
                             "com.teamaot.jason.source_revision": "6e4e4c0979f3762b8dbd3b8b277850a1899deb18"
@@ -213,3 +214,33 @@ def test_probe_runner_rejects_unregistered_arbitrary_probe_type() -> None:
             source="test",
             observed_at=NOW,
         )
+
+
+def test_constitutional_governance_path_is_registered() -> None:
+    registry = registry_from_manifest(MANIFEST)
+    ids = {entity.registry_id for entity in registry.list_all()}
+    required = {
+        "governance.jkd-001",
+        "governance.jkd-002",
+        "governance.jkd-003",
+        "governance.jkd-004",
+        "governance.jkd-005",
+        "governance.jkd-006",
+        "governance.jkd-007",
+        "governance.client-boundary",
+        "governance.information-release",
+        "governance.execution-plan-binding",
+        "component.central-orchestrator",
+        "component.orchestration-event-store",
+        "component.governed-execution-ledger",
+    }
+    assert required.issubset(ids)
+
+    orchestrator = registry.get("component.central-orchestrator")
+    assert {
+        "governance.jkd-001",
+        "governance.jkd-002",
+        "governance.jkd-007",
+        "component.orchestration-event-store",
+        "component.governed-execution-ledger",
+    }.issubset(set(orchestrator.dependencies))

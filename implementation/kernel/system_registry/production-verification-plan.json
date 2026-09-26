@@ -34,6 +34,46 @@
         "container_name": "openclaw-openclaw-gateway-1",
         "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs"
       }
+    },
+    {
+      "registry_id": "component.jason-autonomy-flight-recorder",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-autonomy-flight-recorder"
+      }
+    },
+    {
+      "registry_id": "component.jason-kfs-postgres",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-kfs-postgres"
+      }
+    },
+    {
+      "registry_id": "component.jason-node-exporter",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-node-exporter"
+      }
+    },
+    {
+      "registry_id": "component.jason-ollama",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-ollama"
+      }
+    },
+    {
+      "registry_id": "component.jason-work-item-exporter",
+      "method": "docker-container-inspect-v1",
+      "probe": {
+        "type": "docker_container",
+        "container_name": "jason-work-item-exporter"
+      }
     }
   ]
 }

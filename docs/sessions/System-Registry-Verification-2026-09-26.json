@@ -1,0 +1,195 @@
+{
+  "declared_state_changed": false,
+  "effective_lifecycle_counts": {
+    "configured": 9,
+    "registered": 168,
+    "verified": 14
+  },
+  "generated_at": "2026-09-26T22:46:11.539469+00:00",
+  "lifecycle_events": "/home/al/jason-worktrees/constitutional-certification-20260926/implementation/kernel/system_registry/production-lifecycle-events.json",
+  "manifest": "/home/al/jason-worktrees/constitutional-certification-20260926/implementation/kernel/system_registry/production-registry.json",
+  "observation_source": "system-registry-production-host-observer",
+  "remediation_attempted": false,
+  "results": [
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "",
+        "container_name": "openbao",
+        "health": "not-configured",
+        "image": "ghcr.io/openbao/openbao:2.6.1",
+        "image_id": "sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0",
+        "networks": "jason-core",
+        "no_new_privileges": "true",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "ba7ad8861d0578cd4da4f7b9e5a6756d30484f8f",
+        "tmpfs": "",
+        "user": "0:0"
+      },
+      "outcome": "verified",
+      "registry_id": "component.openbao"
+    },
+    {
+      "detail": "Declared and observed state differ for: image",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "ALL",
+        "container_name": "jason-runtime",
+        "health": "healthy",
+        "image": "jason-runtime:candidate-1b5c9fd",
+        "image_id": "sha256:f9ffa0fa71b4d17832ba8ab242ff06d96afc198e0a98e6aaede7fa919e8f1c0d",
+        "networks": "jason-core,jason-observability",
+        "no_new_privileges": "true",
+        "read_only": "true",
+        "service_state": "running",
+        "source_commit": "1b5c9fdd5ffacce8c4943aa8d959cc377c19208f",
+        "tmpfs": "/tmp:rw,nosuid,nodev,noexec,size=32m",
+        "user": "1000:1000"
+      },
+      "outcome": "drifted",
+      "registry_id": "component.jason-runtime"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "CAP_NET_ADMIN,CAP_NET_RAW",
+        "container_name": "openclaw-openclaw-gateway-1",
+        "health": "healthy",
+        "image": "openclaw:local",
+        "image_id": "sha256:6fdd46f654a1c4edf3ddc7324ebb5918738a35b3e36809c4a47292b399aa7824",
+        "networks": "openclaw_default",
+        "no_new_privileges": "true",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": "node"
+      },
+      "outcome": "verified",
+      "registry_id": "component.openclaw-gateway"
+    },
+    {
+      "detail": "Declared and observed state differ for: sha256",
+      "method": "docker-file-sha256-v1",
+      "observed_state": {
+        "container_name": "openclaw-openclaw-gateway-1",
+        "path": "/home/node/.openclaw/extensions/jason-bridge/index.mjs",
+        "sha256": "8ba81c2e4a4cfbb9535d4ab3ffc0ea4c16894694cc2d2d228a47fa7ddaab599b"
+      },
+      "outcome": "drifted",
+      "registry_id": "component.openclaw-jason-bridge"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "",
+        "container_name": "jason-autonomy-flight-recorder",
+        "health": "not-configured",
+        "image": "python:3.12-slim",
+        "image_id": "sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+        "networks": "jason-observability",
+        "no_new_privileges": "false",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": ""
+      },
+      "outcome": "verified",
+      "registry_id": "component.jason-autonomy-flight-recorder"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "",
+        "container_name": "jason-kfs-postgres",
+        "health": "not-configured",
+        "image": "postgres:16",
+        "image_id": "sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6",
+        "networks": "bridge",
+        "no_new_privileges": "false",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": ""
+      },
+      "outcome": "verified",
+      "registry_id": "component.jason-kfs-postgres"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "",
+        "container_name": "jason-node-exporter",
+        "health": "not-configured",
+        "image": "prom/node-exporter:v1.9.1",
+        "image_id": "sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a",
+        "networks": "jason-observability",
+        "no_new_privileges": "false",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": "nobody"
+      },
+      "outcome": "verified",
+      "registry_id": "component.jason-node-exporter"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "",
+        "container_name": "jason-ollama",
+        "health": "healthy",
+        "image": "ollama/ollama:0.32.5",
+        "image_id": "sha256:4dea9fb511947e24a84237bb636b0203abcb2ff0d3fbc7b4ff865deb91362131",
+        "networks": "jason-observability",
+        "no_new_privileges": "false",
+        "read_only": "false",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": ""
+      },
+      "outcome": "verified",
+      "registry_id": "component.jason-ollama"
+    },
+    {
+      "detail": "Observed state satisfies declared state.",
+      "method": "docker-container-inspect-v1",
+      "observed_state": {
+        "cap_drop": "ALL",
+        "container_name": "jason-work-item-exporter",
+        "health": "not-configured",
+        "image": "python:3.12-slim",
+        "image_id": "sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a",
+        "networks": "jason-observability",
+        "no_new_privileges": "true",
+        "read_only": "true",
+        "service_state": "running",
+        "source_commit": "",
+        "tmpfs": "",
+        "user": "1000:1000"
+      },
+      "outcome": "verified",
+      "registry_id": "component.jason-work-item-exporter"
+    }
+  ],
+  "schema_version": "1.0",
+  "summary": {
+    "not_verified": 2,
+    "planned_host_checks": 9,
+    "registered_entities": 191,
+    "status": "attention-required",
+    "verified": 7
+  },
+  "verification_plan": "/home/al/jason-worktrees/constitutional-certification-20260926/implementation/kernel/system_registry/production-verification-plan.json"
+}
