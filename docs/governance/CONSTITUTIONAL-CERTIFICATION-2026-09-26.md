@@ -23,8 +23,7 @@ Certification is blocked by unresolved governance debt and proof gaps, principal
 1. temporary Jason-managed requester-authorization compatibility modes for Autotask and IT Glue remain active exceptions pending retirement, although they are now formally governed under J-405 with review due 2026-10-15;
 2. `CURRENT.md` was stale before this audit and is corrected by the certification workstream;
 3. full-host reboot acceptance for the OpenBao recovery control remains intentionally unperformed because reboot is disruptive, although bounded recovery evidence now exists and the original P0 #56 has been reconciled/closed;
-5. MCP-server tests still need a production-equivalent certification runner because the host venv lacks MCP runtime dependencies;
-6. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
+4. several constitutional principles (mission, simplicity, stewardship quality) require periodic architectural/human review and cannot honestly be certified by unit tests alone.
 
 ## Constitutional article matrix
 
@@ -126,18 +125,17 @@ The following current-main test families were executed together and passed:
 - OpenClaw/trusted ingress boundaries;
 - autonomous-remediation red-team controls.
 
-The host venv could not collect two MCP server test modules because it lacks the MCP production runtime's `PyJWT` dependency. Those modules are therefore **not counted as host-suite proof**. MCP boundary evidence in this audit uses the live MCP status plus previously accepted production/runtime image evidence; a future certification runner should execute the MCP tests inside the production-equivalent MCP image so dependency parity is guaranteed.
+The earlier host-venv MCP proof gap is now resolved. `tools/run_mcp_constitutional_certification.sh` builds Jason's actual MCP production Dockerfile from the source revision under test, layers only the test runner, and executes the constitutional MCP contract suite with the same MCP/PyJWT/runtime dependency set as production. During its first execution it exposed two Datto governed component-identity fail-closed regressions that the host environment had not surfaced; both were corrected before certification was allowed to pass. Production-equivalent certification passed for source revision `aa92ac17ed37640ecb8daf08c718afdd0ca08546`. Durable result: `docs/sessions/MCP-Constitutional-Certification-Result-2026-09-26.json`.
 
 ## Immediate remediation plan
 
 1. Continue provider-native/delegated requester-authorization investigation and retire the formally governed Autotask #175 and IT Glue #176 compatibility exceptions when safe; mandatory exception review is due no later than 2026-10-15.
-2. Add a production-equivalent constitutional test runner that includes MCP dependencies and produces a durable certification artifact tied to a source revision.
-3. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
-4. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
-5. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
+2. Review the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles with explicit architecture/owner evidence rather than pretending unit tests can settle them.
+3. Keep `docs/control/CURRENT.md` synchronized whenever a material workstream changes.
+4. Re-run this certification after remediation. A 100% statement may be made only when no FAIL/PARTIAL/EXCEPTION items remain and all mechanically testable controls have current evidence.
 
 ## Certification decision
 
 **Decision: NOT 100% CERTIFIED as of 2026-09-26.**
 
-Jason's current operational behavior is strongly constitutional and its most important authority/execution boundaries are functioning correctly. Article XIX/System Registry completeness has now been remediated and proven during this audit. The remaining blockers to a 100% certification are the still-active Autotask and IT Glue requester-authorization exceptions, production-equivalent MCP certification-runner coverage, and explicit owner/architecture review of the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles—not evidence that Jason is currently acting as an uncontrolled autonomous authority.
+Jason's current operational behavior is strongly constitutional and its most important authority/execution boundaries are functioning correctly. Article XIX/System Registry completeness and production-equivalent MCP certification-runner coverage have both been remediated and proven during this audit. The remaining blockers to a 100% certification are the still-active Autotask and IT Glue requester-authorization exceptions and explicit owner/architecture review of the remaining PARTIAL / NOT MECHANICALLY CERTIFIABLE constitutional articles—not evidence that Jason is currently acting as an uncontrolled autonomous authority.
