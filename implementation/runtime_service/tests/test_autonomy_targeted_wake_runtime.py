@@ -240,3 +240,92 @@ def test_attention_event_ingress_rejects_nonexact_resource(tmp_path):
     with pytest.raises(ValueError):
         ingress.signal(event="approval_received", resource_id="T*")
     store.close()
+
+
+def test_terminal_datto_job_read_wakes_only_matching_event_subject(tmp_path):
+    from jason_runtime.autonomy_targeted_wake_runtime import AutonomyAttentionEventIngress
+
+    now = datetime.now(timezone.utc)
+    store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    poll = TargetedWake(
+        wake_id="poll-j1",
+        resource_id="T1",
+        reason="check Datto job",
+        kind=WakeKind.TARGETED_READ,
+        due_at=now,
+        capability_name="automation.job.read",
+        arguments={"resource_id": "J1"},
+    )
+    wait_j1 = TargetedWake(
+        wake_id="wait-j1",
+        resource_id="T1",
+        reason="resume when Datto job completes",
+        kind=WakeKind.TARGETED_READ,
+        wake_on="job_completed",
+        event_subject_id="J1",
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+    )
+    wait_j2 = TargetedWake(
+        wake_id="wait-j2",
+        resource_id="T2",
+        reason="resume when other Datto job completes",
+        kind=WakeKind.TARGETED_READ,
+        wake_on="job_completed",
+        event_subject_id="J2",
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 2},
+    )
+    for wake in (poll, wait_j1, wait_j2):
+        store.schedule(wake)
+
+    class CompletedJobReads:
+        def execute(self, capability, arguments):
+            assert capability == "automation.job.read"
+            assert arguments == {"resource_id": "J1"}
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "job": {"resource_id": "J1", "status": "completed"}
+                },
+            }
+
+    queue = QueueAttention()
+    ingress = AutonomyAttentionEventIngress(store=store, queue_attention=queue)
+    maintenance = TargetedWakeMaintenance(
+        store=store,
+        reads=CompletedJobReads(),
+        queue_attention=queue,
+        event_ingress=ingress,
+        now=lambda: now,
+    )
+
+    assert maintenance.tick() is True
+    assert store.state("poll-j1") is WakeState.COMPLETE
+    assert store.state("wait-j1") is WakeState.PENDING
+    assert store.state("wait-j2") is WakeState.ARMED
+    assert queue.reasons == []
+    store.close()
+
+
+def test_nonterminal_datto_job_read_does_not_emit_completion_event(tmp_path):
+    from jason_runtime.autonomy_targeted_wake_runtime import AutonomyAttentionEventIngress
+
+    store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    store.schedule(TargetedWake(
+        wake_id="wait-j1",
+        resource_id="T1",
+        reason="wait",
+        kind=WakeKind.TARGETED_READ,
+        wake_on="job_completed",
+        event_subject_id="J1",
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+    ))
+    ingress = AutonomyAttentionEventIngress(store=store, queue_attention=QueueAttention())
+    assert ingress.observe_datto_job_read({
+        "status": "succeeded",
+        "evidence": {"job": {"resource_id": "J1", "status": "running"}},
+    }) == ()
+    assert store.state("wait-j1") is WakeState.ARMED
+    store.close()

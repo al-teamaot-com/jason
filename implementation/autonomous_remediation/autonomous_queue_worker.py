@@ -44,6 +44,7 @@ class RecheckRequest:
     arguments: Mapping[str, Any]
     due_at: datetime | None = None
     wake_on: str | None = None
+    event_subject_id: str | None = None
     queue_reconciliation_required: bool = False
     max_attempts: int = 3
 
@@ -55,6 +56,14 @@ class RecheckRequest:
             raise ValueError("recheck requires exactly one of due_at or wake_on")
         if self.due_at is not None and self.due_at.tzinfo is None:
             raise ValueError("recheck due_at must be timezone-aware")
+        if self.event_subject_id is not None:
+            subject = str(self.event_subject_id).strip()
+            if not subject:
+                raise ValueError("recheck event_subject_id must be non-empty")
+            if self.wake_on is None:
+                raise ValueError("recheck event_subject_id requires wake_on")
+            if any(token in subject for token in ("*", "?", "[", "]")):
+                raise ValueError("recheck event_subject_id must be exact")
         if not 1 <= self.max_attempts <= 10:
             raise ValueError("recheck max_attempts must be between 1 and 10")
         try:
@@ -76,6 +85,7 @@ class RecheckRequest:
             "arguments": dict(self.arguments),
             "due_at": self.due_at.isoformat() if self.due_at else None,
             "wake_on": self.wake_on,
+            "event_subject_id": self.event_subject_id,
             "queue_reconciliation_required": self.queue_reconciliation_required,
         }
         encoded = json.dumps(
@@ -91,6 +101,7 @@ class RecheckRequest:
             kind=WakeKind.TARGETED_READ,
             due_at=self.due_at,
             wake_on=self.wake_on,
+            event_subject_id=self.event_subject_id,
             capability_name=self.capability_name,
             arguments=dict(self.arguments),
             queue_reconciliation_required=self.queue_reconciliation_required,
