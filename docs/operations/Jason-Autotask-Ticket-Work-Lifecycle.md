@@ -61,9 +61,9 @@ When Jason reaches a terminal or sticky state whose **next meaningful action is 
 
 1. create an internal handoff/escalation note that summarizes the reason for review, completed diagnostics/remediation, authoritative verification evidence, remaining risk/question, and the exact recommended technician next step;
 2. move the ticket to queue **Help Desk I** (production queue ID `29682833`);
-3. set/preserve status **In Progress**;
+3. set status **Human Review**;
 4. preserve Work Type **Remote Support**, device/configuration association, priority, classification, and all existing ticket evidence unless another approved workflow explicitly changes them;
-5. require post-mutation readback confirming **Help Desk I + In Progress**;
+5. require post-mutation readback confirming **Help Desk I + Human Review**;
 6. persist `handoff_reason=human_review` and the blocker/escalation fingerprint;
 7. release the ticket from Jason's active-work slot immediately after verified handoff.
 

@@ -129,7 +129,7 @@ def test_human_review_handoff_routes_to_helpdesk_i_in_progress(monkeypatch):
     assert result["payload"] == {
         "id": 123,
         "queueID": "Help Desk I",
-        "status": "In Progress",
+        "status": "Human Review",
     }
     assert result["jason_policy_class"] == "ticket_work_handoff"
     assert result["jason_handoff_reason_class"] == "human_review"
@@ -157,7 +157,7 @@ def test_legacy_human_intervention_alias_routes_to_human_review(monkeypatch):
         },
     )
     assert result["payload"]["queueID"] == "Help Desk I"
-    assert result["payload"]["status"] == "In Progress"
+    assert result["payload"]["status"] == "Human Review"
     assert result["jason_handoff_reason_class"] == "human_review"
 
 

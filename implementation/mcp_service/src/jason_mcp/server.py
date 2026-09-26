@@ -2602,7 +2602,7 @@ def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
         payload = {
             "id": ticket_id,
             "queueID": "Help Desk I",
-            "status": "In Progress",
+            "status": "Human Review",
         }
     else:
         payload = {
