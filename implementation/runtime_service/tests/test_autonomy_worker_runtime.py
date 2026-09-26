@@ -1592,3 +1592,68 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     assert "KB5126052=NOT_APPROVED" in body
     assert "No patch approval" in body
     store.close()
+
+
+def disk_bad_block_candidate():
+    return QueueCandidate(
+        resource_id="141300",
+        priority=90,
+        source_queue="Monitoring Alert",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 141300,
+            "ticketNumber": "T20260926.0300",
+            "title": "Disk Event ID 7 - The device, \\Device\\Harddisk1\\DR1, has a bad block.",
+            "description": "The device, \\Device\\Harddisk1\\DR1, has a bad block.",
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+
+
+def test_disk_bad_block_diagnostic_does_not_guess_physical_mapping(tmp_path: Path):
+    class DiskReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":507,"isActive":True,
+                    "referenceNumber":"disk-device-1","referenceTitle":"PC-1"}}}}
+            if capability == "endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"disk-device-1","hostname":"PC-1","online":True}}}
+            if capability == "endpoint.alert.history.search":
+                return {"status":"succeeded","evidence":{"data":{"alerts":[{
+                    "alertUid":"alert-7","ticketNumber":"T20260926.0300","timestamp":1790416800000,
+                    "alertContext":{"code":"7","description":"The device, \\Device\\Harddisk1\\DR1, has a bad block."}
+                }]}}}
+            if capability == "endpoint.audit.read":
+                return {"status":"succeeded","evidence":{"audit":{
+                    "logicalDisks":[{"description":"Local Fixed Disk","diskIdentifier":"C:","freespace":1,"size":2}],
+                    "attachedDevices":[{"deviceName":"USB Mass-Storage","deviceType":"Disk"}]
+                }}}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(disk_bad_block_candidate()),
+        reads=DiskReads(),actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7")),
+        max_active_work_items=2,interval_seconds=30,monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final=store.get(141300)
+    assert final is not None
+    assert final.phase=="escalated"
+    assert "physical-disk mapping" in final.last_reason
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+    notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
+    assert len(notes)==1
+    assert "HarddiskX=1" in notes[0]["description"]
+    assert "RemovableDeviceHints=1" in notes[0]["description"]
+    assert "did not guess" in notes[0]["description"]
+    store.close()
