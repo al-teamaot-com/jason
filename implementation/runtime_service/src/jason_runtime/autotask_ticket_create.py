@@ -371,6 +371,7 @@ class AutotaskTicketCreateConnector(AutotaskTicketUpdateConnector):
         data["jasonVerification"] = {
             "readbackVerified": True, "ticketId": ticket_id, "verifiedFields": ["companyID", "title"]
         }
+        self._notify_ticket_attention("ticket_created", ticket_id)
         return ConnectorResult(
             capability=result.capability, provider=result.provider, data=data,
             evidence_ids=(*result.evidence_ids, f"autotask:ticket:{ticket_id}"), warnings=result.warnings,
@@ -420,6 +421,7 @@ class AutotaskTicketCreateConnector(AutotaskTicketUpdateConnector):
             "ticketId": ticket_id,
             "verifiedFields": ["companyID", "title"],
         }
+        self._notify_ticket_attention("ticket_created", ticket_id)
         return ConnectorResult(
             capability=result.capability,
             provider=result.provider,
@@ -479,9 +481,9 @@ def register_autotask_ticket_create_runtime_foundation(*, capabilities: Capabili
     )
 
 
-def build_autotask_ticket_create_invoker(*, openbao_url: str, role_id_path: Path, secret_id_path: Path, transport: HttpTransport, audit: AuditSink, bindings: TrustedPrincipalBindingResolver) -> CapabilityInvoker:
+def build_autotask_ticket_create_invoker(*, openbao_url: str, role_id_path: Path, secret_id_path: Path, transport: HttpTransport, audit: AuditSink, bindings: TrustedPrincipalBindingResolver, ticket_attention=None) -> CapabilityInvoker:
     secrets = OpenBaoSecretResolver(base_url=openbao_url, role_id_path=role_id_path, secret_id_path=secret_id_path)
-    connector = AutotaskTicketCreateConnector(secrets=secrets, transport=transport, audit=audit, bindings=bindings)
+    connector = AutotaskTicketCreateConnector(secrets=secrets, transport=transport, audit=audit, bindings=bindings, ticket_attention=ticket_attention)
     return GovernedConnectorCapabilityInvoker(
         connectors={AUTOTASK_TICKET_CREATE_PROVIDER: connector},
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,

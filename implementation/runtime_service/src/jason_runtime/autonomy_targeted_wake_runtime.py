@@ -225,11 +225,43 @@ class TargetedWakeMaintenance:
         return True
 
 
+class TicketAttentionRelay:
+    """Late-bound bridge from verified ticket events to queue attention."""
+
+    def __init__(self) -> None:
+        self._target = None
+
+    def bind(self, target) -> None:
+        self._target = target
+
+    def notify(self, *, event: str, ticket_id: int) -> None:
+        if self._target is None:
+            return
+        normalized_event = str(event or "").strip()
+        if normalized_event not in {"ticket_created", "ticket_changed"}:
+            raise ValueError("unsupported ticket attention event")
+        ticket = int(ticket_id)
+        if ticket < 1:
+            raise ValueError("ticket attention id must be positive")
+        self._target.request_reconcile(f"autotask:{normalized_event}:{ticket}")
+
+
 class CompositeAutonomyMaintenance:
     """Run bounded maintenance services on the runtime's owning thread."""
 
     def __init__(self, *services) -> None:
         self.services = tuple(service for service in services if service is not None)
+
+    def request_reconcile(self, reason: str) -> None:
+        delivered = False
+        for service in self.services:
+            callback = getattr(service, "request_reconcile", None)
+            if callback is None:
+                continue
+            callback(reason)
+            delivered = True
+        if not delivered:
+            raise RuntimeError("autonomy maintenance has no queue attention target")
 
     def tick(self) -> bool:
         handled = False
