@@ -363,6 +363,45 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
         }
     )
 
+    def prepare_request(
+        self,
+        request: ConnectorRequest,
+        credentials: Mapping[str, str],
+    ) -> PreparedRequest:
+        if self._is_autonomous_api_user_request(request):
+            operation = request.context.capability
+            if operation not in self.capabilities:
+                raise ConnectorAuthorizationError(
+                    "Capability is not registered for the Autotask mutation connector: "
+                    f"{operation}"
+                )
+            prepared = AutotaskConnector.prepare_request(
+                self,
+                request,
+                credentials,
+            )
+            headers = dict(prepared.headers)
+            headers.pop("ImpersonationResourceId", None)
+            self._preflight_requester_access(
+                prepared=prepared,
+                headers=headers,
+                operation=operation,
+            )
+            return PreparedRequest(
+                method=prepared.method,
+                url=prepared.url,
+                headers=headers,
+                params=prepared.params,
+                json=prepared.json,
+                timeout_seconds=prepared.timeout_seconds,
+                audit_operation=prepared.audit_operation,
+            )
+        return AutotaskMutationConnector.prepare_request(
+            self,
+            request,
+            credentials,
+        )
+
     @staticmethod
     def _label_requires_resolution(value: Any) -> bool:
         if not isinstance(value, str):
@@ -807,8 +846,9 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
         if not autotask_mutation_execution_enabled():
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
         credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
-        prepared = AutotaskMutationConnector.prepare_request(
-            self, normalized_request, credentials
+        prepared = self.prepare_request(
+            normalized_request,
+            credentials,
         )
         relative_path = prepared.audit_operation or urlsplit(prepared.url).path
         return ProviderPreparedExecution(
