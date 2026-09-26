@@ -744,3 +744,160 @@ def test_post_protected_recurring_target_documents_and_escalates(tmp_path: Path)
     assert "Recurring=Yes" in body
     assert "No reboot" in body
     store.close()
+
+
+def test_offline_high_priority_candidates_do_not_starve_online_post_ticket(tmp_path: Path):
+    class MultiQueueSource:
+        def reconcile_candidates(self):
+            offline_one = candidate("[Monitor] Antivirus status issue")
+            offline_one = QueueCandidate(
+                resource_id="140901",
+                priority=10000,
+                source_queue="Monitoring Alert",
+                owned_by_jason=False,
+                urgent=True,
+                context={
+                    **offline_one.context,
+                    "id": 140901,
+                    "ticketNumber": "T20260926.0901",
+                    "configurationItemID": 1901,
+                },
+            )
+            offline_two = QueueCandidate(
+                resource_id="140902",
+                priority=9999,
+                source_queue="Monitoring Alert",
+                owned_by_jason=False,
+                urgent=False,
+                context={
+                    **offline_one.context,
+                    "id": 140902,
+                    "ticketNumber": "T20260926.0902",
+                    "configurationItemID": 1902,
+                },
+            )
+            online_post = post_candidate()
+            return (offline_one, offline_two, online_post)
+
+    class StarvationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                rid = int(arguments["resource_id"])
+                if rid in {1901, 1902}:
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "data": {
+                                "item": {
+                                    "id": rid,
+                                    "companyID": 507,
+                                    "isActive": True,
+                                    "referenceNumber": f"offline-{rid}",
+                                    "referenceTitle": f"OFFLINE-{rid}",
+                                }
+                            }
+                        },
+                    }
+                if rid == 1583:
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "data": {
+                                "item": {
+                                    "id": 1583,
+                                    "companyID": 311,
+                                    "isActive": True,
+                                    "referenceNumber": "device-uid-1",
+                                    "referenceTitle": "PC-1",
+                                }
+                            }
+                        },
+                    }
+            if capability == "endpoint.device.read":
+                rid = arguments["resource_id"]
+                if str(rid).startswith("offline-"):
+                    suffix = str(rid).split("-")[-1]
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "record": {
+                                "resource_id": rid,
+                                "hostname": f"OFFLINE-{suffix}",
+                                "online": False,
+                            }
+                        },
+                    }
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "device-uid-1",
+                            "hostname": "PC-1",
+                            "online": True,
+                            "reboot_required": False,
+                            "operating_system": "Microsoft HyperV Server 2012",
+                            "device_type": {"category": "Server"},
+                        }
+                    },
+                }
+            if capability == "endpoint.alert.history.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "alerts": [
+                                {
+                                    "alertUid": "post-1",
+                                    "ticketNumber": "T20260923.0075",
+                                    "alertContext": {
+                                        "description": "Power-On-Self-Test (POST) errors occurred"
+                                    },
+                                },
+                                {
+                                    "alertUid": "post-2",
+                                    "ticketNumber": "T20260726.0006",
+                                    "alertContext": {
+                                        "description": "Power-On-Self-Test (POST) errors occurred"
+                                    },
+                                },
+                            ]
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=MultiQueueSource(),
+        reads=StarvationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140901) is None
+    assert store.get(140902) is None
+    post = store.get(141004)
+    assert post is not None
+    assert post.phase == "escalated"
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    assert note_calls[0]["ticketID"] == 141004
+    store.close()

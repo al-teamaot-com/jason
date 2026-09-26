@@ -404,12 +404,27 @@ class OperationalAutonomyMaintenance:
                 int(pair[0].resource_id),
             )
         )
-        for candidate, scope in eligible[:slots]:
+        started = 0
+        for candidate, scope in eligible:
+            if started >= slots:
+                break
             try:
                 work = self._admit(candidate, scope)
+            except Exception as exc:
+                # Transient admission failures (notably an offline endpoint) do
+                # not consume an active-work slot. Continue scanning so one or
+                # two offline high-priority tickets cannot permanently starve
+                # a lower-priority online eligible ticket.
+                self._record_admission_failure(candidate, scope, exc)
+                continue
+            started += 1
+            try:
                 self._advance(work, candidate.context)
             except Exception as exc:
-                self._record_admission_failure(candidate, scope, exc)
+                self._block(
+                    work,
+                    f"Execution failed closed: {type(exc).__name__}: {str(exc)[:350]}",
+                )
 
     @staticmethod
     def _is_health_only_edr_ticket(ticket: Mapping[str, Any]) -> bool:
