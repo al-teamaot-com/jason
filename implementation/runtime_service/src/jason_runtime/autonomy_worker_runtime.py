@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -116,6 +117,15 @@ LOW_DISK_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+VULSCAN_SCOPE = PlaybookScope(
+    playbook_id="vulscan_missing_patch",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:vulscan_missing_patch",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -124,6 +134,7 @@ PLAYBOOK_SCOPES = {
     UNEXPECTED_SHUTDOWN_SCOPE.playbook_id: UNEXPECTED_SHUTDOWN_SCOPE,
     BACKUPIQ_SCOPE.playbook_id: BACKUPIQ_SCOPE,
     LOW_DISK_SCOPE.playbook_id: LOW_DISK_SCOPE,
+    VULSCAN_SCOPE.playbook_id: VULSCAN_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -504,6 +515,14 @@ class OperationalAutonomyMaintenance:
             or "hard disk full" in title
         )
 
+    @staticmethod
+    def _is_vulscan_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return (
+            "vulnerability detected by vulscan" in title
+            or "missing critical security patch" in title
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -519,6 +538,8 @@ class OperationalAutonomyMaintenance:
             return BACKUPIQ_SCOPE
         if self._is_low_disk_ticket(ticket):
             return LOW_DISK_SCOPE
+        if self._is_vulscan_ticket(ticket):
+            return VULSCAN_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -586,7 +607,10 @@ class OperationalAutonomyMaintenance:
             )
         if (
             endpoint.get("online") is not True
-            and scope.playbook_id != BACKUPIQ_SCOPE.playbook_id
+            and scope.playbook_id not in {
+                BACKUPIQ_SCOPE.playbook_id,
+                VULSCAN_SCOPE.playbook_id,
+            }
         ):
             raise OperationalAutonomyError("endpoint is not currently online")
 
@@ -637,6 +661,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "backupiq_investigate"
             elif work.playbook_id == LOW_DISK_SCOPE.playbook_id:
                 next_phase = "low_disk_investigate"
+            elif work.playbook_id == VULSCAN_SCOPE.playbook_id:
+                next_phase = "vulscan_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -674,6 +700,11 @@ class OperationalAutonomyMaintenance:
         if work.playbook_id == LOW_DISK_SCOPE.playbook_id:
             if work.phase == "low_disk_investigate":
                 self._investigate_low_disk(work)
+                return
+
+        if work.playbook_id == VULSCAN_SCOPE.playbook_id:
+            if work.phase == "vulscan_investigate":
+                self._investigate_vulscan(work, ticket)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -782,6 +813,122 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    def _investigate_vulscan(
+        self,
+        work: OperationalWork,
+        ticket: Mapping[str, Any],
+    ) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "VulScan device identity changed during execution.")
+            return
+
+        material = " ".join(
+            str(ticket.get(key) or "")
+            for key in ("title", "description", "resolution")
+        )
+        kbs = sorted(set(re.findall(r"KB\s*(\d{6,8})", material, flags=re.IGNORECASE)))
+        if not kbs:
+            self._escalate(
+                work,
+                "No exact KB identity could be extracted from the VulScan ticket.",
+            )
+            return
+
+        rows: list[tuple[str, str, bool]] = []
+        for kb_digits in kbs:
+            kb = f"KB{kb_digits}"
+            patch_data = self._read_data(
+                "endpoint.patch.search",
+                {"resource_id": work.device_uid, "kb": kb},
+            )
+            items = patch_data.get("items")
+            if not isinstance(items, list) or len(items) != 1:
+                rows.append((kb, "AMBIGUOUS_OR_MISSING", False))
+                continue
+            item = items[0]
+            if not isinstance(item, Mapping):
+                rows.append((kb, "AMBIGUOUS_OR_MISSING", False))
+                continue
+            status = str(item.get("installStatus") or "").strip().upper() or "UNKNOWN"
+            rows.append((kb, status, bool(item.get("rebootRequired"))))
+
+        statuses = {status for _, status, _ in rows}
+        if "NOT_APPROVED" in statuses:
+            classification = "approval_blocked"
+        elif statuses & {"INSTALL_ERROR", "FAILED", "ERROR"}:
+            classification = "install_failure"
+        elif "APPROVED_PENDING" in statuses or "PENDING" in statuses:
+            classification = "approved_pending"
+        elif statuses and statuses <= {"INSTALLED"}:
+            classification = "stale_or_recovered_finding"
+        elif "AMBIGUOUS_OR_MISSING" in statuses:
+            classification = "patch_identity_or_supersedence_review"
+        else:
+            classification = "patch_state_review"
+
+        patch_summary = "; ".join(
+            f"{kb}={status}{'/RebootRequired' if reboot else ''}"
+            for kb, status, reboot in rows
+        )
+        online = endpoint.get("online") is True
+        note = (
+            "Jason autonomous VulScan diagnostic completed using governed endpoint and "
+            "exact patch-inventory reads. "
+            f"Device={work.hostname}; Online={'Yes' if online else 'No'}; "
+            f"EndpointRebootRequired={'Yes' if bool(endpoint.get('reboot_required')) else 'No'}; "
+            f"PatchStates={patch_summary}; Classification={classification}. "
+            "No patch approval, forced installation, Windows Update repair, WSUS-policy "
+            "change, reboot scheduling, reboot, or other modifying action was attempted. "
+        )
+        if classification == "approval_blocked":
+            note += (
+                "At least one reported KB is currently NOT_APPROVED; the playbook will "
+                "not approve patches autonomously."
+            )
+            reason = "VulScan diagnostic complete; one or more exact KBs are not approved."
+        elif classification == "stale_or_recovered_finding":
+            note += (
+                "All exact reported KBs are installed. Automatic ticket completion remains "
+                "gated until stale/recovered VulScan closure is separately accepted."
+            )
+            reason = "VulScan diagnostic complete; reported KBs appear installed, closure gated."
+        elif classification == "approved_pending":
+            note += (
+                "At least one exact KB is approved/pending. Patch-window timing and any "
+                "reboot action remain separately gated."
+            )
+            reason = "VulScan diagnostic complete; approved-pending patch requires window/recheck logic."
+        else:
+            note += (
+                "Technician review or a separately accepted Windows Update remediation branch "
+                "is required before modifying the endpoint."
+            )
+            reason = f"VulScan diagnostic classified {classification}; remediation remains gated."
+
+        self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=reason,
             )
         )
 
@@ -1686,7 +1833,15 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == LOW_DISK_SCOPE.playbook_id:
+        if work.playbook_id == VULSCAN_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous VulScan diagnostic stopped for technician review. "
+                f"{reason} No patch approval, forced install, Windows Update repair, "
+                "WSUS-policy change, reboot scheduling, reboot, or other modifying action "
+                "was attempted."
+            )
+            title = "Jason - Autonomous VulScan Escalation"
+        elif work.playbook_id == LOW_DISK_SCOPE.playbook_id:
             body = (
                 "Jason autonomous low-disk diagnostic stopped for technician review. "
                 f"{reason} No file deletion, cleanup component, BitLocker change, reboot, "

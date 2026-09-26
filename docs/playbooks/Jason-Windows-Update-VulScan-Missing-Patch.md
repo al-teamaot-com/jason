@@ -410,23 +410,12 @@ Close after:
 
 ## 23. Autonomous Execution Eligibility
 
-autonomous_allowed: false
+autonomous_allowed: diagnostic_only
 
-Approval owner: pending
-Approval date: pending
-Approved version/fingerprint: pending
+Approval owner: person-al
+Approval date: 2026-09-26
+Approved scope: exact `vulscan_missing_patch@1.0.0` diagnostic/classification branch using governed endpoint/device and exact DRMM patch reads plus internal ticket work-start/note updates.
 
-This new/changed playbook version requires explicit autonomy review before any autonomous remediation is permitted.
+The autonomous branch may extract exact KB identities from the ticket, read the matching DRMM patch objects, classify INSTALLED, APPROVED_PENDING, NOT_APPROVED, INSTALL_ERROR/FAILED, ambiguous/supersedence-review states, document reboot-required/online state, and stop for technician review.
 
-Potential future autonomous scope after acceptance:
-- read-only ticket/device/patch diagnostics
-- ownership/device-association updates
-- diagnostic-only component execution
-- waiting/recheck state transitions
-
-Still per-run approval-bound unless explicitly approved by policy:
-- WU_AutoFixCore=True remediation
-- usrClearWSUS=True
-- reboot/shutdown
-- any user-disruptive action
-- patch approval changes
+It may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.

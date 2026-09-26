@@ -1437,3 +1437,153 @@ def test_low_disk_workstation_diagnostic_is_read_only(tmp_path: Path):
     assert "ProtectedRole=No" in body
     assert "No files were deleted" in body
     store.close()
+
+
+def vulscan_candidate():
+    return QueueCandidate(
+        resource_id="141183",
+        priority=100,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=True,
+        context={
+            "id": 141183,
+            "ticketNumber": "T20260925.0001",
+            "title": "Vulnerability Detected by VulScan - GAI-DT2850",
+            "description": (
+                "Issue: Missing Critical Security Patch - "
+                "2026-09 Security Update (KB5124008) (26100.9445)\n"
+                "Issue: Missing Critical Security Patch - "
+                "2026-09 .NET Framework Security Update (KB5126052)"
+            ),
+            "companyID": 597,
+            "configurationItemID": 68,
+        },
+    )
+
+
+def test_vulscan_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+                "low_disk_space",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert store.get(141183) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
+    class VulscanReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 68,
+                                "companyID": 597,
+                                "isActive": True,
+                                "referenceNumber": "vul-device-1",
+                                "referenceTitle": "GAI-DT2850",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "vul-device-1",
+                            "hostname": "GAI-DT2850",
+                            "online": False,
+                            "reboot_required": True,
+                        }
+                    },
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "items": [
+                            {
+                                "kbArticleId": kb.replace("KB", ""),
+                                "installStatus": "NOT_APPROVED",
+                                "rebootRequired": True,
+                            }
+                        ]
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+                "low_disk_space",
+                "vulscan_missing_patch",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    final = store.get(141183)
+    assert final is not None
+    assert final.playbook_id == "vulscan_missing_patch"
+    assert final.phase == "escalated"
+    assert "not approved" in final.last_reason.casefold()
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_calls == []
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    body = note_calls[0]["description"]
+    assert "KB5124008=NOT_APPROVED" in body
+    assert "KB5126052=NOT_APPROVED" in body
+    assert "No patch approval" in body
+    store.close()

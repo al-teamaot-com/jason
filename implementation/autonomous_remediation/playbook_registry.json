@@ -286,8 +286,9 @@
           "Vulnerability Detected by VulScan"
         ]
       },
+      "review_status": "diagnostic_autonomous_remediation_reboot_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -296,7 +297,10 @@
           "evidence_fresh",
           "governance_precheck"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:vulscan_missing_patch"
       }
     }
