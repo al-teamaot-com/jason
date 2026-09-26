@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-import pytest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -155,6 +154,10 @@ def test_sqlite_repository_rejects_changed_scope_for_same_approval_id(tmp_path):
     repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
     original = request()
     repo.put(original)
-    with pytest.raises(ValueError, match="changed immutable scope"):
+    try:
         repo.put(replace(original, requested_mode="administer"))
+    except ValueError as exc:
+        assert "changed immutable scope" in str(exc)
+    else:
+        raise AssertionError("changed immutable scope was accepted")
     repo.close()
