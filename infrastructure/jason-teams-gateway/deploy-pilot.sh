@@ -8,6 +8,8 @@ IMAGE="${IMAGE:-jason-teams-gateway:pilot}"
 HOST_BIND="${JASON_TEAMS_HOST_BIND:-127.0.0.1}"
 HOST_PORT="${JASON_TEAMS_HOST_PORT:-3979}"
 SERVICE_DIR="${JASON_TEAMS_SERVICE_DIR:-/opt/jason/services/jason-teams-gateway}"
+PROACTIVE_TOKEN_HOST_PATH="${JASON_TEAMS_PROACTIVE_TOKEN_HOST_PATH:-/var/lib/jason/runtime-secrets/teams-proactive/token}"
+PROACTIVE_TOKEN_CONTAINER_PATH="/run/jason-secrets/teams-proactive/token"
 OPENCLAW_CONFIG_HOST="${OPENCLAW_CONFIG_HOST:-/opt/jason/services/openclaw/data/config/openclaw.json}"
 OPENCLAW_KEY_CONTAINER="${OPENCLAW_KEY_CONTAINER:-/home/node/.config/openclaw/jason-ingress/openclaw-jason-ed25519-v2.pem}"
 RUN_UID="$(id -u)"
@@ -19,6 +21,10 @@ if [ ! -f infrastructure/jason-teams-gateway/Dockerfile ]; then
 fi
 if [ ! -f "$OPENCLAW_CONFIG_HOST" ]; then
   echo "ERROR: OpenClaw config not found at $OPENCLAW_CONFIG_HOST"
+  exit 1
+fi
+if [ ! -s "$PROACTIVE_TOKEN_HOST_PATH" ]; then
+  echo "ERROR: Teams proactive token file is missing: $PROACTIVE_TOKEN_HOST_PATH"
   exit 1
 fi
 if ! docker inspect "$OPENCLAW_CONTAINER" >/dev/null 2>&1; then
@@ -104,9 +110,11 @@ docker run -d \
   -e JASON_RUNTIME_URL=http://jason-runtime:8080/v1/openclaw/teams/conversation \
   -e JASON_INGRESS_KEY_ID=openclaw-gateway-2 \
   -e JASON_INGRESS_PRIVATE_KEY_PATH=/run/jason/ingress.pem \
+  -e JASON_TEAMS_PROACTIVE_TOKEN_FILE="$PROACTIVE_TOKEN_CONTAINER_PATH" \
   -p "$HOST_BIND:$HOST_PORT:3979" \
   -v "$OPENCLAW_CONFIG_HOST:/run/openclaw/openclaw.json:ro" \
   -v "$SERVICE_DIR/secrets/ingress.pem:/run/jason/ingress.pem:ro" \
+  -v "$PROACTIVE_TOKEN_HOST_PATH:$PROACTIVE_TOKEN_CONTAINER_PATH:ro" \
   "$IMAGE" >/dev/null
 
 sleep 4
