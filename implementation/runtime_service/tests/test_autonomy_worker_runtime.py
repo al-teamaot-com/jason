@@ -1526,13 +1526,18 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
                 return {
                     "status": "succeeded",
                     "evidence": {
-                        "items": [
-                            {
-                                "kbArticleId": kb.replace("KB", ""),
-                                "installStatus": "NOT_APPROVED",
-                                "rebootRequired": True,
-                            }
-                        ]
+                        "data": {
+                            "patches": [
+                                {
+                                    "kbArticleId": kb.replace("KB", ""),
+                                    "installStatus": "NOT_APPROVED",
+                                    "rebootRequired": True,
+                                }
+                            ],
+                            "match_count": 1,
+                            "exact_selector_match": True,
+                            "ambiguous": False,
+                        }
                     },
                 }
             return super().execute(capability, arguments)
