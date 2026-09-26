@@ -279,6 +279,7 @@ def bind_ticket_work_handoff(
 
     reason = str(reason_class or "").strip().casefold()
     allowed_reasons = {
+        "human_review",
         "human_intervention_required",
         "physical_intervention_required",
         "client_clarification_required",
@@ -287,6 +288,8 @@ def bind_ticket_work_handoff(
     }
     if reason not in allowed_reasons:
         raise RuntimeBindingError("ticket handoff requires a supported reason class")
+    if reason == "human_intervention_required":
+        reason = "human_review"
 
     fingerprint = str(blocker_fingerprint or "").strip()
     if not fingerprint:

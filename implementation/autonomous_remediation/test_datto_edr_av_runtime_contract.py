@@ -166,7 +166,7 @@ def test_ticket_work_start_rejects_offline_device():
         bind_ticket_work_start(123, device_online=False)
 
 
-def test_ticket_work_handoff_uses_reason_and_blocker_fingerprint():
+def test_ticket_work_handoff_uses_canonical_human_review_reason_and_blocker_fingerprint():
     request = bind_ticket_work_handoff(
         123,
         reason_class="human_intervention_required",
@@ -176,7 +176,7 @@ def test_ticket_work_handoff_uses_reason_and_blocker_fingerprint():
     assert request.arguments == {
         "ticket_id": 123,
         "return_work": True,
-        "handoff_reason_class": "human_intervention_required",
+        "handoff_reason_class": "human_review",
         "blocker_fingerprint": "needs-onsite-usb",
     }
 
