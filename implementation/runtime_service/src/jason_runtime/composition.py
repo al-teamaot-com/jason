@@ -205,6 +205,11 @@ from .autotask_internal_note import (
     register_autotask_internal_note_invoker,
     register_autotask_internal_note_runtime_foundation,
 )
+from .autotask_client_notification import (
+    build_autotask_client_notification_invoker,
+    register_autotask_client_notification_invoker,
+    register_autotask_client_notification_runtime_foundation,
+)
 from .autotask_ticket_update import (
     build_autotask_ticket_update_invoker,
     register_autotask_ticket_update_invoker,
@@ -1087,6 +1092,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_autotask_client_notification_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_ticket_update_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1329,6 +1339,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
     )
+    client_notification_invoker = build_autotask_client_notification_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     ticket_update_invoker = build_autotask_ticket_update_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -1550,6 +1568,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     register_autotask_internal_note_invoker(
         invokers=invokers,
         invoker=internal_note_invoker,
+    )
+    register_autotask_client_notification_invoker(
+        invokers=invokers,
+        invoker=client_notification_invoker,
     )
     register_autotask_ticket_update_invoker(
         invokers=invokers,
