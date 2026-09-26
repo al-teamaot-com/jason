@@ -19,6 +19,12 @@ class QueueAttentionPort(Protocol):
     def request_reconcile(self, reason: str) -> None: ...
 
 
+DATTO_TERMINAL_JOB_STATUSES = frozenset({
+    "complete", "completed", "success", "successful", "succeeded", "finished",
+    "failed", "failure", "error", "cancelled", "canceled", "aborted",
+})
+
+
 class AutonomyAttentionEventIngress:
     """Provider-neutral bridge from trusted runtime events into scheduler attention.
 
@@ -64,6 +70,28 @@ class AutonomyAttentionEventIngress:
             )
         return wake_ids
 
+    def observe_datto_job_read(
+        self,
+        result,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        if str(result.get("status") or "") != "succeeded":
+            return ()
+        evidence = result.get("evidence") or {}
+        job = evidence.get("job") if isinstance(evidence, dict) else None
+        if not isinstance(job, dict):
+            return ()
+        job_uid = str(job.get("resource_id") or "").strip()
+        status = str(job.get("status") or "").strip().casefold()
+        if not job_uid or status not in DATTO_TERMINAL_JOB_STATUSES:
+            return ()
+        return self.store.signal_subject(
+            "job_completed",
+            event_subject_id=job_uid,
+            now=now,
+        )
+
 
 DEFAULT_TARGETED_READ_CAPABILITIES = frozenset(
     {
@@ -90,6 +118,7 @@ class TargetedWakeMaintenance:
         allowed_capabilities=frozenset(DEFAULT_TARGETED_READ_CAPABILITIES),
         retry_seconds: int = 300,
         maximum_per_tick: int = 20,
+        event_ingress: AutonomyAttentionEventIngress | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         if retry_seconds < 60:
@@ -102,6 +131,7 @@ class TargetedWakeMaintenance:
         self.allowed_capabilities = frozenset(allowed_capabilities)
         self.retry_seconds = retry_seconds
         self.maximum_per_tick = maximum_per_tick
+        self.event_ingress = event_ingress
         self.now = now or (lambda: datetime.now(timezone.utc))
 
     def tick(self) -> bool:
@@ -135,6 +165,9 @@ class TargetedWakeMaintenance:
                             or "targeted read failed"
                         )
                     )
+
+                if capability == "automation.job.read" and self.event_ingress is not None:
+                    self.event_ingress.observe_datto_job_read(result, now=current)
 
                 self.store.complete(wake.wake_id)
                 if wake.queue_reconciliation_required:
