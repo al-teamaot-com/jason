@@ -593,3 +593,154 @@ def test_security_log_unhealthy_runs_one_self_heal_then_verifies(tmp_path: Path)
         "Security Log Quick Test [WIN] AOT Ver 12012025-1",
     ]
     store.close()
+
+
+def post_candidate(title="Power-On-Self-Test (POST) errors occurred during the last system startup."):
+    return QueueCandidate(
+        resource_id="141004",
+        priority=95,
+        source_queue="Monitoring Alert",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141004,
+            "ticketNumber": "T20260923.0075",
+            "title": title,
+            "companyID": 311,
+            "configurationItemID": 1583,
+        },
+    )
+
+
+def test_post_ticket_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(post_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("datto_edr_av", "dns_agent_diagnostic", "security_log_self_heal")
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(141004) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_post_protected_recurring_target_documents_and_escalates(tmp_path: Path):
+    class PostReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 311,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "PC-1",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "device-uid-1",
+                            "hostname": "PC-1",
+                            "online": True,
+                            "reboot_required": False,
+                            "operating_system": "Microsoft HyperV Server 2012",
+                            "device_type": {
+                                "category": "Server",
+                                "type": "Main System Chassis",
+                            },
+                        }
+                    },
+                }
+            if capability == "endpoint.alert.history.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "alerts": [
+                                {
+                                    "alertUid": "post-1",
+                                    "ticketNumber": "T20260923.0075",
+                                    "alertContext": {
+                                        "description": "Power-On-Self-Test (POST) errors occurred"
+                                    },
+                                },
+                                {
+                                    "alertUid": "post-2",
+                                    "ticketNumber": "T20260726.0006",
+                                    "alertContext": {
+                                        "description": "Power-On-Self-Test (POST) errors occurred"
+                                    },
+                                },
+                            ]
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(post_candidate()),
+        reads=PostReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    first = store.get(141004)
+    assert first is not None
+    assert first.playbook_id == "post_error_investigation"
+
+    final = store.get(141004)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert "requires technician review" in final.last_reason
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_calls == []
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    body = note_calls[0]["description"]
+    assert "ProtectedRole=Yes" in body
+    assert "Recurring=Yes" in body
+    assert "No reboot" in body
+    store.close()
