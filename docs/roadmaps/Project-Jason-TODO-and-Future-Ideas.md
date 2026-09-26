@@ -1217,7 +1217,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Required behavior:** Create a concise internal handoff note; move the ticket to Help Desk I; set status Human Review; preserve Remote Support, device association, priority, and classification; require post-write readback; persist `handoff_reason=human_review`; release the active-work slot; prevent immediate auto-reclaim until the blocker changes or a technician explicitly returns the ticket to Jason.
 - **Current blocker:** Production acceptance waits on merge/deploy of the implementation in PR #368; the previous Atomic acceptance attempt was correctly blocked before provider execution by the old handoff path.
 - **Implementation checkpoint (2026-09-26):** human_review is the canonical handoff reason; legacy human_intervention_required is accepted as an alias. The server-controlled handoff resolves the destination to **Help Desk I + Human Review** while other handoff reasons retain trusted pre-claim restoration. Claim-store blocker fingerprints prevent immediate reclaim for an unchanged human-review blocker.
-- **Remaining acceptance:** Merge/deploy PR #368 and run one controlled production handoff with provider write/readback evidence.
+- **Remaining acceptance:** Merge/deploy the Human Review status follow-up and run one controlled production handoff with provider write/readback evidence once Autotask exposes the active Human Review status through API metadata.
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Resume immediately after PR #368 merges or the governed ticket-update blocker is corrected.
 
