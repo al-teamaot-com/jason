@@ -97,8 +97,9 @@
           "DNS Agent"
         ]
       },
+      "review_status": "diagnostic_only_autonomous_repair_gated",
       "autonomy": {
-        "activation": "shadow",
+        "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
@@ -106,7 +107,11 @@
           "evidence_fresh",
           "governance_precheck"
         ],
-        "allowed_capabilities": [],
+        "allowed_capabilities": [
+          "automation.component.execute",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
         "policy_id": "playbook-autonomy:dns_agent_diagnostic"
       }
     },

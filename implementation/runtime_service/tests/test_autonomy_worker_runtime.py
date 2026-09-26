@@ -11,7 +11,12 @@ from jason_runtime.autonomy_worker_runtime import (
 
 
 class PromotionStore:
+    def __init__(self, promoted=("datto_edr_av",)):
+        self.promoted = set(promoted)
+
     def find_scope_approved(self, **kwargs):
+        if kwargs.get("playbook_id") not in self.promoted:
+            return None
         return SimpleNamespace(
             approval_id="approval-owner",
             allowed_capabilities=(
@@ -93,8 +98,8 @@ class Actions:
         self.calls = []
         self.jobs = 0
 
-    def execute(self, capability, arguments):
-        self.calls.append((capability, arguments))
+    def execute(self, scope, capability, arguments):
+        self.calls.append((scope.playbook_id, capability, arguments))
         if capability == "automation.component.execute":
             self.jobs += 1
             return {
@@ -160,7 +165,7 @@ def test_verified_healthy_ticket_is_claimed_documented_and_completed(tmp_path: P
 
     ticket_updates = [
         args["payload"]
-        for capability, args in actions.calls
+        for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
     assert ticket_updates[0] == {
@@ -173,7 +178,7 @@ def test_verified_healthy_ticket_is_claimed_documented_and_completed(tmp_path: P
 
     component_calls = [
         args
-        for capability, args in actions.calls
+        for _, capability, args in actions.calls
         if capability == "automation.component.execute"
     ]
     assert len(component_calls) == 1
@@ -183,7 +188,7 @@ def test_verified_healthy_ticket_is_claimed_documented_and_completed(tmp_path: P
 
     note_calls = [
         args["payload"]
-        for capability, args in actions.calls
+        for _, capability, args in actions.calls
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
@@ -245,7 +250,7 @@ def test_nonhealthy_health_check_runs_one_repair_then_verifies(tmp_path: Path):
 
     component_names = [
         args["component_name"]
-        for capability, args in actions.calls
+        for _, capability, args in actions.calls
         if capability == "automation.component.execute"
     ]
     assert component_names == [
@@ -293,4 +298,125 @@ def test_worker_accepts_provider_native_datto_device_identity(tmp_path: Path):
     assert work.phase == "health_wait"
     assert work.device_uid == "device-uid-1"
     assert work.hostname == "PC-1"
+    store.close()
+
+
+def dns_candidate(title="DNS Agent service isStopped for PC-1"):
+    return QueueCandidate(
+        resource_id="140944",
+        priority=90,
+        source_queue="Monitoring Alert",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 140944,
+            "ticketNumber": "T20260926.0001",
+            "title": title,
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+
+
+def test_dns_ticket_requires_dns_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(dns_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("datto_edr_av",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140944) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_dns_ticket_runs_standing_safe_diagnostic_then_escalates(tmp_path: Path):
+    class DnsReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "automation.job.output.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "outputs": [
+                            {
+                                "component_uid": arguments["component_uid"],
+                                "stream": "stdout",
+                                "text": (
+                                    "INCIDENT_CLASSIFICATION=agent_corrupt_or_partial\n"
+                                    "FILTERING_SERVICE=Stopped\n"
+                                    "SERVICE_MANAGER=Running\n"
+                                    "DNS_RESOLUTION=Success"
+                                ),
+                            }
+                        ]
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(dns_candidate()),
+        reads=DnsReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("datto_edr_av", "dns_agent_diagnostic")),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    first = store.get(140944)
+    assert first is not None
+    assert first.playbook_id == "dns_agent_diagnostic"
+    assert first.phase == "dns_diagnostic_wait"
+
+    worker.tick()
+    final = store.get(140944)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert "remediation branch requires separate accepted authority" in final.last_reason
+
+    component_calls = [
+        args
+        for playbook_id, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_name"] == (
+        "DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026"
+    )
+    assert component_calls[0]["component_uid"] == (
+        "c3340a58-48d5-457b-bc30-5fd79e5ad8b1"
+    )
+
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [{
+        "id": 140944,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }]
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    assert "No service restart" in note_calls[0]["description"]
     store.close()
