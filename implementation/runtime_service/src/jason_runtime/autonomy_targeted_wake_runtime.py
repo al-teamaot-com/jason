@@ -92,6 +92,27 @@ class AutonomyAttentionEventIngress:
             now=now,
         )
 
+    def observe_device_read(
+        self,
+        result,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        if str(result.get("status") or "") != "succeeded":
+            return ()
+        evidence = result.get("evidence") or {}
+        record = evidence.get("record") if isinstance(evidence, dict) else None
+        if not isinstance(record, dict):
+            return ()
+        device_uid = str(record.get("resource_id") or "").strip()
+        if not device_uid or record.get("online") is not True:
+            return ()
+        return self.store.signal_subject(
+            "device_online",
+            event_subject_id=device_uid,
+            now=now,
+        )
+
 
 DEFAULT_TARGETED_READ_CAPABILITIES = frozenset(
     {
@@ -166,8 +187,11 @@ class TargetedWakeMaintenance:
                         )
                     )
 
-                if capability == "automation.job.read" and self.event_ingress is not None:
-                    self.event_ingress.observe_datto_job_read(result, now=current)
+                if self.event_ingress is not None:
+                    if capability == "automation.job.read":
+                        self.event_ingress.observe_datto_job_read(result, now=current)
+                    elif capability == "endpoint.device.read":
+                        self.event_ingress.observe_device_read(result, now=current)
 
                 self.store.complete(wake.wake_id)
                 if wake.queue_reconciliation_required:
