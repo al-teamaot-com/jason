@@ -170,3 +170,79 @@ def test_equally_urgent_owned_work_beats_external_work():
     ])
     activated = ledger.activate_next(AutonomyConfig(1))
     assert [item.resource_id for item in activated] == ["OWNED"]
+
+
+def test_quiet_reconciliations_progressively_back_off_staleness_watchdog():
+    now = datetime.now(timezone.utc)
+    attention = QueueAttentionState(last_reconciled_at=now)
+    scheduler = AttentionScheduler(
+        staleness_budget=timedelta(minutes=30),
+        maximum_staleness_budget=timedelta(hours=2),
+    )
+
+    attention.mark_reconciled(now=now)
+    assert attention.quiet_reconciliations == 1
+    assert scheduler.effective_staleness_budget(attention) == timedelta(hours=1)
+
+    decision = scheduler.should_reconcile(
+        attention,
+        capacity_available=True,
+        now=now + timedelta(minutes=45),
+    )
+    assert not decision.should_reconcile
+
+    attention.mark_reconciled(now=now + timedelta(hours=1))
+    assert attention.quiet_reconciliations == 2
+    assert scheduler.effective_staleness_budget(attention) == timedelta(hours=2)
+
+
+def test_activity_resets_quiet_backoff_immediately():
+    attention = QueueAttentionState(quiet_reconciliations=3)
+    attention.mark_dirty("ticket_entered")
+    assert attention.quiet_reconciliations == 0
+    assert attention.dirty
+
+
+def test_changed_reconciliation_resets_quiet_backoff():
+    now = datetime.now(timezone.utc)
+    attention = QueueAttentionState(quiet_reconciliations=3)
+    attention.mark_reconciled(now=now, changed=True)
+    assert attention.quiet_reconciliations == 0
+
+
+def test_explicit_request_ignores_adaptive_backoff():
+    now = datetime.now(timezone.utc)
+    attention = QueueAttentionState(
+        last_reconciled_at=now,
+        quiet_reconciliations=10,
+    )
+    scheduler = AttentionScheduler(
+        staleness_budget=timedelta(minutes=30),
+        maximum_staleness_budget=timedelta(hours=4),
+    )
+    decision = scheduler.should_reconcile(
+        attention,
+        capacity_available=False,
+        explicitly_requested=True,
+        now=now + timedelta(seconds=1),
+    )
+    assert decision.should_reconcile
+    assert decision.reason == "explicit_request"
+
+
+def test_urgent_event_ignores_adaptive_backoff():
+    now = datetime.now(timezone.utc)
+    attention = QueueAttentionState(
+        dirty=True,
+        reasons={"urgent_ticket"},
+        last_reconciled_at=now,
+        quiet_reconciliations=10,
+    )
+    decision = AttentionScheduler().should_reconcile(
+        attention,
+        capacity_available=False,
+        urgent_event=True,
+        now=now + timedelta(seconds=1),
+    )
+    assert decision.should_reconcile
+    assert decision.reason == "urgent_event"
