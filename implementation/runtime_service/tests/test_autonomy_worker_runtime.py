@@ -420,3 +420,176 @@ def test_dns_ticket_runs_standing_safe_diagnostic_then_escalates(tmp_path: Path)
     assert len(note_calls) == 1
     assert "No service restart" in note_calls[0]["description"]
     store.close()
+
+
+def security_candidate(title="SET-03 - Windows Security Log unreadable"):
+    return QueueCandidate(
+        resource_id="140955",
+        priority=95,
+        source_queue="Monitoring Alert",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 140955,
+            "ticketNumber": "T20260926.0002",
+            "title": title,
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+
+
+def test_security_log_ticket_requires_separate_promotion(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(security_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("datto_edr_av", "dns_agent_diagnostic")),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140955) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_security_log_healthy_quick_test_documents_and_stops_before_alert_cleanup(
+    tmp_path: Path,
+):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(security_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("datto_edr_av", "dns_agent_diagnostic", "security_log_self_heal")
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    first = store.get(140955)
+    assert first is not None
+    assert first.playbook_id == "security_log_self_heal"
+    assert first.phase == "security_quick_wait"
+
+    worker.tick()
+    final = store.get(140955)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert final.repair_attempts == 0
+    assert "cleanup remains separately gated" in final.last_reason
+
+    component_calls = [
+        args
+        for playbook_id, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_name"] == (
+        "Security Log Quick Test [WIN] AOT Ver 12012025-1"
+    )
+
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [{
+        "id": 140955,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }]
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    assert "No repair was required" in note_calls[0]["description"]
+    store.close()
+
+
+def test_security_log_unhealthy_runs_one_self_heal_then_verifies(tmp_path: Path):
+    class SecurityReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.output_reads = 0
+
+        def execute(self, capability, arguments):
+            if capability == "automation.job.output.read":
+                self.output_reads += 1
+                text = (
+                    "Status=Unhealthy\nSecurityLogReadable=False"
+                    if self.output_reads == 1
+                    else "Status=Healthy\nSecurityLogReadable=True"
+                )
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "outputs": [
+                            {
+                                "component_uid": arguments["component_uid"],
+                                "stream": "stdout",
+                                "text": text,
+                            }
+                        ]
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    reads = SecurityReads()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(security_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("datto_edr_av", "dns_agent_diagnostic", "security_log_self_heal")
+        ),
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0, 62.0, 93.0, 124.0, 155.0)).__next__,
+    )
+
+    worker.tick()
+    worker.tick()
+    assert store.get(140955).phase == "security_repair_dispatch"
+    worker.tick()
+    assert store.get(140955).phase == "security_repair_wait"
+    worker.tick()
+    assert store.get(140955).phase == "security_verify_dispatch"
+    worker.tick()
+    assert store.get(140955).phase == "security_verify_wait"
+    worker.tick()
+
+    final = store.get(140955)
+    assert final.phase == "escalated"
+    assert final.repair_attempts == 1
+    assert "cleanup remains separately gated" in final.last_reason
+
+    component_names = [
+        args["component_name"]
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert component_names == [
+        "Security Log Quick Test [WIN] AOT Ver 12012025-1",
+        "Security Log Self-Heal [WIN] AOT Ver 11262025-2",
+        "Security Log Quick Test [WIN] AOT Ver 12012025-1",
+    ]
+    store.close()
