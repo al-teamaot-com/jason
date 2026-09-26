@@ -80,10 +80,20 @@ SECURITY_LOG_SCOPE = PlaybookScope(
     policy_id="playbook-autonomy:security_log_self_heal",
     required_action_capabilities=REQUIRED_ACTION_CAPABILITIES,
 )
+POST_SCOPE = PlaybookScope(
+    playbook_id="post_error_investigation",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:post_error_investigation",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
     SECURITY_LOG_SCOPE.playbook_id: SECURITY_LOG_SCOPE,
+    POST_SCOPE.playbook_id: POST_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -419,6 +429,14 @@ class OperationalAutonomyMaintenance:
         title = str(ticket.get("title") or "").strip().casefold()
         return "security log unreadable" in title
 
+    @staticmethod
+    def _is_post_error_ticket(ticket: Mapping[str, Any]) -> bool:
+        title = str(ticket.get("title") or "").strip().casefold()
+        return (
+            "power-on-self-test" in title
+            or "post errors occurred" in title
+        )
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -426,6 +444,8 @@ class OperationalAutonomyMaintenance:
             return DNS_SCOPE
         if self._is_security_log_ticket(ticket):
             return SECURITY_LOG_SCOPE
+        if self._is_post_error_ticket(ticket):
+            return POST_SCOPE
         return None
 
     def _scope_is_promoted(self, scope: PlaybookScope) -> bool:
@@ -533,6 +553,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "dns_diagnostic_dispatch"
             elif work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
                 next_phase = "security_quick_dispatch"
+            elif work.playbook_id == POST_SCOPE.playbook_id:
+                next_phase = "post_investigate"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -550,6 +572,11 @@ class OperationalAutonomyMaintenance:
                 return
             if work.phase == "dns_diagnostic_wait":
                 self._poll_dns_diagnostic(work)
+                return
+
+        if work.playbook_id == POST_SCOPE.playbook_id:
+            if work.phase == "post_investigate":
+                self._investigate_post_error(work)
                 return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
@@ -658,6 +685,113 @@ class OperationalAutonomyMaintenance:
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
                 last_reason=f"Dispatched {resolved_component_name}.",
+            )
+        )
+
+    def _investigate_post_error(self, work: OperationalWork) -> None:
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._block(work, "POST investigation device identity changed during execution.")
+            return
+        if endpoint.get("online") is not True:
+            self._block(work, "POST investigation target went offline before evidence collection.")
+            return
+
+        history = self._read_data(
+            "endpoint.alert.history.search",
+            {"resource_id": work.device_uid},
+        )
+        alerts = history.get("alerts")
+        if alerts is None and isinstance(history.get("data"), Mapping):
+            alerts = history["data"].get("alerts")
+        if not isinstance(alerts, list):
+            self._block(work, "POST alert history evidence is unavailable or malformed.")
+            return
+
+        post_alerts: list[Mapping[str, Any]] = []
+        unique_tickets: set[str] = set()
+        for alert in alerts:
+            if not isinstance(alert, Mapping):
+                continue
+            material = json.dumps(alert, sort_keys=True, default=str).casefold()
+            if "power-on-self-test" not in material and "post errors occurred" not in material:
+                continue
+            post_alerts.append(alert)
+            ticket_number = str(alert.get("ticketNumber") or "").strip()
+            if ticket_number:
+                unique_tickets.add(ticket_number)
+
+        operating_system = str(
+            endpoint.get("operating_system")
+            or endpoint.get("operatingSystem")
+            or ""
+        ).strip()
+        device_type = endpoint.get("device_type")
+        device_type_text = (
+            json.dumps(device_type, sort_keys=True, default=str)
+            if isinstance(device_type, (Mapping, list))
+            else str(device_type or "")
+        )
+        role_material = f"{operating_system} {device_type_text} {work.title}".casefold()
+        protected_role = any(
+            token in role_material
+            for token in ("server", "hyper-v", "hyperv", "domain controller", "physical host")
+        )
+        recurring = len(unique_tickets) >= 2 or len(post_alerts) >= 2
+        reboot_required = bool(endpoint.get("reboot_required"))
+
+        note = (
+            "Jason autonomous POST diagnostic completed using read-only provider evidence. "
+            f"Device={work.hostname}; Online=True; OS={operating_system or 'unknown'}; "
+            f"ProtectedRole={'Yes' if protected_role else 'No'}; "
+            f"HistoricalPOSTAlerts={len(post_alerts)}; "
+            f"HistoricalPOSTTickets={len(unique_tickets)}; "
+            f"Recurring={'Yes' if recurring else 'No'}; "
+            f"RebootRequired={'Yes' if reboot_required else 'No'}. "
+            "No reboot, firmware change, hardware mutation, service change, or generic "
+            "PowerShell was attempted. "
+        )
+        if protected_role:
+            note += (
+                "Protected server/hypervisor evidence requires technician review; "
+                "automatic remediation and closure are not authorized."
+            )
+        elif recurring:
+            note += (
+                "Recurring POST evidence requires technician review; automatic closure "
+                "is not authorized."
+            )
+        else:
+            note += (
+                "The baseline autonomous branch is diagnostic-only; closure remains "
+                "gated until isolated-workstation acceptance is separately proven."
+            )
+
+        self._write_note(work, note, "Jason - Autonomous POST Diagnostic")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=(
+                    "POST diagnostic complete; protected/recurring/closure branch "
+                    "requires technician review."
+                    if protected_role or recurring
+                    else "POST diagnostic complete; isolated closure branch not yet promoted."
+                ),
             )
         )
 
@@ -939,7 +1073,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
-        if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
+        if work.playbook_id == POST_SCOPE.playbook_id:
+            body = (
+                "Jason autonomous POST diagnostic stopped for technician review. "
+                f"{reason} No reboot, firmware change, hardware mutation, service "
+                "change, or generic PowerShell was attempted."
+            )
+            title = "Jason - Autonomous POST Diagnostic Escalation"
+        elif work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
             body = (
                 "Jason autonomous Security Log playbook stopped for technician review. "
                 f"{reason} No reboot, generic PowerShell, or unrelated endpoint/security "
