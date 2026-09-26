@@ -379,30 +379,14 @@ Close the Section Goal only after:
 
 ## 23. Autonomous Execution Eligibility
 
-`autonomous_allowed: false`
+`autonomous_allowed: diagnostic_only`
 
-Approval owner: pending.
-Approval date: pending.
-Approved version/fingerprint: pending.
+Approval owner: person-al.
+Approval date: 2026-09-26.
+Approved scope: exact `disk_bad_block_event_7@1.0.0` diagnostic branch using governed endpoint, alert-history, and endpoint-audit reads plus internal ticket work-start/note updates.
 
-Initial version is not autonomous until acceptance testing succeeds and the owner explicitly approves the exact playbook version for autonomy.
+This branch may recover the authoritative Event ID 7 alert, parse the reported HarddiskX/DRX identity, inventory current logical/attached storage evidence, and document the result. It must not infer internal-vs-removable classification unless an authoritative physical-disk mapping exists.
 
-Recommended eventual autonomous scope:
-- Read diagnostics.
-- Physical-disk classification.
-- Evidence collection and documentation.
-- Resolve alert and complete ticket when removable/external classification is conclusive.
-- Move conclusively internal-drive cases to Help Desk I.
-- Send a pre-approved notification template once available.
-
-Actions that remain approval-bound:
-- Reboot/shutdown.
-- Disk repair.
-- CHKDSK repair/offline repair.
-- Firmware changes.
-- Driver changes.
-- Storage configuration changes.
-- Hardware replacement.
-- Any equivalent user-disruptive action.
+The preferred `Comprehensive Disk & Storage Diagnostic [WIN] AOT Ver 07232026` remains blocked from standing-safe promotion by Component Control. Therefore physical-disk mapping, DRMM alert resolution, ticket completion, and internal-drive routing remain gated. Reboot/shutdown, disk repair, CHKDSK repair, firmware/driver/storage changes, and hardware replacement remain approval-bound.
 
 Material playbook changes invalidate autonomous approval until re-reviewed.
