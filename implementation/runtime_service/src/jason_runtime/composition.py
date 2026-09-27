@@ -11,6 +11,7 @@ from usage_ledger.ledger import SQLiteUsageLedger
 
 from decision_memory.resolution_service import ResolutionMemoryService
 from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
+from reflection import ReflectionService, SQLiteReflectionStore
 
 from connectors.core.contracts import ConnectorContext
 from connectors.src.jason_connectors.approval_requests import (
@@ -291,6 +292,17 @@ from .resolution_memory_runtime import (
     GovernedResolutionMemoryCapabilityInvoker,
     register_resolution_memory_runtime_foundation,
 )
+from .reflection_manifest import build_reflection_manifest
+from .reflection_runtime import (
+    REFLECTION_CANDIDATE_READ,
+    REFLECTION_CANDIDATE_REVIEW,
+    REFLECTION_CANDIDATE_SEARCH,
+    REFLECTION_CORRECTION_RECORD,
+    REFLECTION_SUMMARY,
+    GovernedReflectionCapabilityInvoker,
+    ReflectionCollectingAuditSink,
+    register_reflection_runtime_foundation,
+)
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
 
 
@@ -319,6 +331,9 @@ class RuntimeSettings:
     model_usage_db: Path = Path("/var/lib/jason/openclaw/model-usage.sqlite3")
     resolution_memory_db: Path = Path(
         "/var/lib/jason/openclaw/resolution-memory.sqlite3"
+    )
+    reflection_db: Path = Path(
+        "/var/lib/jason/openclaw/reflection.sqlite3"
     )
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
@@ -481,6 +496,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_RESOLUTION_MEMORY_DB",
                     "/var/lib/jason/openclaw/resolution-memory.sqlite3",
+                )
+            ),
+            reflection_db=Path(
+                os.getenv(
+                    "JASON_REFLECTION_DB",
+                    "/var/lib/jason/openclaw/reflection.sqlite3",
                 )
             ),
             trusted_keys_registry=Path(
@@ -1038,6 +1059,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    register_reflection_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_print_resource_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1075,6 +1101,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     integration_broker.register(
         build_resolution_memory_manifest()
+    )
+    integration_broker.register(
+        build_reflection_manifest()
     )
     register_provider_read_runtime_foundation(
         capabilities=capabilities,
@@ -1413,6 +1442,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         service=resolution_memory_service
     )
 
+    reflection_store = SQLiteReflectionStore(settings.reflection_db)
+    reflection_service = ReflectionService(reflection_store)
+    reflection_invoker = GovernedReflectionCapabilityInvoker(
+        service=reflection_service
+    )
+
     kfs_openbao = OpenBaoSecretResolver(
         base_url=settings.openbao_url,
         role_id_path=settings.kfs_openbao_role_id_path,
@@ -1612,6 +1647,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(RESOLUTION_MEMORY_SEARCH, resolution_memory_invoker)
     invokers.register(RESOLUTION_MEMORY_READ, resolution_memory_invoker)
     invokers.register(RESOLUTION_MEMORY_SUMMARY, resolution_memory_invoker)
+    invokers.register(REFLECTION_SUMMARY, reflection_invoker)
+    invokers.register(REFLECTION_CANDIDATE_SEARCH, reflection_invoker)
+    invokers.register(REFLECTION_CANDIDATE_READ, reflection_invoker)
+    invokers.register(REFLECTION_CORRECTION_RECORD, reflection_invoker)
+    invokers.register(REFLECTION_CANDIDATE_REVIEW, reflection_invoker)
     invokers.register(PRINT_DEVICE_SEARCH, kfs_invoker)
     invokers.register(PRINT_DEVICE_READ, kfs_invoker)
     invokers.register(PRINT_METER_READ, kfs_invoker)
@@ -1656,7 +1696,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     orchestrator = CentralOrchestrator(
         resolution=resolution,
         invoker=invokers,
-        audit=orchestration_events,
+        audit=ReflectionCollectingAuditSink(
+            delegate=orchestration_events,
+            service=reflection_service,
+        ),
         authority_context=JKD001OrchestrationContextEnforcer(context_validator),
         require_authority_context=True,
         governed_execution_ledger=governed_execution_ledger,

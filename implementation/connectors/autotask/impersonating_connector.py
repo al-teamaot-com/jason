@@ -236,6 +236,49 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             raise ValueError("AUTOTASK_TICKET_STATUS_LABEL_NOT_UNIQUE")
         return unique[0]
 
+    def _resolve_open_ticket_terminal_status_ids(
+        self,
+        *,
+        prepared: PreparedRequest,
+    ) -> tuple[int, ...]:
+        """Resolve terminal ticket statuses from live Autotask metadata.
+
+        The canonical layer uses an internal jason_open operator for the
+        semantic intent open/unresolved. This method converts that intent to a
+        bounded set of provider-supported noteq clauses. The internal operator
+        never reaches Autotask.
+        """
+        payload = self._transport.request(
+            method="GET",
+            url=f"{self._api_root(prepared)}/V1.0/Tickets/entityInformation/fields",
+            headers=prepared.headers,
+            params=None,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        if not isinstance(payload, Mapping):
+            raise ValueError("AUTOTASK_TICKET_STATUS_METADATA_INVALID")
+
+        terminal_labels = {
+            "complete",
+            "completed",
+            "closed",
+            "cancelled",
+            "canceled",
+        }
+        values: set[int] = set()
+        for item in self._status_picklist_values(payload):
+            label = str(item.get("label") or "").strip().casefold()
+            if label not in terminal_labels:
+                continue
+            try:
+                values.add(int(item.get("value")))
+            except (TypeError, ValueError):
+                continue
+
+        if not values:
+            raise ValueError("AUTOTASK_TICKET_TERMINAL_STATUS_NOT_FOUND")
+        return tuple(sorted(values))
+
     def _resolve_ticket_search_status(
         self,
         *,
@@ -266,10 +309,23 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
                 continue
 
             clause = dict(raw_clause)
-            if (
-                str(clause.get("field") or "").strip().casefold() == "status"
-                and str(clause.get("op") or "").strip().casefold() == "eq"
-            ):
+            field_name = str(clause.get("field") or "").strip().casefold()
+            operator = str(clause.get("op") or "").strip().casefold()
+
+            if field_name == "status" and operator == "jason_open":
+                semantic = str(clause.get("value") or "").strip().casefold()
+                if semantic not in {"open", "unresolved"}:
+                    raise ValueError("AUTOTASK_TICKET_OPEN_STATUS_INTENT_INVALID")
+                for status_id in self._resolve_open_ticket_terminal_status_ids(
+                    prepared=prepared
+                ):
+                    filters.append(
+                        {"op": "noteq", "field": "status", "value": status_id}
+                    )
+                changed = True
+                continue
+
+            if field_name == "status" and operator == "eq":
                 value = clause.get("value")
                 if isinstance(value, bool):
                     raise ValueError("AUTOTASK_TICKET_STATUS_VALUE_INVALID")

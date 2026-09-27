@@ -121,3 +121,9 @@ Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Che
 `jason-provider-health-canary.timer` runs the synthetic provider probes every fifteen minutes with randomized delay. The host runner invokes the MCP-contained canary module, which uses the dedicated `jason-provider-canary` service identity and `provider-health-canary-v1` policy through JKD-001 and the Central Orchestrator. Provider evidence is discarded before persistence.
 
 The production-health exporter reads `/var/lib/jason/provider-health-canaries.json` and exposes only bounded provider/capability health, latency, report timestamp, and error class. The Production Health dashboard shows Autotask, IT Glue, Datto RMM, and Microsoft Graph separately.
+
+### Governed Reflection visibility
+
+`reflection_exporter.py` exposes only aggregate REFLECT-001 state from `/var/lib/jason/openclaw/reflection.sqlite3`: store availability, bounded record count, authenticated correction count, current candidate lifecycle counts, bounded signal-kind counts, and passing/failed CI regression counts. It intentionally does not export candidate text, source record IDs, correlation IDs, principals, client identifiers, provider records, or any authority-bearing data.
+
+The **Jason Security & Learning** dashboard includes these aggregate metrics alongside Resolution Memory. Reflection and dashboard state are observational only; neither can test, approve, promote, or execute an improvement.

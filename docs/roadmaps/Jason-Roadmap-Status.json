@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-26",
+  "updated": "2026-09-27",
   "milestones": [
     {
       "id": "FOUNDATION",
@@ -166,7 +166,7 @@
     {
       "id": "REFLECT-001",
       "title": "Governed reflection and continuous-improvement loop",
-      "status": "planned",
+      "status": "complete",
       "phase": "Reasoning Quality"
     },
     {

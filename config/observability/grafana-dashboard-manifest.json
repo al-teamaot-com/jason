@@ -98,7 +98,7 @@
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-security-learning.json",
-      "sha256": "68b2557768d68f0bc875d11784d7290cc0cb15c85a95616dbf3d4d455afecbb0",
+      "sha256": "6ad1d8db8c87822167217f48c6faf37f64bcce28992752dbc0b28b9e4a2c2129",
       "title": "Jason Security & Learning",
       "uid": "jason-security-learning"
     },

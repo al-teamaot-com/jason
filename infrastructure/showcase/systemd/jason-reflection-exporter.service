@@ -1,0 +1,15 @@
+[Unit]
+Description=Jason Governed Reflection Prometheus Exporter
+After=network.target
+
+[Service]
+Type=simple
+User=al
+WorkingDirectory=/opt/jason/current
+Environment=JASON_REFLECTION_DB=/var/lib/jason/openclaw/reflection.sqlite3
+ExecStart=/usr/bin/python3 /opt/jason/current/infrastructure/showcase/reflection_exporter.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,9 +1,9 @@
 # Governed Reflection and Continuous Improvement
 
-**Roadmap ID:** REFLECT-001  
-**Status:** Planned  
-**Priority:** P1  
-**Risk level:** Moderate  
+**Roadmap ID:** REFLECT-001
+**Status:** Complete
+**Priority:** P1
+**Risk level:** Moderate
 **Tracking issue:** GitHub issue #172 — Governed reflection and continuous-improvement loop for Jason
 
 ## Purpose
@@ -187,3 +187,63 @@ Jason Governance Authority / Technology Steward.
 Begin REFLECT-001 design after the current governed provider-read foundation is stable enough to provide reliable execution telemetry, and before broad provider expansion makes repeated inefficiencies expensive to rediscover manually.
 
 Begin Resolution Memory design once governed ticket/alert reads, Datto job/output correlation, and reliable resolution outcomes are stable enough to distinguish verified repeated patterns from anecdotal fixes.
+
+## Implemented production state — 2026-09-27
+
+REFLECT-001 is implemented as a provider-neutral governed learning layer subordinate to the Central Orchestrator. The production contract is:
+
+`governed execution -> bounded terminal telemetry -> ReflectionRecord -> deterministic signal -> improvement candidate -> human proposal -> durable CI regression -> human approval -> reviewed source/PR -> controlled release promotion`
+
+The reflection subsystem does **not** edit source, policy, capabilities, provider mappings, authority, or production configuration. `promoted` is lifecycle evidence that a separately reviewed release completed; it is not an execution path.
+
+### Production observation path
+
+The Central Orchestrator emits bounded reflection telemetry with completed capability audit events. The telemetry contains strategy labels, result/candidate counts, provider-call count, pagination/fallback count, evidence count, bounded warning codes, and latency. Raw prompts, request arguments, provider response bodies, client content, and credentials are not copied into Reflection Memory. A collecting audit wrapper writes the primary orchestration event first and then derives the reflection record. Reflection failure cannot rewrite a provider outcome.
+
+Deterministic detectors currently cover:
+
+- exact-search miss followed by bounded broader-search success;
+- excessive pagination;
+- excessive provider calls;
+- repeated fallbacks;
+- authenticated human correction.
+
+Repeated detections reuse one candidate key and accumulate source evidence rather than generating one-off provider/client hacks.
+
+### Authenticated correction boundary
+
+A technician correction stores only a bounded correction **category**, authenticated principal identity, organization scope, and linkage to the original/derived reflection records. Free-form correction text is not persisted by REFLECT-001. A correction can create or reinforce an observed candidate; it cannot approve, test, promote, or change production behavior.
+
+### Review and regression boundary
+
+Candidate lifecycle is enforced as:
+
+`observed -> proposed -> tested -> approved -> promoted`
+
+with rejection available from review stages. The actor/evidence contract is intentionally asymmetric:
+
+- **proposed** — human governance actor;
+- **tested** — CI actor only, and only after a durable passing regression record exists;
+- **approved** — human governance actor only, and passing regression evidence must already exist;
+- **promoted** — controlled release actor only after approval.
+
+The runtime review surface exposes human `propose`, `approve`, and `reject` only. It does not expose a human/self-service `test` or `promote` operation. Jason therefore cannot convert its own observation into production behavior. Accepted learnings are represented by source-controlled regression cases in `implementation/reflection/regression_cases.json` and required CI tests.
+
+### Initial accepted generic improvements
+
+The two original motivating examples are now deterministic generic policies, not client-specific exceptions:
+
+1. **Bounded organization-name resolution.** IT Glue organization lookup uses exact provider filtering first. If that produces no exact result, Jason may make one bounded collection read and apply normalized prefix/contains matching locally. Exactly one match may resolve; multiple matches fail closed. This allows a request such as `Hitt Electric` to resolve `Hitt Electric Corp.` without silently selecting among ambiguous candidates.
+2. **Open/unresolved Autotask ticket pushdown.** Canonical `status=open|unresolved` becomes an internal semantic operator. Before ticket retrieval, the Autotask connector reads the live status picklist, resolves terminal labels such as Complete/Closed/Cancelled, and replaces the internal intent with provider-side status exclusions. The internal operator never reaches Autotask, and Jason does not need to page broad historical ticket sets merely to discard terminal records.
+
+Both paths emit bounded reflection telemetry so future inefficiency remains observable.
+
+### Visibility
+
+`operations.reflection.summary`, `operations.reflection.candidate.search`, and `operations.reflection.candidate.read` expose evidence-only review data through the normal provider-neutral resource model. Correction/review mutations are governed local capabilities but are intentionally excluded from generic planner discovery.
+
+Prometheus/Grafana expose aggregate Reflection availability, record count, candidate lifecycle counts, authenticated-correction count, signal counts, and CI regression outcomes. Candidate text, source record IDs, principals, clients, and provider records are not exported as metric labels. Dashboard state grants no authority.
+
+### Authority invariant
+
+Every reflection projection carries `grants_authority=false`; candidate projections additionally state `can_change_production=false`. Current Jason governance, protected source review, and controlled release remain the only path by which an accepted improvement can affect production.

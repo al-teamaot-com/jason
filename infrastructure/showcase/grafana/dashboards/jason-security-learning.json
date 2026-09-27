@@ -20,7 +20,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Evidence, not authority\\nThis dashboard combines **Resolution Memory** and **security playbook** telemetry. Historical resolutions and Grafana state never grant execution authority. Client isolation, Central Orchestrator authorization, exact approvals, disruption controls, and provider readback remain authoritative.\\n\\n**Current milestone:** Resolution Memory has its first verified production case; Datto EDR/AV playbook v1.3 is production-enabled with terminal/sticky security escalation."
+        "content": "### Evidence, not authority\nThis dashboard combines **Resolution Memory**, **Governed Reflection**, and security playbook telemetry. Reflection observes bounded execution quality and creates review candidates; it never edits production behavior or grants authority. Resolution history and Grafana state likewise never grant execution authority. Central Orchestrator authorization, exact approvals, client isolation, disruption controls, CI regression evidence, and controlled release remain authoritative."
       }
     },
     {
@@ -668,6 +668,264 @@
       "options": {
         "showHeader": true
       }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Reflection Exporter",
+      "description": "1 = Prometheus can scrape the governed Reflection exporter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"jason-reflection\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Reflection Records",
+      "description": "Bounded execution-quality records.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_reflection_records",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Improvement Candidates",
+      "description": "Total governed improvement candidates.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_reflection_candidates{state=\"all\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Tested Candidates",
+      "description": "Candidates with durable passing CI regression evidence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_reflection_candidates{state=\"tested\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "User Corrections",
+      "description": "Authenticated correction signals; correction text is not exported.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_reflection_corrections",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Passing Regressions",
+      "description": "Durable passing CI evidence supporting candidate review.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "targets": [
+        {
+          "expr": "jason_reflection_regressions{result=\"passed\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 44
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
     }
   ],
   "preload": false,
@@ -691,5 +949,5 @@
   "timezone": "browser",
   "title": "Jason Security & Learning",
   "uid": "jason-security-learning",
-  "version": 2
+  "version": 3
 }
