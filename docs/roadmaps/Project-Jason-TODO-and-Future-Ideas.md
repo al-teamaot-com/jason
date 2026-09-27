@@ -1115,7 +1115,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-SEC-006 — Complete approval/execution-plan security rollout
 
 - **Priority:** P0 — high priority
-- **Status:** Production rollout and bounded XYZ acceptance complete; broader per-provider acceptance and unrelated baseline cleanup remain
+- **Status:** Implemented — production rollout, adapter classification, bounded XYZ acceptance, replay protection, execution-plan binding, and canonicalization acceptance complete
 - **Risk level:** Critical
 - **Idea:** Complete production rollout of the dual-binding approval security model so every approval-governed mutation binds both the canonical semantic intent and the concrete provider execution plan after provider selection, symbolic resolution, normalization, defaulting, and exact target resolution.
 - **Why it matters:** The 2026-09-23 security review proved two distinct issues: approval replay could create duplicate provider writes, and an unchanged approved semantic action could normalize into a materially different concrete provider mutation. Replay/idempotency and execution-plan binding are now production-fixed and bounded-live accepted. SUPPORT-CAP-019 subsequently proved that model-facing canonicalization must also occur before approval binding so technician-friendly aliases cannot reach execution-plan preparation in an under-specified provider shape.
@@ -1129,7 +1129,7 @@ When complete, document the implementation, tests, capability changes, and remai
   5. **Track the unrelated baseline failures separately.** Do not fold the three pre-existing IT Glue/provider-read test failures into the security rollout or weaken security tests to obtain a green aggregate result.
 - **Acceptance condition:** Production is on a clean/verified expected revision; all approval-governed mutation adapters are explicitly classified; adapted providers pass the execution-plan regression contract; blocked adapters fail closed; the bounded XYZ live test records exactly one provider write and matching provider readback; rollback remains proven.
 - **Decision owner:** Jason Governance Authority / AOT Owner
-- **Review trigger:** Immediate; this is the next security-hardening production workstream.
+- **Review trigger:** Reopen only if a new approval-governed mutation adapter is introduced, a security regression fails, or production evidence shows replay/execution-plan/canonicalization drift.
 
 ### TODO-SEC-007 — Expand security regression/red-team coverage and observability
 
@@ -1210,17 +1210,17 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-009 — Human-review handoff to Help Desk I
 
 - **Priority:** P1
-- **Status:** Implementation in PR #368 — server-controlled human-review routing and regression coverage added; production acceptance still required
+- **Status:** Implemented and merged in PR #368; controlled production acceptance still required
 - **Risk level:** Moderate
 - **Idea:** When Jason reaches a terminal or sticky state where the next meaningful action belongs to a human technician, automatically hand the Autotask ticket from the Jason queue to **Help Desk I**, set the ticket to **Human Review**, document the handoff, verify the queue/status change, and release Jason's active-work slot.
 - **Why it matters:** A ticket awaiting human review should not remain in the Jason queue or consume Jason's active-work capacity. Standardized handoff makes responsibility visible to technicians and prevents stalled security/escalation tickets from being mistaken for autonomous work still in progress.
 - **Current production example:** `T20260925.0050` / Atomic-50291 reached the Datto EDR/AV human-review gate after automated containment and verification. The intended live handoff write to Help Desk I was blocked before provider execution by the current safety/governance path, so the production acceptance is not yet complete.
 - **Required behavior:** Create a concise internal handoff note; move the ticket to Help Desk I; set status Human Review; preserve Remote Support, device association, priority, and classification; require post-write readback; persist `handoff_reason=human_review`; release the active-work slot; prevent immediate auto-reclaim until the blocker changes or a technician explicitly returns the ticket to Jason.
-- **Current blocker:** Production acceptance waits on merge/deploy of the implementation in PR #368; the previous Atomic acceptance attempt was correctly blocked before provider execution by the old handoff path.
+- **Current blocker:** Implementation is merged and source-tested. Controlled production acceptance is still pending because the live handoff must prove the active Human Review status mapping, provider write, post-write readback, slot release, and anti-reclaim behavior without relying on the owner being present during the weekend.
 - **Implementation checkpoint (2026-09-26):** human_review is the canonical handoff reason; legacy human_intervention_required is accepted as an alias. The server-controlled handoff resolves the destination to **Help Desk I + Human Review** while other handoff reasons retain trusted pre-claim restoration. Claim-store blocker fingerprints prevent immediate reclaim for an unchanged human-review blocker.
 - **Remaining acceptance:** Merge/deploy the Human Review status follow-up and run one controlled production handoff with provider write/readback evidence once Autotask exposes the active Human Review status through API metadata.
 - **Decision owner:** Jason Governance Authority / AOT Owner
-- **Review trigger:** Resume immediately after PR #368 merges or the governed ticket-update blocker is corrected.
+- **Review trigger:** Run one controlled production handoff when the owner is available for the bounded acceptance window or when an equivalent pre-approved non-disruptive test ticket is designated.
 
 ---
 
