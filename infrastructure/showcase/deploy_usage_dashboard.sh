@@ -131,10 +131,11 @@ rollback() {
     fi
   done
 
-  if [[ -n "${OLD_PROJECT:-}" && -f "${OLD_COMPOSE:-}" && -f "${OLD_ENV:-}" ]]; then
+  if [[ -n "${OLD_PROJECT:-}" && -f "${OLD_COMPOSE:-}" ]]; then
+    GRAFANA_ADMIN_USER="$GRAFANA_ADMIN_USER" \
+    GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
     docker compose \
       -p "$OLD_PROJECT" \
-      --env-file "$OLD_ENV" \
       -f "$OLD_COMPOSE" \
       up -d --no-deps prometheus grafana >/dev/null 2>&1 || true
   fi
@@ -146,10 +147,23 @@ rollback() {
 precheck() {
   say "========== USAGE DASHBOARD DEPLOYMENT PRECHECK =========="
 
-  [[ -n "$REPO_ROOT" && -d "$REPO_ROOT/.git" || -f "$REPO_ROOT/.git" ]] || {
-    say "PRECHECK=FAIL invalid repository root: $REPO_ROOT"
+  local source_head=""
+  if [[ -n "$REPO_ROOT" && ( -d "$REPO_ROOT/.git" || -f "$REPO_ROOT/.git" ) ]]; then
+    if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+      say "PRECHECK=FAIL deployment worktree is dirty"
+      return 1
+    fi
+    source_head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  elif [[ -f "$REPO_ROOT/SOURCE_REVISION" ]]; then
+    source_head="$(tr -d '[:space:]' < "$REPO_ROOT/SOURCE_REVISION")"
+    [[ "$source_head" =~ ^[0-9a-f]{40}$ ]] || {
+      say "PRECHECK=FAIL invalid immutable release source revision"
+      return 1
+    }
+  else
+    say "PRECHECK=FAIL source is neither a clean Git checkout nor an immutable release: $REPO_ROOT"
     return 1
-  }
+  fi
 
   require_file "$NEW_COMPOSE" || return 1
   require_file "$SHOWCASE_DIR/usage_exporter.py" || return 1
@@ -160,11 +174,8 @@ precheck() {
   require_file "$SHOWCASE_DIR/prometheus/prometheus.yml" || return 1
   require_file "$SHOWCASE_DIR/systemd/$usage_unit" || return 1
   require_file "$SHOWCASE_DIR/systemd/$attribution_unit" || return 1
-
-  if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
-    say "PRECHECK=FAIL deployment worktree is dirty"
-    return 1
-  fi
+  require_file "$REPO_ROOT/tools/grafana_assurance.py" || return 1
+  require_file "$REPO_ROOT/config/observability/grafana-dashboard-manifest.json" || return 1
 
   command -v docker >/dev/null || { say "PRECHECK=FAIL docker unavailable"; return 1; }
   docker compose version >/dev/null 2>&1 || { say "PRECHECK=FAIL docker compose unavailable"; return 1; }
@@ -194,10 +205,14 @@ precheck() {
     return 1
   }
   OLD_ENV="$OLD_SHOWCASE/.env"
-  [[ -f "$OLD_ENV" ]] || {
-    say "PRECHECK=FAIL existing showcase .env unavailable"
+  GRAFANA_ADMIN_USER="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' jason-grafana 2>/dev/null | sed -n 's/^GF_SECURITY_ADMIN_USER=//p' | head -n 1)"
+  GRAFANA_ADMIN_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' jason-grafana 2>/dev/null | sed -n 's/^GF_SECURITY_ADMIN_PASSWORD=//p' | head -n 1)"
+  GRAFANA_ADMIN_USER="${GRAFANA_ADMIN_USER:-admin}"
+  [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || {
+    say "PRECHECK=FAIL Grafana admin credential unavailable from running container"
     return 1
   }
+  export GRAFANA_ADMIN_USER GRAFANA_ADMIN_PASSWORD
 
   mkdir -p "$BACKUP_DIR" || return 1
   chmod 700 "$BACKUP_DIR" || return 1
@@ -215,7 +230,7 @@ precheck() {
     record_unit_state "$unit" || return 1
   done
 
-  say "SOURCE_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  say "SOURCE_HEAD=$source_head"
   say "EXISTING_COMPOSE_PROJECT=$OLD_PROJECT"
   say "EXISTING_SHOWCASE=$OLD_SHOWCASE"
   say "BACKUP_DIR=$BACKUP_DIR"
@@ -229,21 +244,45 @@ deploy() {
   MUTATED=1
 
   sudo systemctl daemon-reload || return 1
-  sudo systemctl enable --now "$usage_unit" || return 1
-  sudo systemctl enable --now "$attribution_unit" || return 1
+  sudo systemctl enable "$usage_unit" || return 1
+  sudo systemctl enable "$attribution_unit" || return 1
+  # The exporters are normally already active. enable --now would leave the
+  # existing process running after a unit/code update, so explicitly restart
+  # both services to load the newly installed runtime and credentials.
+  sudo systemctl restart "$usage_unit" || return 1
+  sudo systemctl restart "$attribution_unit" || return 1
 
   wait_http "http://127.0.0.1:9465/metrics" 30 1 || return 1
   wait_http "http://127.0.0.1:9466/metrics" 30 1 || return 1
 
-  curl -fsS http://127.0.0.1:9465/metrics | grep -q '^jason_usage_exporter_build_info' || return 1
-  curl -fsS http://127.0.0.1:9466/metrics | grep -q '^jason_usage_attribution_exporter_build_info' || return 1
+  local usage_snapshot attribution_snapshot
+  usage_snapshot="$(mktemp)" || return 1
+  attribution_snapshot="$(mktemp)" || { rm -f "$usage_snapshot"; return 1; }
+  curl -fsS -o "$usage_snapshot" http://127.0.0.1:9465/metrics || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  curl -fsS -o "$attribution_snapshot" http://127.0.0.1:9466/metrics || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  grep -q '^jason_usage_exporter_build_info' "$usage_snapshot" || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  grep -q '^jason_usage_attribution_exporter_build_info' "$attribution_snapshot" || {
+    rm -f "$usage_snapshot" "$attribution_snapshot"
+    return 1
+  }
+  rm -f "$usage_snapshot" "$attribution_snapshot"
 
   say "EXPORTERS=PASS"
 
   say "========== REBIND PROMETHEUS/GRAFANA TO VERSIONED DASHBOARD SOURCE =========="
+  GRAFANA_ADMIN_USER="$GRAFANA_ADMIN_USER" \
+  GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD" \
   docker compose \
     -p "$OLD_PROJECT" \
-    --env-file "$OLD_ENV" \
     -f "$NEW_COMPOSE" \
     up -d --no-deps prometheus grafana || return 1
 
@@ -334,23 +373,16 @@ PY
   [[ $? -eq 0 ]] || return 1
 
   say "========== GRAFANA PROVISIONING ACCEPTANCE =========="
-  python3 - "$OLD_ENV" <<'PY'
+  python3 - <<'PY'
 import base64
 import json
-import sys
-from pathlib import Path
+import os
 from urllib.request import Request, urlopen
 
-values = {}
-for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
-    if not raw or raw.lstrip().startswith("#") or "=" not in raw:
-        continue
-    key, value = raw.split("=", 1)
-    values[key.strip()] = value.strip()
-user = values.get("GRAFANA_ADMIN_USER", "admin")
-password = values.get("GRAFANA_ADMIN_PASSWORD", "")
+user = os.environ.get("GRAFANA_ADMIN_USER", "admin")
+password = os.environ.get("GRAFANA_ADMIN_PASSWORD", "")
 if not password:
-    raise SystemExit("Grafana credential unavailable in existing .env")
+    raise SystemExit("Grafana credential unavailable from deployment environment")
 auth = base64.b64encode(f"{user}:{password}".encode()).decode()
 for uid in ("jason-command-center", "jason-usage-attribution"):
     request = Request(
@@ -377,8 +409,34 @@ PY
     say "SECRET_SURFACE=FAIL"
     return 1
   fi
+  grep -q '^jason_openai_org_usage_source_available 1$' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_USAGE_SOURCE=FAIL"
+    return 1
+  }
+  grep -q '^jason_openai_org_requests_24h ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_USAGE_METRICS=FAIL"
+    return 1
+  }
+  grep -q '^jason_openai_org_estimated_cost_usd_24h ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_COST_ESTIMATE=FAIL"
+    return 1
+  }
+  grep -q '^jason_openai_org_reported_cost_available ' "$metric_snapshot" || {
+    rm -f "$metric_snapshot"
+    say "OPENAI_REPORTED_COST_STATUS=FAIL"
+    return 1
+  }
   rm -f "$metric_snapshot"
   say "SECRET_SURFACE=PASS"
+  say "OPENAI_USAGE_SOURCE=PASS"
+
+  say "========== GRAFANA CONFIGURATION ASSURANCE =========="
+  python3 "$REPO_ROOT/tools/grafana_assurance.py"     --release-root "$REPO_ROOT"     --manifest "$REPO_ROOT/config/observability/grafana-dashboard-manifest.json"     --output "$BACKUP_DIR/grafana-assurance.json" || return 1
+  grep -q '"status": "PASS"' "$BACKUP_DIR/grafana-assurance.json" || return 1
+  say "GRAFANA_CONFIGURATION_ASSURANCE=PASS"
 
   say "DASHBOARD_TELEMETRY_DEPLOYMENT=PASS"
   say "BACKUP_DIR=$BACKUP_DIR"

@@ -171,3 +171,22 @@ groups:
         annotations:
           summary: Jason root disk usage is above 95 percent
           description: Root filesystem capacity is critically low.
+      - alert: JasonGrafanaConfigurationDrift
+        expr: jason_grafana_configuration_assurance == 0 and jason_grafana_configuration_drift == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-observability
+        annotations:
+          summary: Jason Grafana configuration drift detected
+          description: One or more required dashboards, datasources, metric dependencies, hashes, or immutable release mounts no longer match the accepted observability release.
+
+      - alert: JasonGrafanaAssuranceUnavailable
+        expr: absent(jason_grafana_configuration_assurance) or jason_grafana_configuration_not_proven == 1 or (time() - jason_grafana_assurance_timestamp_seconds) > 900
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-observability
+        annotations:
+          summary: Jason Grafana configuration assurance is unavailable or stale
+          description: The dashboard assurance control cannot currently prove the Grafana configuration state or its report is older than fifteen minutes.

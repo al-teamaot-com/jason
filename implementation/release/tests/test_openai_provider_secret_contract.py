@@ -42,6 +42,27 @@ def test_openai_semantic_intent_uses_canonical_provider_secret_lifecycle():
     assert check["secret_entered"] is False
 
 
+def test_openai_usage_reporting_has_separate_governed_secret_contract():
+    spec = provision.PROVIDERS["openai_usage"]
+
+    assert spec["logical_name"] == "openai.usage_reporting"
+    assert spec["secret_path"] == (
+        "secret/data/providers/openai/production/usage-reporting"
+    )
+    assert spec["fields"] == ("admin_api_key",)
+    assert spec["required_fields"] == ("admin_api_key",)
+    assert spec["policy_name"] == "jason-openai-usage-reporting-read"
+    assert spec["role_name"] == "jason-openai-usage-reporting-read"
+    assert spec["connector_identity"] == "openai-usage-reporting"
+
+    check = lifecycle._check_only("create", "openai_usage")
+    assert check["logical_name"] == "openai.usage_reporting"
+    assert check["runtime_authentication"] == "approle"
+    assert check["runtime_token_persisted"] is False
+    assert check["network_contacted"] is False
+    assert check["secret_entered"] is False
+
+
 def test_openai_policy_grants_only_secret_read_and_self_revoke():
     policy = provision.provider_policy_text("openai")
 

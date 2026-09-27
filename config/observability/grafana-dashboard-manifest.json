@@ -1,0 +1,119 @@
+{
+  "dashboards": [
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-autonomy-action-detail.json",
+      "sha256": "1a6cc452309c67fb4a398f8186be3196ce0063bbd8ef8948c4bf84dbc1694220",
+      "title": "Jason Autonomous Action Detail",
+      "uid": "jason-autonomy-action-detail"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-autonomy-flight-recorder.json",
+      "sha256": "3c3ecd5f2b678edaac74183c3cae4e72872d27d95625bcb50be856f95c5c19a0",
+      "title": "Jason Flight Recorder",
+      "uid": "jason-autonomy-flight-recorder"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-client-security-posture.json",
+      "sha256": "911b79bace936c901daab8c53ab671ec523848ae76bd5d815d491a83e4d94414",
+      "title": "Jason Client Security Posture",
+      "uid": "jason-client-security-posture"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-command-center.json",
+      "sha256": "511d5086650c269afb6f9d90544bf6971e306d39a5e18daa1c188db2c0700287",
+      "title": "Jason Command Center",
+      "uid": "jason-command-center"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-component-control.json",
+      "sha256": "84540a3039b8341cd1ed01942e9df659d3e6401e32ef115d5a989b76bcad37af",
+      "title": "Jason Component Control",
+      "uid": "jason-component-control"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-credential-management.json",
+      "sha256": "04ba50f83179f870603486aa135d083ae71bd8eba64e227a8ea23f30b93c35ec",
+      "title": "Jason Credential Management",
+      "uid": "jason-credential-management"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-drmm-site-variable-registry.json",
+      "sha256": "731c6348da327725f21a3c3726abd17f4d0702cdf8a50c0e65a333c4d783fd23",
+      "title": "Jason DRMM Site Variable Registry",
+      "uid": "jason-drmm-site-variable-registry"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-governed-actions.json",
+      "sha256": "5eba379053c5e9c5925994e971d5ca2a772e3a9d1b7d63dd613db10eb7297cc8",
+      "title": "Jason Governed Actions",
+      "uid": "jason-governed-actions"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-openclaw-authority-operations.json",
+      "sha256": "0cdec0839cd4e5beae06fa6542c315ce53dc054e53a328b88472683171851544",
+      "title": "Jason OpenClaw / JKD-001 Operations",
+      "uid": "jason-openclaw-authority-operations"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json",
+      "sha256": "3d0450b9954065a4af493a9a986d1e61d311587a9017988d2e14e2275eaa0185",
+      "title": "Jason Playbook Control Center",
+      "uid": "jason-playbook-control-center"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-production-health.json",
+      "sha256": "21982b7c5680d7aaca8eedb200834d075cf63083e648844ace66063a5c45bb5c",
+      "title": "Jason Production Health",
+      "uid": "jason-production-health"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-security-learning.json",
+      "sha256": "68b2557768d68f0bc875d11784d7290cc0cb15c85a95616dbf3d4d455afecbb0",
+      "title": "Jason Security & Learning",
+      "uid": "jason-security-learning"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-usage-attribution.json",
+      "sha256": "7d604e895455f293cc9632818ffa409e9e9271ca50aad95f853b2a9824d7ce57",
+      "title": "Jason Usage & Attribution",
+      "uid": "jason-usage-attribution"
+    }
+  ],
+  "provider": {
+    "folder": "Jason",
+    "name": "Jason Command Center"
+  },
+  "required_datasources": [
+    {
+      "type": "prometheus",
+      "uid": "jason-prometheus"
+    }
+  ],
+  "required_metrics": [
+    {
+      "id": "usage-attribution-up",
+      "query": "up{job=\"jason-usage-attribution\"} == 1"
+    },
+    {
+      "id": "openai-usage-source",
+      "query": "jason_openai_org_usage_source_available == 1"
+    },
+    {
+      "id": "openai-cost-source",
+      "query": "jason_openai_org_cost_source_available == 1"
+    },
+    {
+      "id": "openai-cost-24h",
+      "query": "jason_openai_org_cost_usd_24h"
+    },
+    {
+      "id": "openai-cost-7d",
+      "query": "jason_openai_org_cost_usd_7d"
+    },
+    {
+      "id": "openai-cost-mtd",
+      "query": "jason_openai_org_cost_usd_mtd"
+    }
+  ],
+  "schema_version": "1.0"
+}
