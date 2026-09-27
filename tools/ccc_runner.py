@@ -460,7 +460,7 @@ out=[]
 for item in canaries:
     try:
         result=port.execute(item['capability'],item.get('arguments',{}))
-        out.append({'name':item['name'],'capability':item['capability'],'status':result.get('status'),'stage':result.get('stage'),'provider':result.get('provider'),'error_code':result.get('error_code'),'correlation_id':result.get('correlation_id'),'expected_provider':item.get('expected_provider')})
+        out.append({'name':item['name'],'capability':item['capability'],'status':result.get('status'),'stage':result.get('stage'),'provider':result.get('provider'),'error_code':result.get('error_code'),'reason_codes':result.get('reason_codes',[]),'correlation_id':result.get('correlation_id')})
     except Exception as exc:
         out.append({'name':item.get('name','unknown'),'capability':item.get('capability'),'status':'exception','error_type':type(exc).__name__,'error':str(exc)[:500]})
 print(json.dumps(out,sort_keys=True))
@@ -471,16 +471,51 @@ print(json.dumps(out,sort_keys=True))
         except Exception:
             return CheckResult("governed-provider-canaries", "NOT_PROVEN", f"Unable to parse canary output: {(result.stdout or '')[-800:]}")
         failures = []
+        summary = []
+        expected_by_name = {str(item.get("name")): item for item in self.config.provider_canaries}
         for value in values:
-            expected = value.get("expected_provider")
-            if value.get("status") != "succeeded" or (expected and value.get("provider") != expected):
-                failures.append(value)
+            expected = expected_by_name.get(str(value.get("name")), {})
+            expected_status = str(expected.get("expected_status", "succeeded"))
+            expected_provider_present = "expected_provider" in expected
+            expected_provider = expected.get("expected_provider")
+            expected_error_present = "expected_error_code" in expected
+            expected_error = expected.get("expected_error_code")
+            expected_reasons = tuple(str(x) for x in expected.get("expected_reason_codes_contains", ()))
+            actual_reasons = tuple(str(x) for x in value.get("reason_codes", ()))
+            matches = value.get("status") == expected_status
+            if expected_provider_present:
+                matches = matches and value.get("provider") == expected_provider
+            if expected_error_present:
+                matches = matches and value.get("error_code") == expected_error
+            if expected_reasons:
+                matches = matches and all(reason in actual_reasons for reason in expected_reasons)
+            record = {
+                "name": value.get("name"),
+                "status": value.get("status"),
+                "provider": value.get("provider"),
+                "error_code": value.get("error_code"),
+                "reason_codes": list(actual_reasons),
+                "correlation_id": value.get("correlation_id"),
+                "expected_status": expected_status,
+            }
+            summary.append(record)
+            if not matches:
+                failures.append({**record, "expected": dict(expected)})
         if not failures and len(values) == len(self.config.provider_canaries):
-            summary = [{k:v.get(k) for k in ("name","provider","correlation_id")} for v in values]
-            return CheckResult("governed-provider-canaries", "PASS", f"{len(values)} governed read canaries passed.", {"results": summary})
+            return CheckResult(
+                "governed-provider-boundary-canaries",
+                "PASS",
+                f"{len(values)} governed provider boundary canaries matched expected positive/negative outcomes.",
+                {"results": summary},
+            )
         encoded = json.dumps(failures, sort_keys=True)
         status = "NOT_PROVEN" if "NO_MATCHING_AUTHORITY_GRANT" in encoded else "FAIL"
-        return CheckResult("governed-provider-canaries", status, f"{len(failures)} canaries did not pass.", {"failures": failures})
+        return CheckResult(
+            "governed-provider-boundary-canaries",
+            status,
+            f"{len(failures)} canaries did not match their expected governed outcomes.",
+            {"failures": failures, "results": summary},
+        )
 
     def _runtime_manifest(self, runtime_revision: str) -> Mapping[str, Any]:
         return {

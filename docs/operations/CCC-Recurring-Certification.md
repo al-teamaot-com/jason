@@ -40,7 +40,7 @@ The installer preserves an existing production configuration rather than replaci
 
 ## CCC service authority
 
-Live provider canaries use a dedicated non-human JKD-001 identity:
+Live provider boundary canaries use a dedicated non-human JKD-001 identity:
 
 `jason-ccc-worker`
 
@@ -55,7 +55,7 @@ It receives exactly eight `observe` grants, with no client wildcard mutation aut
 7. `identity.user.search`
 8. `system.registry.search`
 
-Provisioning is explicit and audited by `tools/provision_ccc_authority.py`. The scheduled provider canaries execute through JKD-001 and Central Orchestrator by reusing Jason's governed autonomous observe request path. They do not import MCP and bypass its authentication boundary, and they do not call provider APIs directly.
+Provisioning is explicit and audited by `tools/provision_ccc_authority.py`. The scheduled provider canaries execute through JKD-001 and Central Orchestrator by reusing Jason's governed autonomous observe request path. They do not import MCP and bypass its authentication boundary, and they do not call provider APIs directly. Datto RMM/EDR, DNSFilter, Backup.net, and System Registry are positive read canaries. Autotask, Microsoft Graph, and Kyocera KFS are deliberate negative controls for requester/provider eligibility boundaries under this non-human identity; CCC requires those denials to remain exact rather than weakening them to obtain a green result.
 
 ## Certification checks
 
@@ -74,7 +74,7 @@ When a full CCC run is due, the runner verifies at minimum:
 - current OpenClaw/JKD-001 operational health snapshot is `pass` and fresh;
 - `/opt/jason/current` resolves to the exact live MCP runtime revision;
 - MCP governance reports `central-orchestrator` and `direct_provider_access=false`;
-- all configured governed provider canaries succeed through the dedicated CCC observe identity.
+- all configured governed provider boundary canaries match their expected outcomes through the dedicated CCC observe identity. Positive canaries must succeed; requester-bound negative controls must continue to fail closed with the expected denial reason.
 
 ## Material changes and owner review
 
