@@ -8,7 +8,7 @@
 
 CCC provides a deterministic recurring certification loop for Jason's current production state. It does not grant execution authority and it does not replace the J-002 Constitution, owner review, Central Orchestrator, JKD-001, provider/client boundaries, or J-900 recovery controls.
 
-The default effective cadence is **30 days**. The systemd timer wakes once per day only to determine whether certification is due or whether a material source change requires an out-of-cycle run. `cadence_days` is configured in `/etc/jason/ccc.json`; changing the effective cadence does not require source or unit-file edits.
+The default effective cadence is **30 days**. The systemd timer wakes once per day only to determine whether certification is due or whether a material source change requires an out-of-cycle run. `cadence_days` is configured in `/var/lib/jason/ccc/ccc.json`; changing the effective cadence does not require source or unit-file edits.
 
 ## Deterministic result states
 
@@ -34,7 +34,7 @@ The timer checks daily at approximately 06:15 America/New_York with a bounded ra
 Canonical configuration:
 
 - source default: `config/ccc/default.json`
-- production file: `/etc/jason/ccc.json`
+- production file: `/var/lib/jason/ccc/ccc.json`
 
 The installer preserves an existing production configuration rather than replacing it during an upgrade.
 
@@ -122,7 +122,7 @@ Install an exact reviewed source revision with:
 sudo tools/install_ccc_scheduler.sh <source-revision> [material-review-json]
 ```
 
-When the deployment itself is a material change, supply an owner-review JSON already bound to that exact source SHA. The installer validates and installs the review before the first CCC service start. The installer creates the isolated CCC release, preserves an existing `/etc/jason/ccc.json`, installs/enables the service and timer, and requires the initial service run to complete successfully.
+When the deployment itself is a material change, supply an owner-review JSON already bound to that exact source SHA. The installer validates and installs the review before the first CCC service start. The installer creates the isolated CCC release, preserves an existing `/var/lib/jason/ccc/ccc.json`, installs/enables the service and timer, and requires the initial service run to complete successfully.
 
 ## Failure behavior
 
