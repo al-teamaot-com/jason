@@ -529,3 +529,49 @@ def test_autonomy_acceptance_policy_cannot_be_reused_by_another_service_principa
         .allowed
         is False
     )
+
+
+def test_autonomy_worker_policy_allows_ticket_note_search() -> None:
+    request = _request(
+        SERVICE_TICKET_NOTES_SEARCH,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-worker-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_TICKET_NOTES_SEARCH),
+    )
+    release = invocation.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    )
+    assert release.allowed is True
+    assert "internal_autonomy_production_worker" in release.authorization_basis
+    assert "autonomous-worker-read-v1" in release.authorization_basis
+
+
+def test_autonomy_worker_policy_still_cannot_expand_to_contact_read() -> None:
+    request = _request(
+        SERVICE_CONTACT_READ,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-worker-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 3}}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request,
+        resolution=_resolution(SERVICE_CONTACT_READ),
+    )
+    assert (
+        invocation.information_authorization
+        .require_allowed(InformationAction.RELEASE)
+        .allowed
+        is False
+    )
+
+
