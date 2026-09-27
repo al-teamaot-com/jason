@@ -1221,6 +1221,26 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Run one controlled production handoff when the owner is available for the bounded acceptance window or when an equivalent pre-approved non-disruptive test ticket is designated.
 
+
+### TODO-OPS-010 — Live Jason operational activity dashboard
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Build a live operational dashboard that answers, in plain language, exactly what Jason is doing now, why he is doing it, what authority permits the action, what he is waiting on, what is blocked, what needs human input, and what happens next.
+- **Why it matters:** Current status often has to be reconstructed from tickets, provider jobs, audit events, governance state, and recent actions. A first-class operational view would make Jason's autonomy transparent, make stalls and blockers immediately visible, distinguish legitimate waiting from actual failure, and let AOT operators supervise Jason like a transparent technician rather than infer activity from disconnected system records.
+- **Required views:** current work; waiting; blocked; needs human; recently completed; and an always-visible Jason heartbeat showing online state, autonomous state, active work count, waiting count, blocked count, approval count, and last meaningful action.
+- **Per-work-item detail:** ticket/work identifier; client; device/target; current stage; current action; start time and elapsed time; authority/approval basis; playbook or workflow; concise reason for the current step; last meaningful event; expected next action; blocker/wait reason; and relevant execution/work-session ID.
+- **Live activity stream:** expose a human-readable event timeline for each work session, including pickup/claim, device association, evidence reads, playbook selection, governance checks, provider/job submission, waiting/rechecks, results, verification, ticket updates, handoffs, and completion. Raw logs remain available only as drill-down detail and should not replace the operational narrative.
+- **State semantics:** clearly distinguish `working`, `waiting`, `blocked`, `needs_human`, `completed`, and `idle`. Idle should explain why Jason is idle and, where applicable, the next queue/recheck time. Waiting should identify the external dependency or scheduled recheck. Blocked should identify the exact governance/provider/capability defect or missing prerequisite.
+- **Work-session traceability:** assign or preserve a coherent work/execution session ID spanning ticket/device correlation, evidence gathering, playbook selection, governance, provider invocation, result handling, verification, ticket update, and completion/handoff so operators can follow one unit of work end to end.
+- **Explainability requirement:** the dashboard should surface concise operational reasoning and authoritative evidence references without exposing secrets, credentials, client-sensitive payloads beyond the operator's authorization, or raw internal authorization context.
+- **Observability source:** prefer Jason's canonical orchestration/audit/work-state records as the source of truth rather than reconstructing status from Grafana queries against provider systems after the fact. Provider telemetry may enrich the view but should not define Jason's internal state.
+- **Why not now:** The required events and state transitions span existing queue autonomy, governance, provider execution, approval, audit, and Grafana surfaces. The design should normalize these into one durable operational state model before adding UI, otherwise the dashboard will become another partial reconstruction layer.
+- **Prerequisites:** durable work-session/work-item state; normalized operational event schema; stable autonomous queue state transitions; execution-plan/audit correlation IDs; approval and human-review handoff state; provider job correlation; secret-safe telemetry/export; and Grafana or equivalent dashboard integration.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Begin design once the current autonomous queue workflow and human-review handoff are production-accepted, or sooner if lack of live visibility is materially slowing supervision/testing.
+
 ---
 
 ## New-item template
