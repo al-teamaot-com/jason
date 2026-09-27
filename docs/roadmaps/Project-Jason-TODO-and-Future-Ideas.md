@@ -1113,6 +1113,21 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Before Jason becomes materially difficult to reconstruct by reissuing credentials, before multi-host/production expansion, or during the next formal disaster-recovery review.
 
+### TODO-GOV-005 — Deterministic recurring constitutional and compliance certification
+
+- **Priority:** P1
+- **Status:** Planned
+- **Risk level:** Moderate
+- **Idea:** Build a deterministic, evidence-backed certification job that regularly verifies Jason remains compliant with the J-002 Constitution and other defined production compliance controls. The default scheduled cadence should be monthly, but the cadence must be configurable without code changes. Material governance, authority, identity, provider-boundary, recovery, or production-topology changes should also be able to trigger an out-of-cycle certification.
+- **Why it matters:** Constitutional certification is state-dependent. A repeatable job reduces dependence on ad hoc human review, detects governance drift early, creates comparable evidence over time, and gives AOT a durable record that Jason's production controls remain intact.
+- **Why not now:** The current 2026-09-26 constitutional certification and 2026-09-27 production-host reconciliation are complete, so this is not a present production blocker. The next step is to convert those proven checks into a reusable deterministic certification harness rather than repeatedly performing the review manually.
+- **Required design:** deterministic checks must produce explicit `PASS`, `FAIL`, or `NOT PROVEN` outcomes; AI may summarize or evaluate only requirements that cannot safely be reduced to deterministic assertions; AI must never override a deterministic failure or missing-evidence result into `PASS`; every run must retain the authoritative source revision, runtime revision, evidence package, check results, exceptions, and final certification status.
+- **Initial deterministic scope:** J-002 article evidence coverage; authoritative GitHub revision; System Registry consistency; Central Orchestrator authority; `direct_provider_access=false`; identity/authorization boundaries; approval and execution-plan protections; immutable production service paths; failed systemd units; Prometheus target health; provider-boundary governed read smokes; recovery/OpenBao/OpenClaw health; required regression/security tests; and any formally registered constitutional exceptions.
+- **Cadence:** Monthly by default; configurable through governed configuration rather than source edits. Support explicit out-of-cycle runs after material constitutional architecture, authority, identity, provider-boundary, recovery, or production-topology changes.
+- **Prerequisites:** canonical J-002 article-to-check mapping; stable machine-readable certification result schema; governed configuration for cadence; evidence retention location; material-change trigger definition; production-safe provider smoke set; reporting/notification path; regression tests for the certification harness itself.
+- **Decision owner:** Jason Governance Authority
+- **Review trigger:** Begin implementation before the next scheduled constitutional recertification or sooner if a material production/governance change occurs.
+
 ### TODO-SEC-006 — Complete approval/execution-plan security rollout
 
 - **Priority:** P0 — high priority
