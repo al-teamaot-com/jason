@@ -587,12 +587,15 @@ class OperationalAutonomyMaintenance:
         store: SQLiteOperationalWorkStore,
         promotion_store: SQLitePlaybookAutonomyApprovalStore,
         max_active_work_items: int = 2,
+        max_admission_attempts_per_scan: int = 4,
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
+        if not 1 <= int(max_admission_attempts_per_scan) <= 20:
+            raise ValueError("max_admission_attempts_per_scan must be between 1 and 20")
         if int(interval_seconds) < 30:
             raise ValueError("operational autonomy interval must be at least 30 seconds")
         self.queue_source = queue_source
@@ -601,6 +604,7 @@ class OperationalAutonomyMaintenance:
         self.store = store
         self.promotion_store = promotion_store
         self.max_active_work_items = int(max_active_work_items)
+        self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
@@ -779,14 +783,6 @@ class OperationalAutonomyMaintenance:
                 continue
             if ticket_id in processed:
                 continue
-            if item.context.get("_jason_assigned_elsewhere") is True:
-                assigned_elsewhere += 1
-                if not self._assigned_new_ticket_is_unworked(item):
-                    classifications[ticket_id] = (
-                        "not_actionable", "existing_technician_activity",
-                        item.source_version, False,
-                    )
-                    continue
             scope = self._match_scope(item.context)
             if scope is None:
                 unsupported += 1
@@ -802,6 +798,14 @@ class OperationalAutonomyMaintenance:
                     item.source_version, False,
                 )
                 continue
+            if item.context.get("_jason_assigned_elsewhere") is True:
+                assigned_elsewhere += 1
+                if not self._assigned_new_ticket_is_unworked(item):
+                    classifications[ticket_id] = (
+                        "not_actionable", "existing_technician_activity",
+                        item.source_version, False,
+                    )
+                    continue
             eligible.append((item, scope))
             classifications[ticket_id] = (
                 "eligible_now", "promoted_safe_branch_available",
@@ -820,12 +824,16 @@ class OperationalAutonomyMaintenance:
         )
         started = 0
         waiting_device = 0
+        admission_attempts = 0
         for candidate, scope in eligible:
             # Recompute occupancy after every advancement. If a ticket completes,
             # blocks, or hands off immediately, refill the freed slot during this
             # same scan rather than idling until the next cadence.
             if len(self.store.list_open()) >= self.max_active_work_items:
                 break
+            if admission_attempts >= self.max_admission_attempts_per_scan:
+                break
+            admission_attempts += 1
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:

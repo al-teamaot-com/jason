@@ -2537,3 +2537,90 @@ def test_assigned_new_ticket_with_singular_gpt_insight_can_be_claimed(tmp_path: 
     worker.tick()
     assert store.get(140933) is not None
     store.close()
+
+
+def test_assigned_unsupported_ticket_skips_note_history_read(tmp_path: Path):
+    class TrackingReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.notes_called = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.notes.search":
+                self.notes_called = True
+            return super().execute(capability, arguments)
+
+    item = candidate(title="General software question with no promoted playbook")
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = TrackingReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert reads.notes_called is False
+    assert store.get(140933) is None
+    store.close()
+
+
+def test_new_admission_attempts_are_throttled_per_scan(tmp_path: Path):
+    class MultiQueue:
+        def reconcile_candidates(self):
+            items = []
+            for i in range(6):
+                base = candidate()
+                item = replace(
+                    base,
+                    resource_id=str(150000 + i),
+                    context={
+                        **base.context,
+                        "id": 150000 + i,
+                        "ticketNumber": f"T{i}",
+                    },
+                )
+                items.append(item)
+            return tuple(items)
+
+    class CountingWorker(OperationalAutonomyMaintenance):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.admission_attempts_seen = 0
+
+        def _scope_is_promoted(self, scope):
+            return True
+
+        def _admit(self, candidate, scope):
+            self.admission_attempts_seen += 1
+            raise RuntimeError("synthetic admission failure")
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = CountingWorker(
+        queue_source=MultiQueue(),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        max_admission_attempts_per_scan=4,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert worker.admission_attempts_seen == 4
+    assert store.get(150004) is None
+    assert store.get(150005) is None
+    store.close()
