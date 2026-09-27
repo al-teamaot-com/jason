@@ -103,7 +103,7 @@ def automation_prs() -> list[dict[str, Any]]:
         "--repo", REPO,
         "--state", "open",
         "--limit", "100",
-        "--json", "number,headRefName,headRefOid,url",
+        "--json", "number,headRefName,headRefOid,url,mergeable,mergeStateStatus",
     )
     return [
         item for item in (items or [])
@@ -133,20 +133,35 @@ def workflows_green(head_sha: str) -> bool:
     )
 
 
-def merge_ready_automation_prs() -> None:
-    for item in automation_prs():
+def merge_ready_automation_prs() -> str:
+    items = automation_prs()
+    if not items:
+        return "none"
+    for item in items:
         number = str(item["number"])
+        mergeable = str(item.get("mergeable") or "")
+        merge_state = str(item.get("mergeStateStatus") or "")
+        if mergeable == "CONFLICTING" or merge_state == "DIRTY":
+            print(f"DOCUMENTATION_PR_REFRESH_REQUIRED={number}")
+            return "refresh"
         sha = str(item.get("headRefOid") or "")
         if not sha or not workflows_green(sha):
             print(f"DOCUMENTATION_PR_WAITING={number}")
-            continue
+            return "waiting"
         run("gh", "pr", "merge", number, "--repo", REPO, "--merge")
         print(f"DOCUMENTATION_PR_MERGED={number}")
+        return "merged"
+    return "none"
 
 
 def main() -> int:
+    pr_state = merge_ready_automation_prs()
+    if pr_state == "refresh":
+        publish_source_if_needed()
+        return 0
+    if pr_state in {"waiting", "merged"}:
+        return 0
     publish_source_if_needed()
-    merge_ready_automation_prs()
     return 0
 
 
