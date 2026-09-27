@@ -1,6 +1,6 @@
 # Grafana / Observability Configuration Assurance
 
-**Status:** Implemented in source; production activation pending  
+**Status:** Production-proven 2026-09-27
 **Owner:** Jason Technology Steward  
 **Purpose:** Prevent Grafana dashboards, provisioning, and required telemetry from silently drifting away from the authoritative GitHub source.
 
@@ -98,3 +98,30 @@ Editing a production-mounted dashboard file or relying on an uncommitted worktre
 ## Failure handling
 
 Drift detection does not authorize repair. A failed assurance run creates operational evidence and alerts. Remediation proceeds through the normal governed change path. This preserves the System Registry / constitutional rule against silent topology or configuration repair.
+## Production acceptance — 2026-09-27
+
+Production activation is complete and accepted at source revision `f61ef43228d1f5072d425e11e5303ca3bb143079`.
+
+Accepted production evidence:
+
+- `/opt/jason/observability/current` resolves to `/opt/jason/observability/releases/f61ef43228d1f5072d425e11e5303ca3bb143079`;
+- Grafana dashboard and provisioning mounts resolve directly into that exact immutable release;
+- Prometheus configuration, file-discovery, and alert-rule mounts resolve directly into the same immutable release;
+- all 21 required dashboard source files match the manifest hashes and identities;
+- all 21 required dashboards are readable through the Grafana API with expected UID/title identity;
+- all 6 declared telemetry dependencies pass;
+- authoritative OpenAI 24-hour, 7-day, and month-to-date cost metrics are present;
+- `jason-grafana-assurance-exporter.service` is active on dedicated port `9474`;
+- toner telemetry remains independently active on port `9473`;
+- Prometheus reports the `jason-grafana-assurance` target healthy on `host.docker.internal:9474`;
+- `jason-grafana-assurance.timer` is enabled and active on the five-minute cadence;
+- persisted `/var/lib/jason/observability/grafana-assurance.json` reports `PASS`.
+
+Two non-disruptive recovery/alert acceptance checks were also completed:
+
+1. Prometheus `promtool` evaluated synthetic `DRIFTED` and `NOT_PROVEN` inputs and proved that `JasonGrafanaConfigurationDrift` and `JasonGrafanaAssuranceUnavailable` both reach firing state after their configured five-minute `for` interval.
+2. A disposable fresh Grafana `12.2.1` container was started with only the immutable provisioning/dashboard sources. After provisioning completed, 21/21 required dashboards were recovered with no missing UIDs; the disposable container was then removed.
+
+The first cold-recovery inventory was intentionally treated as not proven because Grafana health became available before dashboard provisioning had completed. Rechecking only after the provisioning completion log produced the accepted 21/21 result. Future recovery tests must wait for provisioning completion, not only HTTP health.
+
+This closes the Grafana/observability reliability workstream. Future dashboard changes remain subject to the normal immutable-release, manifest, CI, deployment-verification, and five-minute assurance controls.
