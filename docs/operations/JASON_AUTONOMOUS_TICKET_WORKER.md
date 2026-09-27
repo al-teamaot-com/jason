@@ -264,7 +264,7 @@ Each scan persists bounded aggregate evidence: pages traversed, raw provider ite
 - `unsupported_capability`
 - `not_actionable`
 
-Tickets already assigned to another technician remain visible to assessment telemetry but are not claimed by Jason. Prioritization is deterministic: urgent first, then PSA priority, then Jason-owned work, then ticket ID.
+Tickets already assigned to another technician remain visible to assessment telemetry. By default Jason does not claim them. The bounded exception is an Autotask ticket whose current status is exactly **New**, which has no technician-authored ticket notes, and which otherwise matches a promoted autonomous playbook. Workflow/system notes, GPT Insights, customer/contact-authored notes, and Jason-authored notes do not establish technician ownership for this decision. Any technician-authored note, any non-New status, or a failure to read note history fails closed and preserves the existing human assignment. Prioritization is deterministic: urgent first, then PSA priority, then Jason-owned work, then ticket ID.
 
 If a ticket lacks an Autotask configuration-item association, Jason may attempt an exact bounded correlation before diagnostics. It extracts bounded hostname hints from ticket text, requires exactly one exact Datto endpoint hostname match, then requires exactly one active same-company Autotask CI whose reference number equals the durable Datto UID and whose reference title equals the hostname. Only then may Jason perform a governed, readback-verified `configurationItemID` update. Ambiguity or mismatch fails closed.
 

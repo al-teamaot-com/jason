@@ -718,11 +718,12 @@ class OperationalAutonomyMaintenance:
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
                 assigned_elsewhere += 1
-                classifications[ticket_id] = (
-                    "not_actionable", "existing_technician_activity",
-                    item.source_version, False,
-                )
-                continue
+                if not self._assigned_new_ticket_is_unworked(item):
+                    classifications[ticket_id] = (
+                        "not_actionable", "existing_technician_activity",
+                        item.source_version, False,
+                    )
+                    continue
             scope = self._match_scope(item.context)
             if scope is None:
                 unsupported += 1
@@ -2748,6 +2749,59 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "human-review handoff readback did not verify queue and status"
             )
+
+    def _assigned_new_ticket_is_unworked(self, candidate) -> bool:
+        """Return True only for assigned New tickets with no technician-authored notes.
+
+        Workflow/system notes, GPT Insights, customer/contact notes, and Jason's own
+        notes do not establish human technician ownership. Read failure fails closed.
+        """
+        status_label = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip()
+        if status_label.casefold() != "new":
+            return False
+        try:
+            result = self.reads.execute(
+                "service.ticket.notes.search",
+                {"ticket_id": int(candidate.resource_id)},
+            )
+        except Exception:
+            return False
+        evidence = result.get("evidence") if isinstance(result, Mapping) else None
+        data = evidence.get("data") if isinstance(evidence, Mapping) else None
+        items = data.get("items") if isinstance(data, Mapping) else None
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+            return False
+
+        owned_ids = set(
+            getattr(
+                getattr(self.queue_source, "config", None),
+                "owned_resource_ids",
+                (),
+            )
+            or ()
+        )
+        for note in items:
+            if not isinstance(note, Mapping):
+                continue
+            title = str(note.get("title") or "").casefold()
+            description = str(note.get("description") or "").casefold()
+            if "gpt insights" in title or "gpt insights" in description:
+                continue
+            if note.get("createdByContactID") is not None:
+                continue
+            creator = note.get("creatorResourceID")
+            try:
+                creator_id = int(creator) if creator is not None else None
+            except (TypeError, ValueError):
+                creator_id = None
+            if creator_id is None:
+                continue
+            if creator_id == 4 or creator_id in owned_ids:
+                continue
+            return False
+        return True
 
     def _block(self, work: OperationalWork, reason: str) -> None:
         try:
