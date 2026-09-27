@@ -95,6 +95,44 @@ def detect_candidate_drafts(
             )
         )
 
+    warnings = set(record.warning_codes)
+    if "worker_unsupported_capability_present" in warnings:
+        candidates.append(
+            ImprovementCandidateDraft(
+                signal_kind=ReflectionSignalKind.WORKER_UNSUPPORTED_CAPABILITY,
+                capability_name=record.capability_name,
+                provider_id=record.provider_id,
+                title="Ticket worker observed unsupported work",
+                proposal=(
+                    "Review recurring unsupported ticket categories for a bounded "
+                    "provider-neutral playbook candidate. Do not change production "
+                    "authority until normal regression and human approval gates pass."
+                ),
+                rationale=(
+                    "The autonomous ticket scan classified one or more current tickets "
+                    "as unsupported by promoted capabilities."
+                ),
+            )
+        )
+
+    if "worker_governance_blocked_present" in warnings:
+        candidates.append(
+            ImprovementCandidateDraft(
+                signal_kind=ReflectionSignalKind.WORKER_GOVERNANCE_BLOCKER,
+                capability_name=record.capability_name,
+                provider_id=record.provider_id,
+                title="Ticket worker observed governance-blocked work",
+                proposal=(
+                    "Review repeated admission, identity, or promotion blockers and "
+                    "propose a narrowly scoped fix without weakening existing controls."
+                ),
+                rationale=(
+                    "The autonomous ticket scan classified one or more current tickets "
+                    "as governance blocked."
+                ),
+            )
+        )
+
     if record.user_correction_category:
         candidates.append(
             ImprovementCandidateDraft(

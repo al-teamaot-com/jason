@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from uuid import uuid4
 
 from autonomous_remediation.autonomous_principal import (
     AutonomousRequestFactory,
@@ -174,6 +175,24 @@ class OperationalAutonomyError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class TicketScanSnapshot:
+    cycle_id: str
+    scanned_at: str
+    pages_traversed: int
+    provider_items: int
+    duplicate_items: int
+    evaluated: int
+    eligible: int
+    unsupported: int
+    governance_blocked: int
+    assigned_elsewhere: int
+    active_slots: int
+    selected: int
+    waiting_device: int
+    human_review: int
+
+
+@dataclass(frozen=True, slots=True)
 class OperationalWork:
     ticket_id: int
     ticket_number: str
@@ -214,6 +233,33 @@ class SQLiteOperationalWorkStore:
         updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_scan_cycle (
+        cycle_id TEXT PRIMARY KEY,
+        scanned_at TEXT NOT NULL,
+        pages_traversed INTEGER NOT NULL,
+        provider_items INTEGER NOT NULL,
+        duplicate_items INTEGER NOT NULL DEFAULT 0,
+        evaluated INTEGER NOT NULL,
+        eligible INTEGER NOT NULL,
+        unsupported INTEGER NOT NULL,
+        governance_blocked INTEGER NOT NULL,
+        assigned_elsewhere INTEGER NOT NULL,
+        active_slots INTEGER NOT NULL,
+        selected INTEGER NOT NULL,
+        waiting_device INTEGER NOT NULL,
+        human_review INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_classification (
+        ticket_id INTEGER PRIMARY KEY,
+        state TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        selected_count INTEGER NOT NULL DEFAULT 0,
+        source_version TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS autonomy_ticket_note_state (
         ticket_id INTEGER NOT NULL,
         playbook_id TEXT NOT NULL,
@@ -248,6 +294,17 @@ class SQLiteOperationalWorkStore:
         if "source_version" not in columns:
             self._connection.execute(
                 "ALTER TABLE autonomy_operational_work ADD COLUMN source_version TEXT"
+            )
+        scan_columns = {
+            str(row["name"])
+            for row in self._connection.execute(
+                "PRAGMA table_info(autonomy_ticket_scan_cycle)"
+            ).fetchall()
+        }
+        if "duplicate_items" not in scan_columns:
+            self._connection.execute(
+                "ALTER TABLE autonomy_ticket_scan_cycle "
+                "ADD COLUMN duplicate_items INTEGER NOT NULL DEFAULT 0"
             )
         os.chmod(self.path, 0o600)
 
@@ -323,6 +380,78 @@ class SQLiteOperationalWorkStore:
                 "DELETE FROM autonomy_operational_work WHERE ticket_id=?",
                 (int(ticket_id),),
             )
+
+    def record_scan(self, snapshot: TicketScanSnapshot) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT OR REPLACE INTO autonomy_ticket_scan_cycle(
+                    cycle_id,scanned_at,pages_traversed,provider_items,duplicate_items,
+                    evaluated,eligible,unsupported,governance_blocked,assigned_elsewhere,
+                    active_slots,selected,waiting_device,human_review
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    snapshot.cycle_id, snapshot.scanned_at, snapshot.pages_traversed,
+                    snapshot.provider_items, snapshot.duplicate_items, snapshot.evaluated,
+                    snapshot.eligible, snapshot.unsupported, snapshot.governance_blocked,
+                    snapshot.assigned_elsewhere, snapshot.active_slots,
+                    snapshot.selected, snapshot.waiting_device, snapshot.human_review,
+                ),
+            )
+            self._connection.execute(
+                """
+                DELETE FROM autonomy_ticket_scan_cycle
+                WHERE cycle_id NOT IN (
+                    SELECT cycle_id FROM autonomy_ticket_scan_cycle
+                    ORDER BY scanned_at DESC LIMIT 500
+                )
+                """
+            )
+
+    def latest_scan(self) -> TicketScanSnapshot | None:
+        row = self._connection.execute(
+            "SELECT * FROM autonomy_ticket_scan_cycle ORDER BY scanned_at DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else TicketScanSnapshot(**dict(row))
+
+    def record_classifications(
+        self,
+        rows: Sequence[tuple[int, str, str, str | None, bool]],
+        *,
+        observed_at: str,
+    ) -> None:
+        current_ids = [int(row[0]) for row in rows]
+        with self._connection:
+            if current_ids:
+                placeholders = ",".join("?" for _ in current_ids)
+                self._connection.execute(
+                    f"DELETE FROM autonomy_ticket_classification "
+                    f"WHERE ticket_id NOT IN ({placeholders})",
+                    current_ids,
+                )
+            else:
+                self._connection.execute("DELETE FROM autonomy_ticket_classification")
+            for ticket_id, state, reason_code, source_version, selected in rows:
+                self._connection.execute(
+                    """
+                    INSERT INTO autonomy_ticket_classification(
+                        ticket_id,state,reason_code,first_seen,last_seen,
+                        selected_count,source_version
+                    ) VALUES (?,?,?,?,?,?,?)
+                    ON CONFLICT(ticket_id) DO UPDATE SET
+                        state=excluded.state,
+                        reason_code=excluded.reason_code,
+                        last_seen=excluded.last_seen,
+                        selected_count=autonomy_ticket_classification.selected_count
+                            + CASE WHEN excluded.selected_count > 0 THEN 1 ELSE 0 END,
+                        source_version=excluded.source_version
+                    """,
+                    (
+                        int(ticket_id), state, reason_code, observed_at, observed_at,
+                        1 if selected else 0, source_version,
+                    ),
+                )
 
     def last_note_fingerprint(
         self, ticket_id: int, playbook_id: str, note_title: str
@@ -459,6 +588,7 @@ class OperationalAutonomyMaintenance:
         max_active_work_items: int = 2,
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
+        audit=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -472,6 +602,7 @@ class OperationalAutonomyMaintenance:
         self.max_active_work_items = int(max_active_work_items)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
+        self.audit = audit
         self._next_due = 0.0
 
     def tick(self) -> None:
@@ -487,11 +618,21 @@ class OperationalAutonomyMaintenance:
             # A later cadence retry will reconcile again.
             return
         by_id = {int(item.resource_id): item for item in candidates}
+        classifications: dict[
+            int, tuple[str, str, str | None, bool]
+        ] = {}
 
         active = list(self.store.list_open())
         processed: set[int] = set()
         for work in active[: self.max_active_work_items]:
             candidate = by_id.get(work.ticket_id)
+            if candidate is not None:
+                classifications[work.ticket_id] = (
+                    "eligible_now",
+                    "active_work",
+                    candidate.source_version,
+                    True,
+                )
             if candidate is None:
                 self._block(
                     work,
@@ -505,50 +646,126 @@ class OperationalAutonomyMaintenance:
                     work,
                     f"Execution failed closed: {type(exc).__name__}: {str(exc)[:350]}",
                 )
+            state, reason_code = self._classify_persisted_work(work.ticket_id)
+            classifications[work.ticket_id] = (
+                state,
+                reason_code,
+                candidate.source_version,
+                state == "eligible_now",
+            )
             processed.add(work.ticket_id)
 
-        slots = max(0, self.max_active_work_items - len(self.store.list_open()))
-        if slots == 0:
-            return
-
         eligible: list[tuple[Any, PlaybookScope]] = []
+        unsupported = 0
+        governance_blocked = 0
+        assigned_elsewhere = 0
+        human_review = 0
+
         for item in candidates:
             ticket_id = int(item.resource_id)
             existing = self.store.get(ticket_id)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 observed_version = str(item.source_version or "").strip() or None
-                if observed_version and observed_version != existing.source_version:
+                # A human-review handoff remains terminal while it stays outside
+                # the Jason queue. The worker must not immediately reselect its
+                # own Help Desk handoff merely because that governed update
+                # changed the Autotask source-version marker.
+                human_handoff = (
+                    existing.phase == "escalated"
+                    and str(item.source_queue).strip().casefold() != "jason"
+                )
+                if (
+                    not human_handoff
+                    and observed_version
+                    and observed_version != existing.source_version
+                ):
                     self.store.delete(ticket_id)
                     existing = None
-            if ticket_id in processed or existing is not None:
+            if existing is not None:
+                if existing.phase == "escalated":
+                    human_review += 1
+                    state, reason_code = "waiting_human_review", "technician_review_required"
+                elif existing.phase == "approval_pending":
+                    state, reason_code = "waiting_human_review", "approval_required"
+                elif existing.phase == "blocked":
+                    state, reason_code = "governance_blocked", "worker_blocked"
+                elif existing.phase == "complete":
+                    state, reason_code = "not_actionable", "already_complete"
+                else:
+                    state, reason_code = "eligible_now", "existing_active_work"
+                classifications[ticket_id] = (
+                    state, reason_code, item.source_version, state == "eligible_now"
+                )
+                continue
+            if ticket_id in processed:
+                continue
+            if item.context.get("_jason_assigned_elsewhere") is True:
+                assigned_elsewhere += 1
+                classifications[ticket_id] = (
+                    "not_actionable", "existing_technician_activity",
+                    item.source_version, False,
+                )
                 continue
             scope = self._match_scope(item.context)
-            if scope is None or not self._scope_is_promoted(scope):
+            if scope is None:
+                unsupported += 1
+                classifications[ticket_id] = (
+                    "unsupported_capability", "no_applicable_promoted_playbook",
+                    item.source_version, False,
+                )
+                continue
+            if not self._scope_is_promoted(scope):
+                governance_blocked += 1
+                classifications[ticket_id] = (
+                    "governance_blocked", "playbook_not_promoted",
+                    item.source_version, False,
+                )
                 continue
             eligible.append((item, scope))
+            classifications[ticket_id] = (
+                "eligible_now", "promoted_safe_branch_available",
+                item.source_version, False,
+            )
 
+        # Keep prioritization deliberately simple and auditable: urgent first,
+        # then PSA priority, then already-owned work, then oldest ticket ID.
         eligible.sort(
             key=lambda pair: (
                 -int(pair[0].urgent),
-                -int(pair[0].owned_by_jason),
                 -pair[0].priority,
+                -int(pair[0].owned_by_jason),
                 int(pair[0].resource_id),
             )
         )
         started = 0
+        waiting_device = 0
         for candidate, scope in eligible:
-            if started >= slots:
+            # Recompute occupancy after every advancement. If a ticket completes,
+            # blocks, or hands off immediately, refill the freed slot during this
+            # same scan rather than idling until the next cadence.
+            if len(self.store.list_open()) >= self.max_active_work_items:
                 break
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:
-                # Transient admission failures (notably an offline endpoint) do
-                # not consume an active-work slot. Continue scanning so one or
-                # two offline high-priority tickets cannot permanently starve
-                # a lower-priority online eligible ticket.
+                if "endpoint is not currently online" in str(exc).casefold():
+                    waiting_device += 1
+                    classifications[int(candidate.resource_id)] = (
+                        "waiting_device_access", "endpoint_offline",
+                        candidate.source_version, False,
+                    )
+                else:
+                    classifications[int(candidate.resource_id)] = (
+                        "governance_blocked", "admission_identity_or_governance_failure",
+                        candidate.source_version, False,
+                    )
+                # Transient admission failures do not consume an active-work slot.
                 self._record_admission_failure(candidate, scope, exc)
                 continue
             started += 1
+            classifications[int(candidate.resource_id)] = (
+                "eligible_now", "active_work", candidate.source_version, True
+            )
             try:
                 self._advance(work, candidate.context)
             except Exception as exc:
@@ -556,6 +773,114 @@ class OperationalAutonomyMaintenance:
                     work,
                     f"Execution failed closed: {type(exc).__name__}: {str(exc)[:350]}",
                 )
+            state, reason_code = self._classify_persisted_work(work.ticket_id)
+            classifications[work.ticket_id] = (
+                state,
+                reason_code,
+                candidate.source_version,
+                True,
+            )
+
+        # Derive coverage counts from the final current classifications so
+        # telemetry includes existing active/waiting/handoff rows as well as new
+        # admissions from this cycle.
+        unsupported = sum(
+            1 for state, _, _, _ in classifications.values()
+            if state == "unsupported_capability"
+        )
+        governance_blocked = sum(
+            1 for state, _, _, _ in classifications.values()
+            if state == "governance_blocked"
+        )
+        human_review = sum(
+            1 for state, _, _, _ in classifications.values()
+            if state == "waiting_human_review"
+        )
+        waiting_device = sum(
+            1 for state, _, _, _ in classifications.values()
+            if state == "waiting_device_access"
+        )
+        assigned_elsewhere = sum(
+            1 for state, reason, _, _ in classifications.values()
+            if state == "not_actionable" and reason == "existing_technician_activity"
+        )
+        eligible_count = sum(
+            1 for state, _, _, _ in classifications.values()
+            if state == "eligible_now"
+        )
+
+        trace = getattr(self.queue_source, "last_trace", None)
+        scanned_at = datetime.now(timezone.utc).isoformat()
+        self.store.record_classifications(
+            [
+                (ticket_id, state, reason, source_version, selected)
+                for ticket_id, (state, reason, source_version, selected)
+                in classifications.items()
+            ],
+            observed_at=scanned_at,
+        )
+        cycle_id = f"scan-{uuid4().hex}"
+        snapshot = TicketScanSnapshot(
+            cycle_id=cycle_id,
+            scanned_at=scanned_at,
+            pages_traversed=int(getattr(trace, "pages_traversed", 0)),
+            provider_items=int(getattr(trace, "provider_items", len(candidates))),
+            duplicate_items=int(getattr(trace, "duplicate_items", 0)),
+            evaluated=len(candidates),
+            eligible=eligible_count,
+            unsupported=unsupported,
+            governance_blocked=governance_blocked,
+            assigned_elsewhere=assigned_elsewhere,
+            active_slots=len(self.store.list_open()),
+            selected=started,
+            waiting_device=waiting_device,
+            human_review=human_review,
+        )
+        self.store.record_scan(snapshot)
+        self._emit_scan_reflection(snapshot)
+
+    def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
+        if self.audit is None:
+            return
+        warnings: list[str] = []
+        if snapshot.unsupported:
+            warnings.append("worker_unsupported_capability_present")
+        if snapshot.governance_blocked:
+            warnings.append("worker_governance_blocked_present")
+        self.audit.append(
+            "orchestration.capability.completed",
+            {
+                "execution_id": snapshot.cycle_id,
+                "correlation_id": snapshot.cycle_id,
+                "organization_id": "aot",
+                "capability_name": "autonomy.ticket.worker.scan",
+                "provider_id": "autotask",
+                "status": "completed",
+                "reflection_normalized_intent": "scan_approved_open_ticket_scope",
+                "reflection_selector_strategy": "open_status_queue_scoped_pagination",
+                "reflection_requested_result_scope": "full",
+                "reflection_result_count": snapshot.evaluated,
+                "reflection_candidate_count": snapshot.eligible,
+                "reflection_provider_call_count": snapshot.pages_traversed,
+                "reflection_pagination_count": snapshot.pages_traversed,
+                "reflection_evidence_item_count": snapshot.provider_items,
+                "reflection_warning_codes": warnings,
+            },
+        )
+
+    def _classify_persisted_work(self, ticket_id: int) -> tuple[str, str]:
+        current = self.store.get(ticket_id)
+        if current is None:
+            return "eligible_now", "active_work"
+        if current.phase == "escalated":
+            return "waiting_human_review", "technician_review_required"
+        if current.phase == "approval_pending":
+            return "waiting_human_review", "approval_required"
+        if current.phase == "blocked":
+            return "governance_blocked", "worker_blocked"
+        if current.phase == "complete":
+            return "not_actionable", "already_complete"
+        return "eligible_now", "active_work"
 
     @staticmethod
     def _is_health_only_edr_ticket(ticket: Mapping[str, Any]) -> bool:
@@ -672,13 +997,107 @@ class OperationalAutonomyMaintenance:
             )
         return scope
 
+    def _associate_exact_ticket_device(
+        self, *, candidate, scope: PlaybookScope, company_id: int
+    ) -> int:
+        material = " ".join(
+            (
+                str(candidate.context.get("title") or ""),
+                str(candidate.context.get("description") or ""),
+            )
+        )
+        hints: list[str] = []
+        for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,62}\b", material):
+            if not any(ch.isalpha() for ch in token) or not any(ch.isdigit() for ch in token):
+                continue
+            normalized = token.casefold()
+            if normalized not in {item.casefold() for item in hints}:
+                hints.append(token)
+            if len(hints) >= 8:
+                break
+        if not hints:
+            raise OperationalAutonomyError(
+                "configuration item id is missing and ticket contains no bounded hostname hint"
+            )
+
+        endpoint_matches: dict[str, Mapping[str, Any]] = {}
+        for hint in hints:
+            data = self._read_data("endpoint.device.search", {"hostname": hint})
+            raw = data.get("resource_matches") or data.get("records") or data.get("items") or ()
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+                continue
+            exact = [
+                item for item in raw
+                if isinstance(item, Mapping)
+                and str(item.get("hostname") or item.get("hostName") or item.get("name") or "").casefold()
+                == hint.casefold()
+                and str(item.get("resource_id") or item.get("uid") or item.get("deviceUid") or "").strip()
+            ]
+            for item in exact:
+                endpoint_matches[
+                    str(item.get("resource_id") or item.get("uid") or item.get("deviceUid"))
+                ] = item
+        if len(endpoint_matches) != 1:
+            raise OperationalAutonomyError(
+                "configuration item id is missing and endpoint hostname correlation is ambiguous"
+            )
+        endpoint_uid, endpoint = next(iter(endpoint_matches.items()))
+        hostname = str(
+            endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
+        ).strip()
+
+        data = self._read_data(
+            "service.configuration.search",
+            {"company_id": company_id, "name": hostname, "page_size": 25},
+        )
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list):
+            raise OperationalAutonomyError("configuration search returned invalid items")
+        matches = [
+            item for item in raw_items
+            if isinstance(item, Mapping)
+            and item.get("isActive") is True
+            and int(item.get("companyID") or -1) == company_id
+            and str(item.get("referenceNumber") or "").strip() == endpoint_uid
+            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+        ]
+        if len(matches) != 1:
+            raise OperationalAutonomyError(
+                "exact endpoint did not resolve to one active same-company configuration item"
+            )
+        ci_id = self._positive_int(matches[0].get("id"), "configuration item id")
+        output = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {"payload": {"id": int(candidate.resource_id), "configurationItemID": ci_id}},
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "configurationItemID" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError(
+                "device association write was not verified by provider readback"
+            )
+        return ci_id
+
     def _admit(self, candidate, scope: PlaybookScope) -> OperationalWork:
         ticket = candidate.context
         ticket_id = self._positive_int(ticket.get("id"), "ticket id")
         company_id = self._positive_int(ticket.get("companyID"), "company id")
-        ci_id = self._positive_int(
-            ticket.get("configurationItemID"), "configuration item id"
-        )
+        ci_value = ticket.get("configurationItemID")
+        if ci_value in (None, "", 0, "0"):
+            ci_id = self._associate_exact_ticket_device(
+                candidate=candidate,
+                scope=scope,
+                company_id=company_id,
+            )
+        else:
+            ci_id = self._positive_int(ci_value, "configuration item id")
 
         ci = self._read_data(
             "service.configuration.read", {"resource_id": ci_id}
@@ -2265,6 +2684,39 @@ class OperationalAutonomyMaintenance:
             )
             title = "Jason - Autonomous EDR/AV Escalation"
         self._write_note(work, body, title)
+        # Human-review work must not be stranded in Jason's queue. Return it to
+        # Help Desk I with an actionable status and require provider readback.
+        scope = self._scope_for_work(work)
+        handoff = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "queueID": "Help Desk I",
+                    "status": "New",
+                }
+            },
+        )
+        handoff_data = self._action_data(handoff)
+        verification = handoff_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        verified = (
+            verification.get("readbackVerified") is True
+            and isinstance(verified_fields, Sequence)
+            and not isinstance(verified_fields, (str, bytes))
+            and {"queueID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ) if isinstance(verification, Mapping) else False
+        if not verified:
+            raise OperationalAutonomyError(
+                "human-review handoff readback did not verify queue and status"
+            )
         self.store.put(
             self._replace(
                 work,

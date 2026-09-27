@@ -7,7 +7,7 @@ numeric constants.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence
 
 from .autonomous_queue_worker import QueueCandidate
@@ -19,6 +19,16 @@ SERVICE_TICKET_SEARCH = "service.ticket.search"
 
 class GovernedReadPort(Protocol):
     def execute(self, capability: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+
+@dataclass(frozen=True)
+class TicketDiscoveryTrace:
+    pages_traversed: int = 0
+    provider_items: int = 0
+    unique_candidates: int = 0
+    duplicate_items: int = 0
+    assigned_elsewhere: int = 0
+    queue_pages: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -42,6 +52,8 @@ class AutotaskQueueDiscoveryConfig:
     discovery_status_labels: tuple[str, ...] = ("New", "Emergency")
     page_size: int = 100
     allow_assigned_discovery: bool = False
+    assessment_include_assigned: bool = False
+    use_open_status_search: bool = False
     owned_resource_ids: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
@@ -61,6 +73,8 @@ class AutotaskQueueSource:
         self._queue_ids: dict[str, int] | None = None
         self._priority_scores: dict[int, int] | None = None
         self._critical_priority_ids: set[int] | None = None
+        self._status_labels_by_id: dict[int, str] | None = None
+        self.last_trace = TicketDiscoveryTrace()
 
     def reconcile_candidates(self) -> Sequence[QueueCandidate]:
         self._ensure_metadata()
@@ -69,14 +83,26 @@ class AutotaskQueueSource:
         assert self._critical_priority_ids is not None
 
         candidates: dict[str, QueueCandidate] = {}
+        trace: dict[str, Any] = {
+            "pages_traversed": 0,
+            "provider_items": 0,
+            "duplicate_items": 0,
+            "assigned_elsewhere": 0,
+            "queue_pages": {},
+        }
         for queue_label in self.config.owned_queue_labels:
             queue_id = self._required_queue_id(queue_label)
             self._collect(
                 candidates,
                 queue_label=queue_label,
                 queue_id=queue_id,
-                status_labels=self.config.owned_status_labels,
+                status_labels=(
+                    ("open",)
+                    if self.config.use_open_status_search
+                    else self.config.owned_status_labels
+                ),
                 owned=True,
+                trace=trace,
             )
 
         for queue_label in self.config.discovery_queue_labels:
@@ -85,10 +111,23 @@ class AutotaskQueueSource:
                 candidates,
                 queue_label=queue_label,
                 queue_id=queue_id,
-                status_labels=self.config.discovery_status_labels,
+                status_labels=(
+                    ("open",)
+                    if self.config.use_open_status_search
+                    else self.config.discovery_status_labels
+                ),
                 owned=False,
+                trace=trace,
             )
 
+        self.last_trace = TicketDiscoveryTrace(
+            pages_traversed=int(trace["pages_traversed"]),
+            provider_items=int(trace["provider_items"]),
+            unique_candidates=len(candidates),
+            duplicate_items=int(trace["duplicate_items"]),
+            assigned_elsewhere=int(trace["assigned_elsewhere"]),
+            queue_pages=dict(trace["queue_pages"]),
+        )
         return tuple(candidates[key] for key in sorted(candidates, key=lambda value: int(value)))
 
     def _collect(
@@ -99,6 +138,7 @@ class AutotaskQueueSource:
         queue_id: int,
         status_labels: tuple[str, ...],
         owned: bool,
+        trace: dict[str, Any],
     ) -> None:
         for status_label in status_labels:
             after_resource_id: int | None = None
@@ -112,13 +152,27 @@ class AutotaskQueueSource:
                     arguments["after_resource_id"] = after_resource_id
                 result = self.reads.execute(SERVICE_TICKET_SEARCH, arguments)
                 items = self._items(result)
+                trace["pages_traversed"] += 1
+                trace["provider_items"] += len(items)
+                trace["queue_pages"][queue_label] = int(
+                    trace["queue_pages"].get(queue_label, 0)
+                ) + 1
                 if not items:
                     break
                 for ticket in items:
                     ticket_id = self._positive_int(ticket.get("id"), "ticket id")
-                    if not owned and not self.config.allow_assigned_discovery:
-                        assigned = self._assigned_resource_id(ticket.get("assignedResourceID"))
-                        if assigned is not None and assigned not in self.config.owned_resource_ids:
+                    assigned = self._assigned_resource_id(ticket.get("assignedResourceID"))
+                    assigned_elsewhere = (
+                        not owned
+                        and assigned is not None
+                        and assigned not in self.config.owned_resource_ids
+                    )
+                    if assigned_elsewhere:
+                        trace["assigned_elsewhere"] += 1
+                        if not (
+                            self.config.allow_assigned_discovery
+                            or self.config.assessment_include_assigned
+                        ):
                             continue
                     priority_id = self._positive_int(ticket.get("priority"), "priority id")
                     priority_score = self._priority_scores.get(priority_id, 0)
@@ -127,12 +181,19 @@ class AutotaskQueueSource:
                         or ticket.get("lastActivityDate")
                         or ""
                     ).strip() or None
+                    source_status_label = status_label
+                    if status_label.strip().casefold() in {"open", "unresolved"}:
+                        raw_status = self._positive_int(ticket.get("status"), "status id")
+                        source_status_label = (self._status_labels_by_id or {}).get(
+                            raw_status, str(raw_status)
+                        )
                     urgent = (
                         priority_id in self._critical_priority_ids
-                        or status_label.strip().casefold() == "emergency"
+                        or source_status_label.strip().casefold() == "emergency"
                     )
                     context = dict(ticket)
-                    context["_jason_source_status_label"] = status_label
+                    context["_jason_source_status_label"] = source_status_label
+                    context["_jason_assigned_elsewhere"] = assigned_elsewhere
                     candidate = QueueCandidate(
                         resource_id=str(ticket_id),
                         priority=priority_score,
@@ -143,6 +204,8 @@ class AutotaskQueueSource:
                         context=context,
                     )
                     prior = candidates.get(candidate.resource_id)
+                    if prior is not None:
+                        trace["duplicate_items"] += 1
                     if prior is None or candidate.priority > prior.priority:
                         candidates[candidate.resource_id] = candidate
                 if len(items) < self.config.page_size:
@@ -169,12 +232,20 @@ class AutotaskQueueSource:
         }
         queue_field = by_name.get("queueID")
         priority_field = by_name.get("priority")
-        if not isinstance(queue_field, Mapping) or not isinstance(priority_field, Mapping):
-            raise ValueError("Autotask ticket queue/priority metadata is incomplete")
+        status_field = by_name.get("status")
+        if (
+            not isinstance(queue_field, Mapping)
+            or not isinstance(priority_field, Mapping)
+            or not isinstance(status_field, Mapping)
+        ):
+            raise ValueError("Autotask ticket queue/priority/status metadata is incomplete")
 
         self._queue_ids = self._active_picklist_map(queue_field)
         self._priority_scores = self._priority_score_map(priority_field)
         self._critical_priority_ids = self._priority_ids_for_label(priority_field, "Critical")
+        self._status_labels_by_id = {
+            value: label for label, value in self._active_picklist_map(status_field).items()
+        }
 
     def _required_queue_id(self, label: str) -> int:
         assert self._queue_ids is not None

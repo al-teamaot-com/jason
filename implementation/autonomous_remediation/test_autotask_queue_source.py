@@ -20,6 +20,12 @@ class Reads:
                         {"value": "1", "label": "High", "sortOrder": 2, "isActive": True},
                         {"value": "2", "label": "Medium", "sortOrder": 3, "isActive": True},
                     ]},
+                    {"name": "status", "picklistValues": [
+                        {"value": "1", "label": "New", "isActive": True},
+                        {"value": "8", "label": "In Progress", "isActive": True},
+                        {"value": "42", "label": "Waiting Device Access", "isActive": True},
+                        {"value": "99", "label": "Complete", "isActive": True},
+                    ]},
                 ]}},
             }
         queue = arguments["filters"]["queueID"]
@@ -162,3 +168,47 @@ def test_queue_discovery_paginates_until_short_page():
     assert found == {"20", "21", "22"}
     ticket_calls = [args for capability, args in reads.calls if capability == "service.ticket.search"]
     assert [call.get("after_resource_id") for call in ticket_calls] == [None, 21]
+
+
+def test_open_scope_search_traverses_all_pages_and_retains_assigned_for_assessment():
+    class OpenReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.entity.fields.describe":
+                return super().execute(capability, arguments)
+            self.calls.append((capability, dict(arguments)))
+            assert arguments["status"] == "open"
+            after = arguments.get("after_resource_id")
+            if after is None:
+                items = [
+                    {"id": 30, "priority": 1, "queueID": 200, "status": 1,
+                     "assignedResourceID": None, "title": "page1-a"},
+                    {"id": 31, "priority": 2, "queueID": 200, "status": 8,
+                     "assignedResourceID": 123, "title": "page1-human"},
+                ]
+            elif after == 31:
+                items = [
+                    {"id": 32, "priority": 4, "queueID": 200, "status": 42,
+                     "assignedResourceID": None, "title": "page2"},
+                ]
+            else:
+                raise AssertionError(after)
+            return {"status": "succeeded", "evidence": {"data": {"items": items}}}
+
+    reads = OpenReads()
+    source = AutotaskQueueSource(
+        reads=reads,
+        config=config(
+            owned_queue_labels=(),
+            page_size=2,
+            use_open_status_search=True,
+            assessment_include_assigned=True,
+        ),
+    )
+    found = {item.resource_id: item for item in source.reconcile_candidates()}
+    assert set(found) == {"30", "31", "32"}
+    assert found["31"].context["_jason_assigned_elsewhere"] is True
+    assert found["32"].context["_jason_source_status_label"] == "Waiting Device Access"
+    assert source.last_trace.pages_traversed == 2
+    assert source.last_trace.provider_items == 3
+    assert source.last_trace.unique_candidates == 3
+    assert source.last_trace.assigned_elsewhere == 1

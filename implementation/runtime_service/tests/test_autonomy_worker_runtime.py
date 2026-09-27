@@ -2053,3 +2053,53 @@ def test_terminal_work_is_reconsidered_when_ticket_source_version_changes(tmp_pa
     assert work.phase == "health_wait"
     assert any(capability == "service.ticket.update" for _, capability, _ in actions.calls)
     store.close()
+
+def test_missing_ci_is_exactly_correlated_and_verified_before_claim(tmp_path: Path):
+    class CorrelationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [{
+                        "resource_id": "device-uid-1",
+                        "hostname": "PC-1",
+                        "online": True,
+                    }]}}
+                }
+            if capability == "service.configuration.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{
+                        "id": 1583,
+                        "companyID": 507,
+                        "isActive": True,
+                        "referenceNumber": "device-uid-1",
+                        "referenceTitle": "PC-1",
+                    }]}}
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(title="[Monitor] Antivirus status issue PC-1")
+
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=CorrelationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    ticket_updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert ticket_updates[0] == {"id": 140933, "configurationItemID": 1583}
+    assert ticket_updates[1]["queueID"] == "Jason"
+    store.close()

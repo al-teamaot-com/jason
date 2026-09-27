@@ -250,3 +250,28 @@ Production review confirmed that the autonomous worker is enabled and actively r
 - terminal worker rows now retain the Autotask source-version marker. If an open candidate materially changes after a prior `blocked`, `escalated`, `approval_pending`, or reopened `complete` state, the stale terminal row is discarded and the ticket is reconsidered through the full admission gates.
 
 These changes do not expand authority. Exact company/CI/DRMM identity, durable playbook promotion, workload grants, standing-safe component classification, and all disruptive-action approval boundaries remain unchanged.
+
+## 2026-09-27 complete-scope discovery and triage hardening
+
+The production worker now discovers the full unresolved population in the approved queue set by using the provider-side semantic `open` status selector and cursor pagination until exhaustion. The worker no longer limits outside-Jason discovery to only New and Emergency statuses.
+
+Each scan persists bounded aggregate evidence: pages traversed, raw provider items, duplicate items, unique tickets evaluated, eligible tickets, unsupported-capability tickets, governance-blocked tickets, tickets already assigned to another technician, active slots, selections, Waiting Device Access tickets, and human-review handoffs. Current ticket classifications are persisted separately with one of these bounded states:
+
+- `eligible_now`
+- `waiting_device_access`
+- `waiting_human_review`
+- `governance_blocked`
+- `unsupported_capability`
+- `not_actionable`
+
+Tickets already assigned to another technician remain visible to assessment telemetry but are not claimed by Jason. Prioritization is deterministic: urgent first, then PSA priority, then Jason-owned work, then ticket ID.
+
+If a ticket lacks an Autotask configuration-item association, Jason may attempt an exact bounded correlation before diagnostics. It extracts bounded hostname hints from ticket text, requires exactly one exact Datto endpoint hostname match, then requires exactly one active same-company Autotask CI whose reference number equals the durable Datto UID and whose reference title equals the hostname. Only then may Jason perform a governed, readback-verified `configurationItemID` update. Ambiguity or mismatch fails closed.
+
+Human-review handoff is explicit: after the normal internal technician-review note, the worker returns the ticket to Help Desk I with status New through governed `service.ticket.update` and requires provider readback verification. The terminal worker row remains a human-review handoff and is not immediately reselected because of the worker's own queue transition.
+
+Slot occupancy is recomputed after every advancement. If a ticket completes, blocks, or hands off immediately, the worker can fill the freed slot during the same scan rather than waiting for the next cadence. The simultaneous active-work ceiling remains two.
+
+Scan aggregates are exported as non-sensitive Prometheus metrics by the autonomy flight recorder. Current classification counts, oldest eligible age, and eligible-never-selected counts are also exposed. The worker emits scan-level REFLECT-001 evidence through the existing Reflection audit sink. Unsupported current work and governance-blocked current work create review-only improvement candidates; they do not modify code, policy, capability grants, provider access, playbook promotion, or execution authority.
+
+The observability source changes follow the same immutable deployment boundary as the existing REFLECT-001 dashboard/exporter. Privileged activation remains tracked by GitHub issue #455 and must not weaken the root-owned release or systemd boundary.

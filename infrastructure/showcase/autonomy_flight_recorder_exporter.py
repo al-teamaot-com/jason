@@ -31,6 +31,7 @@ EVENT_DB = Path(os.environ.get("JASON_ORCHESTRATION_EVENTS_DB", "/var/lib/jason/
 LEDGER_DB = Path(os.environ.get("JASON_GOVERNED_EXECUTION_DB", "/var/lib/jason/openclaw/governed-execution.sqlite3"))
 AUTHORITY_DB = Path(os.environ.get("JASON_AUTHORITY_DB", "/var/lib/jason/authority/authority.sqlite3"))
 SHADOW_DB = Path(os.environ.get("JASON_AUTONOMY_SHADOW_DB", "/var/lib/jason/openclaw/autonomy-shadow.sqlite3"))
+WORKER_DB = Path(os.environ.get("JASON_AUTONOMY_WORKER_DB", "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"))
 PRINCIPAL = os.environ.get("JASON_AUTONOMY_PRINCIPAL", "jason-autonomy-worker")
 ENRICHMENT_PATH = Path(os.environ.get("JASON_AUTONOMY_FLIGHT_RECORDER_ENRICHMENT", "/app/flight_recorder_enrichment.json"))
 
@@ -554,6 +555,58 @@ def load_shadow_summary() -> dict[str, int]:
     return result
 
 
+
+def load_worker_summary() -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "scan": {},
+        "states": {},
+        "reasons": {},
+        "oldest_eligible_age_seconds": 0,
+        "eligible_never_selected": 0,
+    }
+    if not WORKER_DB.exists():
+        return result
+    c = _db(WORKER_DB)
+    try:
+        row = c.execute(
+            "SELECT * FROM autonomy_ticket_scan_cycle ORDER BY scanned_at DESC LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            result["scan"] = dict(row)
+        state_rows = c.execute(
+            "SELECT state,COUNT(*) AS count FROM autonomy_ticket_classification GROUP BY state"
+        ).fetchall()
+        result["states"] = {str(r["state"]): int(r["count"]) for r in state_rows}
+        reason_rows = c.execute(
+            "SELECT state,reason_code,COUNT(*) AS count "
+            "FROM autonomy_ticket_classification GROUP BY state,reason_code"
+        ).fetchall()
+        result["reasons"] = {
+            (str(r["state"]), str(r["reason_code"])): int(r["count"])
+            for r in reason_rows
+        }
+        eligible = c.execute(
+            """
+            SELECT MIN(first_seen) AS oldest,
+                   SUM(CASE WHEN selected_count=0 THEN 1 ELSE 0 END) AS never_selected
+            FROM autonomy_ticket_classification
+            WHERE state='eligible_now'
+            """
+        ).fetchone()
+        if eligible is not None:
+            result["eligible_never_selected"] = int(eligible["never_selected"] or 0)
+            oldest = eligible["oldest"]
+            if oldest:
+                when = datetime.fromisoformat(str(oldest).replace("Z", "+00:00"))
+                result["oldest_eligible_age_seconds"] = max(
+                    0, int((datetime.now(timezone.utc) - when).total_seconds())
+                )
+    except sqlite3.Error:
+        return result
+    finally:
+        c.close()
+    return result
+
 def metrics_text() -> str:
     actions = load_actions(500)
     today = datetime.now(timezone.utc).date().isoformat()
@@ -562,6 +615,7 @@ def metrics_text() -> str:
     counts = Counter(a.get("result") or "unknown" for a in today_actions)
     verified = sum(1 for a in today_actions if a.get("verified"))
     shadow = load_shadow_summary()
+    worker = load_worker_summary()
     lines = [
         "# HELP jason_autonomy_actions_today Autonomous executions observed today.",
         "# TYPE jason_autonomy_actions_today gauge",
@@ -584,6 +638,54 @@ def metrics_text() -> str:
     ])
     for state, count in shadow.items():
         lines.append(f'jason_autonomy_attention{{state="{state}"}} {count}')
+    scan = worker.get("scan") or {}
+    scan_metrics = {
+        "pages_traversed": "pages_traversed",
+        "provider_items": "provider_items",
+        "duplicate_items": "duplicate_items",
+        "evaluated": "evaluated",
+        "eligible": "eligible",
+        "unsupported": "unsupported",
+        "governance_blocked": "governance_blocked",
+        "assigned_elsewhere": "assigned_elsewhere",
+        "active_slots": "active_slots",
+        "selected": "selected",
+        "waiting_device": "waiting_device",
+        "human_review": "human_review",
+    }
+    lines.extend([
+        "# HELP jason_ticket_worker_scan Latest autonomous ticket scan aggregate.",
+        "# TYPE jason_ticket_worker_scan gauge",
+    ])
+    for metric, column in scan_metrics.items():
+        lines.append(
+            f'jason_ticket_worker_scan{{metric="{metric}"}} {int(scan.get(column) or 0)}'
+        )
+    lines.extend([
+        "# HELP jason_ticket_worker_classification Current ticket classifications by bounded state.",
+        "# TYPE jason_ticket_worker_classification gauge",
+    ])
+    for state, count in sorted((worker.get("states") or {}).items()):
+        safe = str(state).replace('\\', '_').replace('"', '_')
+        lines.append(f'jason_ticket_worker_classification{{state="{safe}"}} {int(count)}')
+    lines.extend([
+        "# HELP jason_ticket_worker_reason Current ticket classifications by bounded state and reason.",
+        "# TYPE jason_ticket_worker_reason gauge",
+    ])
+    for (state, reason), count in sorted((worker.get("reasons") or {}).items()):
+        safe_state = str(state).replace('\\', '_').replace('"', '_')
+        safe_reason = str(reason).replace('\\', '_').replace('"', '_')
+        lines.append(
+            f'jason_ticket_worker_reason{{state="{safe_state}",reason="{safe_reason}"}} {int(count)}'
+        )
+    lines.extend([
+        "# HELP jason_ticket_worker_oldest_eligible_age_seconds Age of the oldest currently eligible ticket.",
+        "# TYPE jason_ticket_worker_oldest_eligible_age_seconds gauge",
+        f'jason_ticket_worker_oldest_eligible_age_seconds {int(worker.get("oldest_eligible_age_seconds") or 0)}',
+        "# HELP jason_ticket_worker_eligible_never_selected Eligible tickets never selected by the worker.",
+        "# TYPE jason_ticket_worker_eligible_never_selected gauge",
+        f'jason_ticket_worker_eligible_never_selected {int(worker.get("eligible_never_selected") or 0)}',
+    ])
     return "\n".join(lines) + "\n"
 
 
