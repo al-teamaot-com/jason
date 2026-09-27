@@ -38,8 +38,14 @@ class QueueSource:
 class Reads:
     def __init__(self):
         self.job_status = "completed"
+        self.ticket_notes = []
 
     def execute(self, capability, arguments):
+        if capability == "service.ticket.notes.search":
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": list(self.ticket_notes)}},
+            }
         if capability == "service.configuration.read":
             return {
                 "status": "succeeded",
@@ -2255,4 +2261,91 @@ def test_scan_reflection_event_uses_canonical_audit_shape(tmp_path: Path):
     assert payload["principal_id"] == "jason-autonomy-worker"
     assert payload["stage"] == "completed"
     assert payload["capability_name"] == "autonomy.ticket.worker.scan"
+    store.close()
+
+
+def test_assigned_new_ticket_without_technician_notes_can_be_claimed(tmp_path: Path):
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = Reads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is not None
+    assert any(capability == "service.ticket.update" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_assigned_new_ticket_with_technician_note_is_not_claimed(tmp_path: Path):
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = Reads()
+    reads.ticket_notes = [
+        {
+            "creatorResourceID": 29682899,
+            "createdByContactID": None,
+            "noteType": 1,
+            "title": "Technician update",
+            "description": "Investigating with the user.",
+        }
+    ]
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is None
+    assert not any(capability == "service.ticket.update" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_assigned_new_ticket_with_only_system_and_gpt_insights_notes_can_be_claimed(tmp_path: Path):
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = Reads()
+    reads.ticket_notes = [
+        {"creatorResourceID": 4, "noteType": 13, "title": "Workflow Rule fired", "description": "system"},
+        {"creatorResourceID": 29682899, "noteType": 1, "title": "GPT Insights", "description": "automated insight"},
+    ]
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is not None
     store.close()
