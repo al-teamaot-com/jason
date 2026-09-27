@@ -746,24 +746,24 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-002 — Autotask read-only production adapter and contract tests
 
 - **Priority:** P0
-- **Status:** Planned
+- **Status:** Implemented and production-proven — governed Autotask read adapter, pagination, identity/boundary controls, and contract coverage are active
 - **Risk level:** Moderate
 - **Idea:** Validate current Autotask endpoints, authentication, pagination, field mappings, and sanitized fixtures.
 - **Why it matters:** This is the first production evidence source for Professional Ticket Investigation.
-- **Why not now:** Requires read-only credentials and AOT-specific field mapping.
-- **Prerequisites:** test tenant or approved production read access, fixture sanitization, rate-limit policy.
+- **Production evidence:** Governed Autotask company/ticket/note/entity metadata reads are active through Central Orchestrator under the dedicated read identity and Jason-managed requester authorization. Repeated ticket read/search/count acceptance, client-boundary regression coverage, pagination fixes, and the latest full production diagnostic all succeeded with `direct_provider_access=false`. Autotask requester-read failures and thread-affinity regressions are closed in the Support List.
+- **Ongoing rule:** Preserve least-privilege read identity, client isolation, bounded pagination, sanitization, information-release authorization, and provider-contract regression coverage. New Autotask entities require their own documented/provider-supported read contract rather than inheriting authority from this foundation.
 - **Decision owner:** Platform Owner
 - **Review trigger:** When credentials are available.
 
 ### TODO-CONN-003 — Governed production write execution
 
 - **Priority:** P1
-- **Status:** Blocked
+- **Status:** Implemented as a governed execution foundation — selected write providers are production-active under exact capability authority; individual write families remain separately gated
 - **Risk level:** Critical
-- **Idea:** Enable selected Autotask, Datto RMM, IT Glue, and n8n writes behind approval, idempotency, and precondition controls.
-- **Why it matters:** Converts Jason from recommendation-only to controlled operational assistance.
-- **Why not now:** The pilot is intentionally recommendation-first and read-only.
-- **Prerequisites:** mature audit chain, approval service, rollback patterns, connector contract tests, least-privilege credentials, sandbox testing, incident response process.
+- **Idea:** Enable selected provider writes behind approval, idempotency, exact target resolution, execution-plan binding, precondition controls, and post-mutation verification.
+- **Why it matters:** Converts Jason from recommendation-only to controlled operational assistance while preserving human and policy authority.
+- **Production evidence:** Central Orchestrator governed execution is live with `direct_provider_access=false`; approval replay/deduplication and concrete execution-plan binding are production-proven. Bounded write/readback acceptance exists for Autotask ticket notes/updates/create/procurement/attachments/charges, Datto alert/component/site-variable/EDR scan actions, DNSFilter bounded acceptance profiles, and Teams messaging. Provider attempts, approvals, target/payload bindings, and readback evidence are audited. Unsupported or dormant write families fail closed.
+- **Ongoing rule:** This foundation is not blanket provider write authority. Every new mutation family requires an explicit capability/provider contract, exact authority, least-privilege credential, approval/autonomy posture, provider preflight, bounded execution, verification, rollback/failure handling, and security regression coverage before activation.
 - **Decision owner:** Jason Governance Authority
 - **Review trigger:** Successful completion of the read-only shadow pilot and formal authorization to expand scope.
 
