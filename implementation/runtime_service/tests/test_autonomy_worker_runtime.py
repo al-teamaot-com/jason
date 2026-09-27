@@ -2154,3 +2154,62 @@ def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_p
     ]
     assert updates[0]["queueID"] == "Jason"
     store.close()
+
+def test_existing_escalated_jason_ticket_is_backfilled_to_helpdesk(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import OperationalWork
+
+    item = QueueCandidate(
+        resource_id="140933",
+        priority=100,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        source_version="v1",
+        context={
+            "id": 140933,
+            "ticketNumber": "T20260925.9999",
+            "title": "[Monitor] Antivirus status issue",
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=140933,
+            ticket_number="T20260925.9999",
+            title=item.context["title"],
+            playbook_id="datto_edr_av",
+            source_queue="Jason",
+            company_id=507,
+            configuration_item_id=1583,
+            device_uid="device-uid-1",
+            hostname="PC-1",
+            phase="escalated",
+            last_reason="technician review required",
+            source_version="v1",
+        )
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "queueID": "Help Desk I", "status": "New"}]
+    current = store.get(140933)
+    assert current is not None and current.phase == "escalated"
+    store.close()

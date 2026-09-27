@@ -684,7 +684,24 @@ class OperationalAutonomyMaintenance:
             if existing is not None:
                 if existing.phase == "escalated":
                     human_review += 1
-                    state, reason_code = "waiting_human_review", "technician_review_required"
+                    if str(item.source_queue).strip().casefold() == "jason":
+                        try:
+                            self._handoff_to_helpdesk(existing)
+                            state, reason_code = (
+                                "waiting_human_review",
+                                "technician_review_required",
+                            )
+                        except Exception:
+                            governance_blocked += 1
+                            state, reason_code = (
+                                "governance_blocked",
+                                "human_review_handoff_failed",
+                            )
+                    else:
+                        state, reason_code = (
+                            "waiting_human_review",
+                            "technician_review_required",
+                        )
                 elif existing.phase == "approval_pending":
                     state, reason_code = "waiting_human_review", "approval_required"
                 elif existing.phase == "blocked":
@@ -2684,6 +2701,18 @@ class OperationalAutonomyMaintenance:
             )
             title = "Jason - Autonomous EDR/AV Escalation"
         self._write_note(work, body, title)
+        self._handoff_to_helpdesk(work)
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                job_uid=None,
+                component_uid=None,
+                last_reason=reason,
+            )
+        )
+
+    def _handoff_to_helpdesk(self, work: OperationalWork) -> None:
         # Human-review work must not be stranded in Jason's queue. Return it to
         # Help Desk I with an actionable status and require provider readback.
         scope = self._scope_for_work(work)
@@ -2717,15 +2746,6 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "human-review handoff readback did not verify queue and status"
             )
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                job_uid=None,
-                component_uid=None,
-                last_reason=reason,
-            )
-        )
 
     def _block(self, work: OperationalWork, reason: str) -> None:
         try:

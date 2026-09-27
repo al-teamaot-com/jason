@@ -283,3 +283,7 @@ Autotask company ID `0` is a valid internal AOT boundary and is not treated as a
 The read-only shadow assessor now uses the same semantic `open` ticket selector as the operational worker, reducing startup provider calls while retaining cursor pagination and live Autotask status resolution.
 
 The Datto RMM execution AppRole runtime mount defaults to `/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/` rather than the root-only bootstrap copy. Runtime files remain read-only inside the hardened container and should be owned/readable by the runtime identity without exposing RoleID or SecretID values. The root-only bootstrap copy remains a staging source, not the live runtime mount.
+
+## 2026-09-27 legacy human-review handoff reconciliation
+
+On every scan, an existing terminal `escalated` work row is checked against the ticket's current source queue. If the ticket is still in the Jason queue, the worker performs the same governed, readback-verified handoff used by new escalations: queue `Help Desk I`, status `New`. A successful handoff remains classified as `waiting_human_review`; a failed handoff is classified as `governance_blocked` with reason `human_review_handoff_failed`. This makes the new handoff rule self-healing for escalations created before the rule existed and prevents legacy human-review work from remaining stranded in Jason.
