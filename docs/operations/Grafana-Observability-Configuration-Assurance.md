@@ -57,7 +57,7 @@ The production control consists of:
 
 - `jason-grafana-assurance.service` — deterministic one-shot assurance;
 - `jason-grafana-assurance.timer` — runs assurance every five minutes;
-- `jason-grafana-assurance-exporter.service` — serves the latest assurance state on port `9473`;
+- `jason-grafana-assurance-exporter.service` — serves the latest assurance state on port `9474`;
 - Prometheus job `jason-grafana-assurance`;
 - alerts `JasonGrafanaConfigurationDrift` and `JasonGrafanaAssuranceUnavailable`;
 - `Grafana Configuration Assurance` and `Grafana Assurance Age` panels on `Jason Production Health`.

@@ -1,6 +1,6 @@
 [
   {
-    "targets": ["host.docker.internal:9473"],
+    "targets": ["host.docker.internal:9474"],
     "labels": {
       "component": "grafana-assurance"
     }

@@ -9,7 +9,7 @@ import time
 
 STATE = Path(os.getenv("JASON_GRAFANA_ASSURANCE_STATE", "/var/lib/jason/observability/grafana-assurance.json"))
 HOST = os.getenv("JASON_GRAFANA_ASSURANCE_HOST", "0.0.0.0")
-PORT = int(os.getenv("JASON_GRAFANA_ASSURANCE_PORT", "9473"))
+PORT = int(os.getenv("JASON_GRAFANA_ASSURANCE_PORT", "9474"))
 
 
 def esc(value: object) -> str:
