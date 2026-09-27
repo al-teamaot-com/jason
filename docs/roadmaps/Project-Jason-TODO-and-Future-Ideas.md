@@ -825,7 +825,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-008 — DNSFilter posture integration
 
 - **Priority:** P2
-- **Status:** Dual-plane REST + MCP source implementation complete and locally tested 2026-09-24; production activation in progress
+- **Status:** Read integration production-active and governed-read accepted; DNSFilter administrative write families remain separately gated/dormant outside bounded acceptance profiles
 - **Risk level:** Moderate
 - **Idea:** Add governed DNSFilter posture, investigation, reporting, and future administrative capabilities without bypassing Jason authority.
 - **Implemented source foundation:** REST provides unattended posture reads for mapped organizations/sites/policies/agents. DNSFilter MCP adds provider-supported OAuth investigation/admin reads for query logs, decision explanation, blocked traffic, anomaly analysis, stale/version/duplicate agent checks, site-policy drift, category coverage, and unblock-request monitoring. Both planes reject caller-supplied organization/MSP scope and use the validated Autotask-company-to-DNSFilter-organization boundary.
@@ -833,8 +833,8 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Boundary decision:** REST direct network/policy/agent-by-ID reads remain unregistered where the provider request cannot independently preserve exact organization scope. MCP read tools are fixed in source and receive only the server-derived mapped organization ID; there is no generic arbitrary-tool capability.
 - **Why it matters:** REST supplies deterministic background posture evidence while MCP supplies provider-supported DNS forensics and an eventual governed admin plane, avoiding private/UI automation.
 - **Origin:** Reclassified from `SUPPORT-CAP-010` on 2026-09-18.
-- **Implementation verification (2026-09-24):** REST/MCP client and connector tests, provider-neutral capability tests, public MCP catalog drift tests, dormant-write coverage, client-security-posture tests, provider-secret tests, focused runtime-composition tests, connector regression suite, compile checks, and diff validation pass locally. REST and MCP capabilities remain PILOT and both runtime switches default false.
-- **Remaining prerequisites:** protected source merge/deployment; REST API key/OpenBao provisioning; DNSFilter MCP OAuth sign-in; exact client-boundary records; explicit read authorities; controlled production read acceptance for each plane; post-acceptance promotion from PILOT. No DNSFilter provider write authority is included.
+- **Production checkpoint (2026-09-24):** REST/MCP source, secrets, OAuth, exact AOT boundary, read authorities, and controlled production read acceptance were completed. Governed DNSFilter reads remain active in the live capability catalog, including organization, site, policy, agent, anomaly/query, blocked-traffic, stale/version/duplicate-agent, drift, category, and unblock-request evidence. Separate bounded policy-create/delete acceptances proved the mutation framework and were then cleaned up to dormant write posture; those tests did not create general DNSFilter write authority.
+- **Remaining work:** preserve exact client/network isolation for non-AOT clients before native DNSFilter evidence becomes a normal cross-client playbook dependency; complete the separately governed missing-agent installer acceptance; review each administrative write family independently before any future activation. No generic DNSFilter provider write authority is implied.
 - **Current runbook:** `docs/operations/DNSFilter-Dual-Plane-Integration-2026-09-24.md`.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Complete controlled production REST/MCP read acceptance, then review individual administrative write families separately.
@@ -854,14 +854,14 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-010 — Governed Datto RMM site-variable reads
 
 - **Priority:** P1
-- **Status:** Planned — high priority
+- **Status:** Implemented and production-proven — governed list/create/update active; secret values remain protected
 - **Risk level:** High
 - **Idea:** Add a governed Datto RMM capability that can determine which site variables exist for an exact authorized site and whether a required variable is present and usable, without disclosing secret values unless an explicitly approved workflow requires the value.
 - **Why it matters:** AOT components such as Duo deployment and Datto Endpoint Backup depend on site variables. Jason must be able to distinguish a missing site configuration dependency from an endpoint/component failure.
-- **Current evidence (2026-09-20):** Live capability discovery exposes managed-site reads and component metadata but no dedicated site-variable/account-variable read capability. Existing endpoint UDF reads are not a substitute for Datto RMM site variables.
+- **Production evidence:** `management.site.variable.list`, `management.site.variable.create`, and `management.site.variable.update` are active governed capabilities. Controlled production create of `AOT_OnboardingVariableBaseline` on the AOT-owned Managed site succeeded through the governed create path and authoritative readback verified the variable existed exactly once with its value masked. Site-variable values remain sensitive configuration and are not disclosed to non-administrative requesters.
 - **Required behavior:** Resolve the exact company/site first; enumerate variable names/metadata safely; report presence/absence and usability; redact sensitive values from chat, logs, tickets, and telemetry; allow approved playbooks to consume required values by reference; preserve `direct_provider_access=false`.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Treat as near-term work because multiple operational playbooks depend on site-variable presence validation.
+- **Review trigger:** Reopen only for a new site-variable operation, provider contract change, secret-handling regression, or playbook-specific usability defect.
 
 ### TODO-OPS-007 — Invoice-to-catalog and purchase-order workflow
 
@@ -1010,11 +1010,11 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-018 — Governed ad-hoc PowerShell on eligible Windows endpoints
 
 - **Priority:** P1
-- **Status:** Proposed
+- **Status:** In progress — generalized governed Datto execution is production-proven across non-pilot targets and `endpoint.powershell.read` is active; dedicated provider-neutral workstation/server acceptance remains
 - **Risk level:** High
-- **Idea:** Expand Jason's governed `Run Ad Hoc Command (PowerShell 2-5) [WIN]` execution path from the current single-device pilot scope to eligible Datto RMM-managed Windows endpoints, including workstations and servers, while preserving strict governance.
+- **Idea:** Expand Jason's governed read-only PowerShell path across eligible Datto RMM-managed Windows endpoints, including workstations and servers, while preserving strict governance.
 - **Why it matters:** Jason can often identify the exact read-only diagnostic command needed, but a hard-coded device scope forces manual technician intervention on other customer systems.
-- **Why not now:** The current MCP/runtime execution contract pins the ad-hoc PowerShell runner to a single device identity and target class as part of the original pilot safety boundary.
+- **Current evidence:** The original single-device target restriction was removed through governed target canonicalization. Production acceptance on VZ-50618 proved non-pilot exact endpoint/component resolution, exactly one Datto execution, terminal job readback, governed StdOut, and no cross-company resource use. The live registry also exposes dedicated read-only `endpoint.powershell.read`. Remaining work is a bounded dedicated-capability acceptance on representative workstation/server targets rather than further broadening the generic execution path.
 - **Prerequisites:** replace single-device scope with governed endpoint resolution; validate OS and device identity before execution; support workstation/server target classes; preserve exact component UID binding; classify commands read-only vs mutating; require per-run technician approval for arbitrary commands; prohibit autonomous disruptive/destructive commands; enforce client isolation, audit evidence, bounded output, attempt limits, and job readback verification; add acceptance tests on representative Windows workstation and server targets.
 - **Decision owner:** Jason Governance Authority / MSP Operations
 - **Review trigger:** High priority; complete before Jason is expected to perform cross-client read-only diagnostics without technician-side command execution.
@@ -1166,29 +1166,27 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-005 — Autotask notification-template communication capability
 
 - **Priority:** P1
-- **Status:** In progress — governed NotificationHistory read deployed; production read blocked by `SUPPORT-CAP-016`; ticket-note communication bridge investigation started 2026-09-20
+- **Status:** In progress — governed NotificationHistory read is production-proven; client-notification TEST-mode mutation acceptance remains
 - **Risk level:** High
 - **Idea:** Let Jason discover AOT-approved Autotask notification templates and use them for governed end-user ticket communications with exact ticket/company/contact audience validation, preview, approval policy, send evidence, and post-send verification.
 - **Provider constraint:** Autotask documents `NotificationHistory` as query-only and exposes `templateName`, but does not document Notification Templates as a queryable/executable REST resource or a named-template send operation. Jason must not scrape/private-call the Autotask UI.
-- **Implemented checkpoint (2026-09-19):** Active `service.notification.history.search` is deployed through Central Orchestrator and requires explicit company scope. `service.entity.describe` proved the production API identity currently has `userAccessForQuery=None` on NotificationHistory; bounded live query failed closed and is tracked as `SUPPORT-CAP-016`.
+- **Production checkpoint (2026-09-25):** `SUPPORT-CAP-016` is resolved. The dedicated Jason read-only API security level now reports `NotificationHistory` `canQuery=true` / `userAccessForQuery=All` while create/update/delete remain unavailable. Governed `service.notification.history.search` succeeded for company 311 and returned bounded recent template name, recipient, sent time, ticket, and company metadata with `direct_provider_access=false`.
 - **Implementation checkpoint (2026-09-20):** Confirmed the documented `TicketNotes` REST entity supports create/update and has tenant-specific `publish` and `noteType` picklists. Started a governed `service.entity.fields.describe` read path to `/TicketNotes/entityInformation/fields` so Jason can resolve the live tenant meanings instead of hard-coding numeric picklist IDs. This is the prerequisite for a separate customer-visible ticket-note action and for validating the existing internal-note contract.
 - **Client-notification TEST mode decision (2026-09-26):** Client-facing notifications are restricted to **XYZ Test Company only** (Autotask company ID `1158`) until explicitly promoted out of test mode. Source now contains dormant capability `service.ticket.client.notification.create` plus a fail-closed test-scope guard. Before any future send mutation, the resolved ticket company and resolved contact company must both equal `1158`; the destination must come from the authoritative Autotask contact email; any caller-supplied recipient must exactly match that contact email; and the explicit test profile `xyz-test-company-client-notification-v1` must be enabled. All other companies fail closed before a send mutation. Focused guard/catalog tests: 9/9 PASS. The capability remains source-only/not registered in production pending the XYZ Gmail contact acceptance setup.
 - **Remaining acceptance:** Bind the controlled XYZ Gmail address to the intended XYZ Autotask contact, implement/register the dedicated client-notification mutation provider without altering the internal-note contract, require explicit approval during TEST mode, perform one bounded send on an XYZ controlled ticket, verify exact recipient and message through NotificationHistory, and prove a non-XYZ target is denied before provider mutation. Preserve `direct_provider_access=false`.
 - **Decision owner:** Jason Governance Authority / AOT Owner
-- **Review trigger:** After `SUPPORT-CAP-016` is resolved or a vendor-supported named-template invocation surface is identified.
+- **Review trigger:** Continue with the controlled XYZ client-notification TEST-mode acceptance or revisit if Autotask exposes a supported named-template invocation surface.
 
 ### TODO-COMM-006 — Enable Autotask Notification History read permission
 
 - **Priority:** P1
-- **Status:** Planned — resume when Owner is at a trusted workstation
+- **Status:** Implemented — minimum NotificationHistory read permission enabled and bounded production read accepted 2026-09-25
 - **Risk level:** Moderate
 - **Idea:** Enable the minimum Autotask security-level permission required for Jason's dedicated read-only API identity to query `NotificationHistory`, then complete live acceptance of `service.notification.history.search`.
-- **Current evidence:** Live `service.entity.describe` shows `Resources` query access = `All` while `NotificationHistory` query access = `None`. This isolates the blocker to the read identity's Autotask security level, not Jason's governed read implementation.
-- **Required provider change:** In Autotask, edit only the security level assigned to the dedicated Jason read-only API user and enable Notification History query/access under the applicable Application-wide / Shared Features administrative permission. Do **not** change the separate `Jason API - Ticket Mutation` security level or unrelated permissions.
-- **Remaining acceptance:** Re-run a company-bounded `service.notification.history.search`; require successful readback of recent notification metadata including template name, recipient, sent time, and company/ticket association; inventory observed AOT notification-template names; continue `TODO-COMM-005`; preserve `direct_provider_access=false`.
-- **Prerequisites:** Owner at a trusted workstation with Autotask administrative access.
+- **Production evidence:** The dedicated Jason read-only API security level was updated with the minimum required Notification History query access. Live entity metadata reports `canQuery=true` and `userAccessForQuery=All` while create/update/delete remain `None`. A bounded governed `service.notification.history.search` for company 311 succeeded and returned recent notification metadata including template name, recipient, sent time, and ticket/company association. The separate `Jason API - Ticket Mutation` profile was not broadened and `direct_provider_access=false` remained enforced.
+- **Remaining work:** None for the permission/read-enablement item itself. Continue `TODO-COMM-005` separately for client-facing notification delivery/template workflow behavior.
 - **Decision owner:** Jason Governance Authority / AOT Owner
-- **Review trigger:** Next desk session.
+- **Review trigger:** Reopen only if NotificationHistory read permission regresses or the dedicated read identity changes.
 
 ### TODO-OPS-005 — Client Security/Posture Review
 
