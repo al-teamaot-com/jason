@@ -43,9 +43,15 @@ OLD_CURRENT="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
 printf 'old_current=%s\nnew_release=%s\n' "$OLD_CURRENT" "$RELEASE_DIR" > "$BACKUP_DIR/release-boundary.txt"
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
-JASON_REPO_ROOT="$CURRENT_LINK" \
+if ! JASON_REPO_ROOT="$RELEASE_DIR" \
 JASON_USAGE_DEPLOY_BACKUP_DIR="$BACKUP_DIR/usage-deployment" \
-  /usr/bin/bash "$CURRENT_LINK/infrastructure/showcase/deploy_usage_dashboard.sh"
+  /usr/bin/bash "$RELEASE_DIR/infrastructure/showcase/deploy_usage_dashboard.sh"; then
+  if [ -n "$OLD_CURRENT" ] && [ -d "$OLD_CURRENT" ]; then
+    ln -sfn "$OLD_CURRENT" "$CURRENT_LINK"
+  fi
+  echo "ERROR: observability deployment acceptance failed; current pointer restored" >&2
+  exit 1
+fi
 
 install -o root -g root -m 0644 "$CURRENT_LINK/infrastructure/showcase/systemd/jason-grafana-assurance.service" /etc/systemd/system/jason-grafana-assurance.service
 install -o root -g root -m 0644 "$CURRENT_LINK/infrastructure/showcase/systemd/jason-grafana-assurance.timer" /etc/systemd/system/jason-grafana-assurance.timer
