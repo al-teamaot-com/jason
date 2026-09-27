@@ -605,6 +605,7 @@ class OperationalAutonomyMaintenance:
         self.monotonic = monotonic
         self.audit = audit
         self._next_due = 0.0
+        self._resource_automation_cache: dict[int, bool] = {}
 
     def tick(self) -> None:
         now = self.monotonic()
@@ -2917,7 +2918,7 @@ class OperationalAutonomyMaintenance:
                 continue
             title = str(note.get("title") or "").casefold()
             description = str(note.get("description") or "").casefold()
-            if "gpt insights" in title or "gpt insights" in description:
+            if "gpt insight" in title or "gpt insight" in description:
                 continue
             if note.get("createdByContactID") is not None:
                 continue
@@ -2930,8 +2931,32 @@ class OperationalAutonomyMaintenance:
                 continue
             if creator_id == 4 or creator_id in owned_ids:
                 continue
+            if self._resource_is_automation_identity(creator_id):
+                continue
             return False
         return True
+
+    def _resource_is_automation_identity(self, resource_id: int) -> bool:
+        cached = self._resource_automation_cache.get(resource_id)
+        if cached is not None:
+            return cached
+        try:
+            result = self.reads.execute(
+                "service.resource.read",
+                {"resource_id": resource_id},
+            )
+        except Exception:
+            self._resource_automation_cache[resource_id] = False
+            return False
+        evidence = result.get("evidence") if isinstance(result, Mapping) else None
+        data = evidence.get("data") if isinstance(evidence, Mapping) else None
+        item = data.get("item") if isinstance(data, Mapping) else None
+        if not isinstance(item, Mapping):
+            self._resource_automation_cache[resource_id] = False
+            return False
+        automation_identity = int(item.get("licenseType") or 0) == 7
+        self._resource_automation_cache[resource_id] = automation_identity
+        return automation_identity
 
     def _block(self, work: OperationalWork, reason: str) -> None:
         try:
