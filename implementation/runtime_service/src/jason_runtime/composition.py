@@ -1697,13 +1697,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     governed_execution_ledger = SQLiteGovernedExecutionLedger(str(settings.governed_execution_db))
     governed_execution_ledger.initialize()
+    reflection_audit = ReflectionCollectingAuditSink(
+        delegate=orchestration_events,
+        service=reflection_service,
+    )
     orchestrator = CentralOrchestrator(
         resolution=resolution,
         invoker=invokers,
-        audit=ReflectionCollectingAuditSink(
-            delegate=orchestration_events,
-            service=reflection_service,
-        ),
+        audit=reflection_audit,
         authority_context=JKD001OrchestrationContextEnforcer(context_validator),
         require_authority_context=True,
         governed_execution_ledger=governed_execution_ledger,
@@ -1904,6 +1905,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
         max_active_work_items=settings.autonomy_max_active_work_items,
         interval_seconds=settings.autonomy_worker_interval_seconds,
+        audit=reflection_audit,
     )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,

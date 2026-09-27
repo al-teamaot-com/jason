@@ -290,3 +290,19 @@ def test_record_rejects_unbounded_or_misaligned_search_telemetry() -> None:
             search_strategies=tuple("contains" for _ in range(33)),
             search_result_counts=tuple(1 for _ in range(33)),
         ).validate()
+
+def test_worker_warning_codes_create_review_only_candidates() -> None:
+    drafts = detect_candidate_drafts(
+        record(
+            capability_name="autonomy.ticket.worker.scan",
+            provider_id="autotask",
+            requested_result_scope="full",
+            warning_codes=(
+                "worker_unsupported_capability_present",
+                "worker_governance_blocked_present",
+            ),
+        )
+    )
+    kinds = {item.signal_kind for item in drafts}
+    assert ReflectionSignalKind.WORKER_UNSUPPORTED_CAPABILITY in kinds
+    assert ReflectionSignalKind.WORKER_GOVERNANCE_BLOCKER in kinds

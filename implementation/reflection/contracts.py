@@ -16,6 +16,8 @@ class ReflectionSignalKind(str, Enum):
     EXCESSIVE_PAGINATION = "excessive_pagination"
     EXCESSIVE_PROVIDER_CALLS = "excessive_provider_calls"
     REPEATED_FALLBACKS = "repeated_fallbacks"
+    WORKER_UNSUPPORTED_CAPABILITY = "worker_unsupported_capability"
+    WORKER_GOVERNANCE_BLOCKER = "worker_governance_blocker"
     USER_CORRECTION = "user_correction"
 
 

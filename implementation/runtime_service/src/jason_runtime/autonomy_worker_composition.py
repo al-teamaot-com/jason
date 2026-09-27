@@ -41,6 +41,7 @@ def build_autonomy_worker_maintenance(
     owned_autotask_resource_ids: Iterable[int] = (),
     max_active_work_items: int = 2,
     interval_seconds: int = 60,
+    audit=None,
 ):
     """Build the production worker or return None without side effects."""
 
@@ -82,6 +83,8 @@ def build_autonomy_worker_maintenance(
             discovery_status_labels=("New", "Emergency"),
             owned_resource_ids=tuple(owned_autotask_resource_ids),
             allow_assigned_discovery=False,
+            assessment_include_assigned=True,
+            use_open_status_search=True,
         ),
     )
     actions = GovernedAutonomyActionPort(
@@ -97,4 +100,5 @@ def build_autonomy_worker_maintenance(
         promotion_store=promotion_store,
         max_active_work_items=max_active_work_items,
         interval_seconds=interval_seconds,
+        audit=audit,
     )
