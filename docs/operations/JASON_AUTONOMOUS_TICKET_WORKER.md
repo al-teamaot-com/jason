@@ -227,3 +227,17 @@ Technicians may create and improve playbooks without receiving authority to make
 The owner card is bound to the exact playbook version, policy ID, allowed capability set, source path, review status, and canonical registry-entry fingerprint. An authenticated configured owner may Approve, Deny, or Request Changes. Approval mechanically creates the exact durable `PlaybookAutonomyApproval`; it does not broaden any capability, component, or remediation branch beyond the reviewed source scope.
 
 A changed fingerprint invalidates the old review scope. A non-owner response, copied card payload, typed approval text, or Teams membership cannot create autonomy authority.
+## 2026-09-27 production acceptance — automatic device-access lifecycle
+
+Source revision `5e57a34ac2018bad032e3b4467c58f814023699f` is deployed to both `jason-runtime` and `jason-mcp-pilot`, and `/opt/jason/current` resolves to the matching immutable host release. Production readback showed 8 Jason-queue tickets in **Waiting Device Access** and 1 in **In Progress**. The in-progress ticket was VZ-HYPER-V and its exact endpoint was online. The waiting tickets were exact device-bound Jason-owned work whose endpoints were offline.
+
+The accepted worker behavior is therefore:
+
+- offline Jason-owned endpoint ticket -> **Waiting Device Access** exactly once;
+- no active-work slot consumed while waiting;
+- repeated offline reconciliation performs no duplicate status write;
+- endpoint becomes online -> normal claim lifecycle restores **In Progress** and resumes execution;
+- outside-Jason/offline tickets are not claimed or status-mutated solely because of availability state;
+- all writes remain governed, readback-verified, and bounded by exact standing playbook authority.
+
+This production proof supersedes the earlier behavior where offline tickets were merely left unchanged and manually revisited.
