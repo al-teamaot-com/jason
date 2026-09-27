@@ -1237,6 +1237,19 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Run one controlled production handoff when the owner is available for the bounded acceptance window or when an equivalent pre-approved non-disruptive test ticket is designated.
 
+### TODO-COMMS-004 — Microsoft Teams voice-call conversation with Jason
+
+- **Priority:** P2
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add a Teams calling/bot capability so an authorized AOT user can have a real-time two-way voice conversation with Jason inside Microsoft Teams.
+- **Why it matters:** Voice would make Jason usable for hands-free operational discussion, live troubleshooting, ticket review, approvals, and quick status conversations without requiring chat-only interaction.
+- **Scope:** Support inbound or explicitly initiated Teams calls with authenticated approved users; real-time speech-to-text, conversational reasoning, and text-to-speech; preserve Jason's normal governance, authority, audit, and client-boundary controls during the call.
+- **Governance requirements:** No autonomous outbound calling by default; no adding participants without authorization; no recording/transcription retention beyond approved policy; disruptive or modifying actions discussed during a call still require the same playbook/approval rules as chat; voice identity must not be treated as sufficient authority without authenticated Teams identity/context.
+- **Prerequisites:** Microsoft Teams calling/bot architecture, Graph/Teams calling permissions, media handling, speech pipeline, authenticated participant mapping, audit/event model, retention/privacy policy, and a controlled AOT-only acceptance test.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** When Teams communications work expands beyond chat/proactive messages or when a supported Teams real-time media path is selected.
+
 ---
 
 ## New-item template
