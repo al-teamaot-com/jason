@@ -45,7 +45,7 @@ ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
 JASON_REPO_ROOT="$CURRENT_LINK" \
 JASON_USAGE_DEPLOY_BACKUP_DIR="$BACKUP_DIR/usage-deployment" \
-  "$CURRENT_LINK/infrastructure/showcase/deploy_usage_dashboard.sh"
+  /usr/bin/bash "$CURRENT_LINK/infrastructure/showcase/deploy_usage_dashboard.sh"
 
 install -o root -g root -m 0644 "$CURRENT_LINK/infrastructure/showcase/systemd/jason-grafana-assurance.service" /etc/systemd/system/jason-grafana-assurance.service
 install -o root -g root -m 0644 "$CURRENT_LINK/infrastructure/showcase/systemd/jason-grafana-assurance.timer" /etc/systemd/system/jason-grafana-assurance.timer
