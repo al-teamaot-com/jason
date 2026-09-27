@@ -319,6 +319,7 @@ class SQLiteOperationalWorkStore:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_operational_work "
             "WHERE phase NOT IN ('complete','escalated','blocked','approval_pending') "
+            "AND phase NOT LIKE 'waiting_device_access:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
@@ -640,6 +641,15 @@ class OperationalAutonomyMaintenance:
                 )
                 continue
             try:
+                if self._pause_active_work_if_endpoint_offline(work, candidate):
+                    classifications[work.ticket_id] = (
+                        "waiting_device_access",
+                        "endpoint_offline",
+                        candidate.source_version,
+                        False,
+                    )
+                    processed.add(work.ticket_id)
+                    continue
                 self._advance(work, candidate.context)
             except Exception as exc:
                 self._block(
@@ -682,6 +692,58 @@ class OperationalAutonomyMaintenance:
                     self.store.delete(ticket_id)
                     existing = None
             if existing is not None:
+                if existing.phase.startswith("waiting_device_access:"):
+                    waiting_phase = existing.phase
+                    if self._endpoint_is_online(existing.device_uid):
+                        if len(self.store.list_open()) < self.max_active_work_items:
+                            scope = self._scope_for_work(existing)
+                            self.actions.execute(
+                                scope,
+                                "service.ticket.update",
+                                {
+                                    "payload": {
+                                        "id": existing.ticket_id,
+                                        "status": "In Progress",
+                                    }
+                                },
+                            )
+                            resume_phase = waiting_phase.split(":", 1)[1]
+                            existing = self._replace(
+                                existing,
+                                phase=resume_phase,
+                                last_reason="Exact endpoint is online again; resuming preserved work.",
+                            )
+                            self.store.put(existing)
+                            try:
+                                self._advance(existing, item.context)
+                            except Exception as exc:
+                                self._block(
+                                    existing,
+                                    "Execution failed closed after device-access resume: "
+                                    f"{type(exc).__name__}: {str(exc)[:350]}",
+                                )
+                            state, reason_code = self._classify_persisted_work(ticket_id)
+                            classifications[ticket_id] = (
+                                state,
+                                reason_code,
+                                item.source_version,
+                                state == "eligible_now",
+                            )
+                        else:
+                            classifications[ticket_id] = (
+                                "waiting_device_access",
+                                "active_capacity_full",
+                                item.source_version,
+                                False,
+                            )
+                    else:
+                        classifications[ticket_id] = (
+                            "waiting_device_access",
+                            "endpoint_offline",
+                            item.source_version,
+                            False,
+                        )
+                    continue
                 if existing.phase == "escalated":
                     human_review += 1
                     if str(item.source_queue).strip().casefold() == "jason":
@@ -888,6 +950,72 @@ class OperationalAutonomyMaintenance:
             },
         )
 
+    def _endpoint_is_online(self, device_uid: str) -> bool:
+        try:
+            endpoint = self._read_record(
+                "endpoint.device.read", {"resource_id": device_uid}
+            )
+        except Exception:
+            return False
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        if endpoint_uid != device_uid:
+            return False
+        return endpoint.get("online") is True
+
+    def _pause_active_work_if_endpoint_offline(self, work: OperationalWork, candidate) -> bool:
+        if not work.job_uid:
+            return False
+        if work.phase.startswith("waiting_device_access:"):
+            return True
+        try:
+            endpoint = self._read_record(
+                "endpoint.device.read", {"resource_id": work.device_uid}
+            )
+        except Exception:
+            return False
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid:
+            return False
+        if endpoint.get("online") is not False:
+            return False
+
+        scope = self._scope_for_work(work)
+        status_label = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip()
+        if status_label.casefold() != "waiting device access":
+            self.actions.execute(
+                scope,
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+        self.store.put(
+            self._replace(
+                work,
+                phase=f"waiting_device_access:{work.phase}",
+                last_reason=(
+                    "Exact endpoint went offline after job dispatch; preserving "
+                    "the outstanding job and releasing the active-work slot."
+                ),
+            )
+        )
+        return True
+
     def _classify_persisted_work(self, ticket_id: int) -> tuple[str, str]:
         current = self.store.get(ticket_id)
         if current is None:
@@ -900,6 +1028,8 @@ class OperationalAutonomyMaintenance:
             return "governance_blocked", "worker_blocked"
         if current.phase == "complete":
             return "not_actionable", "already_complete"
+        if current.phase.startswith("waiting_device_access:"):
+            return "waiting_device_access", "endpoint_offline"
         return "eligible_now", "active_work"
 
     @staticmethod

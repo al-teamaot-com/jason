@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
 from jason_runtime.autonomy_worker_runtime import (
     OperationalAutonomyMaintenance,
+    OperationalWork,
     SQLiteOperationalWorkStore,
 )
 
@@ -2348,4 +2350,119 @@ def test_assigned_new_ticket_with_only_system_and_gpt_insights_notes_can_be_clai
     worker.tick()
 
     assert store.get(140933) is not None
+    store.close()
+
+
+def _active_dispatched_work() -> OperationalWork:
+    return OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="health_wait",
+        job_uid="job-existing",
+        component_uid="component-existing",
+        last_reason="Dispatched health diagnostic.",
+    )
+
+
+def test_dispatched_job_offline_moves_to_waiting_device_access_and_releases_slot(tmp_path: Path):
+    item = _owned_device_candidate(status_label="In Progress")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(_active_dispatched_work())
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "waiting_device_access:health_wait"
+    assert current.job_uid == "job-existing"
+    assert current.component_uid == "component-existing"
+    assert store.list_open() == ()
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "status": "Waiting Device Access"}]
+    assert not any(capability == "automation.component.execute" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_dispatched_job_offline_wait_is_idempotent(tmp_path: Path):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None and current.phase == "waiting_device_access:health_wait"
+    assert current.job_uid == "job-existing"
+    assert store.list_open() == ()
+    assert actions.calls == []
+    store.close()
+
+
+def test_dispatched_job_resumes_same_job_when_endpoint_returns_online(tmp_path: Path):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    reads = Reads()
+    reads.job_status = "active"
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "health_wait"
+    assert current.job_uid == "job-existing"
+    assert len(store.list_open()) == 1
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "status": "In Progress"}]
+    assert not any(capability == "automation.component.execute" for _, capability, _ in actions.calls)
     store.close()
