@@ -101,46 +101,58 @@ class AutotaskQueueSource:
         owned: bool,
     ) -> None:
         for status_label in status_labels:
-            result = self.reads.execute(
-                SERVICE_TICKET_SEARCH,
-                {
+            after_resource_id: int | None = None
+            while True:
+                arguments: dict[str, Any] = {
                     "status": status_label,
                     "filters": {"queueID": queue_id},
                     "page_size": self.config.page_size,
-                },
-            )
-            items = self._items(result)
-            for ticket in items:
-                ticket_id = self._positive_int(ticket.get("id"), "ticket id")
-                if not owned and not self.config.allow_assigned_discovery:
-                    assigned = self._assigned_resource_id(ticket.get("assignedResourceID"))
-                    if assigned is not None and assigned not in self.config.owned_resource_ids:
-                        continue
-                priority_id = self._positive_int(ticket.get("priority"), "priority id")
-                priority_score = self._priority_scores.get(priority_id, 0)
-                source_version = str(
-                    ticket.get("lastTrackedModificationDateTime")
-                    or ticket.get("lastActivityDate")
-                    or ""
-                ).strip() or None
-                urgent = (
-                    priority_id in self._critical_priority_ids
-                    or status_label.strip().casefold() == "emergency"
+                }
+                if after_resource_id is not None:
+                    arguments["after_resource_id"] = after_resource_id
+                result = self.reads.execute(SERVICE_TICKET_SEARCH, arguments)
+                items = self._items(result)
+                if not items:
+                    break
+                for ticket in items:
+                    ticket_id = self._positive_int(ticket.get("id"), "ticket id")
+                    if not owned and not self.config.allow_assigned_discovery:
+                        assigned = self._assigned_resource_id(ticket.get("assignedResourceID"))
+                        if assigned is not None and assigned not in self.config.owned_resource_ids:
+                            continue
+                    priority_id = self._positive_int(ticket.get("priority"), "priority id")
+                    priority_score = self._priority_scores.get(priority_id, 0)
+                    source_version = str(
+                        ticket.get("lastTrackedModificationDateTime")
+                        or ticket.get("lastActivityDate")
+                        or ""
+                    ).strip() or None
+                    urgent = (
+                        priority_id in self._critical_priority_ids
+                        or status_label.strip().casefold() == "emergency"
+                    )
+                    context = dict(ticket)
+                    context["_jason_source_status_label"] = status_label
+                    candidate = QueueCandidate(
+                        resource_id=str(ticket_id),
+                        priority=priority_score,
+                        source_queue=queue_label,
+                        owned_by_jason=(owned or self._assigned_resource_id(ticket.get("assignedResourceID")) in self.config.owned_resource_ids),
+                        urgent=urgent,
+                        source_version=source_version,
+                        context=context,
+                    )
+                    prior = candidates.get(candidate.resource_id)
+                    if prior is None or candidate.priority > prior.priority:
+                        candidates[candidate.resource_id] = candidate
+                if len(items) < self.config.page_size:
+                    break
+                next_after = max(
+                    self._positive_int(ticket.get("id"), "ticket id") for ticket in items
                 )
-                context = dict(ticket)
-                context["_jason_source_status_label"] = status_label
-                candidate = QueueCandidate(
-                    resource_id=str(ticket_id),
-                    priority=priority_score,
-                    source_queue=queue_label,
-                    owned_by_jason=(owned or self._assigned_resource_id(ticket.get("assignedResourceID")) in self.config.owned_resource_ids),
-                    urgent=urgent,
-                    source_version=source_version,
-                    context=context,
-                )
-                prior = candidates.get(candidate.resource_id)
-                if prior is None or candidate.priority > prior.priority:
-                    candidates[candidate.resource_id] = candidate
+                if after_resource_id is not None and next_after <= after_resource_id:
+                    raise RuntimeError("Autotask ticket search pagination did not advance")
+                after_resource_id = next_after
 
     def _ensure_metadata(self) -> None:
         if self._queue_ids is not None and self._priority_scores is not None:

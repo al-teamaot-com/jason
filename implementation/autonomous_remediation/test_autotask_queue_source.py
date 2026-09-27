@@ -132,3 +132,33 @@ def test_waiting_device_access_is_reconciled_as_owned_jason_work():
     assert "12" in found
     assert found["12"].owned_by_jason is True
     assert found["12"].context["_jason_source_status_label"] == "Waiting Device Access"
+
+
+def test_queue_discovery_paginates_until_short_page():
+    class PagedReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.entity.fields.describe":
+                return super().execute(capability, arguments)
+            self.calls.append((capability, dict(arguments)))
+            if arguments["filters"]["queueID"] != 200 or arguments["status"] != "New":
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            after = arguments.get("after_resource_id")
+            if after is None:
+                items = [
+                    {"id": 20, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 1 a"},
+                    {"id": 21, "priority": 2, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 1 b"},
+                ]
+            elif after == 21:
+                items = [
+                    {"id": 22, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 2"},
+                ]
+            else:
+                raise AssertionError(f"unexpected cursor: {after}")
+            return {"status": "succeeded", "evidence": {"data": {"items": items}}}
+
+    reads = PagedReads()
+    source = AutotaskQueueSource(reads=reads, config=config(owned_queue_labels=(), page_size=2))
+    found = {item.resource_id for item in source.reconcile_candidates()}
+    assert found == {"20", "21", "22"}
+    ticket_calls = [args for capability, args in reads.calls if capability == "service.ticket.search"]
+    assert [call.get("after_resource_id") for call in ticket_calls] == [None, 21]
