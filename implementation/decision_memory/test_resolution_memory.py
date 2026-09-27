@@ -290,3 +290,49 @@ def test_unconfirmed_observed_case_does_not_steer_live_troubleshooting() -> None
     )
     assert result.matches == ()
     assert result.step_evidence == ()
+
+
+def test_mixed_historical_outcomes_are_explicitly_conflicted() -> None:
+    successful = ResolutionStep(
+        step_id="S-OK",
+        ordinal=1,
+        kind=ResolutionStepKind.REMEDIATION,
+        action_key="datto.edr.reinstall",
+        action_summary="Reinstall and upgrade Datto EDR",
+        outcome=ResolutionOutcome.RESOLVED,
+        approval_required=True,
+        disruptive=True,
+    )
+    failed = ResolutionStep(
+        step_id="S-FAIL",
+        ordinal=1,
+        kind=ResolutionStepKind.REMEDIATION,
+        action_key="datto.edr.reinstall",
+        action_summary="Reinstall and upgrade Datto EDR",
+        outcome=ResolutionOutcome.FAILED,
+        approval_required=True,
+        disruptive=True,
+    )
+
+    result = ResolutionMemoryMatcher().search(
+        signature=signature(),
+        organization_id="aot",
+        client_id="client-a",
+        cases=(
+            case("OK1", steps=(successful,)),
+            case("OK2", steps=(successful,)),
+            case("FAIL1", outcome=ResolutionOutcome.FAILED, steps=(failed,)),
+        ),
+        now=NOW,
+    )
+
+    reinstall = next(
+        item for item in result.step_evidence
+        if item.action_key == "datto.edr.reinstall"
+    )
+    assert reinstall.successes == 2
+    assert reinstall.failures == 1
+    assert reinstall.disposition == "historically_conflicted"
+    assert reinstall.approval_required is True
+    assert reinstall.disruptive is True
+    assert reinstall.grants_authority is False
