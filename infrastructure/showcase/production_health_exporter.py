@@ -282,14 +282,41 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
         in env["JASON_DATTO_SITE_VARIABLE_MCP_PROFILE"]
     )
 
-    datto_scope_ok = all(
-        expected in env[key]
-        for key, expected in (
-            ("JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME", EXPECTED_DATTO_ALLOWLIST),
-            ("JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON", EXPECTED_DATTO_COMPONENTS_JSON),
-            ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID", EXPECTED_DATTO_DEVICE_UID),
-            ("JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS", EXPECTED_DATTO_DEVICE_CLASS),
-        )
+    expected_components = {
+        str(item.get("uid")): item
+        for item in json.loads(EXPECTED_DATTO_COMPONENTS_JSON)
+        if isinstance(item, dict) and item.get("uid")
+    }
+    component_scope_ok = False
+    for raw_scope in env["JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON"]:
+        try:
+            parsed_scope = json.loads(raw_scope)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(parsed_scope, list):
+            continue
+        actual_components = {
+            str(item.get("uid")): item
+            for item in parsed_scope
+            if isinstance(item, dict) and item.get("uid")
+        }
+        if all(
+            uid in actual_components
+            and actual_components[uid].get("name") == expected.get("name")
+            and actual_components[uid].get("approval_mode") == expected.get("approval_mode")
+            for uid, expected in expected_components.items()
+        ):
+            component_scope_ok = True
+            break
+
+    datto_scope_ok = (
+        EXPECTED_DATTO_ALLOWLIST
+        in env["JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME"]
+        and component_scope_ok
+        and EXPECTED_DATTO_DEVICE_UID
+        in env["JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID"]
+        and EXPECTED_DATTO_DEVICE_CLASS
+        in env["JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS"]
     )
 
     checks = {
