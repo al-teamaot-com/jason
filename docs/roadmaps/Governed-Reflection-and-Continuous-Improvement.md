@@ -242,7 +242,7 @@ Both paths emit bounded reflection telemetry so future inefficiency remains obse
 
 `operations.reflection.summary`, `operations.reflection.candidate.search`, and `operations.reflection.candidate.read` expose evidence-only review data through the normal provider-neutral resource model. Correction/review mutations are governed local capabilities but are intentionally excluded from generic planner discovery.
 
-Prometheus/Grafana expose aggregate Reflection availability, record count, candidate lifecycle counts, authenticated-correction count, signal counts, and CI regression outcomes. Candidate text, source record IDs, principals, clients, and provider records are not exported as metric labels. Dashboard state grants no authority.
+Prometheus/Grafana source for aggregate Reflection availability, record count, candidate lifecycle counts, authenticated-correction count, signal counts, and CI regression outcomes is implemented and merged. Candidate text, source record IDs, principals, clients, and provider records are not exported as metric labels. Production activation of the new exporter/dashboard panels remains a privileged observability operation tracked in GitHub issue #455 because the immutable release and systemd installation boundary is root-owned and the authorized remote-command policy blocks sudo. REFLECT-001 runtime functionality and governed candidate retrieval are already live; dashboard state grants no authority.
 
 ### Authority invariant
 
