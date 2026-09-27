@@ -33,6 +33,16 @@ class QueueAttention:
         self.reasons.append(reason)
 
 
+class WorkResume:
+    def __init__(self, *, result=True):
+        self.result = result
+        self.calls = []
+
+    def resume(self, resource_id, *, reason):
+        self.calls.append((resource_id, reason))
+        return self.result
+
+
 class Service:
     def __init__(self, result):
         self.result = result
@@ -179,3 +189,88 @@ def test_composite_maintenance_runs_services_on_same_tick():
     assert composite.tick() is True
     assert first.calls == 1
     assert second.calls == 1
+
+
+
+def test_successful_targeted_read_resumes_exact_work_item(tmp_path):
+    store = SQLiteTargetedWakeStore(tmp_path / "wake.sqlite3")
+    store.schedule(TargetedWake(
+        wake_id="resume-1",
+        resource_id="T1",
+        reason="device availability",
+        kind=WakeKind.TARGETED_READ,
+        due_at=fixed_now() - timedelta(seconds=1),
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+        resume_work_item=True,
+    ))
+    resume = WorkResume()
+    queue = QueueAttention()
+    maintenance = TargetedWakeMaintenance(
+        store=store,
+        reads=Reads(),
+        queue_attention=queue,
+        work_resume=resume,
+        now=fixed_now,
+    )
+
+    maintenance.tick()
+
+    assert resume.calls == [
+        ("T1", "targeted_read_complete:service.ticket.read")
+    ]
+    assert store.state("resume-1") is WakeState.COMPLETE
+    assert queue.reasons == []
+
+
+def test_resume_requested_without_resume_port_fails_closed(tmp_path):
+    store = SQLiteTargetedWakeStore(tmp_path / "wake.sqlite3")
+    store.schedule(TargetedWake(
+        wake_id="resume-missing",
+        resource_id="T1",
+        reason="device availability",
+        kind=WakeKind.TARGETED_READ,
+        due_at=fixed_now() - timedelta(seconds=1),
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+        resume_work_item=True,
+        max_attempts=1,
+    ))
+    maintenance = TargetedWakeMaintenance(
+        store=store,
+        reads=Reads(),
+        queue_attention=QueueAttention(),
+        work_resume=None,
+        now=fixed_now,
+    )
+
+    maintenance.tick()
+
+    assert store.state("resume-missing") is WakeState.FAILED
+
+
+def test_stale_work_resume_noop_still_completes_safe_read(tmp_path):
+    store = SQLiteTargetedWakeStore(tmp_path / "wake.sqlite3")
+    store.schedule(TargetedWake(
+        wake_id="resume-stale",
+        resource_id="T1",
+        reason="device availability",
+        kind=WakeKind.TARGETED_READ,
+        due_at=fixed_now() - timedelta(seconds=1),
+        capability_name="service.ticket.read",
+        arguments={"ticket_id": 1},
+        resume_work_item=True,
+    ))
+    resume = WorkResume(result=False)
+    maintenance = TargetedWakeMaintenance(
+        store=store,
+        reads=Reads(),
+        queue_attention=QueueAttention(),
+        work_resume=resume,
+        now=fixed_now,
+    )
+
+    maintenance.tick()
+
+    assert resume.calls
+    assert store.state("resume-stale") is WakeState.COMPLETE

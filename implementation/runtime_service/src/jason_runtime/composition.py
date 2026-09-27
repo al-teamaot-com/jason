@@ -400,6 +400,9 @@ class RuntimeSettings:
     autonomy_targeted_wake_db: Path = Path(
         "/var/lib/jason/openclaw/autonomy-targeted-wakes.sqlite3"
     )
+    autonomy_work_db: Path = Path(
+        "/var/lib/jason/openclaw/autonomy-work.sqlite3"
+    )
     autonomy_playbook_registry: Path = Path(
         "/app/implementation/autonomous_remediation/playbook_registry.json"
     )
@@ -698,6 +701,12 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_AUTONOMY_TARGETED_WAKE_DB",
                     "/var/lib/jason/openclaw/autonomy-targeted-wakes.sqlite3",
+                )
+            ),
+            autonomy_work_db=Path(
+                os.getenv(
+                    "JASON_AUTONOMY_WORK_DB",
+                    "/var/lib/jason/openclaw/autonomy-work.sqlite3",
                 )
             ),
             autonomy_playbook_registry=Path(
@@ -1839,6 +1848,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         promotion_db=settings.autonomy_promotion_db,
         playbook_registry=settings.autonomy_playbook_registry,
         targeted_wake_db=settings.autonomy_targeted_wake_db,
+        work_db=settings.autonomy_work_db,
         owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
         max_active_work_items=settings.autonomy_max_active_work_items,
         interval_seconds=settings.autonomy_shadow_interval_seconds,

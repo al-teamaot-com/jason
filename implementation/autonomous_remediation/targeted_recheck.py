@@ -41,6 +41,7 @@ class TargetedWake:
     capability_name: str | None = None
     arguments: Mapping[str, Any] = field(default_factory=dict)
     queue_reconciliation_required: bool = False
+    resume_work_item: bool = False
     max_attempts: int = 3
 
     def __post_init__(self) -> None:
@@ -293,6 +294,7 @@ class SQLiteTargetedWakeStore:
             "capability_name": wake.capability_name,
             "arguments": dict(wake.arguments),
             "queue_reconciliation_required": wake.queue_reconciliation_required,
+            "resume_work_item": wake.resume_work_item,
             "max_attempts": wake.max_attempts,
         }
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
