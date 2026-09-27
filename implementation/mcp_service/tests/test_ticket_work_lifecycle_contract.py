@@ -549,3 +549,147 @@ def test_direct_ticket_update_rejects_non_authoritative_readback(monkeypatch):
             "service.ticket.update",
             {"ticket_id": 123, "status": "Complete"},
         )
+
+
+def _verified_resolution_package():
+    return {
+        "category": "disk_space",
+        "product": "windows_sysmon",
+        "device_role": "workstation",
+        "platform": "windows",
+        "symptoms": ["critical low disk space", "sysmon archive growth"],
+        "attributes": {"volume": "c:"},
+        "root_cause": "Sysmon archive accumulation consumed the system volume.",
+        "final_resolution": "Archive data was removed and free space verified.",
+        "outcome": "resolved",
+        "technician_confirmed": True,
+        "terminal_verification_confirmed": True,
+        "steps": [
+            {
+                "kind": "diagnostic",
+                "action_key": "disk.consumer.identify",
+                "action_summary": "Identify the dominant disk consumer.",
+                "outcome": "resolved",
+                "evidence_summary": "Sysmon archive was the dominant consumer.",
+                "read_only": True,
+                "approval_required": False,
+                "disruptive": False,
+            },
+            {
+                "kind": "remediation",
+                "action_key": "filesystem.sysmon.archive.remove",
+                "action_summary": "Remove approved Sysmon archive data.",
+                "outcome": "resolved",
+                "evidence_summary": "Approved archive removal completed.",
+                "read_only": False,
+                "approval_required": True,
+                "disruptive": False,
+            },
+            {
+                "kind": "verification",
+                "action_key": "disk.free_space.verify",
+                "action_summary": "Verify free space after cleanup.",
+                "outcome": "resolved",
+                "evidence_summary": "Free space returned above the alert threshold.",
+                "read_only": True,
+                "approval_required": False,
+                "disruptive": False,
+            },
+        ],
+    }
+
+
+def test_complete_work_builds_verified_resolution_ingestion_package(monkeypatch):
+    claim = SimpleNamespace(state="claimed")
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+    monkeypatch.setattr(
+        server,
+        "_exact_ticket_record_for_work_start",
+        lambda ticket_id: _ticket(ticket_id=ticket_id, title="Disk alert"),
+    )
+
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 123,
+            "complete_work": True,
+            "resolution": _verified_resolution_package(),
+        },
+    )
+
+    assert result["payload"] == {"id": 123, "status": "Complete"}
+    assert result["jason_policy_class"] == "ticket_work_complete"
+    package = result["jason_resolution_package"]
+    assert package["case_id"] == "autotask-ticket-123-resolution-v1"
+    assert package["company_id"] == "99"
+    assert len(package["steps"]) == 3
+    assert package["steps"][1]["approval_required"] is True
+
+
+def test_complete_work_rejects_unverified_or_unclaimed_resolution(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: None),
+    )
+    with pytest.raises(ValueError, match="NOT_CLAIMED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 123,
+                "complete_work": True,
+                "resolution": _verified_resolution_package(),
+            },
+        )
+
+    claim = SimpleNamespace(state="claimed")
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+    monkeypatch.setattr(
+        server,
+        "_exact_ticket_record_for_work_start",
+        lambda ticket_id: _ticket(ticket_id=ticket_id, title="Disk alert"),
+    )
+    unverified = _verified_resolution_package()
+    unverified["terminal_verification_confirmed"] = False
+    with pytest.raises(ValueError, match="TERMINAL_VERIFICATION_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 123,
+                "complete_work": True,
+                "resolution": unverified,
+            },
+        )
+
+
+def test_complete_work_requires_terminal_verification_step(monkeypatch):
+    claim = SimpleNamespace(state="claimed")
+    monkeypatch.setattr(
+        server,
+        "_ticket_work_claim_store",
+        lambda: SimpleNamespace(get=lambda ticket_id: claim),
+    )
+    monkeypatch.setattr(
+        server,
+        "_exact_ticket_record_for_work_start",
+        lambda ticket_id: _ticket(ticket_id=ticket_id, title="Disk alert"),
+    )
+    package = _verified_resolution_package()
+    package["steps"] = package["steps"][:2]
+    with pytest.raises(ValueError, match="VERIFICATION_STEP_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            "service.ticket.update",
+            {
+                "ticket_id": 123,
+                "complete_work": True,
+                "resolution": package,
+            },
+        )

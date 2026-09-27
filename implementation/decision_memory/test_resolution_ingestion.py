@@ -22,3 +22,33 @@ def test_service_ingests_confirmed_case_durably(tmp_path):
     case=service.ingest_confirmed_resolution(candidate())
     assert case.status is ResolutionCaseStatus.VERIFIED
     assert store.count_cases(organization_id='aot',client_id='company:311') == 1
+
+
+def test_duplicate_ingestion_is_idempotent(tmp_path):
+    from decision_memory.resolution_service import ResolutionMemoryService
+    from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
+
+    store = SQLiteResolutionMemoryStore(str(tmp_path / "r.sqlite3"))
+    service = ResolutionMemoryService(store=store)
+    service.initialize()
+
+    first = service.ingest_confirmed_resolution(candidate())
+    second = service.ingest_confirmed_resolution(candidate())
+
+    assert first.case_id == second.case_id
+    assert store.count_cases(organization_id="aot", client_id="company:311") == 1
+
+
+def test_conflicting_duplicate_ingestion_fails_closed(tmp_path):
+    from decision_memory.resolution_service import ResolutionMemoryService
+    from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
+
+    store = SQLiteResolutionMemoryStore(str(tmp_path / "r.sqlite3"))
+    service = ResolutionMemoryService(store=store)
+    service.initialize()
+    service.ingest_confirmed_resolution(candidate())
+
+    with pytest.raises(ValueError, match="conflicting existing resolution case"):
+        service.ingest_confirmed_resolution(
+            candidate(final_resolution="Different historical conclusion")
+        )

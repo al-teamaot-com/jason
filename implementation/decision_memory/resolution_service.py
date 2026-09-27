@@ -37,6 +37,35 @@ class ResolutionMemoryService:
 
     def ingest_confirmed_resolution(self, candidate: ConfirmedResolutionIngestion) -> ResolutionCase:
         case = candidate.to_case()
+        existing = self.store.get_case(
+            case_id=case.case_id,
+            organization_id=case.organization_id,
+            client_id=case.client_id,
+        )
+        if existing is not None:
+            same_sources = {
+                (item.source_type, item.source_id)
+                for item in existing.source_references
+            } == {
+                (item.source_type, item.source_id)
+                for item in case.source_references
+            }
+            semantically_equal = (
+                existing.case_id == case.case_id
+                and existing.organization_id == case.organization_id
+                and existing.client_id == case.client_id
+                and existing.signature.normalized() == case.signature.normalized()
+                and existing.steps == case.steps
+                and existing.root_cause == case.root_cause
+                and existing.final_resolution == case.final_resolution
+                and existing.outcome is case.outcome
+                and existing.status is case.status
+                and existing.technician_confirmed == case.technician_confirmed
+                and same_sources
+            )
+            if semantically_equal:
+                return existing
+            raise ValueError("conflicting existing resolution case")
         self.store.add_case(case)
         return case
 
