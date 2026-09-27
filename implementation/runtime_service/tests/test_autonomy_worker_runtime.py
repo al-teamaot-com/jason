@@ -108,6 +108,18 @@ class Actions:
                     "job_status": "active",
                 }
             }
+        if capability == "service.ticket.update":
+            payload = arguments.get("payload") or {}
+            verified = [key for key in payload if key != "id"]
+            return {
+                "data": {
+                    "jasonVerification": {
+                        "readbackVerified": True,
+                        "ticketId": payload.get("id"),
+                        "verifiedFields": verified,
+                    }
+                }
+            }
         return {}
 
 
@@ -309,6 +321,98 @@ def test_verified_healthy_ticket_is_claimed_documented_and_completed(tmp_path: P
     ]
     assert len(note_calls) == 1
     assert "Status=Healthy" in note_calls[0]["description"]
+    store.close()
+
+
+
+def test_duplicate_note_is_suppressed_across_terminal_work_reconsideration(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import OperationalWork
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="escalated",
+        last_reason="same terminal evidence",
+    )
+
+    assert worker._write_note(work, "Same result.", "Jason - Diagnostic") is True
+    store.put(work)
+    store.delete(work.ticket_id)
+    assert worker._write_note(work, "Same   result.", "Jason - Diagnostic") is False
+
+    note_calls = [
+        args for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    store.close()
+
+
+def test_completion_fails_closed_without_terminal_readback_verification(tmp_path: Path):
+    class NoReadbackActions(Actions):
+        def execute(self, scope, capability, arguments):
+            if capability == "service.ticket.update" and arguments.get("payload", {}).get("status") == "Complete":
+                self.calls.append((scope.playbook_id, capability, arguments))
+                return {"data": {"jasonVerification": {"readbackVerified": False, "verifiedFields": []}}}
+            return super().execute(scope, capability, arguments)
+
+    actions = NoReadbackActions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    from jason_runtime.autonomy_worker_runtime import OperationalWork, OperationalAutonomyError
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="health_wait",
+    )
+
+    try:
+        worker._complete(work, "Status=Healthy\nEDRVersion=3.17.1")
+    except OperationalAutonomyError:
+        pass
+    else:
+        raise AssertionError("completion must fail closed when terminal readback is not verified")
+
+    assert store.get(140933) is None
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
     store.close()
 
 

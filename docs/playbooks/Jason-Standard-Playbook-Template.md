@@ -129,6 +129,15 @@ Add playbook-specific states when required.
 
 State should survive conversation boundaries, scheduled rechecks, technician handoffs, and service restarts where practical. Jason must not repeat completed steps unnecessarily.
 
+Persist at minimum:
+- current playbook state;
+- last meaningful observed-state fingerprint;
+- active job/correlation identifiers;
+- next recheck condition/time;
+- last ticket-documentation fingerprint.
+
+A recheck that produces no meaningful state/evidence change updates persisted state only; it does **not** create another ticket note. The persisted recheck record remains the audit evidence that the check occurred.
+
 ---
 
 ## 7. Diagnostic Workflow
@@ -244,6 +253,8 @@ If the playbook requires waiting:
 
 Prevent duplicate scheduled jobs for the same ticket/playbook instance.
 
+Periodic polling is not itself a documentable event. Write a new ticket note only when the recheck changes evidence, classification, action, dependency, authority state, escalation state, or terminal disposition.
+
 ---
 
 ## 12. Aging / Stale Condition
@@ -280,7 +291,9 @@ Never fabricate missing configuration or borrow values from another client.
 
 ## 14. Documentation Requirements
 
-Every meaningful step must be documented in the original Autotask ticket or authoritative case record when one exists.
+Every meaningful **state transition** must be documented in the original Autotask ticket or authoritative case record when one exists.
+
+Do not document unchanged polling/recheck results repeatedly. Before creating a Jason-authored note, compare a durable normalized fingerprint for the same ticket/playbook/note class. If the normalized content is unchanged, suppress the duplicate note and retain the recheck only in persisted operational state.
 
 Document:
 - what Jason checked
@@ -388,7 +401,10 @@ The ticket/case may only complete when:
 4. remediation succeeded where required;
 5. authoritative healthy-state evidence exists;
 6. all actions/results are documented;
-7. final resolution note is present.
+7. final resolution note is present;
+8. the requested terminal ticket disposition has been independently/readback verified against the authoritative PSA/provider state.
+
+A resolution statement in prose is never proof that the ticket actually reached its intended terminal state. If the terminal write or readback fails, do not mark the playbook complete; persist a blocked/escalated state with the failed terminal transition as the next required action.
 
 ---
 
@@ -451,6 +467,8 @@ Prove:
 11. completion/escalation
 12. scheduled-job cleanup
 13. persisted state
+14. duplicate-note suppression on unchanged rechecks
+15. terminal ticket-state readback verification
 
 Do not modify unrelated production objects during testing.
 
