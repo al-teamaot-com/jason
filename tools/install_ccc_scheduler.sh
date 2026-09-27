@@ -11,7 +11,7 @@ REPO_ROOT="/home/al/projects/jason"
 RELEASE_ROOT="/opt/jason/ccc-releases"
 RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/ccc-current"
-CONFIG_DIR="/etc/jason"
+CONFIG_DIR="/var/lib/jason/ccc"
 CONFIG_PATH="$CONFIG_DIR/ccc.json"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-ccc-$STAMP"
@@ -25,7 +25,7 @@ if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null; th
   git -C "$REPO_ROOT" fetch origin "$SOURCE_REVISION"
 fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
-mkdir -p "$RELEASE_ROOT" "$CONFIG_DIR" "$BACKUP_DIR" /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
+mkdir -p "$RELEASE_ROOT" "$CONFIG_DIR" "$BACKUP_DIR" /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 
 if [ ! -d "$RELEASE_DIR" ]; then
   TMP_RELEASE="$RELEASE_ROOT/.${SOURCE_REVISION}.tmp.$$"
@@ -49,7 +49,7 @@ ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-ccc.service" /etc/systemd/system/jason-ccc.service
 install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-ccc.timer" /etc/systemd/system/jason-ccc.timer
 if [ ! -f "$CONFIG_PATH" ]; then
-  install -o root -g root -m 0644 "$RELEASE_DIR/config/ccc/default.json" "$CONFIG_PATH"
+  install -o al -g al -m 0600 "$RELEASE_DIR/config/ccc/default.json" "$CONFIG_PATH"
 fi
 chown al:al /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 chmod 0700 /var/lib/jason/ccc
