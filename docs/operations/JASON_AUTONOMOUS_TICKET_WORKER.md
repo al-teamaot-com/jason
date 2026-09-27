@@ -287,3 +287,5 @@ The Datto RMM execution AppRole runtime mount defaults to `/var/lib/jason/runtim
 ## 2026-09-27 legacy human-review handoff reconciliation
 
 On every scan, an existing terminal `escalated` work row is checked against the ticket's current source queue. If the ticket is still in the Jason queue, the worker performs the same governed, readback-verified handoff used by new escalations: queue `Help Desk I`, status `New`. A successful handoff remains classified as `waiting_human_review`; a failed handoff is classified as `governance_blocked` with reason `human_review_handoff_failed`. This makes the new handoff rule self-healing for escalations created before the rule existed and prevents legacy human-review work from remaining stranded in Jason.
+
+Scan-level REFLECT-001 events use the canonical orchestration audit shape, including execution/correlation IDs, organization, `jason-autonomy-worker` principal, capability name, and terminal stage, so the durable orchestration store can mirror each completed scan into Reflection Memory.

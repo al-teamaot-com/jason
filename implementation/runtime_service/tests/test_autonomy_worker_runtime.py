@@ -2213,3 +2213,46 @@ def test_existing_escalated_jason_ticket_is_backfilled_to_helpdesk(tmp_path: Pat
     current = store.get(140933)
     assert current is not None and current.phase == "escalated"
     store.close()
+
+def test_scan_reflection_event_uses_canonical_audit_shape(tmp_path: Path):
+    class StrictAudit:
+        def __init__(self):
+            self.events = []
+
+        def append(self, event_type, payload):
+            for key in (
+                "execution_id",
+                "correlation_id",
+                "organization_id",
+                "principal_id",
+                "capability_name",
+                "stage",
+            ):
+                assert payload[key]
+            self.events.append((event_type, dict(payload)))
+
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    audit = StrictAudit()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+        audit=audit,
+    )
+
+    worker.tick()
+
+    assert len(audit.events) == 1
+    event_type, payload = audit.events[0]
+    assert event_type == "orchestration.capability.completed"
+    assert payload["principal_id"] == "jason-autonomy-worker"
+    assert payload["stage"] == "completed"
+    assert payload["capability_name"] == "autonomy.ticket.worker.scan"
+    store.close()
