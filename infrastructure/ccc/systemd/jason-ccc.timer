@@ -1,0 +1,12 @@
+[Unit]
+Description=Check daily whether Jason CCC is due
+
+[Timer]
+OnBootSec=10m
+OnCalendar=*-*-* 06:15:00 America/New_York
+Persistent=true
+RandomizedDelaySec=10m
+Unit=jason-ccc.service
+
+[Install]
+WantedBy=timers.target

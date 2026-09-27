@@ -1,0 +1,21 @@
+[Unit]
+Description=Jason Constitutional and Compliance Check (CCC)
+After=network-online.target docker.service jason-openclaw-authority-health.service
+Wants=network-online.target
+ConditionPathExists=/etc/jason/ccc.json
+ConditionPathExists=/var/lib/jason/authority/authority.sqlite3
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/opt/jason/ccc-current
+ExecStart=/usr/bin/python3 /opt/jason/ccc-current/tools/run_ccc.py --config /etc/jason/ccc.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/jason/ccc-current /home/al/projects/jason /var/lib/jason/authority /var/lib/jason/openclaw /etc/jason/ccc.json
+ReadWritePaths=/home/al/projects/jason/.git /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
+UMask=0077
+TimeoutStartSec=45min
