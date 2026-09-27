@@ -1,0 +1,83 @@
+{
+  "case_id": "AT-T20260924.0043-IDLE-LOGOFF",
+  "organization_id": "aot",
+  "client_id": "1179",
+  "ticket_id": "T20260924.0043",
+  "ticket_company_id": "1179",
+  "current_company_id": "1179",
+  "signature": {
+    "category": "endpoint compliance",
+    "product": "AOT Idle Log Off",
+    "device_role": "workstation",
+    "platform": "Windows",
+    "product_version": "02042026-1",
+    "symptoms": [
+      "compliant false",
+      "invalid myfiledestination",
+      "idle log off control unhealthy"
+    ],
+    "attributes": {
+      "control": "AOT_IdleLogOff",
+      "monitor": "Get Idle Log Off Status AOT Ver 08202024",
+      "requirement": "idle log off enforced"
+    }
+  },
+  "source_references": [
+    {
+      "source_type": "autotask_ticket",
+      "source_id": "T20260924.0043",
+      "correlation_id": "corr_mcp_efa82e435f0545debb36be0c538b78b8"
+    },
+    {
+      "source_type": "datto_rmm_alert",
+      "source_id": "9d34f135-8393-4e7f-b2a8-064a1e98eb07",
+      "correlation_id": "corr_mcp_action_8b29c0e4cc124ad0be8e0a5e98b0b6cf"
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "idle-logoff-1",
+      "ordinal": 1,
+      "kind": "diagnostic",
+      "action_key": "idle_log_off.alert.classify",
+      "action_summary": "Classify the Idle Log Off alert and legacy component failure",
+      "outcome": "improved",
+      "evidence_summary": "Compliant=False was not treated as proof of noncompliance; legacy response evidence showed Invalid MyFileDestination.",
+      "read_only": true,
+      "approval_required": false,
+      "disruptive": false
+    },
+    {
+      "step_id": "idle-logoff-2",
+      "ordinal": 2,
+      "kind": "remediation",
+      "action_key": "aot.idle_log_off.setter.02042026-1",
+      "action_summary": "Run Set Idle Log Off AOT Ver 02042026-1 with built-in defaults",
+      "outcome": "resolved",
+      "evidence_summary": "Setter was dispatched exactly once under owner approval; stdout reported successful staging and scheduled-task creation; stderr was empty.",
+      "read_only": false,
+      "approval_required": true,
+      "disruptive": true
+    },
+    {
+      "step_id": "idle-logoff-3",
+      "ordinal": 3,
+      "kind": "verification",
+      "action_key": "idle_log_off.mechanism.verify",
+      "action_summary": "Independently verify the installed Idle Log Off mechanism",
+      "outcome": "resolved",
+      "evidence_summary": "AOT_IdleLogOff was Ready, SYSTEM, Highest, executing C:\\Temp\\MyIdleLogOff\\MyIdleLogOff.exe with arguments 240 60 and exit code 0.",
+      "read_only": true,
+      "approval_required": false,
+      "disruptive": false
+    }
+  ],
+  "root_cause": "The legacy Idle Log Off monitoring/remediation path produced Invalid MyFileDestination and did not establish a healthy current control; the approved current Idle Log Off mechanism required repair/re-staging with the 02042026-1 setter.",
+  "final_resolution": "Ran the current Idle Log Off setter exactly once under owner approval using built-in defaults, independently verified the AOT_IdleLogOff mechanism healthy, resolved the stale DRMM alert with verified readback, and Autotask completed T20260924.0043.",
+  "outcome": "resolved",
+  "technician_confirmed": true,
+  "terminal_verification_confirmed": true,
+  "recorded_at": "2026-09-27T08:53:34Z",
+  "resolved_at": "2026-09-25T16:49:38.763Z",
+  "owner": "person-al"
+}
