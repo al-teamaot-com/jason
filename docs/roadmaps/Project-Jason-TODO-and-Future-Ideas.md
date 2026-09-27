@@ -1269,6 +1269,20 @@ Copy this section when adding an idea:
 6. No item in this document overrides the Jason Constitution, policy engine, approval requirements, or human authority.
 ---
 
+## Recently completed platform reliability work
+
+### OBS-001 — Grafana / Observability Configuration Assurance
+
+- **Priority:** P1
+- **Status:** Completed and production-proven 2026-09-27
+- **Risk level:** Moderate
+- **Why it mattered:** Production dashboards could depend on mutable worktrees or Grafana database-only state, which allowed dashboard pages or telemetry panels to disappear after redeploy, cleanup, or mount changes.
+- **Implemented behavior:** All 21 production dashboards are now Git-authoritative and covered by the dashboard manifest; Grafana and Prometheus deploy from exact immutable observability release paths; a five-minute assurance control verifies source hashes, mount provenance, dashboard identities, datasource availability, and required Prometheus dependencies; the assurance exporter uses dedicated port `9474`; rollback restores the prior accepted release pointer if deployment acceptance fails.
+- **Production evidence:** Source revision `f61ef43228d1f5072d425e11e5303ca3bb143079` is active. Independent readback verified 21/21 dashboard files, 21/21 Grafana dashboard identities, and 6/6 metric dependencies. Prometheus scrapes `jason-grafana-assurance` on `host.docker.internal:9474`; toner remains isolated on `9473`. OpenAI 24-hour, 7-day, and month-to-date cost metrics are present.
+- **Recovery/alert proof:** Prometheus `promtool` synthetic rule tests proved the drift and unavailable/not-proven alert conditions. A disposable clean Grafana `12.2.1` instance recovered all 21 dashboards from immutable Git-backed sources after provisioning completed, then was removed.
+- **Canonical documentation:** `docs/operations/Grafana-Observability-Configuration-Assurance.md` and `docs/sessions/Grafana-Observability-Configuration-Assurance-Production-Acceptance-2026-09-27.md`.
+- **Remaining work:** None for this reliability baseline. Future dashboard changes must follow the existing manifest/CI/immutable-release/assurance process.
+
 ## Recently implemented operational defaults
 
 ### TODO-OPS-003 — Autotask ticket work-start lifecycle
