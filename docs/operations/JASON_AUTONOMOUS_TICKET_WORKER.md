@@ -275,3 +275,11 @@ Slot occupancy is recomputed after every advancement. If a ticket completes, blo
 Scan aggregates are exported as non-sensitive Prometheus metrics by the autonomy flight recorder. Current classification counts, oldest eligible age, and eligible-never-selected counts are also exposed. The worker emits scan-level REFLECT-001 evidence through the existing Reflection audit sink. Unsupported current work and governance-blocked current work create review-only improvement candidates; they do not modify code, policy, capability grants, provider access, playbook promotion, or execution authority.
 
 The observability source changes follow the same immutable deployment boundary as the existing REFLECT-001 dashboard/exporter. Privileged activation remains tracked by GitHub issue #455 and must not weaken the root-owned release or systemd boundary.
+
+## 2026-09-27 internal-company and execution-secret follow-up
+
+Autotask company ID `0` is a valid internal AOT boundary and is not treated as a missing company. Autonomous admission still fails closed unless the ticket company ID and the exact active Autotask configuration item's company ID are identical, including the `0` internal boundary, and the CI's durable Datto UID and hostname match the governed endpoint read.
+
+The read-only shadow assessor now uses the same semantic `open` ticket selector as the operational worker, reducing startup provider calls while retaining cursor pagination and live Autotask status resolution.
+
+The Datto RMM execution AppRole runtime mount defaults to `/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/` rather than the root-only bootstrap copy. Runtime files remain read-only inside the hardened container and should be owned/readable by the runtime identity without exposing RoleID or SecretID values. The root-only bootstrap copy remains a staging source, not the live runtime mount.

@@ -1057,7 +1057,7 @@ class OperationalAutonomyMaintenance:
             item for item in raw_items
             if isinstance(item, Mapping)
             and item.get("isActive") is True
-            and int(item.get("companyID") or -1) == company_id
+            and self._company_id(item.get("companyID")) == company_id
             and str(item.get("referenceNumber") or "").strip() == endpoint_uid
             and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
         ]
@@ -1088,7 +1088,7 @@ class OperationalAutonomyMaintenance:
     def _admit(self, candidate, scope: PlaybookScope) -> OperationalWork:
         ticket = candidate.context
         ticket_id = self._positive_int(ticket.get("id"), "ticket id")
-        company_id = self._positive_int(ticket.get("companyID"), "company id")
+        company_id = self._company_id(ticket.get("companyID"))
         ci_value = ticket.get("configurationItemID")
         if ci_value in (None, "", 0, "0"):
             ci_id = self._associate_exact_ticket_device(
@@ -1106,7 +1106,7 @@ class OperationalAutonomyMaintenance:
             ci = dict(ci["item"])
         if int(ci.get("id") or 0) != ci_id:
             raise OperationalAutonomyError("configuration identity readback mismatch")
-        if int(ci.get("companyID") or -1) != company_id:
+        if self._company_id(ci.get("companyID")) != company_id:
             raise OperationalAutonomyError("configuration belongs to another company")
         if ci.get("isActive") is not True:
             raise OperationalAutonomyError("configuration is inactive")
@@ -2781,7 +2781,9 @@ class OperationalAutonomyMaintenance:
             str(candidate.source_queue).strip().casefold() != "jason"
             and (
                 "company id must be a positive integer" in message
+                or "company id must be a non-negative integer" in message
                 or "configuration item id must be a positive integer" in message
+                or "configuration belongs to another company" in message
             )
         ):
             return
@@ -2901,6 +2903,20 @@ class OperationalAutonomyMaintenance:
             if len(selected) >= 6:
                 break
         return " | ".join(selected)[:900] or "Status=Healthy"
+
+    @staticmethod
+    def _company_id(value: Any) -> int:
+        if isinstance(value, bool):
+            raise OperationalAutonomyError("company id must be a non-negative integer")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise OperationalAutonomyError(
+                "company id must be a non-negative integer"
+            ) from exc
+        if parsed < 0:
+            raise OperationalAutonomyError("company id must be a non-negative integer")
+        return parsed
 
     @staticmethod
     def _positive_int(value: Any, label: str) -> int:

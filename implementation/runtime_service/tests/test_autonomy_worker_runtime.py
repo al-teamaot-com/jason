@@ -2103,3 +2103,54 @@ def test_missing_ci_is_exactly_correlated_and_verified_before_claim(tmp_path: Pa
     assert ticket_updates[0] == {"id": 140933, "configurationItemID": 1583}
     assert ticket_updates[1]["queueID"] == "Jason"
     store.close()
+
+
+def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_path: Path):
+    class InternalCompanyReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 0,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "PC-1",
+                            }
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate()
+    item.context["companyID"] = 0
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=InternalCompanyReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.company_id == 0
+    assert work.configuration_item_id == 1583
+    assert work.phase == "health_wait"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[0]["queueID"] == "Jason"
+    store.close()
