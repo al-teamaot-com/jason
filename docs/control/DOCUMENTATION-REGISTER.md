@@ -59,6 +59,7 @@ Historical numbered documentation roots, the former top-level engineering `archi
 | Operating procedure / deployment record / generated operational view | `docs/operations/` classified by `docs/operations/README.md` | Procedures do not self-authorize; generated current-state views derive from System Registry truth. |
 | Historical proof | `docs/sessions/` and bounded evidence references | Point-in-time proof, not perpetual current-state authority. |
 | Current work/resume point | `docs/control/CURRENT.md` | References authoritative evidence instead of duplicating volatile state. |
+| Automated validated-source / production-alignment state | `docs/control/AUTOMATED-CHANGE-STATE.json` with generated view `docs/control/AUTOMATED-CHANGE-STATE.md` | Machine-owned derived evidence. Separates successful source validation from production deployment and never grants authority. |
 | Implementation-local README discovery | `docs/control/IMPLEMENTATION-DOCUMENTATION-INDEX.md` | Discoverability only; package README files remain supporting implementation documentation. |
 | Architecture observations | `docs/journal/` | Non-governing until promoted normally. |
 | Active governed roadmap/backlog | `docs/roadmaps/` | Historical/superseded roadmaps belong in `docs/archive/`. |
@@ -165,6 +166,8 @@ This exception is bounded:
 - `docs/index.md` — entry point.
 - `docs/control/JASON-FUNDAMENTALS.md` — mandatory fundamentals reconstruction baseline.
 - `docs/control/CURRENT.md` — canonical resume point.
+- `docs/control/AUTOMATED-CHANGE-STATE.json` — generated structured latest successful source-validation / production-alignment evidence.
+- `docs/control/AUTOMATED-CHANGE-STATE.md` — generated human-readable view; do not hand-edit.
 - `docs/control/EXTENSION-CONSTRUCTION-MAP.md` — component-class construction/reuse discovery map.
 - `docs/control/HOW-TO-DOCUMENT-JASON.md` — repeatable authoring/update procedure.
 - `docs/control/DOCUMENTATION-REGISTER.md` — authority/source map.

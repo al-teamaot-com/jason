@@ -1,0 +1,32 @@
+{
+  "production": {
+    "failed_systemd_units": 0,
+    "host_release": "/opt/jason/releases/5e57a34ac2018bad032e3b4467c58f814023699f",
+    "host_units": {
+      "jason-client-posture-exporter.service": "active",
+      "jason-delegation-maintenance.timer": "active",
+      "jason-openclaw-authority-health.timer": "active",
+      "jason-playbook-exporter.service": "active",
+      "jason-production-health-exporter.service": "active",
+      "jason-resolution-memory-exporter.service": "active",
+      "jason-security-control-exporter.service": "active",
+      "jason-status-exporter.service": "active",
+      "jason-usage-attribution-exporter.service": "active",
+      "jason-usage-exporter.service": "active"
+    },
+    "mcp": {
+      "restart_policy": "unless-stopped",
+      "source_revision": "5e57a34ac2018bad032e3b4467c58f814023699f",
+      "state": "running"
+    },
+    "observed_at": "2026-09-27T13:13:34+00:00",
+    "revision": "5e57a34ac2018bad032e3b4467c58f814023699f",
+    "runtime": {
+      "health": "healthy",
+      "restart_count": 0,
+      "source_revision": "5e57a34ac2018bad032e3b4467c58f814023699f"
+    },
+    "status": "aligned_and_healthy"
+  },
+  "schema_version": "1.0"
+}

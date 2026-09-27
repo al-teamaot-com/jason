@@ -229,6 +229,12 @@ Every material implementation workstream/PR must explicitly determine documentat
 
 "No documentation impact" must be an explicit reviewed conclusion, not the default caused by forgetting documentation.
 
+CI enforces this declaration in pull requests. After a successful material `Validate Jason` run on `main`, the documentation reconciliation workflow updates the generated validated-source state through a dedicated documentation PR and requests auto-merge only after normal protected checks pass. Documentation-only merges are excluded to prevent reconciliation loops.
+
+Production deployment is separate from source validation. The canonical host reconciliation verifies runtime, MCP, immutable host release, required host services, and failed-unit state before invoking the production documentation reconciler. That reconciler updates only `docs/control/AUTOMATED-CHANGE-STATE.json` and its generated Markdown view. A source-validation record must never be presented as production proof.
+
+Generated reconciliation does not replace narrative documentation. If architecture, authority, contracts, runbooks, reusable construction guidance, System Registry semantics, or durable proof requirements changed, those authoritative records must still be updated in the implementation PR.
+
 ## 19. Retiring documentation
 
 Do not delete institutional memory merely because it is old. Mark Superseded/Historical, identify replacement, archive where appropriate, update links/navigation, preserve decision/proof history, and remove it from places implying current authority.
@@ -251,6 +257,7 @@ Before completing a material workstream:
 - [ ] Are links valid?
 - [ ] Are secrets absent?
 - [ ] Is the documentation-impact determination explicit?
+- [ ] Will successful CI/production reconciliation update the generated change-state record, and are any required narrative docs already updated rather than delegated to generated state?
 - [ ] Can a future session continue and extend Jason without this chat?
 
 ## 21. Future-session startup procedure
