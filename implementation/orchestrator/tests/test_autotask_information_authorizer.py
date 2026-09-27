@@ -573,3 +573,4 @@ def test_autonomy_worker_policy_still_cannot_expand_to_contact_read() -> None:
         .allowed
         is False
     )
+
