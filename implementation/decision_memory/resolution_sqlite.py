@@ -238,6 +238,41 @@ class SQLiteResolutionMemoryStore:
 
         return tuple(cases)
 
+    def list_organization_cases_for_pattern_derivation(
+        self,
+        *,
+        organization_id: str,
+        limit: int = 5000,
+    ) -> tuple[ResolutionCase, ...]:
+        """Internal-only derivation feed. Never project these rows cross-client.
+
+        This method exists solely so the sanitizing pattern builder can derive
+        irreversible AOT-wide patterns. Runtime raw-case reads continue to require
+        organization + client scope through get_case/list_cases.
+        """
+        if not organization_id.strip():
+            raise ValueError("organization_id must be non-empty")
+        if limit < 1 or limit > 5000:
+            raise ValueError("limit must be between 1 and 5000")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM resolution_cases
+                WHERE organization_id = ?
+                ORDER BY COALESCE(resolved_at, recorded_at) DESC
+                LIMIT ?
+                """,
+                (organization_id, limit),
+            ).fetchall()
+            cases: list[ResolutionCase] = []
+            for row in rows:
+                steps = connection.execute(
+                    "SELECT * FROM resolution_steps WHERE case_id = ? ORDER BY ordinal ASC",
+                    (row["case_id"],),
+                ).fetchall()
+                cases.append(self._from_rows(row, steps))
+        return tuple(cases)
+
     def count_cases(
         self,
         *,

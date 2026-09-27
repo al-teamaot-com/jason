@@ -111,3 +111,36 @@ Jason derives the ticket identity and company boundary from an authoritative gov
 The Autotask ticket update still follows its normal mutation authority and approval rules and still requires provider readback verification. Only after that governed ticket completion succeeds does Jason ingest the verified resolution locally and mark the ticket-work claim completed. Historical remediation metadata remains evidence only and every later Resolution Memory result continues to expose `grants_authority=false`.
 
 If local memory ingestion fails after the provider ticket update has succeeded, Jason does not fabricate success for the memory write; the ticket provider result remains visible and the claim is left retriable rather than silently inventing a case.
+
+## Cross-client AOT Pattern Memory (RESMEM-003)
+
+RESMEM-003 adds a second resolution-memory layer without weakening raw client isolation.
+
+The retrieval hierarchy is now:
+
+1. current live evidence and current incident facts;
+2. same-client exact/similar Resolution Memory cases;
+3. AOT-wide sanitized generalized patterns;
+4. generic playbook, vendor, and reference knowledge.
+
+Historical similarity never outranks contradictory current live evidence. Both client cases and AOT patterns remain evidence only and return `grants_authority=false`; execution authority continues to come only from current Jason governance.
+
+### Promotion threshold
+
+Automatic AOT-wide promotion requires at least **two independent client scopes** supporting the same sanitized technical pattern. One client case cannot promote itself automatically. A single-client pattern may be created only by explicit technician-approved early promotion, and its confidence is reduced.
+
+Promotion confidence incorporates independent support count, recency, outcome quality, contradiction rate, and current-environment similarity at retrieval time. Failed and inconclusive steps are retained in aggregate form. Contradictory evidence lowers pattern confidence and produces conflicted/unreliable step dispositions rather than being discarded.
+
+### Sanitization contract
+
+Cross-client pattern payloads are constructed from an allowlisted technical schema only. They may retain normalized symptom class, platform/product/device-role traits, bounded technical version, allowlisted environment attributes, canonical action keys, aggregate success/failure counts, outcome quality, confidence, support count, and approval/disruption metadata.
+
+They never contain source case IDs, ticket numbers, source references, client/company/customer IDs or names, hostnames, IP addresses, usernames, email addresses, domains, tenant IDs, configuration-item IDs, provider-native record IDs, owner names, or free-form source evidence. Free-form root-cause and resolution text are not copied into AOT patterns; the root-cause class is derived from sanitized technical context and canonical successful remediation keys.
+
+If a symptom, retained attribute, canonical action key, or other proposed pattern field contains identifying/ambiguous material, that case fails closed for cross-client promotion while remaining available inside its original client-scoped Resolution Memory boundary.
+
+### Storage and access boundary
+
+`resolution_cases` remains the authoritative raw client-scoped history. Runtime raw reads still require organization + client scope. The internal derivation feed is not exposed as a runtime read capability and exists only to build sanitized AOT pattern records.
+
+`aot_resolution_patterns` stores only sanitized generalized records. Pattern projections contain aggregate supporting-client counts but no list of source clients or source cases. Another client can retrieve a matching AOT pattern while remaining unable to read any raw source case from another client.

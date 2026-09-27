@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from .pattern_memory import AOTPatternMemoryBuilder
+from .pattern_sqlite import SQLiteAOTPatternStore
 from .resolution_ingestion import ConfirmedResolutionIngestion
 from .resolution_memory import (
     ResolutionCase,
@@ -14,26 +16,28 @@ from .resolution_sqlite import SQLiteResolutionMemoryStore
 
 
 class ResolutionMemoryService:
-    """Provider-neutral facade for durable operational resolution memory.
-
-    This service stores and retrieves evidence. It deliberately exposes no method
-    that executes a provider action or grants approval/authority.
-    """
+    """Provider-neutral facade for client resolution memory + sanitized AOT patterns."""
 
     def __init__(
         self,
         *,
         store: SQLiteResolutionMemoryStore,
         matcher: ResolutionMemoryMatcher | None = None,
+        pattern_store: SQLiteAOTPatternStore | None = None,
+        pattern_builder: AOTPatternMemoryBuilder | None = None,
     ) -> None:
         self.store = store
         self.matcher = matcher or ResolutionMemoryMatcher()
+        self.pattern_store = pattern_store or SQLiteAOTPatternStore(store.database_path)
+        self.pattern_builder = pattern_builder or AOTPatternMemoryBuilder()
 
     def initialize(self) -> None:
         self.store.initialize()
+        self.pattern_store.initialize()
 
     def record_case(self, case: ResolutionCase) -> None:
         self.store.add_case(case)
+        self.refresh_aot_patterns(organization_id=case.organization_id)
 
     def ingest_confirmed_resolution(self, candidate: ConfirmedResolutionIngestion) -> ResolutionCase:
         case = candidate.to_case()
@@ -67,7 +71,30 @@ class ResolutionMemoryService:
                 return existing
             raise ValueError("conflicting existing resolution case")
         self.store.add_case(case)
+        self.refresh_aot_patterns(organization_id=case.organization_id)
         return case
+
+    def refresh_aot_patterns(
+        self,
+        *,
+        organization_id: str,
+        technician_approved_case_ids: frozenset[str] = frozenset(),
+        now: datetime | None = None,
+    ) -> tuple[dict[str, object], ...]:
+        cases = self.store.list_organization_cases_for_pattern_derivation(
+            organization_id=organization_id,
+        )
+        patterns = self.pattern_builder.derive(
+            organization_id=organization_id,
+            cases=cases,
+            now=now,
+            technician_approved_case_ids=technician_approved_case_ids,
+        )
+        self.pattern_store.replace_organization_patterns(
+            organization_id=organization_id,
+            patterns=patterns,
+        )
+        return tuple(pattern.project() for pattern in patterns)
 
     def search_similar(
         self,
@@ -91,6 +118,47 @@ class ResolutionMemoryService:
             limit=limit,
         )
 
+    def search_evidence(
+        self,
+        *,
+        signature: ResolutionSignature,
+        organization_id: str,
+        client_id: str,
+        now: datetime | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        same_client = self.search_similar(
+            signature=signature,
+            organization_id=organization_id,
+            client_id=client_id,
+            now=now,
+            limit=limit,
+        )
+        same_client_projection = self.project_search_result(same_client)
+        patterns = self.pattern_builder.search(
+            signature=signature,
+            patterns=self.pattern_store.list_patterns(
+                organization_id=organization_id,
+            ),
+            limit=limit,
+        )
+        return {
+            "retrieval_hierarchy": (
+                "same_client_exact_or_similar",
+                "aot_sanitized_patterns",
+                "generic_playbook_vendor_reference",
+            ),
+            "current_live_evidence_precedence": True,
+            "matches": same_client_projection["matches"],
+            "step_evidence": same_client_projection["step_evidence"],
+            "aot_patterns": list(patterns),
+            "match_count": len(same_client_projection["matches"]),
+            "pattern_count": len(patterns),
+            "raw_cross_client_cases_exposed": False,
+            "grants_authority": False,
+            "execution_authority_source": "current_jason_governance_only",
+        }
+
     def summary(
         self,
         *,
@@ -103,6 +171,9 @@ class ResolutionMemoryService:
             "case_count": self.store.count_cases(
                 organization_id=organization_id,
                 client_id=client_id,
+            ),
+            "pattern_count": self.pattern_store.count_patterns(
+                organization_id=organization_id,
             ),
             "grants_authority": False,
         }
@@ -120,8 +191,12 @@ class ResolutionMemoryService:
                 organization_id=organization_id,
                 client_id=client_id,
             ),
+            "pattern_count": self.pattern_store.count_patterns(
+                organization_id=organization_id,
+            ),
             "scope": "client" if client_id else "organization_aggregate",
             "raw_cases_exposed": False,
+            "raw_cross_client_cases_exposed": False,
             "grants_authority": False,
         }
 
@@ -129,8 +204,6 @@ class ResolutionMemoryService:
     def project_search_result(
         result: ResolutionSearchResult,
     ) -> dict[str, Any]:
-        """Return a JSON-safe bounded evidence projection for reasoning layers."""
-
         matches = []
         for item in result.matches:
             matches.append(

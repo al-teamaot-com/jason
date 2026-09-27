@@ -260,3 +260,62 @@ def test_summary_allows_organization_aggregate_without_raw_case_scope(tmp_path) 
     assert data["scope"] == "organization_aggregate"
     assert data["raw_cases_exposed"] is False
     assert data["grants_authority"] is False
+
+
+def test_runtime_search_returns_aot_pattern_without_cross_client_raw_case(tmp_path) -> None:
+    store = SQLiteResolutionMemoryStore(str(tmp_path / "resolution.sqlite3"))
+    service = ResolutionMemoryService(store=store)
+    service.initialize()
+    first = build_case()
+    second = ResolutionCase(
+        case_id="CASE-2",
+        organization_id=first.organization_id,
+        client_id="client-b",
+        signature=first.signature,
+        source_references=(
+            ResolutionSourceReference(
+                source_type="autotask_ticket",
+                source_id="T-2",
+                correlation_id="corr-2",
+            ),
+        ),
+        steps=first.steps,
+        root_cause=first.root_cause,
+        final_resolution=first.final_resolution,
+        outcome=first.outcome,
+        status=first.status,
+        technician_confirmed=True,
+        recorded_at=NOW - timedelta(days=2),
+        resolved_at=NOW - timedelta(days=2),
+        owner="another-tech",
+    )
+    service.record_case(first)
+    service.record_case(second)
+
+    invoker = GovernedResolutionMemoryCapabilityInvoker(service=service)
+    result = invoker.invoke(
+        request=request(
+            capability=RESOLUTION_MEMORY_SEARCH,
+            client_id="client-c",
+            arguments={
+                "category": "endpoint security",
+                "product": "Datto EDR AV",
+                "device_role": "workstation",
+                "platform": "Windows",
+                "product_version": "3.17.1.6224",
+                "symptoms": ["service stopped", "edr version out of date"],
+                "attributes": {"service": "EndpointProtectionService"},
+            },
+        ),
+        resolution=resolution(RESOLUTION_MEMORY_SEARCH),
+    )
+    data = result.output["data"]
+    assert data["matches"] == []
+    assert data["pattern_count"] == 1
+    assert data["raw_cross_client_cases_exposed"] is False
+    payload = str(data)
+    assert "CASE-1" not in payload
+    assert "CASE-2" not in payload
+    assert "T-1" not in payload
+    assert "T-2" not in payload
+    assert data["aot_patterns"][0]["grants_authority"] is False
