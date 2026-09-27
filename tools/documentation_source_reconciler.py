@@ -8,12 +8,6 @@ import subprocess
 from typing import Any
 
 REPO = "al-teamaot-com/jason"
-REQUIRED_WORKFLOWS = {
-    "Validate Jason",
-    "SEC-007 Security Regressions",
-    "Validate Jason Teams Gateway",
-    "Validate Conversation Experience Foundation",
-}
 STATE_PATH = "docs/control/AUTOMATED-CHANGE-STATE.json"
 REPO_ROOT = Path(os.environ.get("JASON_DOCUMENTATION_REPO_ROOT", "/home/al/projects/jason"))
 
@@ -103,7 +97,7 @@ def automation_prs() -> list[dict[str, Any]]:
         "--repo", REPO,
         "--state", "open",
         "--limit", "100",
-        "--json", "number,headRefName,headRefOid,url",
+        "--json", "number,headRefName,headRefOid,url,mergeable,mergeStateStatus",
     )
     return [
         item for item in (items or [])
@@ -111,42 +105,61 @@ def automation_prs() -> list[dict[str, Any]]:
     ]
 
 
-def workflows_green(head_sha: str) -> bool:
-    runs = gh_json(
-        "run", "list",
-        "--repo", REPO,
-        "--commit", head_sha,
-        "--event", "pull_request",
-        "--limit", "30",
-        "--json", "name,status,conclusion",
+def required_checks_green(pr_number: str) -> bool:
+    result = subprocess.run(
+        [
+            "gh", "pr", "checks", pr_number,
+            "--repo", REPO,
+            "--required",
+            "--json", "name,state,bucket",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
     )
-    latest: dict[str, dict[str, Any]] = {}
-    for item in runs or []:
-        name = str(item.get("name") or "")
-        if name in REQUIRED_WORKFLOWS and name not in latest:
-            latest[name] = item
-    if set(latest) != REQUIRED_WORKFLOWS:
+    if not result.stdout.strip():
         return False
-    return all(
-        str(item.get("status")) == "completed" and str(item.get("conclusion")) == "success"
-        for item in latest.values()
-    )
+    try:
+        checks = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    if not checks:
+        return False
+    return all(str(item.get("bucket") or "") == "pass" for item in checks)
 
 
-def merge_ready_automation_prs() -> None:
-    for item in automation_prs():
+def merge_ready_automation_prs() -> str:
+    items = automation_prs()
+    if not items:
+        return "none"
+    for item in items:
         number = str(item["number"])
-        sha = str(item.get("headRefOid") or "")
-        if not sha or not workflows_green(sha):
+        mergeable = str(item.get("mergeable") or "")
+        merge_state = str(item.get("mergeStateStatus") or "")
+        if mergeable == "CONFLICTING" or merge_state == "DIRTY":
+            print(f"DOCUMENTATION_PR_REFRESH_REQUIRED={number}")
+            return "refresh"
+        if merge_state == "BEHIND":
+            run("gh", "pr", "update-branch", number, "--repo", REPO)
+            print(f"DOCUMENTATION_PR_UPDATED_TO_MAIN={number}")
+            return "waiting"
+        if not required_checks_green(number):
             print(f"DOCUMENTATION_PR_WAITING={number}")
-            continue
+            return "waiting"
         run("gh", "pr", "merge", number, "--repo", REPO, "--merge")
         print(f"DOCUMENTATION_PR_MERGED={number}")
+        return "merged"
+    return "none"
 
 
 def main() -> int:
+    pr_state = merge_ready_automation_prs()
+    if pr_state == "refresh":
+        publish_source_if_needed()
+        return 0
+    if pr_state in {"waiting", "merged"}:
+        return 0
     publish_source_if_needed()
-    merge_ready_automation_prs()
     return 0
 
 

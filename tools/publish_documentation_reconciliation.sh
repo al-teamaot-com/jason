@@ -25,13 +25,8 @@ if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
 fi
 rm -rf "$WORKTREE"
 
-if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-  git worktree add -B "$BRANCH" "$WORKTREE" "origin/$BRANCH"
-  git -C "$WORKTREE" rebase origin/main
-else
-  git branch -D "$BRANCH" >/dev/null 2>&1 || true
-  git worktree add -b "$BRANCH" "$WORKTREE" origin/main
-fi
+git branch -D "$BRANCH" >/dev/null 2>&1 || true
+git worktree add -b "$BRANCH" "$WORKTREE" origin/main
 
 cd "$WORKTREE"
 git config user.name "Project Jason Documentation Automation"
