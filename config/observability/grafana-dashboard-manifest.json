@@ -1,6 +1,12 @@
 {
   "dashboards": [
     {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-ai-prompt-registry.json",
+      "sha256": "9dd6c77d5e70bf3940d14c45b80d08e1cbb1a9155836041444b5bfefb5a0f18e",
+      "title": "Jason AI Prompt Registry",
+      "uid": "jason-ai-prompt-registry"
+    },
+    {
       "path": "infrastructure/showcase/grafana/dashboards/jason-autonomy-action-detail.json",
       "sha256": "1a6cc452309c67fb4a398f8186be3196ce0063bbd8ef8948c4bf84dbc1694220",
       "title": "Jason Autonomous Action Detail",
@@ -25,10 +31,28 @@
       "uid": "jason-command-center"
     },
     {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-communication-templates.json",
+      "sha256": "fb5b945e41b6e46349256e05e74d64b8a78007a5275d282a683eb80eaf20b4f9",
+      "title": "Jason Approved Client Communications",
+      "uid": "jason-communication-templates"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-completion-gaps.json",
+      "sha256": "784ad2900f589cde4c4b4928aaeddf3ae1169bb88ae1062a592c50821088caf1",
+      "title": "Why Jason Couldn't Complete Work",
+      "uid": "jason-completion-gaps"
+    },
+    {
       "path": "infrastructure/showcase/grafana/dashboards/jason-component-control.json",
       "sha256": "84540a3039b8341cd1ed01942e9df659d3e6401e32ef115d5a989b76bcad37af",
       "title": "Jason Component Control",
       "uid": "jason-component-control"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-component-engineering.json",
+      "sha256": "c97d1b81a9f10cd77466afb06dc364d7aa9cdc99c14c6d98e8e23949cf6dfec3",
+      "title": "Jason Component Engineering",
+      "uid": "jason-component-engineering"
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-credential-management.json",
@@ -55,6 +79,12 @@
       "uid": "jason-openclaw-authority-operations"
     },
     {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-operations-configuration.json",
+      "sha256": "0c5523f286c3a9fbfd900eb1f9873636c5f5006e150fd195d64d00e34ffd69a9",
+      "title": "Jason Operations & Configuration",
+      "uid": "jason-operations-configuration"
+    },
+    {
       "path": "infrastructure/showcase/grafana/dashboards/jason-playbook-control-center.json",
       "sha256": "3d0450b9954065a4af493a9a986d1e61d311587a9017988d2e14e2275eaa0185",
       "title": "Jason Playbook Control Center",
@@ -73,10 +103,28 @@
       "uid": "jason-security-learning"
     },
     {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-support-todo.json",
+      "sha256": "75cfce54e4faae07c969fa8f8a199434765fff32e0d25947675c78090f43a752",
+      "title": "Jason Support & To Do",
+      "uid": "jason-support-todo"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-toner-readiness.json",
+      "sha256": "b3454358c05d63d2dab926ad81a0ca3035e7d3135e77017692e03c7362b66125",
+      "title": "AOT Toner Readiness",
+      "uid": "jason-toner-readiness"
+    },
+    {
       "path": "infrastructure/showcase/grafana/dashboards/jason-usage-attribution.json",
       "sha256": "7d604e895455f293cc9632818ffa409e9e9271ca50aad95f853b2a9824d7ce57",
       "title": "Jason Usage & Attribution",
       "uid": "jason-usage-attribution"
+    },
+    {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-user-activity-audit.json",
+      "sha256": "a224bc7ce0aaa9e610ca65463a3654f46a78df90112c8397f0531d85f8236132",
+      "title": "Jason User Activity & Audit",
+      "uid": "jason-user-activity-audit"
     }
   ],
   "provider": {
