@@ -64,6 +64,10 @@ Use `docs/control/CURRENT.md` and live container labels/health as the current vo
 - `security_control_exporter.py` provides aggregate secret-safe authority/execution-plan/fail-closed control metrics.
 - `client_posture_exporter.py` provides aggregate client-posture classification counts without client identity labels.
 
+## Immutable observability configuration
+
+Production Grafana/Prometheus configuration is hardened by the Grafana / Observability Configuration Assurance control. Production bind mounts must resolve to `/opt/jason/observability/releases/<sha>` through `/opt/jason/observability/current`; developer worktrees are not accepted deployment sources. `config/observability/grafana-dashboard-manifest.json` declares the repository-managed dashboard inventory and hashes. A five-minute read-only assurance check verifies source hashes, mount provenance, Grafana dashboard/datasource inventory, and required Prometheus dependencies and exposes the result back to Prometheus. See `docs/operations/Grafana-Observability-Configuration-Assurance.md`.
+
 ## Grafana dashboards
 
 ### Jason Governed Actions

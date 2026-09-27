@@ -26,6 +26,19 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "openai-semantic-intent-approle"
         ),
     },
+    "openai_usage": {
+        "logical_name": "openai.usage_reporting",
+        "secret_path": "secret/data/providers/openai/production/usage-reporting",
+        "fields": ("admin_api_key",),
+        "required_fields": ("admin_api_key",),
+        "policy_name": "jason-openai-usage-reporting-read",
+        "role_name": "jason-openai-usage-reporting-read",
+        "connector_identity": "openai-usage-reporting",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/"
+            "openai-usage-reporting-approle"
+        ),
+    },
     "aws_ses": {
         "logical_name": "aws_ses.sendmail",
         "secret_path": "secret/data/connectors/aws-ses/production/sendmail",

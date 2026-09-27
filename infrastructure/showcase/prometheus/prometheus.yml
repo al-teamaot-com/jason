@@ -66,3 +66,9 @@ scrape_configs:
           - /etc/prometheus/file_sd/jason-autonomy-flight-recorder.json
         refresh_interval: 15s
 
+  - job_name: jason-grafana-assurance
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-grafana-assurance.json
+        refresh_interval: 30s
+

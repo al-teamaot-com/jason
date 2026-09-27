@@ -1,0 +1,19 @@
+[Unit]
+Description=Jason Grafana Configuration Assurance Check
+After=network-online.target docker.service jason-grafana-assurance-exporter.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/opt/jason/observability/current
+ExecStart=/usr/bin/python3 /opt/jason/observability/current/tools/grafana_assurance.py --release-root /opt/jason/observability/current --output /var/lib/jason/observability/grafana-assurance.json
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/jason/observability/current /var/run/docker.sock
+ReadWritePaths=/var/lib/jason/observability
+UMask=0077
+TimeoutStartSec=3min

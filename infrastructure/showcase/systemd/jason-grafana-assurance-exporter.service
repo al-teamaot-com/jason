@@ -1,0 +1,24 @@
+[Unit]
+Description=Jason Grafana Configuration Assurance Metrics Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=al
+Group=al
+WorkingDirectory=/opt/jason/observability/current/infrastructure/showcase
+Environment=JASON_GRAFANA_ASSURANCE_HOST=0.0.0.0
+Environment=JASON_GRAFANA_ASSURANCE_PORT=9473
+Environment=JASON_GRAFANA_ASSURANCE_STATE=/var/lib/jason/observability/grafana-assurance.json
+ExecStart=/usr/bin/python3 /opt/jason/observability/current/infrastructure/showcase/grafana_assurance_exporter.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/jason/observability/current /var/lib/jason/observability/grafana-assurance.json
+
+[Install]
+WantedBy=multi-user.target

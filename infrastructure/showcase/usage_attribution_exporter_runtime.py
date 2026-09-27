@@ -15,8 +15,14 @@ scope, or provider permissions.
 
 from __future__ import annotations
 
+import json
+import os
+import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from http.server import HTTPServer
+from pathlib import Path
+from urllib import error, parse, request
 
 import usage_attribution_exporter as base
 
@@ -25,6 +31,71 @@ _ORIGINAL_ORCHESTRATION_EVENTS = base._orchestration_events
 _ORIGINAL_MODEL_EVENT = base._model_event
 _REQUEST_BY_CORRELATION: dict[str, dict[str, str]] = {}
 _DIRECTORY_EMAILS: dict[str, str] = {}
+_ORIGINAL_RENDER_METRICS = base.render_metrics
+
+_OPENBAO_URL = os.environ.get("JASON_OPENBAO_URL", "http://127.0.0.1:8200").rstrip("/")
+_OPENAI_API_BASE = os.environ.get("JASON_OPENAI_ADMIN_API_BASE", "https://api.openai.com/v1").rstrip("/")
+_OPENAI_USAGE_ROLE_ID = Path(os.environ.get(
+    "JASON_OPENAI_USAGE_ROLE_ID_PATH",
+    "/var/lib/jason/runtime-secrets/openbao/openai-usage-reporting-approle/role-id",
+))
+_OPENAI_USAGE_SECRET_ID = Path(os.environ.get(
+    "JASON_OPENAI_USAGE_SECRET_ID_PATH",
+    "/var/lib/jason/runtime-secrets/openbao/openai-usage-reporting-approle/secret-id",
+))
+_OPENAI_USAGE_CACHE_SECONDS = max(
+    60, int(os.environ.get("JASON_OPENAI_USAGE_CACHE_SECONDS", "300"))
+)
+_OPENAI_USAGE_TIMEOUT_SECONDS = float(
+    os.environ.get("JASON_OPENAI_USAGE_TIMEOUT_SECONDS", "20")
+)
+_OPENAI_USAGE_CACHE: dict[str, object] = {
+    "expires_at": 0.0,
+    "snapshot": None,
+    "last_success": None,
+}
+
+# Standard API text-token rates published by OpenAI on 2026-09-22.
+# Estimates deliberately exclude long-context, priority/flex/batch, regional,
+# Scale Tier, and other contractual adjustments. OpenAI's Costs API remains the
+# authoritative financial source once a reported cost row is available.
+_OPENAI_STANDARD_RATES_PER_MILLION = {
+    "gpt-5.5": (Decimal("5.00"), Decimal("0.50"), Decimal("30.00")),
+    "gpt-5.4": (Decimal("2.50"), Decimal("0.25"), Decimal("15.00")),
+}
+_OPENAI_RATE_BASIS = "openai-standard-2026-09-22"
+
+
+def _standard_rate_for_model(model: str) -> tuple[Decimal, Decimal, Decimal] | None:
+    normalized = str(model or "").strip().casefold()
+    for family, rates in _OPENAI_STANDARD_RATES_PER_MILLION.items():
+        # Dated snapshots look like gpt-5.5-2026-04-23. Do not accidentally
+        # classify gpt-5.5-mini/pro or other variants at the base-model rate.
+        if normalized == family or normalized.startswith(f"{family}-20"):
+            return rates
+    return None
+
+
+def _estimate_standard_cost_usd(
+    model: str,
+    input_tokens: int,
+    cached_input_tokens: int,
+    output_tokens: int,
+) -> Decimal | None:
+    rates = _standard_rate_for_model(model)
+    if rates is None:
+        return None
+    input_rate, cached_rate, output_rate = rates
+    cached = max(0, int(cached_input_tokens))
+    total_input = max(0, int(input_tokens))
+    uncached = max(0, total_input - cached)
+    output = max(0, int(output_tokens))
+    million = Decimal("1000000")
+    return (
+        Decimal(uncached) * input_rate
+        + Decimal(cached) * cached_rate
+        + Decimal(output) * output_rate
+    ) / million
 
 
 def _valid_email(value: object) -> str:
@@ -236,10 +307,454 @@ def _provider_events(events: list[dict], emails: dict[str, str]) -> list[dict]:
     return result
 
 
+class _OpenAIUsageError(RuntimeError):
+    """Safe usage-query failure that never includes credential values."""
+
+
+def _http_json(
+    url: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, object] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict:
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    merged = {"Accept": "application/json"}
+    merged.update(headers or {})
+    if body is not None:
+        merged["Content-Type"] = "application/json"
+    req = request.Request(url, data=body, headers=merged, method=method)
+    try:
+        with request.urlopen(req, timeout=_OPENAI_USAGE_TIMEOUT_SECONDS) as response:
+            raw = response.read().decode("utf-8")
+    except error.HTTPError as exc:
+        raise _OpenAIUsageError(f"HTTP request failed with status {exc.code}.") from exc
+    except (error.URLError, TimeoutError, OSError) as exc:
+        raise _OpenAIUsageError("HTTP request failed.") from exc
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise _OpenAIUsageError("HTTP endpoint returned malformed JSON.") from exc
+    if not isinstance(value, dict):
+        raise _OpenAIUsageError("HTTP endpoint returned an unexpected payload.")
+    return value
+
+
+def _openbao_token() -> str:
+    role_id = _OPENAI_USAGE_ROLE_ID.read_text(encoding="utf-8").strip()
+    secret_id = _OPENAI_USAGE_SECRET_ID.read_text(encoding="utf-8").strip()
+    if not role_id or not secret_id:
+        raise _OpenAIUsageError("OpenAI usage AppRole credentials are incomplete.")
+    response = _http_json(
+        f"{_OPENBAO_URL}/v1/auth/approle/login",
+        method="POST",
+        payload={"role_id": role_id, "secret_id": secret_id},
+    )
+    token = str((response.get("auth") or {}).get("client_token") or "").strip()
+    if not token:
+        raise _OpenAIUsageError("OpenBao did not issue a runtime token.")
+    return token
+
+
+def _openai_admin_key(token: str) -> str:
+    response = _http_json(
+        f"{_OPENBAO_URL}/v1/secret/data/providers/openai/production/usage-reporting",
+        headers={"X-Vault-Token": token},
+    )
+    key = str(
+        (((response.get("data") or {}).get("data") or {}).get("admin_api_key"))
+        or ""
+    ).strip()
+    if not key:
+        raise _OpenAIUsageError("OpenAI usage credential is unavailable.")
+    return key
+
+
+def _revoke_openbao_token(token: str) -> None:
+    try:
+        _http_json(
+            f"{_OPENBAO_URL}/v1/auth/token/revoke-self",
+            method="POST",
+            payload={},
+            headers={"X-Vault-Token": token},
+        )
+    except _OpenAIUsageError:
+        pass
+
+
+def _openai_get(path: str, params: list[tuple[str, str]], admin_key: str) -> list[dict]:
+    buckets: list[dict] = []
+    page = ""
+    for _ in range(10):
+        query = list(params)
+        if page:
+            query.append(("page", page))
+        response = _http_json(
+            f"{_OPENAI_API_BASE}{path}?{parse.urlencode(query)}",
+            headers={"Authorization": f"Bearer {admin_key}"},
+        )
+        buckets.extend(
+            item for item in response.get("data", []) if isinstance(item, dict)
+        )
+        if not response.get("has_more"):
+            return buckets
+        page = str(response.get("next_page") or "").strip()
+        if not page:
+            return buckets
+    raise _OpenAIUsageError("OpenAI pagination exceeded the safety bound.")
+
+
+def _openai_dimension_names(
+    admin_key: str,
+    dimensions: set[tuple[str, str]],
+) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    projects: dict[str, str] = {}
+    keys: dict[tuple[str, str], str] = {}
+    for project_id, api_key_id in sorted(dimensions):
+        if project_id and project_id not in projects:
+            try:
+                item = _http_json(
+                    f"{_OPENAI_API_BASE}/organization/projects/{parse.quote(project_id)}",
+                    headers={"Authorization": f"Bearer {admin_key}"},
+                )
+                projects[project_id] = str(item.get("name") or project_id)
+            except _OpenAIUsageError:
+                projects[project_id] = project_id
+        if project_id and api_key_id:
+            try:
+                item = _http_json(
+                    f"{_OPENAI_API_BASE}/organization/projects/"
+                    f"{parse.quote(project_id)}/api_keys/{parse.quote(api_key_id)}",
+                    headers={"Authorization": f"Bearer {admin_key}"},
+                )
+                keys[(project_id, api_key_id)] = str(item.get("name") or api_key_id)
+            except _OpenAIUsageError:
+                keys[(project_id, api_key_id)] = api_key_id
+    return projects, keys
+
+
+def _fetch_openai_org_snapshot(now: datetime) -> dict[str, object]:
+    now = now.astimezone(timezone.utc)
+    start = now - timedelta(hours=24)
+    token = _openbao_token()
+    admin_key = ""
+    try:
+        admin_key = _openai_admin_key(token)
+        common = [
+            ("start_time", str(int(start.timestamp()))),
+            ("end_time", str(int(now.timestamp()))),
+        ]
+        usage_buckets = _openai_get(
+            "/organization/usage/completions",
+            common + [
+                ("bucket_width", "1h"),
+                ("limit", "24"),
+                ("group_by", "model"),
+                ("group_by", "project_id"),
+                ("group_by", "api_key_id"),
+            ],
+            admin_key,
+        )
+        cost_buckets = _openai_get(
+            "/organization/costs",
+            common + [
+                ("bucket_width", "1d"),
+                ("limit", "2"),
+                ("group_by", "project_id"),
+                ("group_by", "line_item"),
+            ],
+            admin_key,
+        )
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_cost_buckets = _openai_get(
+            "/organization/costs",
+            [
+                ("start_time", str(int(month_start.timestamp()))),
+                ("end_time", str(int(now.timestamp()))),
+                ("bucket_width", "1d"),
+                ("limit", "31"),
+                ("group_by", "project_id"),
+                ("group_by", "line_item"),
+            ],
+            admin_key,
+        )
+
+        detail: dict[tuple[str, str, str], dict[str, int]] = {}
+        totals = {"requests": 0, "input": 0, "cached_input": 0, "output": 0}
+        last_activity = 0
+        for bucket in usage_buckets:
+            bucket_end = int(bucket.get("end_time") or 0)
+            for result in bucket.get("results", []):
+                if not isinstance(result, dict):
+                    continue
+                dimension = (
+                    str(result.get("model") or "unknown"),
+                    str(result.get("project_id") or ""),
+                    str(result.get("api_key_id") or ""),
+                )
+                row = detail.setdefault(
+                    dimension,
+                    {"requests": 0, "input": 0, "cached_input": 0, "output": 0},
+                )
+                values = {
+                    "requests": int(result.get("num_model_requests") or 0),
+                    "input": int(result.get("input_tokens") or 0),
+                    "cached_input": int(result.get("input_cached_tokens") or 0),
+                    "output": int(result.get("output_tokens") or 0),
+                }
+                for name, value in values.items():
+                    row[name] += value
+                    totals[name] += value
+                if values["requests"] > 0:
+                    last_activity = max(last_activity, bucket_end)
+
+        dimensions = {(project_id, api_key_id) for _, project_id, api_key_id in detail}
+        projects, keys = _openai_dimension_names(admin_key, dimensions)
+        rows = []
+        estimated_cost_usd = Decimal("0")
+        estimated_requests = 0
+        for (model, project_id, api_key_id), values in sorted(detail.items()):
+            estimate = _estimate_standard_cost_usd(
+                model,
+                values["input"],
+                values["cached_input"],
+                values["output"],
+            )
+            if estimate is not None:
+                estimated_cost_usd += estimate
+                estimated_requests += values["requests"]
+            rows.append(
+                {
+                    "model": model,
+                    "project_id": project_id,
+                    "project": projects.get(project_id, project_id or "unknown"),
+                    "api_key_id": api_key_id,
+                    "api_key": keys.get((project_id, api_key_id), api_key_id or "unknown"),
+                    **values,
+                }
+            )
+
+        cost_usd = Decimal("0")
+        reported_cost_rows = 0
+        for bucket in cost_buckets:
+            for result in bucket.get("results", []):
+                if not isinstance(result, dict):
+                    continue
+                amount = result.get("amount")
+                if not isinstance(amount, dict):
+                    continue
+                if str(amount.get("currency") or "usd").casefold() != "usd":
+                    continue
+                try:
+                    cost_usd += Decimal(str(amount.get("value") or "0"))
+                    reported_cost_rows += 1
+                except Exception:
+                    continue
+
+        monthly_cost_usd = Decimal("0")
+        monthly_reported_cost_rows = 0
+        daily_costs: dict[int, Decimal] = {}
+        for bucket in monthly_cost_buckets:
+            bucket_start = int(bucket.get("start_time") or 0)
+            bucket_total = Decimal("0")
+            for result in bucket.get("results", []):
+                if not isinstance(result, dict):
+                    continue
+                amount = result.get("amount")
+                if not isinstance(amount, dict):
+                    continue
+                if str(amount.get("currency") or "usd").casefold() != "usd":
+                    continue
+                try:
+                    value = Decimal(str(amount.get("value") or "0"))
+                    monthly_cost_usd += value
+                    bucket_total += value
+                    monthly_reported_cost_rows += 1
+                except Exception:
+                    continue
+            if bucket_start:
+                daily_costs[bucket_start] = bucket_total
+
+        elapsed_days = max(1, now.day)
+        daily_average_mtd = monthly_cost_usd / Decimal(elapsed_days)
+        projected_month_end_cost = daily_average_mtd * Decimal(
+            (now.replace(month=now.month % 12 + 1, day=1) - timedelta(days=1)).day
+            if now.month < 12
+            else 31
+        )
+        recent_days = sorted(daily_costs)[-7:]
+        recent_7d_cost = sum((daily_costs[d] for d in recent_days), Decimal("0"))
+        recent_7d_average = (
+            recent_7d_cost / Decimal(len(recent_days)) if recent_days else Decimal("0")
+        )
+        trend_ratio = (
+            recent_7d_average / daily_average_mtd
+            if daily_average_mtd > 0
+            else Decimal("0")
+        )
+
+        return {
+            "source_available": 1,
+            "cost_source_available": 1,
+            "fetched_at": now.timestamp(),
+            "last_activity": float(last_activity),
+            "cost_usd": cost_usd,
+            "reported_cost_available": 1 if reported_cost_rows else 0,
+            "monthly_cost_usd": monthly_cost_usd,
+            "monthly_reported_cost_available": 1 if monthly_reported_cost_rows else 0,
+            "daily_average_mtd_usd": daily_average_mtd,
+            "recent_7d_cost_usd": recent_7d_cost,
+            "recent_7d_average_usd": recent_7d_average,
+            "projected_month_end_cost_usd": projected_month_end_cost,
+            "recent_vs_mtd_daily_ratio": trend_ratio,
+            "estimated_cost_usd": estimated_cost_usd,
+            "estimated_request_coverage_ratio": (
+                estimated_requests / totals["requests"] if totals["requests"] else 1.0
+            ),
+            "rate_basis": _OPENAI_RATE_BASIS,
+            "rows": rows,
+            **totals,
+        }
+    finally:
+        admin_key = ""
+        _revoke_openbao_token(token)
+
+
+def _openai_org_snapshot(now: datetime) -> dict[str, object]:
+    clock = time.monotonic()
+    cached = _OPENAI_USAGE_CACHE.get("snapshot")
+    if isinstance(cached, dict) and clock < float(_OPENAI_USAGE_CACHE["expires_at"]):
+        return dict(cached)
+    try:
+        current = _fetch_openai_org_snapshot(now)
+        _OPENAI_USAGE_CACHE["snapshot"] = current
+        _OPENAI_USAGE_CACHE["last_success"] = current
+        _OPENAI_USAGE_CACHE["expires_at"] = clock + _OPENAI_USAGE_CACHE_SECONDS
+        return dict(current)
+    except (_OpenAIUsageError, OSError, ValueError):
+        previous = _OPENAI_USAGE_CACHE.get("last_success")
+        if isinstance(previous, dict):
+            degraded = dict(previous)
+            degraded["source_available"] = 0
+            degraded["cost_source_available"] = 0
+            _OPENAI_USAGE_CACHE["snapshot"] = degraded
+            _OPENAI_USAGE_CACHE["expires_at"] = clock + 60
+            return degraded
+        return {
+            "source_available": 0, "cost_source_available": 0,
+            "fetched_at": 0.0, "last_activity": 0.0,
+            "cost_usd": Decimal("0"), "reported_cost_available": 0,
+            "monthly_cost_usd": Decimal("0"), "monthly_reported_cost_available": 0,
+            "daily_average_mtd_usd": Decimal("0"),
+            "recent_7d_cost_usd": Decimal("0"),
+            "recent_7d_average_usd": Decimal("0"),
+            "projected_month_end_cost_usd": Decimal("0"),
+            "recent_vs_mtd_daily_ratio": Decimal("0"),
+            "estimated_cost_usd": Decimal("0"),
+            "estimated_request_coverage_ratio": 0.0,
+            "rate_basis": _OPENAI_RATE_BASIS, "rows": [],
+            "requests": 0, "input": 0, "cached_input": 0, "output": 0,
+        }
+
+
+def _render_openai_org_metrics(now: datetime) -> str:
+    data = _openai_org_snapshot(now)
+    lines = [
+        "# HELP jason_openai_org_usage_source_available Whether authoritative OpenAI organization usage is reachable.",
+        "# TYPE jason_openai_org_usage_source_available gauge",
+        f"jason_openai_org_usage_source_available {int(data['source_available'])}",
+        "# HELP jason_openai_org_cost_source_available Whether authoritative OpenAI organization costs are reachable.",
+        "# TYPE jason_openai_org_cost_source_available gauge",
+        f"jason_openai_org_cost_source_available {int(data['cost_source_available'])}",
+        "# HELP jason_openai_org_reported_cost_available Whether OpenAI has published at least one cost row for the rolling window.",
+        "# TYPE jason_openai_org_reported_cost_available gauge",
+        f"jason_openai_org_reported_cost_available {int(data['reported_cost_available'])}",
+        "# HELP jason_openai_org_requests_24h OpenAI requests reported over the rolling 24h window.",
+        "# TYPE jason_openai_org_requests_24h gauge",
+        f"jason_openai_org_requests_24h {int(data['requests'])}",
+        "# HELP jason_openai_org_tokens_24h OpenAI tokens reported over the rolling 24h window.",
+        "# TYPE jason_openai_org_tokens_24h gauge",
+        f'jason_openai_org_tokens_24h{{token_type="input"}} {int(data["input"])}',
+        f'jason_openai_org_tokens_24h{{token_type="cached_input"}} {int(data["cached_input"])}',
+        f'jason_openai_org_tokens_24h{{token_type="output"}} {int(data["output"])}',
+        "# HELP jason_openai_org_cost_usd_24h Cost reported by OpenAI for the rolling 24h query window.",
+        "# TYPE jason_openai_org_cost_usd_24h gauge",
+        f"jason_openai_org_cost_usd_24h {Decimal(data['cost_usd']):.8f}",
+        "# HELP jason_openai_org_cost_usd_mtd OpenAI-reported organization cost from the first day of the current UTC month through now.",
+        "# TYPE jason_openai_org_cost_usd_mtd gauge",
+        f"jason_openai_org_cost_usd_mtd {Decimal(data['monthly_cost_usd']):.8f}",
+        "# HELP jason_openai_org_monthly_reported_cost_available Whether OpenAI has published at least one cost row for the current month.",
+        "# TYPE jason_openai_org_monthly_reported_cost_available gauge",
+        f"jason_openai_org_monthly_reported_cost_available {int(data['monthly_reported_cost_available'])}",
+        "# HELP jason_openai_org_daily_average_mtd_usd Average reported OpenAI organization cost per elapsed calendar day this month.",
+        "# TYPE jason_openai_org_daily_average_mtd_usd gauge",
+        f"jason_openai_org_daily_average_mtd_usd {Decimal(data['daily_average_mtd_usd']):.8f}",
+        "# HELP jason_openai_org_cost_usd_7d OpenAI-reported organization cost across the latest available 7 daily buckets.",
+        "# TYPE jason_openai_org_cost_usd_7d gauge",
+        f"jason_openai_org_cost_usd_7d {Decimal(data['recent_7d_cost_usd']):.8f}",
+        "# HELP jason_openai_org_recent_7d_average_usd Average reported OpenAI organization cost across available daily buckets in the latest 7 days.",
+        "# TYPE jason_openai_org_recent_7d_average_usd gauge",
+        f"jason_openai_org_recent_7d_average_usd {Decimal(data['recent_7d_average_usd']):.8f}",
+        "# HELP jason_openai_org_projected_month_end_cost_usd Linear projection of month-end reported cost using current MTD daily average.",
+        "# TYPE jason_openai_org_projected_month_end_cost_usd gauge",
+        f"jason_openai_org_projected_month_end_cost_usd {Decimal(data['projected_month_end_cost_usd']):.8f}",
+        "# HELP jason_openai_org_recent_vs_mtd_daily_ratio Ratio of recent 7-day average daily cost to MTD average daily cost.",
+        "# TYPE jason_openai_org_recent_vs_mtd_daily_ratio gauge",
+        f"jason_openai_org_recent_vs_mtd_daily_ratio {Decimal(data['recent_vs_mtd_daily_ratio']):.8f}",
+        "# HELP jason_openai_org_estimated_cost_usd_24h Standard-rate estimate from provider-reported token usage; not an invoice value.",
+        "# TYPE jason_openai_org_estimated_cost_usd_24h gauge",
+        f"jason_openai_org_estimated_cost_usd_24h {Decimal(data['estimated_cost_usd']):.8f}",
+        "# HELP jason_openai_org_estimated_cost_coverage_ratio_24h Fraction of OpenAI requests covered by the configured standard-rate estimate.",
+        "# TYPE jason_openai_org_estimated_cost_coverage_ratio_24h gauge",
+        f"jason_openai_org_estimated_cost_coverage_ratio_24h {float(data['estimated_request_coverage_ratio']):.6f}",
+        "# HELP jason_openai_org_estimate_pricing_info Pricing schedule metadata for the provisional OpenAI estimate.",
+        "# TYPE jason_openai_org_estimate_pricing_info gauge",
+        f'jason_openai_org_estimate_pricing_info{{basis="{base._escape(data["rate_basis"])}"}} 1',
+        "# HELP jason_openai_org_last_activity_timestamp_seconds End of the newest usage bucket containing requests.",
+        "# TYPE jason_openai_org_last_activity_timestamp_seconds gauge",
+        f"jason_openai_org_last_activity_timestamp_seconds {float(data['last_activity']):.3f}",
+        "# HELP jason_openai_org_snapshot_timestamp_seconds Timestamp of the last successful organization snapshot.",
+        "# TYPE jason_openai_org_snapshot_timestamp_seconds gauge",
+        f"jason_openai_org_snapshot_timestamp_seconds {float(data['fetched_at']):.3f}",
+        "# HELP jason_openai_org_usage_by_dimension_24h OpenAI usage grouped by model, project and API key.",
+        "# TYPE jason_openai_org_usage_by_dimension_24h gauge",
+    ]
+    for row in data["rows"]:
+        labels = {
+            "model": row["model"], "project": row["project"],
+            "project_id": row["project_id"], "api_key_name": row["api_key"],
+            "api_key_id": row["api_key_id"],
+        }
+        for usage_type, field in (
+            ("requests", "requests"), ("input_tokens", "input"),
+            ("cached_input_tokens", "cached_input"), ("output_tokens", "output"),
+        ):
+            label_text = base._labels({**labels, "usage_type": usage_type})
+            lines.append(
+                f"jason_openai_org_usage_by_dimension_24h{{{label_text}}} {int(row[field])}"
+            )
+    provider_labels = base._labels({
+        "provider": "openai", "product": "OpenAI API",
+        "billing_class": "metered", "telemetry_quality": "provider_reported",
+    })
+    lines.append(
+        f"jason_usage_provider_events_24h{{{provider_labels}}} {int(data['requests'])}"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_metrics(now: datetime | None = None) -> str:
+    resolved = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return _ORIGINAL_RENDER_METRICS(resolved) + _render_openai_org_metrics(resolved)
+
+
 # Keep the dashboard's existing metric contract while extending safe runtime parsing.
 base._orchestration_events = _orchestration_events
 base._model_event = _model_event
 base._provider_events = _provider_events
+base.render_metrics = _render_metrics
 
 
 if __name__ == "__main__":
