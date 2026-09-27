@@ -41,12 +41,31 @@ class Reads:
     def __init__(self):
         self.job_status = "completed"
         self.ticket_notes = []
+        self.resource_license_types = {
+            29682899: 1,
+            29682888: 7,
+            29682911: 7,
+            29682922: 7,
+        }
 
     def execute(self, capability, arguments):
         if capability == "service.ticket.notes.search":
             return {
                 "status": "succeeded",
                 "evidence": {"data": {"items": list(self.ticket_notes)}},
+            }
+        if capability == "service.resource.read":
+            resource_id = int(arguments["resource_id"])
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": resource_id,
+                            "licenseType": self.resource_license_types.get(resource_id, 1),
+                        }
+                    }
+                },
             }
         if capability == "service.configuration.read":
             return {
@@ -2465,4 +2484,56 @@ def test_dispatched_job_resumes_same_job_when_endpoint_returns_online(tmp_path: 
     ]
     assert updates == [{"id": 140933, "status": "In Progress"}]
     assert not any(capability == "automation.component.execute" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_assigned_new_ticket_with_api_resource_note_can_be_claimed(tmp_path: Path):
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = Reads()
+    reads.ticket_notes = [
+        {
+            "creatorResourceID": 29682888,
+            "createdByContactID": None,
+            "noteType": 99,
+            "title": "DEVICE SNAPSHOT",
+            "description": "Automated Datto RMM device snapshot.",
+        }
+    ]
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=reads, actions=actions, store=store,
+        promotion_store=PromotionStore(), max_active_work_items=2,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert store.get(140933) is not None
+    store.close()
+
+
+def test_assigned_new_ticket_with_singular_gpt_insight_can_be_claimed(tmp_path: Path):
+    item = candidate()
+    item.context["_jason_assigned_elsewhere"] = True
+    item.context["_jason_source_status_label"] = "New"
+    reads = Reads()
+    reads.ticket_notes = [
+        {
+            "creatorResourceID": 29682922,
+            "createdByContactID": None,
+            "noteType": 3,
+            "title": "GPT Insight",
+            "description": "Automated insight.",
+        }
+    ]
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=reads, actions=actions, store=store,
+        promotion_store=PromotionStore(), max_active_work_items=2,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert store.get(140933) is not None
     store.close()
