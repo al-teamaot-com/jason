@@ -287,3 +287,48 @@ def test_datto_contract_allows_additional_governed_components() -> None:
 
     checks, _, _, _ = module._mcp_contract(mcp)
     assert checks["datto_execution_scope"] == 1
+
+
+def test_provider_canary_metrics_are_bounded_and_secret_safe(monkeypatch):
+    module = load_exporter()
+    monkeypatch.setattr(module, "_docker_inspect", lambda _name: {})
+    monkeypatch.setattr(module, "_openbao_health", lambda: {})
+    monkeypatch.setattr(module, "_kernel_error_count", lambda: 0)
+    monkeypatch.setattr(module, "_failed_systemd_units", lambda: 0)
+    monkeypatch.setattr(module, "_root_writable", lambda: 1)
+    monkeypatch.setattr(module, "_docker_names", lambda: ())
+    monkeypatch.setattr(
+        module,
+        "_provider_canary_report",
+        lambda: {
+            "schema_version": 1,
+            "generated_at_epoch": 1234.5,
+            "results": [
+                {
+                    "provider": "autotask",
+                    "capability": "service.company.search",
+                    "healthy": True,
+                    "latency_seconds": 0.42,
+                    "error_class": "none",
+                    "correlation_id": "corr_secret_not_exported",
+                },
+                {
+                    "provider": "it_glue",
+                    "capability": "documentation.organization.search",
+                    "healthy": False,
+                    "latency_seconds": 1.25,
+                    "error_class": "provider_unavailable",
+                    "correlation_id": "corr_secret_not_exported_2",
+                },
+            ],
+        },
+    )
+
+    metrics = module.render_metrics()
+
+    assert "jason_provider_canary_report_timestamp_seconds 1234.500000" in metrics
+    assert 'jason_provider_canary_health{provider="autotask",capability="service.company.search"} 1' in metrics
+    assert 'jason_provider_canary_health{provider="it_glue",capability="documentation.organization.search"} 0' in metrics
+    assert 'error_class="provider_unavailable"' in metrics
+    assert "corr_secret_not_exported" not in metrics
+    assert "__jason_provider_canary_nonexistent__" not in metrics

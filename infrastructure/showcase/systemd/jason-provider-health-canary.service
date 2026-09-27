@@ -1,0 +1,23 @@
+[Unit]
+Description=Jason Governed Provider Health Canaries
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/opt/jason/current
+ExecStart=/usr/bin/python3 /opt/jason/current/infrastructure/showcase/run_provider_health_canaries.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/jason/current
+ReadOnlyPaths=-/var/run/docker.sock
+ReadOnlyPaths=-/run/docker.sock
+ReadWritePaths=/var/lib/jason
+
+[Install]
+WantedBy=multi-user.target

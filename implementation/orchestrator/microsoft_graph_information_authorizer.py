@@ -13,6 +13,10 @@ from .information_authorization import (
     InformationHandlingClass,
 )
 from .information_sensitivity import assess_sensitive_evidence
+from .provider_health_canary_policy import (
+    is_provider_health_canary_request,
+    provider_health_canary_output_is_empty,
+)
 from .provider_read_capability_catalog import (
     MICROSOFT_GRAPH_CAPABILITIES,
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
@@ -85,6 +89,36 @@ def _authorized_envelope(
     )
 
 
+def _canary_authorized_envelope(
+    *,
+    capability_name: str,
+) -> InformationAuthorizationEnvelope:
+    handling = InformationHandlingClass.RELEASABLE
+    basis = (
+        "provider_health_canary_v1",
+        "jkd001_authority_context",
+        "validated_microsoft_tenant_boundary",
+        "central_orchestrator_governed_read",
+        "synthetic_empty_result_only",
+    )
+    return InformationAuthorizationEnvelope(
+        handling_class=handling,
+        decisions={
+            action: InformationAuthorizationDecision(
+                action=action,
+                allowed=True,
+                reason_code=f"INFORMATION_{action.value.upper()}_ALLOWED",
+                handling_class=handling,
+                policy_ids=("provider-information-authorization-v1",),
+                authorization_basis=basis,
+            )
+            for action in InformationAction
+        },
+        source_provider=MICROSOFT_GRAPH_PROVIDER,
+        source_resource_type=capability_name,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MicrosoftGraphInformationAuthorizer:
     """Release Microsoft Entra user evidence only to the governed requester.
@@ -109,20 +143,37 @@ class MicrosoftGraphInformationAuthorizer:
         provider_id = (resolution.selected_provider_id or "").strip()
         if provider_id != MICROSOFT_GRAPH_PROVIDER:
             return invocation
-        if (
-            resolution.capability_name not in MICROSOFT_GRAPH_CAPABILITIES
-            or not _trusted_requester_proven(request=request, bindings=self.bindings)
-        ):
+        if resolution.capability_name not in MICROSOFT_GRAPH_CAPABILITIES:
             return invocation
 
-        sensitivity = assess_sensitive_evidence(invocation.output)
+        if (
+            is_provider_health_canary_request(
+                request=request,
+                capability_name=resolution.capability_name,
+            )
+            and provider_health_canary_output_is_empty(
+                output=invocation.output,
+            )
+        ):
+            authorization = _canary_authorized_envelope(
+                capability_name=resolution.capability_name,
+            )
+        elif _trusted_requester_proven(
+            request=request,
+            bindings=self.bindings,
+        ):
+            sensitivity = assess_sensitive_evidence(invocation.output)
+            authorization = _authorized_envelope(
+                capability_name=resolution.capability_name,
+                sensitive=sensitivity.sensitive,
+            )
+        else:
+            return invocation
+
         return InvocationResult(
             output=invocation.output,
             artifact_references=invocation.artifact_references,
             attempts=invocation.attempts,
             telemetry=invocation.telemetry,
-            information_authorization=_authorized_envelope(
-                capability_name=resolution.capability_name,
-                sensitive=sensitivity.sensitive,
-            ),
+            information_authorization=authorization,
         )

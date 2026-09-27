@@ -11,6 +11,29 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HOST = os.environ.get("JASON_PRODUCTION_HEALTH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("JASON_PRODUCTION_HEALTH_PORT", "9467"))
+PROVIDER_CANARY_REPORT_PATH = os.environ.get(
+    "JASON_PROVIDER_CANARY_REPORT_PATH",
+    "/var/lib/jason/provider-health-canaries.json",
+)
+PROVIDER_CANARY_CAPABILITIES = {
+    "autotask": "service.company.search",
+    "it_glue": "documentation.organization.search",
+    "datto_rmm": "endpoint.device.search",
+    "microsoft_graph": "identity.user.search",
+}
+PROVIDER_CANARY_ERROR_CLASSES = frozenset(
+    {
+        "none",
+        "authority_denied",
+        "information_release_denied",
+        "timeout",
+        "provider_unavailable",
+        "provider_error",
+        "unexpected_provider",
+        "execution_failed",
+        "runner_error",
+    }
+)
 
 EXPECTED_MCP_IMAGE_PREFIX = os.environ.get(
     "JASON_EXPECTED_MCP_IMAGE_PREFIX",
@@ -247,6 +270,21 @@ def _failed_systemd_units() -> int:
     return _cached_count("failed-units", 60.0, _failed_systemd_units_uncached)
 
 
+def _provider_canary_report() -> dict:
+    try:
+        raw = open(PROVIDER_CANARY_REPORT_PATH, encoding="utf-8").read()
+        payload = json.loads(raw)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("schema_version") != 1:
+        return {}
+    if not isinstance(payload.get("results"), list):
+        return {}
+    return payload
+
+
 def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
     config = mcp.get("Config") if isinstance(mcp.get("Config"), dict) else {}
     host_config = mcp.get("HostConfig") if isinstance(mcp.get("HostConfig"), dict) else {}
@@ -369,6 +407,7 @@ def render_metrics() -> str:
     kernel_errors = _kernel_error_count()
     failed_units = _failed_systemd_units()
     root_writable = _root_writable()
+    provider_canaries = _provider_canary_report()
     rollback_available = 1 if any(
         name.startswith("jason-mcp-pilot-rollback-")
         or name.startswith("jason-mcp-pilot-pre-v4-")
@@ -456,6 +495,54 @@ def render_metrics() -> str:
         "# TYPE jason_production_health_exporter_build_info gauge",
         'jason_production_health_exporter_build_info{version="4"} 1',
     ])
+
+    generated_at = provider_canaries.get("generated_at_epoch")
+    try:
+        generated_at_value = float(generated_at)
+    except (TypeError, ValueError):
+        generated_at_value = 0.0
+    lines.extend(
+        [
+            "# HELP jason_provider_canary_report_timestamp_seconds Unix timestamp of the last governed provider-canary report; zero means unavailable.",
+            "# TYPE jason_provider_canary_report_timestamp_seconds gauge",
+            f"jason_provider_canary_report_timestamp_seconds {generated_at_value:.6f}",
+            "# HELP jason_provider_canary_health End-to-end governed provider-read canary health using synthetic empty-result selectors.",
+            "# TYPE jason_provider_canary_health gauge",
+            "# HELP jason_provider_canary_latency_seconds End-to-end governed provider-read canary latency.",
+            "# TYPE jason_provider_canary_latency_seconds gauge",
+            "# HELP jason_provider_canary_error Safe bounded error-class metadata for the latest governed provider canary.",
+            "# TYPE jason_provider_canary_error gauge",
+        ]
+    )
+    by_provider = {}
+    for item in provider_canaries.get("results", []):
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or "")
+        capability = str(item.get("capability") or "")
+        if PROVIDER_CANARY_CAPABILITIES.get(provider) != capability:
+            continue
+        by_provider[provider] = item
+
+    for provider, capability in sorted(PROVIDER_CANARY_CAPABILITIES.items()):
+        item = by_provider.get(provider)
+        healthy = 1 if item and item.get("healthy") is True else 0
+        try:
+            latency = float(item.get("latency_seconds")) if item else 0.0
+        except (TypeError, ValueError):
+            latency = 0.0
+        error_class = str(item.get("error_class") or "runner_error") if item else "runner_error"
+        if error_class not in PROVIDER_CANARY_ERROR_CLASSES:
+            error_class = "runner_error"
+        labels = (
+            f'provider="{_metric_escape(provider)}",'
+            f'capability="{_metric_escape(capability)}"'
+        )
+        lines.append(f"jason_provider_canary_health{{{labels}}} {healthy}")
+        lines.append(f"jason_provider_canary_latency_seconds{{{labels}}} {max(0.0, latency):.6f}")
+        lines.append(
+            f'jason_provider_canary_error{{{labels},error_class="{_metric_escape(error_class)}"}} 1'
+        )
 
     return "\n".join(lines) + "\n"
 

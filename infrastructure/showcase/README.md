@@ -114,3 +114,10 @@ Current production state: `docs/control/CURRENT.md`.
 Final bounded Datto proof: `docs/sessions/Jason-Datto-RMM-Governed-Execution-Proof-2026-09-16.md`.
 
 Resolved governed-action checkpoint: `docs/sessions/Jason-Governed-Execution-Checkpoint-2026-09-16.md`.
+
+
+### Governed provider health canaries
+
+`jason-provider-health-canary.timer` runs the synthetic provider probes every fifteen minutes with randomized delay. The host runner invokes the MCP-contained canary module, which uses the dedicated `jason-provider-canary` service identity and `provider-health-canary-v1` policy through JKD-001 and the Central Orchestrator. Provider evidence is discarded before persistence.
+
+The production-health exporter reads `/var/lib/jason/provider-health-canaries.json` and exposes only bounded provider/capability health, latency, report timestamp, and error class. The Production Health dashboard shows Autotask, IT Glue, Datto RMM, and Microsoft Graph separately.

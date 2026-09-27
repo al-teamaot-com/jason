@@ -74,6 +74,11 @@ from starlette.responses import JSONResponse
 from jason_runtime.autotask_ticket_create import (
     SERVICE_TICKET_CREATE,
 )
+from orchestrator.provider_health_canary_policy import (
+    PROVIDER_HEALTH_CANARY_CAPABILITIES,
+    PROVIDER_HEALTH_CANARY_POLICY_ID,
+    PROVIDER_HEALTH_CANARY_PRINCIPAL,
+)
 from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
@@ -3566,6 +3571,182 @@ def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, o
         outcome="succeeded",
         reason_codes=("EXACT_GRANT_ADMIN", f"GRANT_ID:{grant_id}"),
     )
+
+def _provider_health_canary_grant_ids(
+    *,
+    app: Any,
+    organization: str,
+) -> dict[str, str]:
+    return {
+        capability: _authority_grant_id(
+            subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
+            capability=capability,
+            organization=organization,
+            client_id=None,
+            permission=PermissionMode.OBSERVE,
+            approval_required=False,
+        )
+        for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES)
+    }
+
+
+@mcp.tool()
+def provider_health_canary_status() -> dict[str, Any]:
+    """Owner-only: report exact observe authority for provider health canaries."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        identity = app.identity_authority.identities.get(
+            PROVIDER_HEALTH_CANARY_PRINCIPAL
+        )
+        expected = _provider_health_canary_grant_ids(
+            app=app,
+            organization=organization,
+        )
+        grants = {
+            grant.capability: {
+                "grant_id": grant.grant_id,
+                "permission": grant.permission.value,
+                "approval_required": grant.approval_required,
+                "status": grant.status,
+            }
+            for grant in app.identity_authority.grants.list_for_subject(
+                PROVIDER_HEALTH_CANARY_PRINCIPAL
+            )
+            if grant.grant_id in expected.values()
+        }
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "principal": PROVIDER_HEALTH_CANARY_PRINCIPAL,
+        "policy_id": PROVIDER_HEALTH_CANARY_POLICY_ID,
+        "identity_active": bool(identity is not None and identity.status == "active"),
+        "required_capabilities": sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES),
+        "grants": grants,
+    }
+
+
+@mcp.tool()
+def approve_provider_health_canaries() -> dict[str, Any]:
+    """Owner-only: grant exact observe-only authority for synthetic provider canaries."""
+    try:
+        admin, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("PROVIDER_CANARY_ORGANIZATION_MISMATCH")
+        app = _runtime()
+        identity = app.identity_authority.identities.get(
+            PROVIDER_HEALTH_CANARY_PRINCIPAL
+        )
+        if identity is None:
+            app.identity_authority.identities.put(
+                IdentityRecord(
+                    PROVIDER_HEALTH_CANARY_PRINCIPAL,
+                    "service",
+                    organization,
+                )
+            )
+        elif (
+            identity.status != "active"
+            or identity.organization_id != organization
+            or identity.identity_type != "service"
+        ):
+            raise ValueError("PROVIDER_CANARY_IDENTITY_CONFLICT")
+
+        created = []
+        for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES):
+            exact_capability = _exact_authority_capability(app, capability)
+            grant_id = _authority_grant_id(
+                subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
+                capability=exact_capability,
+                organization=organization,
+                client_id=None,
+                permission=PermissionMode.OBSERVE,
+                approval_required=False,
+            )
+            candidate = AuthorityGrant(
+                grant_id=grant_id,
+                subject_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
+                capability=exact_capability,
+                organization_id=organization,
+                client_id=None,
+                permission=PermissionMode.OBSERVE,
+                approval_required=False,
+                status="active",
+            )
+            existing = app.identity_authority.grants.get(grant_id)
+            if existing is not None:
+                if existing != candidate:
+                    raise ValueError("PROVIDER_CANARY_GRANT_CONFLICT")
+                created.append(grant_id)
+                continue
+            _authority_grant_audit(
+                app=app,
+                event_type="provider.canary.authority.create.requested",
+                admin_principal=admin,
+                organization=organization,
+                capability=exact_capability,
+                grant_id=grant_id,
+            )
+            app.identity_authority.grants.put(candidate)
+            _authority_grant_audit(
+                app=app,
+                event_type="provider.canary.authority.created",
+                admin_principal=admin,
+                organization=organization,
+                capability=exact_capability,
+                grant_id=grant_id,
+            )
+            created.append(grant_id)
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "principal": PROVIDER_HEALTH_CANARY_PRINCIPAL,
+        "policy_id": PROVIDER_HEALTH_CANARY_POLICY_ID,
+        "grant_ids": created,
+        "permission": "observe",
+        "approval_required": False,
+    }
+
+
+@mcp.tool()
+def revoke_provider_health_canaries() -> dict[str, Any]:
+    """Owner-only: revoke only the exact provider-canary observe grants."""
+    try:
+        admin, organization = _authority_admin_owner()
+        app = _runtime()
+        expected = set(
+            _provider_health_canary_grant_ids(
+                app=app,
+                organization=organization,
+            ).values()
+        )
+        revoked = []
+        for grant in app.identity_authority.grants.list_for_subject(
+            PROVIDER_HEALTH_CANARY_PRINCIPAL
+        ):
+            if grant.grant_id not in expected or grant.status != "active":
+                continue
+            record = app.identity_authority.grants.revoke(grant.grant_id)
+            if record is not None:
+                revoked.append(record.grant_id)
+                _authority_grant_audit(
+                    app=app,
+                    event_type="provider.canary.authority.revoked",
+                    admin_principal=admin,
+                    organization=organization,
+                    capability=record.capability,
+                    grant_id=record.grant_id,
+                )
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "principal": PROVIDER_HEALTH_CANARY_PRINCIPAL,
+        "revoked_grant_ids": revoked,
+    }
+
 
 
 @mcp.tool()
