@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "reflect-bounded-organization-name-resolution",
+      "signal_kind": "search_broadening_success",
+      "capability_name": "documentation.organization.search",
+      "invariant": "Exact miss may broaden only to bounded normalized prefix/contains resolution; exactly one match may be selected and ambiguity must fail closed.",
+      "test_reference": "reflection/tests/test_reflection_completion.py::test_hitt_style_name_resolution_uses_bounded_normalized_fallback"
+    },
+    {
+      "case_id": "reflect-organization-name-ambiguity-fails-closed",
+      "signal_kind": "search_broadening_success",
+      "capability_name": "documentation.organization.search",
+      "invariant": "Multiple normalized organization matches must not be silently selected.",
+      "test_reference": "reflection/tests/test_reflection_completion.py::test_hitt_style_name_resolution_fails_closed_on_ambiguity"
+    },
+    {
+      "case_id": "reflect-open-ticket-filter-pushdown",
+      "signal_kind": "excessive_pagination",
+      "capability_name": "service.ticket.search",
+      "invariant": "Open/unresolved ticket intent is translated into provider-side terminal-status exclusions before ticket retrieval rather than broad historical paging.",
+      "test_reference": "reflection/tests/test_reflection_completion.py::test_open_ticket_intent_resolves_live_terminal_status_to_provider_exclusion"
+    },
+    {
+      "case_id": "reflect-human-regression-release-boundary",
+      "signal_kind": "user_correction",
+      "capability_name": "operations.reflection.candidate.review",
+      "invariant": "A candidate requires durable passing CI regression evidence before human approval and only controlled release can mark it promoted.",
+      "test_reference": "reflection/tests/test_reflection_completion.py::test_candidate_requires_ci_regression_then_human_approval_then_release_promotion"
+    }
+  ]
+}

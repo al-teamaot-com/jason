@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 
@@ -71,7 +72,7 @@ from .provider_read_capability_catalog import (
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
-from .service import InvocationResult
+from .service import InvocationResult, InvocationTelemetry
 
 
 _IT_GLUE_ENTITY = {
@@ -507,10 +508,22 @@ def _autotask_search(
 
     for selector, provider_field in _AUTOTASK_SEARCH_FIELDS[capability_name].items():
         value = arguments.get(selector)
-        if value is not None and not any(
-            item["field"] == provider_field for item in clauses
+        if value is None or any(item["field"] == provider_field for item in clauses):
+            continue
+        if (
+            capability_name in {SERVICE_TICKET_SEARCH, SERVICE_TICKET_COUNT}
+            and selector == "status"
+            and isinstance(value, str)
+            and value.strip().casefold() in {"open", "unresolved"}
         ):
-            clauses.append({"op": "eq", "field": provider_field, "value": value})
+            # Internal semantic operator. The Autotask impersonating connector
+            # resolves this against the live ticket-status picklist and replaces
+            # it with provider-supported terminal-status exclusions before I/O.
+            clauses.append(
+                {"op": "jason_open", "field": provider_field, "value": "open"}
+            )
+            continue
+        clauses.append({"op": "eq", "field": provider_field, "value": value})
 
     if not clauses:
         clauses.append({"op": "exist", "field": "id"})
@@ -816,12 +829,170 @@ def _minimize_provider_read_output(
         output=output,
         artifact_references=invocation.artifact_references,
         attempts=invocation.attempts,
+        telemetry=invocation.telemetry,
+        information_authorization=invocation.information_authorization,
+    )
+
+
+def _normalized_human_name(value: object) -> str:
+    return " ".join(
+        token
+        for token in re.split(r"[^a-z0-9]+", str(value or "").strip().casefold())
+        if token
+    )
+
+
+def _it_glue_record_name(record: object) -> str:
+    if not isinstance(record, Mapping):
+        return ""
+    attrs = record.get("attributes")
+    if not isinstance(attrs, Mapping):
+        return ""
+    return str(attrs.get("name") or "").strip()
+
+
+def _it_glue_records(invocation: InvocationResult) -> list[object]:
+    payload = invocation.output.get("data")
+    if not isinstance(payload, Mapping):
+        return []
+    records = payload.get("data")
+    return list(records) if isinstance(records, list) else []
+
+
+def _bounded_name_matches(records: list[object], requested_name: str) -> list[object]:
+    query = _normalized_human_name(requested_name)
+    if not query:
+        return []
+    exact = [
+        item for item in records
+        if _normalized_human_name(_it_glue_record_name(item)) == query
+    ]
+    if exact:
+        return exact
+
+    query_tokens = tuple(query.split())
+    broader: list[object] = []
+    for item in records:
+        candidate = _normalized_human_name(_it_glue_record_name(item))
+        if not candidate:
+            continue
+        tokens = tuple(candidate.split())
+        if (
+            tokens[: len(query_tokens)] == query_tokens
+            or query_tokens[: len(tokens)] == tokens
+            or f" {query} " in f" {candidate} "
+        ):
+            broader.append(item)
+    return broader
+
+
+def _replace_it_glue_records(
+    invocation: InvocationResult,
+    records: list[object],
+) -> InvocationResult:
+    output = dict(invocation.output)
+    payload = output.get("data")
+    if not isinstance(payload, Mapping):
+        return invocation
+    minimized = dict(payload)
+    minimized["data"] = records
+    output["data"] = minimized
+    return InvocationResult(
+        output=output,
+        artifact_references=invocation.artifact_references,
+        attempts=invocation.attempts,
+        telemetry=invocation.telemetry,
+        information_authorization=invocation.information_authorization,
+    )
+
+
+def _result_count(invocation: InvocationResult) -> int | None:
+    payload = invocation.output.get("data")
+    if isinstance(payload, Mapping):
+        for key in ("items", "value", "data"):
+            rows = payload.get(key)
+            if isinstance(rows, list):
+                return len(rows)
+        for key in ("count", "queryCount", "totalCount"):
+            value = payload.get(key)
+            if isinstance(value, bool):
+                continue
+            try:
+                if value is not None:
+                    return int(value)
+            except (TypeError, ValueError):
+                pass
+    if isinstance(payload, list):
+        return len(payload)
+    return None
+
+
+def _pagination_count(invocation: InvocationResult) -> int:
+    payload = invocation.output.get("data")
+    if not isinstance(payload, Mapping):
+        return 0
+    pagination = payload.get("jasonPagination")
+    if isinstance(pagination, Mapping):
+        try:
+            return max(1, int(pagination.get("pagesFetched") or 1))
+        except (TypeError, ValueError):
+            return 1
+    meta = payload.get("meta")
+    if isinstance(meta, Mapping):
+        for key in ("current-page", "current_page"):
+            try:
+                if meta.get(key) is not None:
+                    return max(1, int(meta[key]))
+            except (TypeError, ValueError):
+                pass
+    return 1
+
+
+def _with_reflection_telemetry(
+    invocation: InvocationResult,
+    *,
+    provider_id: str,
+    capability_name: str,
+    normalized_intent: str,
+    selector_strategy: str,
+    requested_result_scope: str,
+    result_count: int | None,
+    candidate_count: int | None,
+    provider_call_count: int,
+    pagination_count: int,
+    fallback_count: int,
+    search_strategies: tuple[str, ...],
+    search_result_counts: tuple[int, ...],
+    warning_codes: tuple[str, ...] = (),
+) -> InvocationResult:
+    base = invocation.telemetry or InvocationTelemetry()
+    telemetry = replace(
+        base,
+        reflection_normalized_intent=normalized_intent,
+        reflection_selector_strategy=selector_strategy,
+        reflection_requested_result_scope=requested_result_scope,
+        reflection_result_count=result_count,
+        reflection_candidate_count=candidate_count,
+        reflection_provider_call_count=provider_call_count,
+        reflection_pagination_count=pagination_count,
+        reflection_fallback_count=fallback_count,
+        reflection_evidence_item_count=result_count or 0,
+        reflection_search_strategies=search_strategies,
+        reflection_search_result_counts=search_result_counts,
+        reflection_warning_codes=warning_codes,
+    )
+    return InvocationResult(
+        output=invocation.output,
+        artifact_references=invocation.artifact_references,
+        attempts=invocation.attempts,
+        telemetry=telemetry,
+        information_authorization=invocation.information_authorization,
     )
 
 
 @dataclass(frozen=True, slots=True)
 class GovernedProviderReadConnectorInvoker:
-    """Adapt canonical read arguments only after governed provider selection."""
+    """Adapt canonical reads and emit bounded REFLECT-001 execution telemetry."""
 
     delegate: GovernedConnectorCapabilityInvoker
 
@@ -849,6 +1020,154 @@ class GovernedProviderReadConnectorInvoker:
         if client_id != canonical_company:
             raise PermissionError("company selector does not match governed client context")
 
+    def _invoke_it_glue_organization_search(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+    ) -> InvocationResult:
+        requested_name = str(request.arguments.get("name") or "").strip()
+        if not requested_name:
+            raise ValueError("name is required for bounded organization resolution")
+
+        exact_adapted = adapt_it_glue_arguments(
+            DOCUMENTATION_ORGANIZATION_SEARCH,
+            request.arguments,
+        )
+        exact_raw = self.delegate.invoke(
+            request=replace(request, arguments=exact_adapted),
+            resolution=resolution,
+        )
+        exact_invocation = _minimize_provider_read_output(
+            provider_id=IT_GLUE_PROVIDER,
+            capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+            invocation=exact_raw,
+        )
+        first_records = _it_glue_records(exact_invocation)
+        exact_matches = [
+            item for item in first_records
+            if _normalized_human_name(_it_glue_record_name(item))
+            == _normalized_human_name(requested_name)
+        ]
+        if len(exact_matches) > 1:
+            raise ValueError("IT_GLUE_ORGANIZATION_SEARCH_AMBIGUOUS")
+        if len(exact_matches) == 1:
+            resolved = _replace_it_glue_records(exact_invocation, exact_matches)
+            return _with_reflection_telemetry(
+                resolved,
+                provider_id=IT_GLUE_PROVIDER,
+                capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+                normalized_intent="organization_search",
+                selector_strategy="bounded_name_resolution",
+                requested_result_scope="single",
+                result_count=1,
+                candidate_count=len(first_records),
+                provider_call_count=1,
+                pagination_count=1,
+                fallback_count=0,
+                search_strategies=("exact",),
+                search_result_counts=(1,),
+            )
+
+        local_broader = _bounded_name_matches(first_records, requested_name)
+        provider_calls = 1
+        if not local_broader:
+            broad_arguments = dict(request.arguments)
+            broad_arguments.pop("name", None)
+            broad_arguments["page_size"] = _MAX_IT_GLUE_PAGE_SIZE
+            broad_adapted = adapt_it_glue_arguments(
+                DOCUMENTATION_ORGANIZATION_SEARCH,
+                broad_arguments,
+            )
+            broad_raw = self.delegate.invoke(
+                request=replace(request, arguments=broad_adapted),
+                resolution=resolution,
+            )
+            broad_invocation = _minimize_provider_read_output(
+                provider_id=IT_GLUE_PROVIDER,
+                capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+                invocation=broad_raw,
+            )
+            provider_calls += 1
+            local_broader = _bounded_name_matches(
+                _it_glue_records(broad_invocation), requested_name
+            )
+            base = broad_invocation
+        else:
+            base = exact_invocation
+
+        if len(local_broader) > 1:
+            raise ValueError("IT_GLUE_ORGANIZATION_SEARCH_AMBIGUOUS")
+        resolved = _replace_it_glue_records(base, local_broader)
+        return _with_reflection_telemetry(
+            resolved,
+            provider_id=IT_GLUE_PROVIDER,
+            capability_name=DOCUMENTATION_ORGANIZATION_SEARCH,
+            normalized_intent="organization_search",
+            selector_strategy="bounded_name_resolution",
+            requested_result_scope="single",
+            result_count=len(local_broader),
+            candidate_count=len(local_broader),
+            provider_call_count=provider_calls,
+            pagination_count=1,
+            fallback_count=1,
+            search_strategies=("exact", "normalized_prefix_contains"),
+            search_result_counts=(0, len(local_broader)),
+            warning_codes=("bounded_search_broadening_used",),
+        )
+
+    def _generic_reflection_telemetry(
+        self,
+        *,
+        request: OrchestrationRequest,
+        resolution: CapabilityResolutionResult,
+        provider_id: str,
+        invocation: InvocationResult,
+    ) -> InvocationResult:
+        count = _result_count(invocation)
+        pages = _pagination_count(invocation)
+        capability = resolution.capability_name
+        search_capability = capability.endswith(".search") or capability.endswith(".count")
+        scope = "bounded" if search_capability else "single"
+        normalized_intent = capability.replace(".", "_")
+        selector_strategy = "canonical_provider_filter" if search_capability else "exact_resource_read"
+        strategy = "provider_filter_pushdown" if search_capability else "exact_resource_id"
+        provider_calls = 1
+        warnings: tuple[str, ...] = ()
+
+        if provider_id == AUTOTASK_PROVIDER:
+            # Zone discovery plus the requested provider read. Continuation pages
+            # add one call each beyond the first data page.
+            provider_calls = 1 + max(1, pages)
+            status = request.arguments.get("status")
+            if (
+                capability in {SERVICE_TICKET_SEARCH, SERVICE_TICKET_COUNT}
+                and isinstance(status, str)
+                and status.strip().casefold() in {"open", "unresolved"}
+            ):
+                normalized_intent = "open_ticket_search"
+                selector_strategy = "company_open_status_pushdown"
+                strategy = "open_status_pushdown"
+                provider_calls += 1  # live status metadata resolution
+                warnings = ("terminal_statuses_resolved_from_live_metadata",)
+
+        return _with_reflection_telemetry(
+            invocation,
+            provider_id=provider_id,
+            capability_name=capability,
+            normalized_intent=normalized_intent,
+            selector_strategy=selector_strategy,
+            requested_result_scope=scope,
+            result_count=count,
+            candidate_count=count,
+            provider_call_count=provider_calls,
+            pagination_count=pages,
+            fallback_count=0,
+            search_strategies=(strategy,),
+            search_result_counts=((count or 0),),
+            warning_codes=warnings,
+        )
+
     def invoke(
         self,
         *,
@@ -860,6 +1179,16 @@ class GovernedProviderReadConnectorInvoker:
             raise PermissionError("resolved provider is required before argument adaptation")
 
         self._enforce_client_selector_binding(request, resolution.capability_name)
+        if (
+            provider_id == IT_GLUE_PROVIDER
+            and resolution.capability_name == DOCUMENTATION_ORGANIZATION_SEARCH
+            and str(request.arguments.get("name") or "").strip()
+        ):
+            return self._invoke_it_glue_organization_search(
+                request=request,
+                resolution=resolution,
+            )
+
         adapted = adapt_provider_read_arguments(
             provider_id=provider_id,
             capability_name=resolution.capability_name,
@@ -869,8 +1198,14 @@ class GovernedProviderReadConnectorInvoker:
             request=replace(request, arguments=adapted),
             resolution=resolution,
         )
-        return _minimize_provider_read_output(
+        minimized = _minimize_provider_read_output(
             provider_id=provider_id,
             capability_name=resolution.capability_name,
             invocation=invocation,
+        )
+        return self._generic_reflection_telemetry(
+            request=request,
+            resolution=resolution,
+            provider_id=provider_id,
+            invocation=minimized,
         )
