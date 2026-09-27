@@ -60,7 +60,18 @@ if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null; th
 fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
 
-mkdir -p "$RELEASE_ROOT" "$BACKUP_DIR"
+LIVE_MCP_REVISION="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
+  echo "ERROR: live MCP revision does not match requested host release." >&2
+  echo "LIVE_MCP_REVISION=$LIVE_MCP_REVISION" >&2
+  echo "REQUESTED_SOURCE_REVISION=$SOURCE_REVISION" >&2
+  exit 7
+fi
+
+mkdir -p "$RELEASE_ROOT" "$BACKUP_DIR" /var/lib/jason
+printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$SOURCE_REVISION" > /var/lib/jason/production-health.env
+chown root:root /var/lib/jason/production-health.env
+chmod 0644 /var/lib/jason/production-health.env
 if [ ! -d "$RELEASE_DIR" ]; then
   TMP_RELEASE="$RELEASE_ROOT/.${SOURCE_REVISION}.tmp.$$"
   rm -rf "$TMP_RELEASE"

@@ -16,6 +16,10 @@ def load_exporter():
 
 
 def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contract(monkeypatch):
+    monkeypatch.setenv(
+        "JASON_EXPECTED_MCP_SOURCE_REVISION",
+        "0123456789abcdef0123456789abcdef01234567",
+    )
     module = load_exporter()
 
     runtime = {
@@ -27,9 +31,10 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     mcp = {
         "State": {"Running": True},
         "Config": {
-            "Image": module.EXPECTED_MCP_IMAGE,
+            "Image": module.EXPECTED_MCP_IMAGE_PREFIX + "test-release",
+            "Labels": {"com.teamaot.jason.source_revision": module.EXPECTED_SOURCE_REVISION},
             "Env": [
-                "JASON_SOURCE_REVISION=historical-env-value",
+                f"JASON_SOURCE_REVISION={module.EXPECTED_SOURCE_REVISION}",
                 f"JASON_PROVIDER_READ_ACTIVATION_PROFILE={module.EXPECTED_PROVIDER_PROFILE}",
                 "JASON_PROVIDER_READ_ACTIVATION_PROFILE=itglue-autotask-governed-catalog-v3",
                 f"JASON_AUTOTASK_REQUESTER_AUTH_MODE={module.EXPECTED_AUTOTASK_MODE}",
@@ -104,7 +109,8 @@ def test_datto_contract_fails_closed_when_scope_does_not_match(monkeypatch):
     mcp = {
         "State": {"Running": True},
         "Config": {
-            "Image": module.EXPECTED_MCP_IMAGE,
+            "Image": module.EXPECTED_MCP_IMAGE_PREFIX + "test-release",
+            "Labels": {"com.teamaot.jason.source_revision": module.EXPECTED_SOURCE_REVISION},
             "Env": [
                 f"JASON_PROVIDER_READ_ACTIVATION_PROFILE={module.EXPECTED_PROVIDER_PROFILE}",
                 f"JASON_AUTOTASK_REQUESTER_AUTH_MODE={module.EXPECTED_AUTOTASK_MODE}",
@@ -157,7 +163,8 @@ def test_datto_contract_fails_closed_when_component_classification_changes():
     mcp = {
         "State": {"Running": True},
         "Config": {
-            "Image": module.EXPECTED_MCP_IMAGE,
+            "Image": module.EXPECTED_MCP_IMAGE_PREFIX + "test-release",
+            "Labels": {"com.teamaot.jason.source_revision": module.EXPECTED_SOURCE_REVISION},
             "Env": [
                 f"JASON_SOURCE_REVISION={module.EXPECTED_SOURCE_REVISION}",
                 f"JASON_PROVIDER_READ_ACTIVATION_PROFILE={module.EXPECTED_PROVIDER_PROFILE}",
@@ -249,7 +256,8 @@ def test_datto_contract_allows_additional_governed_components() -> None:
     mcp = {
         "State": {"Running": True},
         "Config": {
-            "Image": module.EXPECTED_MCP_IMAGE,
+            "Image": module.EXPECTED_MCP_IMAGE_PREFIX + "test-release",
+            "Labels": {"com.teamaot.jason.source_revision": module.EXPECTED_SOURCE_REVISION},
             "Env": [
                 f"JASON_SOURCE_REVISION={module.EXPECTED_SOURCE_REVISION}",
                 f"JASON_PROVIDER_READ_ACTIVATION_PROFILE={module.EXPECTED_PROVIDER_PROFILE}",
