@@ -63,3 +63,8 @@ def test_rendered_production_state_keeps_source_and_production_distinct():
     assert "Revision: `newer`" in markdown
     assert "Revision: `older`" in markdown
     assert "A validated source revision is not proof of production deployment" in markdown
+
+
+def test_rendered_markdown_has_no_trailing_whitespace():
+    markdown = render_markdown({"schema_version": "1.0"})
+    assert all(line == line.rstrip() for line in markdown.splitlines())
