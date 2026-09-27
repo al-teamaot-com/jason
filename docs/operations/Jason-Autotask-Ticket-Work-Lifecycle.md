@@ -158,3 +158,22 @@ Production observability was refreshed on 2026-09-18 after the lifecycle accepta
 - the loaded panel includes both the Autotask ticket-work lifecycle acceptance and the open `SUPPORT-CONN-002` MCP transport warning.
 
 No per-run ticket-work counters were added because the production playbook-event writer is not yet active. This is intentional: dashboards must not imply event telemetry that Jason does not actually persist yet.
+## Waiting Device Access production acceptance — 2026-09-27
+
+The automatic **Waiting Device Access** lifecycle is production-proven at source revision `5e57a34ac2018bad032e3b4467c58f814023699f`.
+
+Production acceptance evidence:
+
+- `jason-runtime` is healthy on source revision `5e57a34ac2018bad032e3b4467c58f814023699f` with zero restarts;
+- `jason-mcp-pilot` is running on the same source revision with the governance postcheck passing and `direct_provider_access=false`;
+- `/opt/jason/current` resolves to immutable host release `/opt/jason/releases/5e57a34ac2018bad032e3b4467c58f814023699f`;
+- all reconciled Jason host exporters and maintenance timers are active with no failed systemd units;
+- live Autotask readback after reconciliation showed eight Jason-queue tickets in **Waiting Device Access** and one ticket in **In Progress**;
+- the sole **In Progress** ticket was `T20260923.0075` / VZ-HYPER-V, whose exact DRMM endpoint was online at acceptance time;
+- the eight **Waiting Device Access** tickets were device-bound Jason-owned tickets whose exact DRMM endpoints were offline at reconciliation time;
+- the worker regression suite proves that an offline Jason-owned ticket moves to **Waiting Device Access** without creating active operational work, repeated offline reconciliation is idempotent, and a later online state returns the ticket to **In Progress** through the normal claim lifecycle;
+- tickets outside the Jason queue remain unchanged when pre-claim availability checks find the device offline.
+
+The initial runtime deployment exposed a wrapper-verification race: the lower-level production deployment succeeded and the new runtime was healthy, but the outer refresh wrapper performed an immediate second health/revision check, reported failure, and restored the `jason-runtime:production` / `jason-runtime:local` aliases to the previous image even though the new container was already running successfully. The running runtime remained healthy on `5e57a34...`; the image aliases were reconciled back to the live proven image without restarting the runtime. MCP was then deployed to the same revision and `/opt/jason/current` was reconciled only after runtime/MCP source alignment was proven. Rollback images were preserved throughout.
+
+This acceptance closes the automatic device-access status workstream. Future changes to this lifecycle must preserve exact CI/DRMM identity, Jason ownership, standing playbook authority, idempotent status writes, zero active-slot consumption while offline, and automatic resume only after current endpoint-online evidence.
