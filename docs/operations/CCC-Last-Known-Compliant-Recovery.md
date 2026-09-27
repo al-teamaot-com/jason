@@ -1,6 +1,6 @@
 # CCC Last Known Compliant Recovery Point
 
-**Status:** Implemented foundation; production seed acceptance pending  
+**Status:** Implemented and production-proven 2026-09-27
 **Owner:** Jason Governance Authority  
 **Applies to:** Constitutional and Compliance Check (CCC) recovery promotion
 
@@ -57,6 +57,26 @@ Success reports `CCC_LAST_KNOWN_COMPLIANT=PASS` and the exact checkpoint, source
 ## Governance
 
 Creating a compliant recovery point does not authorize rollback. Restoring production to a prior checkpoint remains a separately governed operation requiring the applicable identity, approval, impact review, and post-restore verification. Newer audit/evidence history must not be erased merely because production code or configuration is reverted.
+
+## Production acceptance — 2026-09-27
+
+The first Last Known Compliant checkpoint was promoted successfully after fresh verification of the current governed production state.
+
+- checkpoint: `ccc-20260927T110333Z-83e3f6f59565`;
+- certified source revision: `83e3f6f59565ae8240428d0e359ac82531b18a64`;
+- live runtime revision: `d2aff802be2a052019d25759a5218e5b4a12f622`;
+- recovery package: `/home/al/Jason-Recovery/CCC/vccc-20260927T110333Z-83e3f6f59565`;
+- checkpoint directory: `/home/al/Jason-Evidence/CCC/ccc-20260927T110333Z-83e3f6f59565`;
+- pointer: `/home/al/Jason-Evidence/CCC/last-known-compliant.json`;
+- offline restore validation: PASS;
+- recovery-package SHA-256 verification: PASS for bundle, source archive, environment record, and release manifest;
+- System Registry validation: `valid`;
+- systemd failed units: `0`;
+- Prometheus targets: `11/11 up`;
+- Central Orchestrator authoritative and `direct_provider_access=false`;
+- governed provider read smokes: PASS for Autotask, Datto RMM, Datto EDR, DNSFilter, Backup.net, Kyocera KFS, Microsoft Graph, and System Registry.
+
+An earlier seed attempt correctly failed closed because the historical J-900 restore validator referenced retired `tools/assemble_docs.py`. PR #407 replaced that stale step with the current documentation-control validator; no compliant pointer was advanced until the repaired recovery package passed offline restore verification.
 
 ## Integration with recurring CCC
 
