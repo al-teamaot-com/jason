@@ -18,6 +18,10 @@ from .information_authorization import (
     InformationHandlingClass,
 )
 from .information_sensitivity import assess_sensitive_evidence
+from .provider_health_canary_policy import (
+    is_provider_health_canary_request,
+    provider_health_canary_output_is_empty,
+)
 from .provider_read_capability_catalog import (
     AUTOTASK_CAPABILITIES,
     AUTOTASK_PROVIDER,
@@ -266,7 +270,23 @@ class AutotaskImpersonationInformationAuthorizer:
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
-            if _jason_managed_requester_authorization_proven(
+            if (
+                is_provider_health_canary_request(
+                    request=request,
+                    capability_name=resolution.capability_name,
+                )
+                and provider_health_canary_output_is_empty(
+                    output=invocation.output,
+                )
+            ):
+                basis = (
+                    "jason_managed",
+                    "provider_health_canary_v1",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    "synthetic_empty_result_only",
+                )
+            elif _jason_managed_requester_authorization_proven(
                 request=request,
                 bindings=self.bindings,
             ):

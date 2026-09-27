@@ -15,6 +15,10 @@ from .information_authorization import (
     InformationRemediation,
 )
 from .information_sensitivity import assess_sensitive_evidence
+from .provider_health_canary_policy import (
+    is_provider_health_canary_request,
+    provider_health_canary_output_is_empty,
+)
 from .provider_read_capability_catalog import (
     DOCUMENTATION_DOCUMENT_READ,
     DOCUMENTATION_ATTACHMENT_SEARCH,
@@ -567,6 +571,31 @@ class ProviderReadInformationAuthorizingInvoker:
                     resource_type="document-search",
                     reason_code="IT_GLUE_DOCUMENT_SEARCH_SOURCE_AUTHORIZATION_UNVERIFIED",
                 )
+        elif (
+            provider_id == IT_GLUE_PROVIDER
+            and resolution.capability_name == DOCUMENTATION_ORGANIZATION_SEARCH
+            and is_provider_health_canary_request(
+                request=request,
+                capability_name=resolution.capability_name,
+            )
+            and provider_health_canary_output_is_empty(
+                output=invocation.output,
+            )
+        ):
+            raw_output = dict(invocation.output)
+            authorization = _authorized_envelope(
+                provider_id=IT_GLUE_PROVIDER,
+                resource_type=resolution.capability_name,
+                handling_class=InformationHandlingClass.RELEASABLE,
+                basis=(
+                    SourceAuthorizationMode.JASON_MANAGED.value,
+                    "provider_health_canary_v1",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    "synthetic_empty_result_only",
+                ),
+            )
+            output = raw_output
         elif (
             provider_id == IT_GLUE_PROVIDER
             and resolution.capability_name in IT_GLUE_CAPABILITIES

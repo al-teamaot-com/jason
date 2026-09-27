@@ -182,3 +182,21 @@ The existing Command Center, usage, and authority dashboards remain useful and s
 ## Notification routing
 
 Prometheus alert rules are evaluated and displayed in Prometheus/Grafana. External notification delivery (Teams/email/page) is a separate operational change and should be added deliberately so that alert routing does not accidentally create an unauthorized action path.
+
+
+## Governed external-provider canaries
+
+Low-cadence provider canaries verify that Jason can complete a real observe-only read through the same identity authority, Central Orchestrator, canonical capability, connector, provider authentication, and information-release controls used by normal governed reads.
+
+The canary workload uses the dedicated service identity `jason-provider-canary` and policy `provider-health-canary-v1`. It has only exact observe grants for four synthetic empty-result reads:
+
+- Autotask: `service.company.search`
+- IT Glue: `documentation.organization.search`
+- Datto RMM: `endpoint.device.search`
+- Microsoft Graph: `identity.user.search`
+
+Each selector is the fixed synthetic value `__jason_provider_canary_nonexistent__`. Information release for the canary service identity is permitted only when the exact capability, exact synthetic selector, exact canary policy, observe-only authority context, and an empty provider result all match. Any returned real record fails closed.
+
+The MCP-contained runner discards provider evidence and emits only provider, canonical capability, health, latency, bounded error class, timestamp, and correlation ID. The host runner writes that sanitized report atomically to `/var/lib/jason/provider-health-canaries.json`. Prometheus reads only the sanitized report through the production-health exporter; Prometheus and the exporter never receive provider credentials or provider records.
+
+The systemd timer runs every fifteen minutes with randomized delay. `JasonProviderCanaryUnhealthy` distinguishes an external governed-read failure from local runtime/OpenBao health, while `JasonProviderCanaryReportStale` detects a missing or stale canary loop.

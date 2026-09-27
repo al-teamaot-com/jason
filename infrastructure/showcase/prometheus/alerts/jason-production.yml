@@ -152,6 +152,26 @@ groups:
           summary: Preserved pre-v4 MCP rollback container is unavailable
           description: No container matching the accepted pre-v4 rollback naming contract is present. Do not remove recovery assets automatically.
 
+      - alert: JasonProviderCanaryReportStale
+        expr: absent(jason_provider_canary_report_timestamp_seconds) or jason_provider_canary_report_timestamp_seconds == 0 or (time() - jason_provider_canary_report_timestamp_seconds) > 1800
+        for: 5m
+        labels:
+          severity: warning
+          service: jason-provider-canaries
+        annotations:
+          summary: Governed provider health canary report is missing or stale
+          description: The low-cadence end-to-end provider canary report has not refreshed within thirty minutes.
+
+      - alert: JasonProviderCanaryUnhealthy
+        expr: jason_provider_canary_health == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: jason-provider-canaries
+        annotations:
+          summary: Governed provider read canary is failing
+          description: One provider cannot complete its synthetic empty-result read through Jason identity, authority, Central Orchestrator, connector, and information-release controls.
+
       - alert: JasonRootDiskUsageHigh
         expr: 100 * (1 - node_filesystem_avail_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="jason-host",mountpoint="/",fstype!~"tmpfs|overlay"}) > 85
         for: 10m
