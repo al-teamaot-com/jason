@@ -188,6 +188,7 @@ class OperationalWork:
     component_uid: str | None = None
     repair_attempts: int = 0
     last_reason: str = ""
+    source_version: str | None = None
     updated_at: str = ""
 
 
@@ -208,6 +209,7 @@ class SQLiteOperationalWorkStore:
         component_uid TEXT,
         repair_attempts INTEGER NOT NULL DEFAULT 0,
         last_reason TEXT NOT NULL DEFAULT '',
+        source_version TEXT,
         updated_at TEXT NOT NULL
     );
     """
@@ -232,6 +234,10 @@ class SQLiteOperationalWorkStore:
             self._connection.execute(
                 "ALTER TABLE autonomy_operational_work "
                 "ADD COLUMN playbook_id TEXT NOT NULL DEFAULT 'datto_edr_av'"
+            )
+        if "source_version" not in columns:
+            self._connection.execute(
+                "ALTER TABLE autonomy_operational_work ADD COLUMN source_version TEXT"
             )
         os.chmod(self.path, 0o600)
 
@@ -258,8 +264,8 @@ class SQLiteOperationalWorkStore:
                 INSERT INTO autonomy_operational_work(
                     ticket_id,ticket_number,title,playbook_id,source_queue,company_id,
                     configuration_item_id,device_uid,hostname,phase,job_uid,
-                    component_uid,repair_attempts,last_reason,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    component_uid,repair_attempts,last_reason,source_version,updated_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(ticket_id) DO UPDATE SET
                     ticket_number=excluded.ticket_number,
                     title=excluded.title,
@@ -274,6 +280,7 @@ class SQLiteOperationalWorkStore:
                     component_uid=excluded.component_uid,
                     repair_attempts=excluded.repair_attempts,
                     last_reason=excluded.last_reason,
+                    source_version=excluded.source_version,
                     updated_at=excluded.updated_at
                 """,
                 (
@@ -291,8 +298,16 @@ class SQLiteOperationalWorkStore:
                     work.component_uid,
                     work.repair_attempts,
                     work.last_reason,
+                    work.source_version,
                     value,
                 ),
+            )
+
+    def delete(self, ticket_id: int) -> None:
+        with self._connection:
+            self._connection.execute(
+                "DELETE FROM autonomy_operational_work WHERE ticket_id=?",
+                (int(ticket_id),),
             )
 
     def close(self) -> None:
@@ -315,6 +330,7 @@ class SQLiteOperationalWorkStore:
             component_uid=row["component_uid"],
             repair_attempts=int(row["repair_attempts"]),
             last_reason=str(row["last_reason"]),
+            source_version=row["source_version"],
             updated_at=str(row["updated_at"]),
         )
 
@@ -447,10 +463,14 @@ class OperationalAutonomyMaintenance:
 
         eligible: list[tuple[Any, PlaybookScope]] = []
         for item in candidates:
-            if (
-                int(item.resource_id) in processed
-                or self.store.get(int(item.resource_id)) is not None
-            ):
+            ticket_id = int(item.resource_id)
+            existing = self.store.get(ticket_id)
+            if existing is not None and existing.phase in TERMINAL_PHASES:
+                observed_version = str(item.source_version or "").strip() or None
+                if observed_version and observed_version != existing.source_version:
+                    self.store.delete(ticket_id)
+                    existing = None
+            if ticket_id in processed or existing is not None:
                 continue
             scope = self._match_scope(item.context)
             if scope is None or not self._scope_is_promoted(scope):
@@ -662,6 +682,7 @@ class OperationalAutonomyMaintenance:
             device_uid=device_uid,
             hostname=hostname,
             phase="claim",
+            source_version=(str(candidate.source_version or "").strip() or None),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -2233,6 +2254,19 @@ class OperationalAutonomyMaintenance:
                     },
                 )
             return
+        # Missing/invalid ticket identity prerequisites outside Jason are not a
+        # durable failure. They can be corrected by normal PSA triage; keeping a
+        # terminal row would suppress reconsideration forever.
+        message = str(error).casefold()
+        if (
+            str(candidate.source_queue).strip().casefold() != "jason"
+            and (
+                "company id must be a positive integer" in message
+                or "configuration item id must be a positive integer" in message
+            )
+        ):
+            return
+
         ticket_id = int(candidate.resource_id)
         context = candidate.context
         ci_value = context.get("configurationItemID")
@@ -2252,6 +2286,7 @@ class OperationalAutonomyMaintenance:
             hostname="",
             phase="blocked",
             last_reason=str(error)[:500],
+            source_version=(str(candidate.source_version or "").strip() or None),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
         self.store.put(work)
@@ -2361,6 +2396,7 @@ class OperationalAutonomyMaintenance:
             "component_uid": work.component_uid,
             "repair_attempts": work.repair_attempts,
             "last_reason": work.last_reason,
+            "source_version": work.source_version,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         values.update(changes)
