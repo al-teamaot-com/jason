@@ -38,6 +38,8 @@ def _error_class(
     ).casefold()
     if status == "succeeded":
         return "none"
+    if status == "denied":
+        return "authority_denied"
     if "authority" in text or "no_matching_authority_grant" in text:
         return "authority_denied"
     if "information" in text or "request_access" in text:
