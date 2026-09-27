@@ -22,6 +22,7 @@ Those remain approval-gated by design.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -212,6 +213,15 @@ class SQLiteOperationalWorkStore:
         source_version TEXT,
         updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_note_state (
+        ticket_id INTEGER NOT NULL,
+        playbook_id TEXT NOT NULL,
+        note_title TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        documented_at TEXT NOT NULL,
+        PRIMARY KEY(ticket_id, playbook_id, note_title)
+    );
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -304,10 +314,50 @@ class SQLiteOperationalWorkStore:
             )
 
     def delete(self, ticket_id: int) -> None:
+        # Deliberately retain autonomy_ticket_note_state. A terminal work row may
+        # be reconsidered after provider/ticket evidence changes, but unchanged
+        # documentation must not be emitted again merely because the work row
+        # was reopened.
         with self._connection:
             self._connection.execute(
                 "DELETE FROM autonomy_operational_work WHERE ticket_id=?",
                 (int(ticket_id),),
+            )
+
+    def last_note_fingerprint(
+        self, ticket_id: int, playbook_id: str, note_title: str
+    ) -> str | None:
+        row = self._connection.execute(
+            "SELECT fingerprint FROM autonomy_ticket_note_state "
+            "WHERE ticket_id=? AND playbook_id=? AND note_title=?",
+            (int(ticket_id), str(playbook_id), str(note_title)),
+        ).fetchone()
+        return None if row is None else str(row["fingerprint"])
+
+    def remember_note_fingerprint(
+        self,
+        ticket_id: int,
+        playbook_id: str,
+        note_title: str,
+        fingerprint: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_note_state(
+                    ticket_id,playbook_id,note_title,fingerprint,documented_at
+                ) VALUES (?,?,?,?,?)
+                ON CONFLICT(ticket_id,playbook_id,note_title) DO UPDATE SET
+                    fingerprint=excluded.fingerprint,
+                    documented_at=excluded.documented_at
+                """,
+                (
+                    int(ticket_id),
+                    str(playbook_id),
+                    str(note_title),
+                    str(fingerprint),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
 
     def close(self) -> None:
@@ -2101,18 +2151,35 @@ class OperationalAutonomyMaintenance:
 
     def _complete(self, work: OperationalWork, stdout: str) -> None:
         summary = self._bounded_health_summary(stdout)
-        note = (
-            "Jason autonomous EDR/AV playbook completed. "
-            f"Endpoint {work.hostname} returned authoritative Status=Healthy"
-            + (" after one standing-safe repair attempt." if work.repair_attempts else ".")
-            + f" Verification: {summary}"
-        )
-        self._write_note(work, note, "Jason - Autonomous EDR/AV Resolution")
-        self.actions.execute(
+        update_output = self.actions.execute(
             EDR_SCOPE,
             "service.ticket.update",
             {"payload": {"id": work.ticket_id, "status": "Complete"}},
         )
+        update_data = self._action_data(update_output)
+        verification = update_data.get("jasonVerification")
+        if not isinstance(verification, Mapping):
+            raise OperationalAutonomyError(
+                "ticket completion returned no jasonVerification readback evidence"
+            )
+        verified_fields = verification.get("verifiedFields")
+        if (
+            verification.get("readbackVerified") is not True
+            or not isinstance(verified_fields, Sequence)
+            or isinstance(verified_fields, (str, bytes))
+            or "status" not in {str(value) for value in verified_fields}
+        ):
+            raise OperationalAutonomyError(
+                "ticket completion readback did not verify the requested status"
+            )
+
+        note = (
+            "Jason autonomous EDR/AV playbook completed. "
+            f"Endpoint {work.hostname} returned authoritative Status=Healthy"
+            + (" after one standing-safe repair attempt." if work.repair_attempts else ".")
+            + f" Verification: {summary}. Autotask terminal status readback verified."
+        )
+        self._write_note(work, note, "Jason - Autonomous EDR/AV Resolution")
         self.store.put(
             self._replace(
                 work,
@@ -2291,7 +2358,21 @@ class OperationalAutonomyMaintenance:
         )
         self.store.put(work)
 
-    def _write_note(self, work: OperationalWork, body: str, title: str) -> None:
+    def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
+        normalized_title = " ".join(str(title).split())
+        normalized_body = " ".join(str(body).split())
+        encoded = json.dumps(
+            {"title": normalized_title, "body": normalized_body},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        fingerprint = hashlib.sha256(encoded).hexdigest()
+        prior = self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, normalized_title
+        )
+        if prior == fingerprint:
+            return False
+
         self.actions.execute(
             self._scope_for_work(work),
             "service.ticket.note.create",
@@ -2305,6 +2386,10 @@ class OperationalAutonomyMaintenance:
                 }
             },
         )
+        self.store.remember_note_fingerprint(
+            work.ticket_id, work.playbook_id, normalized_title, fingerprint
+        )
+        return True
 
     def _read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         result = self.reads.execute(capability, arguments)
