@@ -10,7 +10,7 @@
 - **Jason fundamentals:** `docs/control/JASON-FUNDAMENTALS.md`
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
-- **Production/runtime boundary:** live runtime/MCP must be verified from container source labels, health, activation profiles, and governance status before consequential change.
+- **Production/runtime boundary:** use `docs/control/AUTOMATED-CHANGE-STATE.json` / generated `AUTOMATED-CHANGE-STATE.md` for the latest reconciled validated-source and production-alignment evidence, then verify live runtime/MCP directly before consequential change. Source-validation success is not production proof.
 - **Next safe actions:** constitutional certification remediation is complete. All nineteen J-002 articles are PROVEN on authoritative `main`; #175/#176 are closed; Article XIX and production-equivalent MCP certification are proven; ADR-011 is canonical. Resume normal roadmap work, but re-run constitutional certification after any material constitutional architecture, authority, identity, provider-boundary, recovery, or production-topology change. Certification is evidence tied to reviewed state, not a permanent waiver for future changes.
 
 ## Current production state
@@ -93,9 +93,9 @@ Security/posture metrics must not contain secrets, raw auth context, client name
 
 ## Current source boundary
 
-The production MCP acceptance checkpoint is `d3bdf0ced712e6602a46b14ddbaa6e83a139ebc6`, including the first autonomous-write acceptance fixes and provider-envelope verification. Canonical `main` may advance beyond this checkpoint; verify live container source labels before consequential change.
+Latest machine-reconciled source-validation and production-alignment evidence is maintained in `docs/control/AUTOMATED-CHANGE-STATE.json` with generated view `docs/control/AUTOMATED-CHANGE-STATE.md`. Do not duplicate mutable runtime/source hashes here.
 
-**Before consequential change:** verify live container source labels, health, activation profiles, and governance status directly; do not treat this file alone as volatile runtime proof.
+**Before consequential change:** use the generated state as a discovery aid, then verify live container source labels, health, activation profiles, governance status, and immutable release directly.
 
 ## Open follow-up work
 

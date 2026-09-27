@@ -11,6 +11,7 @@ nav:
   - Documentation Control:
       - Jason Fundamentals: control/JASON-FUNDAMENTALS.md
       - Current Resume Point: control/CURRENT.md
+      - Automated Change State: control/AUTOMATED-CHANGE-STATE.md
       - Extension Construction Map: control/EXTENSION-CONSTRUCTION-MAP.md
       - Documentation Register: control/DOCUMENTATION-REGISTER.md
       - Documentation Migration Issues: control/DOCUMENTATION-MIGRATION-ISSUES.md

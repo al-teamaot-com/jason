@@ -69,6 +69,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'pgrep -u al -f "$script_name"' in text
     assert 'developer checkout dependency remains in $unit' in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
+    assert 'publish_documentation_reconciliation.sh' in text
+    assert 'POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS' in text
+    assert 'production succeeded but documentation reconciliation publication failed' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:

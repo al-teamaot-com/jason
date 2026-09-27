@@ -178,3 +178,19 @@ echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
+
+DOC_PUBLISHER="$RELEASE_DIR/tools/publish_documentation_reconciliation.sh"
+if [ ! -x "$DOC_PUBLISHER" ]; then
+  echo "ERROR: post-success documentation publisher is missing: $DOC_PUBLISHER" >&2
+  exit 8
+fi
+if ! runuser -u al -- env \
+  HOME=/home/al \
+  PATH=/usr/local/bin:/usr/bin:/bin \
+  JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason \
+  JASON_DOCUMENTATION_WORKTREE_ROOT=/home/al/jason-worktrees \
+  bash "$DOC_PUBLISHER" production "$SOURCE_REVISION"; then
+  echo "ERROR: production succeeded but documentation reconciliation publication failed" >&2
+  exit 8
+fi
+echo "POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS"

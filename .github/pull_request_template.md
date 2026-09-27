@@ -37,8 +37,26 @@ Provide the commands and results.
 
 Describe rollback, data preservation, custom-code justification, review interval, and retirement criteria.
 
-## Documentation and decisions
+## Documentation impact
+
+Select exactly one outcome:
 
 - [ ] Documentation updated
+- [ ] No documentation impact
+
+No-documentation-impact reason: Not applicable when documentation was updated.
+
+Impact areas reviewed:
+
+- [ ] Architecture / standards / ADRs
+- [ ] Component / capability / provider contracts
+- [ ] Reusable construction guidance
+- [ ] System Registry
+- [ ] Operations / runbooks
+- [ ] Proof / session evidence
+- [ ] Current resume point
+
+## Documentation and decisions
+
 - [ ] ADR added or updated when an enduring decision changed
 - [ ] J-402 Definition of Done reviewed when capability maturity changed

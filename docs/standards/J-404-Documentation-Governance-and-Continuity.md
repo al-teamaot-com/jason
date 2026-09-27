@@ -275,6 +275,10 @@ The determination shall consider at minimum:
 
 "No documentation impact" is permitted only as an explicit reviewed conclusion. It must not be the accidental default caused by forgetting documentation.
 
+CI shall reject pull requests that omit the explicit documentation-impact outcome. Successful source validation may update machine-owned generated documentation state, but generated state is derived evidence only and cannot substitute for required authoritative narrative documentation.
+
+A production deployment shall not be documented merely because source CI passed. Production state may be generated only after bounded live verification proves the intended revision is active and healthy across the declared deployment boundary. The generated production record must fail closed on revision, health, immutable-release, or required-service mismatch.
+
 ## 17. Definition of documentation complete
 
 A material change is not documentation-complete until:
@@ -285,6 +289,7 @@ A material change is not documentation-complete until:
 - its operational-state implications are reflected in the System Registry when applicable;
 - its durable proof or decision record exists when needed;
 - `docs/control/CURRENT.md` is updated if the resume point changed;
+- generated validated-source / production-alignment state is reconciled after successful material source or production delivery;
 - navigation/indexes locate the authoritative material;
 - implementation-local documentation is indexed when material;
 - superseded or conflicting documentation is retired, redirected, or explicitly classified; and

@@ -13,6 +13,8 @@ REQUIRED_FILES = (
     "docs/index.md",
     "docs/control/JASON-FUNDAMENTALS.md",
     "docs/control/CURRENT.md",
+    "docs/control/AUTOMATED-CHANGE-STATE.json",
+    "docs/control/AUTOMATED-CHANGE-STATE.md",
     "docs/control/EXTENSION-CONSTRUCTION-MAP.md",
     "docs/control/DOCUMENTATION-REGISTER.md",
     "docs/control/DOCUMENTATION-MIGRATION-ISSUES.md",
@@ -232,6 +234,7 @@ def main() -> int:
             "Last durable success",
             "Next safe actions",
             "Production/runtime boundary",
+            "AUTOMATED-CHANGE-STATE.json",
         ),
         "CURRENT.md",
     )

@@ -1,0 +1,53 @@
+name: Documentation Reconciliation
+
+on:
+  workflow_run:
+    workflows: ["Validate Jason"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  reconcile-successful-main-change:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Skip documentation-only merges
+        id: material
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha='${{ github.event.workflow_run.head_sha }}'
+          git fetch origin "$sha" --depth=2
+          parent="${sha}^1"
+          changed="$(git diff --name-only "$parent" "$sha")"
+          printf '%s\n' "$changed"
+          material="$(printf '%s\n' "$changed" | grep -Ev '^(docs/|\.github/)' || true)"
+          if [ -n "$material" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish generated source-success documentation
+        if: steps.material.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JASON_DOCUMENTATION_REPO_ROOT: ${{ github.workspace }}
+          JASON_DOCUMENTATION_WORKTREE_ROOT: ${{ runner.temp }}/jason-documentation-worktrees
+        run: >-
+          bash tools/publish_documentation_reconciliation.sh
+          source
+          '${{ github.event.workflow_run.head_sha }}'
+          '${{ github.event.workflow_run.id }}'
+          '${{ github.event.workflow_run.html_url }}'
