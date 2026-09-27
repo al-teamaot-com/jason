@@ -332,9 +332,10 @@ class RuntimeSettings:
     resolution_memory_db: Path = Path(
         "/var/lib/jason/openclaw/resolution-memory.sqlite3"
     )
-    reflection_db: Path = Path(
-        "/var/lib/jason/openclaw/reflection.sqlite3"
-    )
+    # When omitted by tests/custom composition, colocate reflection with the
+    # configured orchestration event store. from_env() still supplies the
+    # explicit production path under /var/lib/jason/openclaw.
+    reflection_db: Path | None = None
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
@@ -1442,7 +1443,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         service=resolution_memory_service
     )
 
-    reflection_store = SQLiteReflectionStore(settings.reflection_db)
+    reflection_db = settings.reflection_db or settings.orchestration_events_db.with_name(
+        "reflection.sqlite3"
+    )
+    reflection_store = SQLiteReflectionStore(reflection_db)
     reflection_service = ReflectionService(reflection_store)
     reflection_invoker = GovernedReflectionCapabilityInvoker(
         service=reflection_service
