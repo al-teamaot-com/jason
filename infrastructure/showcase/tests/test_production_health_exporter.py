@@ -16,6 +16,10 @@ def load_exporter():
 
 
 def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contract(monkeypatch):
+    monkeypatch.setenv(
+        "JASON_EXPECTED_MCP_SOURCE_REVISION",
+        "0123456789abcdef0123456789abcdef01234567",
+    )
     module = load_exporter()
 
     runtime = {
