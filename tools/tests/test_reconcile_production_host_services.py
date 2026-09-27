@@ -20,10 +20,12 @@ EXPORTER_UNITS = (
 MAINTENANCE_UNITS = (
     "jason-delegation-maintenance.service",
     "jason-openclaw-authority-health.service",
+    "jason-documentation-reconciliation.service",
 )
 MAINTENANCE_TIMERS = (
     "jason-delegation-maintenance.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-documentation-reconciliation.timer",
 )
 OBSOLETE_UNITS = (
     "jason-communication-template-exporter.service",

@@ -11,6 +11,7 @@
 - **Extension construction map:** `docs/control/EXTENSION-CONSTRUCTION-MAP.md`
 - **Last durable success:** 2026-09-25 first governed autonomous provider write accepted in production; see `docs/sessions/Jason-Autonomous-Execution-Production-Acceptance-2026-09-25.md`.
 - **Production/runtime boundary:** use `docs/control/AUTOMATED-CHANGE-STATE.json` / generated `AUTOMATED-CHANGE-STATE.md` for the latest reconciled validated-source and production-alignment evidence, then verify live runtime/MCP directly before consequential change. Source-validation success is not production proof.
+- **Documentation continuity:** `jason-documentation-reconciliation.timer` polls successful `Validate Jason` runs on `main`, publishes generated-state PRs through Jason's authenticated GitHub identity, and merges only after the expected protected workflow set is green. Production host reconciliation also publishes production-alignment state after live runtime/MCP/release verification.
 - **Next safe actions:** constitutional certification remediation is complete. All nineteen J-002 articles are PROVEN on authoritative `main`; #175/#176 are closed; Article XIX and production-equivalent MCP certification are proven; ADR-011 is canonical. Resume normal roadmap work, but re-run constitutional certification after any material constitutional architecture, authority, identity, provider-boundary, recovery, or production-topology change. Certification is evidence tied to reviewed state, not a permanent waiver for future changes.
 
 ## Current production state

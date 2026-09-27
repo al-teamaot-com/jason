@@ -275,7 +275,7 @@ The determination shall consider at minimum:
 
 "No documentation impact" is permitted only as an explicit reviewed conclusion. It must not be the accidental default caused by forgetting documentation.
 
-CI shall reject pull requests that omit the explicit documentation-impact outcome. Successful source validation may update machine-owned generated documentation state, but generated state is derived evidence only and cannot substitute for required authoritative narrative documentation.
+CI shall reject pull requests that omit the explicit documentation-impact outcome. Successful source validation may update machine-owned generated documentation state through the governed host reconciliation timer, but generated state is derived evidence only and cannot substitute for required authoritative narrative documentation.
 
 A production deployment shall not be documented merely because source CI passed. Production state may be generated only after bounded live verification proves the intended revision is active and healthy across the declared deployment boundary. The generated production record must fail closed on revision, health, immutable-release, or required-service mismatch.
 

@@ -34,6 +34,8 @@ else
 fi
 
 cd "$WORKTREE"
+git config user.name "Project Jason Documentation Automation"
+git config user.email "jason@teamaot.com"
 ARGS=("$MODE" --source-revision "$SOURCE_REVISION")
 if [ "$MODE" = "source" ]; then
   ARGS+=(--workflow-run-id "$WORKFLOW_RUN_ID" --workflow-url "$WORKFLOW_URL")
@@ -77,6 +79,5 @@ EOF
   PR_NUMBER="$(gh pr view "$PR_URL" --repo al-teamaot-com/jason --json number --jq '.number')"
 fi
 
-gh pr merge "$PR_NUMBER" --repo al-teamaot-com/jason --auto --merge >/dev/null
-echo "DOCUMENTATION_PUBLICATION=PR_AUTO_MERGE_ENABLED"
+echo "DOCUMENTATION_PUBLICATION=PR_OPEN"
 echo "DOCUMENTATION_PR=$PR_NUMBER"
