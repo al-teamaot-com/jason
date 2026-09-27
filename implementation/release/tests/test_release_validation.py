@@ -35,7 +35,7 @@ def test_validation_step_order_is_deterministic(tmp_path: Path) -> None:
         "git-clean",
         "kernel-tests",
         "cap-001-tests",
-        "assemble-docs",
+        "documentation-control",
         "strict-docs",
         "whitespace",
     )
@@ -71,7 +71,7 @@ def test_successful_validation_returns_all_results(tmp_path: Path) -> None:
         "git-clean",
         "kernel-tests",
         "cap-001-tests",
-        "assemble-docs",
+        "documentation-control",
         "strict-docs",
         "whitespace",
     ]
