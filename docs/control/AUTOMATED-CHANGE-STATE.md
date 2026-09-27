@@ -1,7 +1,7 @@
 # Automated Change State
 
-**Status:** Generated; do not hand-edit  
-**Authority:** Derived evidence only; this file does not grant authority or replace governing architecture/runbooks.  
+**Status:** Generated; do not hand-edit
+**Authority:** Derived evidence only; this file does not grant authority or replace governing architecture/runbooks.
 **Canonical structured source:** `docs/control/AUTOMATED-CHANGE-STATE.json`
 
 This record is updated by Jason's post-success documentation reconciliation process. It deliberately separates validated source from production-deployed state.
