@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
 from typing import Type
 
 from .http import RuntimeHttpApplication
@@ -17,15 +18,26 @@ class JasonRuntimeHttpServer(HTTPServer):
 
     allow_reuse_address = True
 
-    def __init__(self, server_address, application: RuntimeHttpApplication):
+    def __init__(
+        self,
+        server_address,
+        application: RuntimeHttpApplication,
+        *,
+        maintenance_startup_grace_seconds: float = 30.0,
+        monotonic=time.monotonic,
+    ):
         self.application = application
+        self._monotonic = monotonic
+        self._maintenance_not_before = self._monotonic() + max(
+            0.0, float(maintenance_startup_grace_seconds)
+        )
         super().__init__(server_address, _handler_type(application))
 
     def service_actions(self) -> None:
         """Run bounded maintenance on the server's existing SQLite-owning thread."""
 
         maintenance = self.application.maintenance
-        if maintenance is None:
+        if maintenance is None or self._monotonic() < self._maintenance_not_before:
             return
         try:
             maintenance.tick()
@@ -75,7 +87,12 @@ def _handler_type(application: RuntimeHttpApplication) -> Type[BaseHTTPRequestHa
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                # Health clients and reverse proxies may disconnect after their own
+                # timeout. That is not a runtime failure and should not flood stderr.
+                return
 
         def log_message(self, format: str, *args) -> None:
             # Never log request bodies, authorization material, signatures, or Teams
