@@ -128,6 +128,122 @@ def candidate(title="[Monitor] Antivirus status issue"):
     )
 
 
+
+
+def _owned_device_candidate(*, status_label: str = "In Progress") -> QueueCandidate:
+    return QueueCandidate(
+        resource_id="140933",
+        priority=100,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 140933,
+            "ticketNumber": "T20260925.9999",
+            "title": "[Monitor] Antivirus status issue",
+            "companyID": 507,
+            "configurationItemID": 1583,
+            "_jason_source_status_label": status_label,
+        },
+    )
+
+
+class OfflineReads(Reads):
+    def execute(self, capability, arguments):
+        if capability == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "device-uid-1",
+                        "hostname": "PC-1",
+                        "online": False,
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+def test_owned_offline_ticket_moves_to_waiting_device_access_without_active_slot(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_device_candidate()),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is None
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "status": "Waiting Device Access"}]
+    store.close()
+
+
+def test_waiting_device_access_offline_is_idempotent(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_device_candidate(status_label="Waiting Device Access")),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_waiting_device_access_online_returns_to_in_progress_and_resumes(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_device_candidate(status_label="Waiting Device Access")),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.phase == "health_wait"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[0] == {
+        "id": 140933,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+    store.close()
+
+
 def test_health_only_edr_ticket_is_admitted_but_threat_ticket_is_not():
     assert OperationalAutonomyMaintenance._is_health_only_edr_ticket(
         candidate().context
@@ -1170,7 +1286,7 @@ def test_backupiq_requires_separate_promotion(tmp_path: Path):
     store.close()
 
 
-def test_backupiq_offline_endpoint_is_classified_without_reinstall(tmp_path: Path):
+def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_path: Path):
     class BackupReads(Reads):
         def execute(self, capability, arguments):
             if capability == "service.configuration.read":
@@ -1200,29 +1316,6 @@ def test_backupiq_offline_endpoint_is_classified_without_reinstall(tmp_path: Pat
                         }
                     },
                 }
-            if capability == "backup.endpoint.asset.search":
-                return {
-                    "status": "succeeded",
-                    "evidence": {
-                        "data": {
-                            "items": [
-                                {
-                                    "id": "HYCDTGV8G",
-                                    "name": "APD-50399",
-                                    "status": "offline",
-                                    "backupEnabled": True,
-                                    "lastSuccessfulBackupTimestamp": "2026-09-22T06:10:03.505Z",
-                                    "lastOnlineTimestamp": "2026-09-26T11:14:07.930834Z",
-                                }
-                            ]
-                        }
-                    },
-                }
-            if capability == "backup.backupiq.alert.search":
-                return {
-                    "status": "succeeded",
-                    "evidence": {"data": {"items": []}},
-                }
             return super().execute(capability, arguments)
 
     actions = Actions()
@@ -1249,40 +1342,25 @@ def test_backupiq_offline_endpoint_is_classified_without_reinstall(tmp_path: Pat
 
     worker.tick()
 
-    final = store.get(141185)
-    assert final is not None
-    assert final.playbook_id == "backupiq_endpoint_backup"
-    assert final.phase == "escalated"
-    assert "inactive/offline endpoint" in final.last_reason
-
+    assert store.get(141185) is None
     component_calls = [
         args
         for _, capability, args in actions.calls
         if capability == "automation.component.execute"
     ]
     assert component_calls == []
-
+    note_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert note_calls == []
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [{
-        "id": 141185,
-        "queueID": "Jason",
-        "status": "In Progress",
-        "billingCodeID": "Remote Support",
-    }]
-
-    note_calls = [
-        args["payload"]
-        for _, capability, args in actions.calls
-        if capability == "service.ticket.note.create"
-    ]
-    assert len(note_calls) == 1
-    body = note_calls[0]["description"]
-    assert "Classification=inactive_or_offline_device" in body
-    assert "did not reinstall" in body
+    assert update_calls == [{"id": 141185, "status": "Waiting Device Access"}]
     store.close()
 
 
@@ -1516,7 +1594,7 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
                         "record": {
                             "resource_id": "vul-device-1",
                             "hostname": "GAI-DT2850",
-                            "online": False,
+                            "online": True,
                             "reboot_required": True,
                         }
                     },
@@ -1591,6 +1669,81 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     assert "KB5124008=NOT_APPROVED" in body
     assert "KB5126052=NOT_APPROVED" in body
     assert "No patch approval" in body
+    store.close()
+
+
+def test_vulscan_offline_endpoint_waits_for_device_access(tmp_path: Path):
+    class OfflineVulscanReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 68,
+                                "companyID": 597,
+                                "isActive": True,
+                                "referenceNumber": "vul-device-1",
+                                "referenceTitle": "GAI-DT2850",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "vul-device-1",
+                            "hostname": "GAI-DT2850",
+                            "online": False,
+                            "reboot_required": True,
+                        }
+                    },
+                }
+            if capability == "endpoint.patch.search":
+                raise AssertionError("offline admission must not query patch state")
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=OfflineVulscanReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=(
+                "datto_edr_av",
+                "dns_agent_diagnostic",
+                "security_log_self_heal",
+                "post_error_investigation",
+                "unexpected_shutdown",
+                "backupiq_endpoint_backup",
+                "low_disk_space",
+                "vulscan_missing_patch",
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(141183) is None
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [{"id": 141183, "status": "Waiting Device Access"}]
+    assert not [
+        args
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
     store.close()
 
 

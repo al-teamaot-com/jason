@@ -37,6 +37,7 @@ class AutotaskQueueDiscoveryConfig:
         "Updated by Email - Client",
         "Updated by AOT",
         "Emergency",
+        "Waiting Device Access",
     )
     discovery_status_labels: tuple[str, ...] = ("New", "Emergency")
     page_size: int = 100
@@ -126,6 +127,8 @@ class AutotaskQueueSource:
                     priority_id in self._critical_priority_ids
                     or status_label.strip().casefold() == "emergency"
                 )
+                context = dict(ticket)
+                context["_jason_source_status_label"] = status_label
                 candidate = QueueCandidate(
                     resource_id=str(ticket_id),
                     priority=priority_score,
@@ -133,7 +136,7 @@ class AutotaskQueueSource:
                     owned_by_jason=(owned or self._assigned_resource_id(ticket.get("assignedResourceID")) in self.config.owned_resource_ids),
                     urgent=urgent,
                     source_version=source_version,
-                    context=dict(ticket),
+                    context=context,
                 )
                 prior = candidates.get(candidate.resource_id)
                 if prior is None or candidate.priority > prior.priority:

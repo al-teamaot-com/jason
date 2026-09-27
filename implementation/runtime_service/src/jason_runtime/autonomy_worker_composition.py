@@ -77,6 +77,7 @@ def build_autonomy_worker_maintenance(
                 "Updated by Email - Client",
                 "Updated by AOT",
                 "Emergency",
+                "Waiting Device Access",
             ),
             discovery_status_labels=("New", "Emergency"),
             owned_resource_ids=tuple(owned_autotask_resource_ids),
