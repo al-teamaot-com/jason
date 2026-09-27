@@ -238,3 +238,44 @@ def test_missing_components_fail_closed(monkeypatch):
     assert "jason_datto_governed_execution_contract 0" in metrics
     assert "jason_root_filesystem_writable -1" in metrics
     assert "jason_mcp_rollback_available 0" in metrics
+
+
+def test_datto_contract_allows_additional_governed_components() -> None:
+    module = load_exporter()
+    actual_components = module.EXPECTED_DATTO_COMPONENTS_JSON[:-1] + (
+        ',{"uid":"extra-component","name":"Additional Governed Diagnostic",'
+        '"approval_mode":"per_run"}]'
+    )
+    mcp = {
+        "State": {"Running": True},
+        "Config": {
+            "Image": module.EXPECTED_MCP_IMAGE,
+            "Env": [
+                f"JASON_SOURCE_REVISION={module.EXPECTED_SOURCE_REVISION}",
+                f"JASON_PROVIDER_READ_ACTIVATION_PROFILE={module.EXPECTED_PROVIDER_PROFILE}",
+                f"JASON_AUTOTASK_REQUESTER_AUTH_MODE={module.EXPECTED_AUTOTASK_MODE}",
+                f"JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE={module.EXPECTED_DATTO_EXECUTION_PROFILE}",
+                f"JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME={module.EXPECTED_DATTO_ALLOWLIST}",
+                f"JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON={actual_components}",
+                f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_UID={module.EXPECTED_DATTO_DEVICE_UID}",
+                f"JASON_DATTO_COMPONENT_EXECUTION_DEVICE_CLASS={module.EXPECTED_DATTO_DEVICE_CLASS}",
+            ],
+        },
+        "HostConfig": {
+            "NetworkMode": module.EXPECTED_MCP_NETWORK,
+            "RestartPolicy": {"Name": module.EXPECTED_MCP_RESTART_POLICY},
+            "PortBindings": {
+                "8000/tcp": [{
+                    "HostIp": module.EXPECTED_MCP_HOST_IP,
+                    "HostPort": module.EXPECTED_MCP_HOST_PORT,
+                }]
+            },
+        },
+        "Mounts": [
+            {"Type": "bind", "RW": False, "Destination": destination}
+            for destination in module.REQUIRED_SECRET_MOUNTS
+        ],
+    }
+
+    checks, _, _, _ = module._mcp_contract(mcp)
+    assert checks["datto_execution_scope"] == 1
