@@ -12,21 +12,21 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 HOST = os.environ.get("JASON_PRODUCTION_HEALTH_HOST", "0.0.0.0")
 PORT = int(os.environ.get("JASON_PRODUCTION_HEALTH_PORT", "9467"))
 
-EXPECTED_MCP_IMAGE = os.environ.get(
-    "JASON_EXPECTED_MCP_IMAGE",
-    "jason-mcp:generic-governed-26704f0600bb",
+EXPECTED_MCP_IMAGE_PREFIX = os.environ.get(
+    "JASON_EXPECTED_MCP_IMAGE_PREFIX",
+    "jason-mcp:",
 )
 EXPECTED_SOURCE_REVISION = os.environ.get(
     "JASON_EXPECTED_MCP_SOURCE_REVISION",
-    "26704f0600bbc6c48c790c9b9ff501a3b5ec3aad",
-)
+    "",
+).strip()
 EXPECTED_PROVIDER_PROFILE = os.environ.get(
     "JASON_EXPECTED_PROVIDER_PROFILE",
-    "itglue-autotask-entra-governed-catalog-v4",
+    "itglue-autotask-entra-procurement-mail-contract-attachment-resource-catalog-v9",
 )
 EXPECTED_AUTOTASK_MODE = os.environ.get(
     "JASON_EXPECTED_AUTOTASK_REQUESTER_MODE",
-    "impersonated",
+    "jason_managed",
 )
 EXPECTED_DATTO_EXECUTION_PROFILE = os.environ.get(
     "JASON_EXPECTED_DATTO_EXECUTION_PROFILE",
@@ -63,7 +63,7 @@ EXPECTED_DATTO_SITE_VARIABLE_PROFILE = os.environ.get(
 EXPECTED_MCP_NETWORK = "jason-core"
 EXPECTED_MCP_HOST_IP = "10.87.246.157"
 EXPECTED_MCP_HOST_PORT = "8765"
-EXPECTED_MCP_RESTART_POLICY = "no"
+EXPECTED_MCP_RESTART_POLICY = "unless-stopped"
 
 WATCHED_ENV_KEYS = (
     "JASON_SOURCE_REVISION",
@@ -255,9 +255,21 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
     duplicates = {key: max(0, len(values) - 1) for key, values in env.items()}
 
     image_ref = str(config.get("Image") or "")
+    labels = config.get("Labels") if isinstance(config.get("Labels"), dict) else {}
+    image_revision = str(
+        labels.get("com.teamaot.jason.source_revision")
+        or labels.get("org.opencontainers.image.revision")
+        or ""
+    ).strip()
+    image_ok = (
+        bool(EXPECTED_SOURCE_REVISION)
+        and image_ref.startswith(EXPECTED_MCP_IMAGE_PREFIX)
+        and image_revision == EXPECTED_SOURCE_REVISION
+    )
     source_ok = (
-        EXPECTED_SOURCE_REVISION in env["JASON_SOURCE_REVISION"]
-        or EXPECTED_SOURCE_REVISION[:12] in image_ref
+        bool(EXPECTED_SOURCE_REVISION)
+        and EXPECTED_SOURCE_REVISION in env["JASON_SOURCE_REVISION"]
+        and image_revision == EXPECTED_SOURCE_REVISION
     )
 
     ports = host_config.get("PortBindings") if isinstance(host_config.get("PortBindings"), dict) else {}
@@ -321,7 +333,7 @@ def _mcp_contract(mcp: dict) -> tuple[dict[str, int], dict[str, int], int, int]:
 
     checks = {
         "running": 1 if _container_running(mcp) else 0,
-        "image": 1 if image_ref == EXPECTED_MCP_IMAGE else 0,
+        "image": 1 if image_ok else 0,
         "source_revision": 1 if source_ok else 0,
         "provider_profile": 1 if EXPECTED_PROVIDER_PROFILE in env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] else 0,
         "autotask_requester_mode": 1 if EXPECTED_AUTOTASK_MODE in env["JASON_AUTOTASK_REQUESTER_AUTH_MODE"] else 0,
@@ -433,7 +445,7 @@ def render_metrics() -> str:
         "# TYPE jason_production_expected_info gauge",
         (
             'jason_production_expected_info{image="'
-            + _metric_escape(EXPECTED_MCP_IMAGE)
+            + _metric_escape(EXPECTED_MCP_IMAGE_PREFIX + "<revision-bound>")
             + '",source_revision="'
             + _metric_escape(EXPECTED_SOURCE_REVISION)
             + '",provider_profile="'

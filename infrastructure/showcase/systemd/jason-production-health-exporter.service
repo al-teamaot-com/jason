@@ -12,8 +12,10 @@ WorkingDirectory=/opt/jason/current
 Environment=JASON_REPO_ROOT=/opt/jason/current
 Environment=JASON_PRODUCTION_HEALTH_HOST=0.0.0.0
 Environment=JASON_PRODUCTION_HEALTH_PORT=9467
-Environment=JASON_EXPECTED_MCP_IMAGE=jason-mcp:generic-governed-26704f0600bb
-Environment=JASON_EXPECTED_MCP_SOURCE_REVISION=26704f0600bbc6c48c790c9b9ff501a3b5ec3aad
+Environment=JASON_EXPECTED_MCP_IMAGE_PREFIX=jason-mcp:
+Environment=JASON_EXPECTED_PROVIDER_PROFILE=itglue-autotask-entra-procurement-mail-contract-attachment-resource-catalog-v9
+Environment=JASON_EXPECTED_AUTOTASK_REQUESTER_MODE=jason_managed
+EnvironmentFile=-/var/lib/jason/production-health.env
 ExecStart=/usr/bin/python3 /opt/jason/current/infrastructure/showcase/production_health_exporter.py
 Restart=on-failure
 RestartSec=5
