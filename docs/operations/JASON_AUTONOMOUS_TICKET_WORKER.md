@@ -134,7 +134,7 @@ For a newly discovered eligible ticket:
 
 A ticket can instead transition to waiting, blocked, or escalation states. Offline-at-admission is treated as transient and is not persisted as a permanent block. The ticket is reconsidered when later queue reconciliation sees the endpoint online.
 
-Tickets already in the Jason queue remain eligible for resume/reconciliation under the same gates.
+Tickets already in the Jason queue remain eligible for resume/reconciliation under the same gates. **Waiting Device Access** is part of that owned status set. If exact CI/DRMM identity is proven and the endpoint is offline, the worker automatically sets **Waiting Device Access** once and does not consume an active-work slot. When the same endpoint is later proven online, the normal claim lifecycle returns the ticket to **In Progress** and resumes work. Tickets outside the Jason queue are not status-mutated merely because a pre-claim availability check finds them offline.
 
 ## Safety and verification model
 

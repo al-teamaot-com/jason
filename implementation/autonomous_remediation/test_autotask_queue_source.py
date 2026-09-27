@@ -32,6 +32,11 @@ class Reads:
                 {"id": 11, "priority": 4, "queueID": 100, "status": 8, "assignedResourceID": None,
                  "lastTrackedModificationDateTime": "2026-09-25T10:01:00Z", "title": "critical"},
             ]
+        if queue == 100 and status == "Waiting Device Access":
+            items = [
+                {"id": 12, "priority": 2, "queueID": 100, "status": 42, "assignedResourceID": None,
+                 "lastTrackedModificationDateTime": "2026-09-25T10:05:00Z", "title": "waiting device"},
+            ]
         if queue == 200 and status == "New":
             items = [
                 {"id": 20, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None,
@@ -116,3 +121,14 @@ def test_configured_jason_resource_assignment_is_eligible_outside_jason_queue():
     assert "22" in found
     assert found["22"].owned_by_jason is True
     assert found["22"].urgent is True
+
+
+def test_waiting_device_access_is_reconciled_as_owned_jason_work():
+    source = AutotaskQueueSource(
+        reads=Reads(),
+        config=config(owned_status_labels=("In Progress", "Waiting Device Access")),
+    )
+    found = {item.resource_id: item for item in source.reconcile_candidates()}
+    assert "12" in found
+    assert found["12"].owned_by_jason is True
+    assert found["12"].context["_jason_source_status_label"] == "Waiting Device Access"

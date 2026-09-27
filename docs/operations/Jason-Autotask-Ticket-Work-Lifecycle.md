@@ -15,7 +15,7 @@ Substantive work begins immediately before the first ticket-specific technical a
 
 The following are pre-work eligibility/triage and do **not** claim the ticket: queue scanning; reading the ticket; identifying the device; checking whether the endpoint is online; determining whether an applicable playbook/capability exists; associating a deterministically proven configuration item; classification; and proposing a troubleshooting plan.
 
-For an endpoint-related ticket, Jason must have affirmative current evidence that the target device is online before the claim transition. The MCP independently verifies this through the governed DRMM endpoint read path and does not trust a caller-supplied online flag as proof. If the endpoint is offline, suspended, deleted, unreadable, or ambiguous, Jason leaves the ticket in its current queue and may document/recheck the condition without claiming ownership.
+For an endpoint-related ticket, Jason must have affirmative current evidence that the target device is online before the claim transition. The MCP independently verifies this through the governed DRMM endpoint read path and does not trust a caller-supplied online flag as proof. If a ticket is not yet owned by Jason and the endpoint is offline, suspended, deleted, unreadable, or ambiguous, Jason leaves the ticket in its current queue and does not claim it. If the ticket is already in the **Jason** queue and exact CI-to-DRMM identity is proven but the endpoint is offline, Jason automatically sets **Waiting Device Access** and keeps the ticket outside the active-work concurrency count until access returns.
 
 A failed capability/eligibility check before the first substantive diagnostic does not claim the ticket. Missing capabilities are routed through Support/TODO intake as appropriate.
 
@@ -38,6 +38,23 @@ For the exact resolved Autotask ticket, immediately before the first substantive
 7. When classification is supplied, resolve the exact live Autotask picklist labels before update; never hard-code tenant picklist IDs.
 8. Require post-mutation readback for every field changed.
 9. Persist the pre-claim queue and status as trusted lifecycle state before the claim is considered complete.
+
+## Automatic device-access waiting state
+
+Temporary endpoint unavailability is a Jason-owned waiting condition, not a human handoff. For a device-bound ticket already in queue **Jason**, the autonomous queue worker must:
+
+1. resolve the exact active Autotask configuration item and its exact DRMM device UID;
+2. read the current DRMM endpoint state through the governed read path;
+3. when the exact endpoint is not online, set ticket status **Waiting Device Access** using the matched playbook's already-approved `service.ticket.update` authority;
+4. require normal post-write readback verification;
+5. do not create an active operational-work record or consume either active-work slot merely because the device is offline;
+6. include **Waiting Device Access** in subsequent Jason-queue reconciliation;
+7. avoid repeating the status write while the ticket is already **Waiting Device Access**; and
+8. when the endpoint later becomes online, use the normal claim transition to restore **In Progress** (and Remote Support where applicable) before resuming substantive diagnostics/remediation.
+
+This automatic transition applies only when the ticket is already Jason-owned and the matched playbook has exact durable standing authority for `service.ticket.update`. It does not create generic ticket-write authority, does not claim an offline ticket from Help Desk/Monitoring queues, and does not bypass any remediation or disruptive-action approval. Unmatched or unpromoted work fails closed and remains unchanged.
+
+**Waiting Device Access** is distinct from **Human Review**. Waiting for a device to reconnect remains Jason's responsibility and must not be routed to Help Desk I merely because the endpoint is temporarily inaccessible.
 
 ## Handoff and return-to-queue rule
 

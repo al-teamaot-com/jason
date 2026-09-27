@@ -648,13 +648,7 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
-        if (
-            endpoint.get("online") is not True
-            and scope.playbook_id not in {
-                BACKUPIQ_SCOPE.playbook_id,
-                VULSCAN_SCOPE.playbook_id,
-            }
-        ):
+        if endpoint.get("online") is not True:
             raise OperationalAutonomyError("endpoint is not currently online")
 
         return OperationalWork(
@@ -2214,9 +2208,30 @@ class OperationalAutonomyMaintenance:
     def _record_admission_failure(
         self, candidate, scope: PlaybookScope, error: Exception
     ) -> None:
-        # Offline is transient.  Do not claim or permanently suppress the ticket;
-        # simply let the next reconciliation re-evaluate endpoint availability.
+        # Offline is transient and must not consume an active-work slot. For a
+        # ticket already owned by Jason, reflect that state explicitly in
+        # Autotask exactly once. The queue source continues to reconcile
+        # Waiting Device Access tickets, so the normal claim path restores In
+        # Progress automatically as soon as the exact DRMM endpoint is online.
         if "endpoint is not currently online" in str(error).casefold():
+            status_label = str(
+                candidate.context.get("_jason_source_status_label") or ""
+            ).strip()
+            if (
+                str(candidate.source_queue).strip().casefold() == "jason"
+                and candidate.owned_by_jason
+                and status_label.casefold() != "waiting device access"
+            ):
+                self.actions.execute(
+                    scope,
+                    "service.ticket.update",
+                    {
+                        "payload": {
+                            "id": int(candidate.resource_id),
+                            "status": "Waiting Device Access",
+                        }
+                    },
+                )
             return
         ticket_id = int(candidate.resource_id)
         context = candidate.context
