@@ -53,6 +53,9 @@ if [ ! -f "$CONFIG_PATH" ]; then
 fi
 chown al:al /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 chmod 0700 /var/lib/jason/ccc
+mkdir -p /var/lib/jason/ccc/docker
+chown al:al /var/lib/jason/ccc/docker
+chmod 0700 /var/lib/jason/ccc/docker
 
 if [ -n "$MATERIAL_REVIEW_FILE" ]; then
   test -f "$MATERIAL_REVIEW_FILE" || { echo "ERROR: material review file not found: $MATERIAL_REVIEW_FILE" >&2; exit 5; }

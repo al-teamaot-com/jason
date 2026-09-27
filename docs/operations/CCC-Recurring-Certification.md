@@ -68,8 +68,8 @@ When a full CCC run is due, the runner verifies at minimum:
 - all nineteen J-002 certification matrix articles remain `PROVEN` and the final 100% certification decision remains present;
 - System Registry deterministic validation;
 - J-900 release validation including Kernel/CAP-001 tests, documentation-control validation, strict documentation build, and whitespace checks;
-- production-equivalent MCP constitutional certification suite;
-- zero failed systemd units;
+- production-equivalent MCP constitutional certification suite, with Docker/Buildx state isolated under `/var/lib/jason/ccc/docker`;
+- zero failed systemd units other than the currently executing `jason-ccc.service` itself; CCC cannot use its own transient prior failure as evidence against the host;
 - all configured Prometheus targets healthy;
 - current OpenClaw/JKD-001 operational health snapshot is `pass` and fresh;
 - `/opt/jason/current` resolves to the exact live MCP runtime revision;

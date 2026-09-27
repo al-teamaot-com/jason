@@ -94,12 +94,19 @@ def backup_restore_proof(source: Path) -> dict[str, object]:
         os.chmod(backup, 0o600)
         shutil.copy2(backup, restored)
         os.chmod(restored, 0o600)
+        live_counts = authority_counts(source)
+        backup_counts = authority_counts(backup)
+        restored_counts = authority_counts(restored)
         return {
             'backup_integrity': sqlite_integrity(backup),
             'restore_integrity': sqlite_integrity(restored),
             'backup_mode': mode(backup),
             'restore_mode': mode(restored),
-            'counts_match': authority_counts(source) == authority_counts(restored),
+            'counts_match': backup_counts == restored_counts,
+            'live_source_counts': live_counts,
+            'backup_counts': backup_counts,
+            'restored_counts': restored_counts,
+            'live_source_matches_snapshot_at_observation': live_counts == backup_counts,
         }
 
 
