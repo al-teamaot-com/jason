@@ -119,7 +119,7 @@ def test_general_read_only_pipeline_runs_through_exact_component(monkeypatch):
 def test_mutating_commands_never_reach_provider(monkeypatch, command):
     c = connector(monkeypatch)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(module.ConnectorAuthorizationError):
         c.execute(request(command))
 
     assert c._transport.calls == []
@@ -128,7 +128,7 @@ def test_mutating_commands_never_reach_provider(monkeypatch, command):
 def test_sensitive_read_never_reaches_provider(monkeypatch):
     c = connector(monkeypatch)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(module.ConnectorAuthorizationError):
         c.execute(request(r"Get-Item HKLM:\SAM"))
 
     assert c._transport.calls == []
@@ -137,7 +137,7 @@ def test_sensitive_read_never_reaches_provider(monkeypatch):
 def test_uncertain_command_never_reaches_provider(monkeypatch):
     c = connector(monkeypatch)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(module.ConnectorAuthorizationError):
         c.execute(request("Watch-Thing"))
 
     assert c._transport.calls == []
@@ -242,3 +242,64 @@ def test_runtime_foundation_stays_dormant_without_readonly_profile(monkeypatch):
 
     assert capability.lifecycle_status is CapabilityLifecycle.BUILDING
     assert provider.lifecycle_status is ProviderLifecycle.PLANNED
+
+
+def test_variable_assignment_denial_is_connector_authorization_error(monkeypatch):
+    c = connector(monkeypatch)
+    command = (
+        "$os=Get-CimInstance Win32_OperatingSystem; "
+        "$os | Select-Object Caption,Version"
+    )
+
+    with pytest.raises(
+        module.ConnectorAuthorizationError,
+        match="PowerShell command is mutating",
+    ):
+        c.execute(request(command))
+
+    assert c._transport.calls == []
+
+
+def test_completed_job_with_stderr_fails_as_command_error(monkeypatch):
+    class StderrTransport(Transport):
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+            if method == "GET" and url.endswith("/stderr"):
+                self.calls.append((method, url, json))
+                return [{
+                    "componentUid": DATTO_AD_HOC_POWERSHELL_UID,
+                    "stdData": "CommandNotFoundException: synthetic failure",
+                }]
+            return super().request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                json=json,
+                timeout_seconds=timeout_seconds,
+            )
+
+    monkeypatch.setattr(
+        module,
+        "acquire_access_token",
+        lambda credentials: DattoRmmAccessToken(access_token="token"),
+    )
+    audit = Audit()
+    c = module.DattoRmmPowerShellReadConnector(
+        secrets=Secrets(),
+        transport=StderrTransport(),
+        audit=audit,
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(
+        module.DattoPowerShellCommandError,
+        match="completed with command error output",
+    ) as exc:
+        c.execute(request("Get-Service"))
+
+    assert exc.value.error_code == "DATTO_POWERSHELL_COMMAND_FAILED"
+    assert any(
+        event == "connector.readonly_powershell.command_error"
+        and details["stderr_present"] is True
+        for event, details in audit.events
+    )

@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from connectors.core.contracts import (
     AuditSink,
     ConnectorAuthorizationError,
+    ConnectorError,
     ConnectorContext,
     ConnectorRequest,
     ConnectorResult,
@@ -78,6 +79,12 @@ class DattoPowerShellReadActivationError(RuntimeError):
 
 class DattoPowerShellReadVerificationError(RuntimeError):
     pass
+
+
+class DattoPowerShellCommandError(ConnectorError):
+    """The Datto job completed but PowerShell reported a command-level error."""
+
+    error_code = "DATTO_POWERSHELL_COMMAND_FAILED"
 
 
 def _capability_definition(*, now: datetime) -> CapabilityDefinition:
@@ -417,11 +424,17 @@ class DattoRmmPowerShellReadConnector:
             raise ConnectorAuthorizationError("command is required")
 
         requested_timeout = request.arguments.get("timeout_seconds", 30)
-        prepared = self._policy.prepare_command(
-            device_uid=device_uid,
-            command=command,
-            timeout_seconds=requested_timeout,
-        )
+        try:
+            prepared = self._policy.prepare_command(
+                device_uid=device_uid,
+                command=command,
+                timeout_seconds=requested_timeout,
+            )
+        except PermissionError as exc:
+            # Classifier denials are an intentional authorization boundary, not a
+            # connector/runtime failure. Preserve the safe reason so callers can
+            # reformulate the diagnostic without weakening the read-only policy.
+            raise ConnectorAuthorizationError(str(exc)) from exc
 
         credentials = dict(
             self._secrets.resolve(DATTO_RMM_EXECUTION_LOGICAL_SECRET, request.context)
@@ -567,6 +580,22 @@ class DattoRmmPowerShellReadConnector:
             stderr, stderr_bounded, stderr_matches = self._bounded_stream(
                 stderr_payload, stream="stderr"
             )
+            if stderr.strip():
+                self._audit.record(
+                    "connector.readonly_powershell.command_error",
+                    request.context,
+                    {
+                        "provider": self.provider_name,
+                        "device_uid_present": True,
+                        "job_uid_present": True,
+                        "job_status": final_status.casefold(),
+                        "stderr_present": True,
+                        "stderr_bounded": stderr_bounded,
+                    },
+                )
+                raise DattoPowerShellCommandError(
+                    "Read-only PowerShell job completed with command error output"
+                )
             self._audit.record(
                 "connector.readonly_powershell.completed",
                 request.context,
