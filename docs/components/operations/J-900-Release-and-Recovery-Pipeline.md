@@ -33,7 +33,7 @@ The pipeline reduces human memory requirements without weakening governance.
 
 The foundation provides four independently testable tools:
 
-- `tools/validate_release.py` — validates the worktree, Kernel tests, CAP-001 tests, documentation assembly, strict MkDocs build, and whitespace;
+- `tools/validate_release.py` — validates the worktree, Kernel tests, CAP-001 tests, documentation-control validation, strict MkDocs build, and whitespace;
 - `tools/create_recovery_package.py` — creates and verifies the Git bundle, source archive, environment record, release manifest, and SHA-256 checksums;
 - `tools/verify_recovery_restore.py` — clones the bundle offline, checks out the exact recorded commit, and runs release validation from the restored repository;
 - `tools/release.py` — coordinates the complete governed workflow and emits the final approved or denied result.

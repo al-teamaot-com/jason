@@ -104,11 +104,11 @@ def build_validation_steps(repository_root: Path) -> tuple[ValidationStep, ...]:
             working_directory=repository_root / "implementation" / "cap-001",
         ),
         ValidationStep(
-            step_id="assemble-docs",
-            description="Assemble documentation workspace",
+            step_id="documentation-control",
+            description="Validate documentation control plane",
             command=(
                 docs_python,
-                str(repository_root / "tools" / "assemble_docs.py"),
+                str(repository_root / "tools" / "validate_documentation_control.py"),
             ),
             working_directory=repository_root,
         ),
