@@ -30,7 +30,9 @@ def test_service_actions_noop_when_maintenance_disabled():
 def test_service_actions_runs_maintenance_on_server_thread():
     maintenance = Maintenance()
     app = RuntimeHttpApplication(Ingress(), maintenance=maintenance)
-    with JasonRuntimeHttpServer(("127.0.0.1", 0), app) as server:
+    with JasonRuntimeHttpServer(
+        ("127.0.0.1", 0), app, maintenance_startup_grace_seconds=0
+    ) as server:
         server.service_actions()
     assert maintenance.calls == 1
 
@@ -38,7 +40,29 @@ def test_service_actions_runs_maintenance_on_server_thread():
 def test_maintenance_failure_cannot_terminate_runtime_server():
     maintenance = Maintenance(fail=True)
     app = RuntimeHttpApplication(Ingress(), maintenance=maintenance)
-    with JasonRuntimeHttpServer(("127.0.0.1", 0), app) as server:
+    with JasonRuntimeHttpServer(
+        ("127.0.0.1", 0), app, maintenance_startup_grace_seconds=0
+    ) as server:
         server.service_actions()
         server.service_actions()
     assert maintenance.calls == 2
+
+
+def test_startup_grace_defers_maintenance_until_health_window_expires():
+    clock = [100.0]
+    maintenance = Maintenance()
+    app = RuntimeHttpApplication(Ingress(), maintenance=maintenance)
+    with JasonRuntimeHttpServer(
+        ("127.0.0.1", 0),
+        app,
+        maintenance_startup_grace_seconds=30,
+        monotonic=lambda: clock[0],
+    ) as server:
+        server.service_actions()
+        assert maintenance.calls == 0
+        clock[0] = 129.9
+        server.service_actions()
+        assert maintenance.calls == 0
+        clock[0] = 130.0
+        server.service_actions()
+    assert maintenance.calls == 1
