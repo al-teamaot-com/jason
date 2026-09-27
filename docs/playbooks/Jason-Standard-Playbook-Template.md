@@ -136,7 +136,7 @@ Persist at minimum:
 - next recheck condition/time;
 - last ticket-documentation fingerprint.
 
-A recheck that produces no meaningful state/evidence change updates persisted state only; it does **not** create another ticket note.
+A recheck that produces no meaningful state/evidence change updates persisted state only; it does **not** create another ticket note. The persisted recheck record remains the audit evidence that the check occurred.
 
 ---
 
