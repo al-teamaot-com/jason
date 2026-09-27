@@ -324,7 +324,7 @@ class GovernedResolutionMemoryCapabilityInvoker:
         if limit < 1 or limit > 25:
             raise ValueError("resolution memory limit must be between 1 and 25")
 
-        result = self.service.search_similar(
+        return self.service.search_evidence(
             signature=ResolutionSignature(
                 category=str(arguments["category"]),
                 product=str(arguments["product"]),
@@ -338,11 +338,6 @@ class GovernedResolutionMemoryCapabilityInvoker:
             client_id=request.client_id,
             limit=limit,
         )
-        projected = self.service.project_search_result(result)
-        return {
-            "match_count": len(projected["matches"]),
-            **projected,
-        }
 
     def _read(self, request: OrchestrationRequest) -> Mapping[str, Any]:
         case_id = str(
