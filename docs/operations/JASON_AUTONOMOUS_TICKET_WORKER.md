@@ -241,3 +241,12 @@ The accepted worker behavior is therefore:
 - all writes remain governed, readback-verified, and bounded by exact standing playbook authority.
 
 This production proof supersedes the earlier behavior where offline tickets were merely left unchanged and manually revisited.
+
+## 2026-09-27 resilience hardening — ticket change reconsideration
+
+Production review confirmed that the autonomous worker is enabled and actively reconciling queues. Two admission-state defects were identified and corrected in source:
+
+- non-Jason discovery tickets missing a valid company or configuration-item identity are now treated as retriable intake candidates rather than being persisted as terminal `blocked` work; normal PSA triage can add the missing identity and the next reconciliation may admit them;
+- terminal worker rows now retain the Autotask source-version marker. If an open candidate materially changes after a prior `blocked`, `escalated`, `approval_pending`, or reopened `complete` state, the stale terminal row is discarded and the ticket is reconsidered through the full admission gates.
+
+These changes do not expand authority. Exact company/CI/DRMM identity, durable playbook promotion, workload grants, standing-safe component classification, and all disruptive-action approval boundaries remain unchanged.

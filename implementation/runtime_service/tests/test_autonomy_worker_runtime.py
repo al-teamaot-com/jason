@@ -1868,3 +1868,84 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
     assert "Classification=monitor_execution_failure" in notes[0]["description"]
     assert "setter" in notes[0]["description"].casefold()
     store.close()
+
+
+def test_unowned_candidate_missing_identity_is_retriable_not_terminal(tmp_path: Path):
+    broken = candidate()
+    broken = QueueCandidate(
+        resource_id=broken.resource_id,
+        priority=broken.priority,
+        source_queue=broken.source_queue,
+        owned_by_jason=broken.owned_by_jason,
+        urgent=broken.urgent,
+        source_version="v1",
+        context={**broken.context, "companyID": 0},
+    )
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(broken),
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is None
+    store.close()
+
+
+def test_terminal_work_is_reconsidered_when_ticket_source_version_changes(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import OperationalWork
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=140933,
+            ticket_number="T20260925.9999",
+            title="[Monitor] Antivirus status issue",
+            playbook_id="datto_edr_av",
+            source_queue="Monitoring Alert",
+            company_id=507,
+            configuration_item_id=1583,
+            device_uid="device-uid-1",
+            hostname="PC-1",
+            phase="blocked",
+            last_reason="old evidence",
+            source_version="v1",
+        )
+    )
+    refreshed = candidate()
+    refreshed = QueueCandidate(
+        resource_id=refreshed.resource_id,
+        priority=refreshed.priority,
+        source_queue=refreshed.source_queue,
+        owned_by_jason=refreshed.owned_by_jason,
+        urgent=refreshed.urgent,
+        source_version="v2",
+        context=refreshed.context,
+    )
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(refreshed),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.source_version == "v2"
+    assert work.phase == "health_wait"
+    assert any(capability == "service.ticket.update" for _, capability, _ in actions.calls)
+    store.close()
