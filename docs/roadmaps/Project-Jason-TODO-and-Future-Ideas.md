@@ -1116,7 +1116,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-005 — Deterministic recurring constitutional and compliance certification
 
 - **Priority:** P1
-- **Status:** In progress — Last Known Compliant promotion is production-proven; recurring deterministic CCC runner and configurable monthly scheduler remain pending
+- **Status:** In progress — recurring deterministic runner, configurable 30-day cadence, material-change gating, dedicated observe-only provider canaries, and PASS-only snapshot integration are implemented in source; production scheduler acceptance remains pending
 - **Risk level:** Moderate
 - **Idea:** Build a deterministic, evidence-backed certification job that regularly verifies Jason remains compliant with the J-002 Constitution and other defined production compliance controls. The default scheduled cadence should be monthly, but the cadence must be configurable without code changes. Material governance, authority, identity, provider-boundary, recovery, or production-topology changes should also be able to trigger an out-of-cycle certification.
 - **Why it matters:** Constitutional certification is state-dependent. A repeatable job reduces dependence on ad hoc human review, detects governance drift early, creates comparable evidence over time, and gives AOT a durable record that Jason's production controls remain intact.
