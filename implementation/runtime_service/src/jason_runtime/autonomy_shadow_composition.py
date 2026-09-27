@@ -77,6 +77,7 @@ def build_autonomy_shadow_maintenance(
         reads=shadow_reads,
         config=AutotaskQueueDiscoveryConfig(
             owned_resource_ids=tuple(owned_autotask_resource_ids),
+            use_open_status_search=True,
         ),
     )
     catalog = PlaybookCatalog.load(playbook_registry)
