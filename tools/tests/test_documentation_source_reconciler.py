@@ -1,4 +1,4 @@
-from tools.documentation_source_reconciler import REQUIRED_WORKFLOWS, is_material
+from tools.documentation_source_reconciler import is_material
 
 
 def test_material_change_excludes_docs_and_workflow_only_changes():
@@ -6,13 +6,6 @@ def test_material_change_excludes_docs_and_workflow_only_changes():
     assert is_material(("tools/example.py", "docs/control/CURRENT.md"))
 
 
-def test_expected_protected_workflows_are_exact():
-    assert REQUIRED_WORKFLOWS == {
-        "Validate Jason",
-        "SEC-007 Security Regressions",
-        "Validate Jason Teams Gateway",
-        "Validate Conversation Experience Foundation",
-    }
 
 
 def test_main_does_not_republish_while_generated_pr_is_waiting(monkeypatch):
@@ -58,3 +51,19 @@ def test_main_stops_after_merge_until_next_cycle(monkeypatch):
     from tools.documentation_source_reconciler import main
     assert main() == 0
     assert calls == []
+
+
+def test_required_checks_green_uses_repository_required_check_set(monkeypatch):
+    class Result:
+        stdout = '[{"name":"documentation","state":"SUCCESS","bucket":"pass"},{"name":"runtime-service","state":"SUCCESS","bucket":"pass"}]'
+    monkeypatch.setattr("tools.documentation_source_reconciler.subprocess.run", lambda *a, **k: Result())
+    from tools.documentation_source_reconciler import required_checks_green
+    assert required_checks_green("123") is True
+
+
+def test_required_checks_green_fails_on_pending(monkeypatch):
+    class Result:
+        stdout = '[{"name":"documentation","state":"PENDING","bucket":"pending"}]'
+    monkeypatch.setattr("tools.documentation_source_reconciler.subprocess.run", lambda *a, **k: Result())
+    from tools.documentation_source_reconciler import required_checks_green
+    assert required_checks_green("123") is False
