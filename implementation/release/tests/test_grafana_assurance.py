@@ -38,3 +38,11 @@ def test_grafana_assurance_exporter_port_is_dedicated() -> None:
     target = json.loads((root / 'infrastructure/showcase/prometheus/file_sd/jason-grafana-assurance.json').read_text(encoding='utf-8'))
     assert 'JASON_GRAFANA_ASSURANCE_PORT=9474' in service
     assert target[0]['targets'] == ['host.docker.internal:9474']
+
+
+def test_observability_installer_deploys_from_exact_release_and_restores_pointer_on_failure() -> None:
+    root = Path(__file__).resolve().parents[3]
+    installer = (root / 'tools/install_observability_assurance.sh').read_text(encoding='utf-8')
+    assert 'JASON_REPO_ROOT="$RELEASE_DIR"' in installer
+    assert '/usr/bin/bash "$RELEASE_DIR/infrastructure/showcase/deploy_usage_dashboard.sh"' in installer
+    assert 'ln -sfn "$OLD_CURRENT" "$CURRENT_LINK"' in installer
