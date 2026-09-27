@@ -89,7 +89,7 @@ python3 tools/record_ccc_material_review.py \
   --reason "<review rationale>"
 ```
 
-This preserves the constitutional distinction between deterministic verification and requirements that still need human architecture/governance judgment.
+This preserves the constitutional distinction between deterministic verification and requirements that still need human architectural or governance judgment.
 
 ## Checker staleness
 
