@@ -146,16 +146,15 @@ Items in this document are not approved capabilities and must not be enabled mer
 ### TODO-OPS-002 — Governed BackupIQ ticket-processing playbook
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** In progress — provider integration and diagnostic/classification branch are production-active; scheduled recheck, remediation, and successful-backup closure acceptance remain
 - **Risk level:** High
-- **Idea:** Build and productionize an end-to-end governed Jason playbook for Autotask tickets titled `BackupIQ: Backup for asset is not available for AOT Office`, including asset resolution, availability gating, periodic rechecks, Endpoint Backup diagnostics, bounded remediation, dependency-ticket creation, full command/result documentation, and verified successful-backup closure.
-- **Current blocker:** The playbook requires the Datto Endpoint Backup API details/credentials available at the Owner's desk so Jason can verify backup inventory/state and require an authoritative successful backup before ticket closure. Do not substitute DRMM agent state alone for backup-success evidence.
-- **Review trigger:** Resume when the Owner is at a trusted workstation with the Endpoint Backup API information.
-- **Why it matters:** BackupIQ tickets are repetitive, evidence-driven MSP work that Jason can materially process when the correct read, execution, ticket-write, scheduling, and verification capabilities are available. A deterministic playbook can reduce technician effort while preserving auditability, client isolation, and AOT approval rules.
-- **Why not now:** A live test exposed specific missing capabilities and workflow gaps that prevent safe end-to-end completion today, including governed Autotask ticket creation, reliable DRMM component discovery/metadata reads, durable workflow state, and scheduled periodic rechecks.
-- **Prerequisites:** governed Autotask ticket search/read and internal notes; narrowly scoped Autotask ticket creation; DRMM endpoint/software/service reads; DRMM component search/metadata read; governed component execution; job/result/StdOut reads; site-variable presence validation without secret disclosure; persisted playbook state; periodic recheck scheduling; duplicate suppression; and successful-backup verification.
+- **Idea:** Build and productionize an end-to-end governed Jason playbook for Autotask BackupIQ tickets, including asset resolution, availability gating, periodic rechecks, Endpoint Backup diagnostics, bounded remediation, dependency-ticket creation, full command/result documentation, and verified successful-backup closure.
+- **Current capability state:** The original Endpoint Backup credential/API blocker is resolved. Live governed capabilities include `backup.endpoint.asset.search/read`, `backup.endpoint.backup.search`, `backup.backupiq.alert.search`, Autotask ticket read/note/create/update, DRMM endpoint/component/job/output reads, governed component execution, and site-variable list/create/update. The canonical playbook records that provider/API integration and client isolation are live and its diagnostic/classification branch is approved for bounded autonomy.
+- **Remaining blocker:** End-to-end workflow acceptance, not credentials. The still-unproven branches are durable hourly/two-hour rechecks, bounded Endpoint Backup reinstall under exact evidence/dependency gates, dependency-ticket behavior where required, and authoritative provider-side successful-backup verification before automatic completion.
+- **Why it matters:** BackupIQ tickets are repetitive, evidence-driven MSP work that Jason can materially process with the current read and execution foundation. Completing the remaining state/recheck/remediation/closure branches can reduce technician effort while preserving auditability, client isolation, and AOT approval rules.
+- **Remaining prerequisites:** persisted playbook state and periodic recheck scheduling tied to the exact ticket/device/provider asset; duplicate suppression; bounded remediation acceptance; and successful-backup verification/closure acceptance. Existing provider/ticket/component/site-variable capabilities should be reused rather than rebuilt.
 - **Decision owner:** Jason Governance Authority / Jason Architecture Authority
-- **Review trigger:** Implement as the next operational playbook after the required bounded capabilities are available and validate against the controlled AOT-50740 BackupIQ ticket workflow.
+- **Review trigger:** Continue remote-safe state-machine/recheck testing now; run controlled remediation/closure acceptance only on an explicitly approved target when the evidence gates are satisfied.
 
 #### Architect prompt
 

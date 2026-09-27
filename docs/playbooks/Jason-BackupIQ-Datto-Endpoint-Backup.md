@@ -243,20 +243,23 @@ Include original BackupIQ condition, classification/root cause, DRMM availabilit
 
 ## 20. Required Capabilities
 
-Existing:
+Production-active foundation:
 - Autotask ticket read/write/note/create
 - DRMM device/software/component/job/output reads
-- DRMM site-variable presence/read controls
+- DRMM site-variable list/create/update with protected values
 - governed component execution
-- persisted playbook state and scheduler/rechecks
-
-Implementation required:
 - backup.endpoint.asset.search/read
 - backup.endpoint.backup.search
 - backup.backupiq.alert.search
-- OAuth client-credentials broker using OpenBao-held Client ID/Secret
-- provider/client isolation and redaction
-- health/readiness evidence for the Backup.net integration
+- OAuth client-credentials through OpenBao-held Backup.net credentials
+- validated provider/client isolation and redaction
+- Backup.net integration health/readiness evidence
+
+Workflow work remaining:
+- durable per-ticket playbook state for hourly/two-hour rechecks
+- scheduled recheck production acceptance and duplicate suppression
+- bounded Endpoint Backup reinstall/remediation acceptance
+- provider-confirmed successful-backup closure acceptance
 
 ## 21. Acceptance Test
 
@@ -276,16 +279,21 @@ Acceptance must prove:
 8. provider-side successful-backup verification before completion
 9. ticket documentation and bounded retry behavior
 
-Do not run the live API acceptance test until credentials are installed through the approved secret path.
+The live provider-read/API prerequisite is already accepted and active. Do not run a remediation or automatic-completion acceptance unless the exact controlled target satisfies the evidence/dependency gates and the required authority is present.
 
 ## 22. Section Goal Closure
 
-Close the Section Goal after:
+Already satisfied:
 - Backup.net OAuth integration is implemented and registered
 - provider read capabilities are live and client-isolated
 - credentials are stored only in the approved secret system
-- DGV-50859 or another controlled target passes acceptance
-- Grafana/Project Jason status reflects the capability and health
+- Grafana/Project Jason can observe Backup.net integration health
+
+Close the Section Goal after:
+- DGV-50859 or another controlled target passes the remaining workflow acceptance
+- scheduled recheck/duplicate-suppression behavior is production-proven
+- any remediation branch used in acceptance is bounded and verified
+- a provider-confirmed successful backup or stale/recovered condition is proven before completion
 - remaining limitations are documented
 
 ## 23. Autonomous Execution Eligibility
