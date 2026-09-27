@@ -33,7 +33,7 @@ A passing report requires:
 - SQLite `PRAGMA integrity_check` returns `ok` for each database;
 - trusted-key registry is present and, when present, mode `0600`;
 - authority database backup and restore both pass integrity checks;
-- restored authority record counts match the live source;
+- restored authority record counts exactly match the online backup snapshot; live-source counts are reported separately because normal authority/audit activity may commit after the snapshot is taken;
 - no provider contact and no provider credential resolution.
 
 The backup/restore proof uses an ephemeral local temporary directory and does not replace the live database.

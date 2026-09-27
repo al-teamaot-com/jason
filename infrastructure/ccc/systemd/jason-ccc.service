@@ -10,6 +10,7 @@ Type=oneshot
 User=al
 Group=al
 WorkingDirectory=/opt/jason/ccc-current
+Environment=DOCKER_CONFIG=/var/lib/jason/ccc/docker
 ExecStart=/usr/bin/python3 /opt/jason/ccc-current/tools/run_ccc.py --config /var/lib/jason/ccc/ccc.json
 NoNewPrivileges=true
 PrivateTmp=true

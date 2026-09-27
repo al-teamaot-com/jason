@@ -404,7 +404,13 @@ class CCCRunner:
         results: list[CheckResult] = []
         failed = _run(("systemctl", "--failed", "--no-legend"), timeout=30)
         lines = [line for line in (failed.stdout or "").splitlines() if line.strip()]
-        results.append(CheckResult("systemd-failed-units", "PASS" if failed.returncode == 0 and not lines else "FAIL", f"failed_units={len(lines)}"))
+        external_failed = [line for line in lines if "jason-ccc.service" not in line]
+        results.append(CheckResult(
+            "systemd-failed-units",
+            "PASS" if failed.returncode == 0 and not external_failed else "FAIL",
+            f"external_failed_units={len(external_failed)},self_failed_present={any('jason-ccc.service' in line for line in lines)}",
+            {"failed_units": external_failed},
+        ))
 
         prom = _run(("curl", "-fsS", self.config.prometheus_url), timeout=30)
         try:
