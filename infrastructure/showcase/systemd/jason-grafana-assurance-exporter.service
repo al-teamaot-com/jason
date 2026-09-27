@@ -9,7 +9,7 @@ User=al
 Group=al
 WorkingDirectory=/opt/jason/observability/current/infrastructure/showcase
 Environment=JASON_GRAFANA_ASSURANCE_HOST=0.0.0.0
-Environment=JASON_GRAFANA_ASSURANCE_PORT=9473
+Environment=JASON_GRAFANA_ASSURANCE_PORT=9474
 Environment=JASON_GRAFANA_ASSURANCE_STATE=/var/lib/jason/observability/grafana-assurance.json
 ExecStart=/usr/bin/python3 /opt/jason/observability/current/infrastructure/showcase/grafana_assurance_exporter.py
 Restart=on-failure

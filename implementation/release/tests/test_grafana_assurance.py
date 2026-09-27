@@ -30,3 +30,11 @@ def test_overall_status_is_fail_closed() -> None:
     assert overall_status([Check('a',PASS,'ok')])==PASS
     assert overall_status([Check('a',NOT_PROVEN,'unknown')])==NOT_PROVEN
     assert overall_status([Check('a',NOT_PROVEN,'unknown'),Check('b',DRIFTED,'bad')])==DRIFTED
+
+
+def test_grafana_assurance_exporter_port_is_dedicated() -> None:
+    root = Path(__file__).resolve().parents[3]
+    service = (root / 'infrastructure/showcase/systemd/jason-grafana-assurance-exporter.service').read_text(encoding='utf-8')
+    target = json.loads((root / 'infrastructure/showcase/prometheus/file_sd/jason-grafana-assurance.json').read_text(encoding='utf-8'))
+    assert 'JASON_GRAFANA_ASSURANCE_PORT=9474' in service
+    assert target[0]['targets'] == ['host.docker.internal:9474']
