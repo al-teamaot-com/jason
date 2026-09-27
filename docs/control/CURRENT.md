@@ -1,6 +1,6 @@
 # Project Jason — Current Resume Point
 
-**Updated:** 2026-09-26
+**Updated:** 2026-09-27
 **Production status:** Healthy governed runtime/MCP; Central Orchestrator authoritative; `direct_provider_access=false`; Project Jason is 100% constitutionally certified against J-002 as of authoritative main revision `bb0aad018ec40fb975a32b69594bdc6d6806fd1c` plus this closeout record.
 **Current certification record:** `docs/governance/CONSTITUTIONAL-CERTIFICATION-2026-09-26.md`
 **Morning checkpoint:** `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`
@@ -23,7 +23,7 @@ Project Jason's major 2026-09-25 work is production-accepted:
 - **CONN-019:** governed Autotask ticket attachment search/read/content-read and approval-required create production-accepted.
 - **Authority administration:** Owner-only exact authority grant list/add/revoke production-deployed; wildcard/administer grant creation is prohibited and execute grants require approval.
 - **Autonomous execution substrate:** first production autonomous provider write completed successfully under `jason-autonomy-worker`, exact JKD-001 grants, durable playbook promotion, execution-plan binding, one provider write, independent readback, and duplicate suppression. All temporary acceptance authority was revoked afterward; operational playbooks remain shadow-only until individually promoted.
-- **Observability:** Security & Learning, Client Security Posture, Resolution Memory, Production Health, Governed Actions, and Command Center surfaces are active under an evidence-not-authority model.
+- **Observability:** Security & Learning, Client Security Posture, Resolution Memory, Production Health, Governed Actions, Command Center, and the full 21-dashboard Grafana inventory are active under an evidence-not-authority model. Grafana/Prometheus now deploy from exact immutable observability release `f61ef43228d1f5072d425e11e5303ca3bb143079`; the five-minute Grafana Configuration Assurance control is production-proven, 21/21 dashboard identities/hashes and 6/6 metric dependencies pass, and the dedicated assurance exporter is healthy on port `9474`.
 
 ## Current provider-read profile
 
