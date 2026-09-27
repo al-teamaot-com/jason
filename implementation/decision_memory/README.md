@@ -91,3 +91,23 @@ The first live integrations should ingest verified closed/resolved work from aut
 Organization-scoped AOT owners may explicitly select an Autotask company for `operations.resolution.search` or `operations.resolution.read` with `company_id`. Jason verifies that company through the ordinary governed `service.company.read` path, proves the owner already has the exact organization-scoped OBSERVE grant for the Resolution Memory capability, and derives a short-lived one-minute client-specific OBSERVE context.
 
 This does not create a cross-client search mode. Raw historical cases remain restricted to the selected client, non-owner callers cannot derive this scope, and failure to verify the Autotask company or exact Resolution Memory authority fails closed.
+
+
+## Automatic verified-resolution ingestion (RESMEM-002)
+
+Jason ticket-work completion now has a distinct `complete_work` path. A plain Autotask status change does not create memory. To create durable Resolution Memory automatically, the ticket must already be claimed by Jason and the completion request must include a bounded structured resolution package with:
+
+- incident category, product, device role, platform, symptoms, and optional bounded attributes;
+- explicit root cause and final resolution;
+- overall `resolved` outcome;
+- technician confirmation;
+- terminal verification confirmation;
+- at least one ordered troubleshooting step;
+- at least one successful verification step;
+- evidence summaries for every stored step.
+
+Jason derives the ticket identity and company boundary from an authoritative governed Autotask read. The caller cannot supply a different client boundary or arbitrary case identity. The case ID is deterministic from the Autotask ticket, making exact repeat completion idempotent. A conflicting second history for the same deterministic case ID fails closed.
+
+The Autotask ticket update still follows its normal mutation authority and approval rules and still requires provider readback verification. Only after that governed ticket completion succeeds does Jason ingest the verified resolution locally and mark the ticket-work claim completed. Historical remediation metadata remains evidence only and every later Resolution Memory result continues to expose `grants_authority=false`.
+
+If local memory ingestion fails after the provider ticket update has succeeded, Jason does not fabricate success for the memory write; the ticket provider result remains visible and the claim is left retriable rather than silently inventing a case.

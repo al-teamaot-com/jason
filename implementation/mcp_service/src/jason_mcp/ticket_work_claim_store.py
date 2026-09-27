@@ -38,6 +38,8 @@ class TicketWorkClaim:
     captured_at: str
     claimed_at: str = ""
     returned_at: str = ""
+    completed_at: str = ""
+    resolution_case_id: str = ""
     handoff_reason_class: str = ""
     blocker_fingerprint: str = ""
 
@@ -152,6 +154,38 @@ class TicketWorkClaimStore:
             return
         payload.pop(str(claim.ticket_id), None)
         self._write_all(payload)
+
+    def mark_completed(
+        self,
+        ticket_id: int,
+        *,
+        resolution_case_id: str,
+    ) -> TicketWorkClaim:
+        payload = self._load_all()
+        raw = payload.get(str(int(ticket_id)))
+        if not isinstance(raw, Mapping):
+            raise ValueError("AUTOTASK_TICKET_WORK_CLAIM_STATE_MISSING")
+        claim = TicketWorkClaim(**dict(raw))
+        if claim.state == "completed":
+            if claim.resolution_case_id != resolution_case_id:
+                raise ValueError("AUTOTASK_TICKET_WORK_COMPLETION_CONFLICT")
+            return claim
+        if claim.state != "claimed":
+            raise ValueError("AUTOTASK_TICKET_WORK_NOT_CLAIMED")
+        updated = TicketWorkClaim(
+            **{
+                **asdict(claim),
+                "state": "completed",
+                "completed_at": _now(),
+                "resolution_case_id": resolution_case_id.strip(),
+                "returned_at": "",
+                "handoff_reason_class": "",
+                "blocker_fingerprint": "",
+            }
+        )
+        payload[str(updated.ticket_id)] = asdict(updated)
+        self._write_all(payload)
+        return updated
 
     def mark_returned(
         self,

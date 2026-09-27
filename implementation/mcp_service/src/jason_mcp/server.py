@@ -16,6 +16,19 @@ from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
+from decision_memory.resolution_ingestion import (
+    ConfirmedResolutionIngestion,
+    ResolutionIngestionError,
+)
+from decision_memory.resolution_memory import (
+    ResolutionOutcome,
+    ResolutionSignature,
+    ResolutionSourceReference,
+    ResolutionStep,
+    ResolutionStepKind,
+)
+from decision_memory.resolution_service import ResolutionMemoryService
+from decision_memory.resolution_sqlite import SQLiteResolutionMemoryStore
 from kernel.identity_authority import (
     ApprovalRecord,
     AuthorityGrant,
@@ -2563,6 +2576,360 @@ def _ticket_work_start_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+
+
+@lru_cache(maxsize=1)
+def _resolution_memory_ingestion_service() -> ResolutionMemoryService:
+    database_path = os.environ.get(
+        "JASON_RESOLUTION_MEMORY_DB",
+        "/var/lib/jason/openclaw/resolution-memory.sqlite3",
+    ).strip()
+    service = ResolutionMemoryService(
+        store=SQLiteResolutionMemoryStore(database_path)
+    )
+    service.initialize()
+    return service
+
+
+def _bounded_string_list(
+    value: Any,
+    *,
+    field_name: str,
+    maximum_items: int,
+    maximum_length: int = 500,
+) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field_name} must be a list")
+    if len(value) > maximum_items:
+        raise ValueError(f"{field_name} exceeds bounded item limit")
+    items = tuple(str(item).strip() for item in value if str(item).strip())
+    if not items:
+        raise ValueError(f"{field_name} must not be empty")
+    if any(len(item) > maximum_length for item in items):
+        raise ValueError(f"{field_name} contains an oversized value")
+    return items
+
+
+def _ticket_work_complete_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "ticket_id",
+        "ticketID",
+        "resource_id",
+        "complete_work",
+        "resolution",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_UNSUPPORTED_ARGUMENTS:"
+            + ",".join(sorted(unknown))
+        )
+
+    value = raw.get("ticket_id", raw.get("ticketID", raw.get("resource_id")))
+    if isinstance(value, bool):
+        raise ValueError("AUTOTASK_TICKET_WORK_COMPLETE_TICKET_ID_REQUIRED")
+    try:
+        ticket_id = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_TICKET_ID_REQUIRED"
+        ) from error
+    if ticket_id < 1:
+        raise ValueError("AUTOTASK_TICKET_WORK_COMPLETE_TICKET_ID_REQUIRED")
+
+    claim = _ticket_work_claim_store().get(ticket_id)
+    if claim is None or claim.state not in {"claimed", "completed"}:
+        raise ValueError("AUTOTASK_TICKET_WORK_NOT_CLAIMED")
+
+    ticket = _exact_ticket_record_for_work_start(ticket_id)
+    try:
+        company_id = int(ticket.get("companyID"))
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_COMPANY_REQUIRED"
+        ) from error
+    if company_id < 0:
+        raise ValueError("AUTOTASK_TICKET_WORK_COMPLETE_COMPANY_REQUIRED")
+
+    resolution = raw.get("resolution")
+    if not isinstance(resolution, Mapping):
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_RESOLUTION_PACKAGE_REQUIRED"
+        )
+    allowed_resolution = {
+        "category",
+        "product",
+        "device_role",
+        "platform",
+        "product_version",
+        "symptoms",
+        "attributes",
+        "root_cause",
+        "final_resolution",
+        "outcome",
+        "technician_confirmed",
+        "terminal_verification_confirmed",
+        "steps",
+    }
+    unknown_resolution = set(resolution) - allowed_resolution
+    if unknown_resolution:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_RESOLUTION_FIELD_NOT_ALLOWED:"
+            + ",".join(sorted(unknown_resolution))
+        )
+
+    required_text = {
+        name: str(resolution.get(name) or "").strip()
+        for name in (
+            "category",
+            "product",
+            "device_role",
+            "platform",
+            "root_cause",
+            "final_resolution",
+        )
+    }
+    missing = [name for name, value in required_text.items() if not value]
+    if missing:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_RESOLUTION_REQUIRED:"
+            + ",".join(sorted(missing))
+        )
+    if any(len(value) > 4000 for value in required_text.values()):
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_RESOLUTION_TEXT_TOO_LONG"
+        )
+
+    outcome = str(resolution.get("outcome") or "").strip().casefold()
+    if outcome != ResolutionOutcome.RESOLVED.value:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_REQUIRES_RESOLVED_OUTCOME"
+        )
+    if resolution.get("technician_confirmed") is not True:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_TECHNICIAN_CONFIRMATION_REQUIRED"
+        )
+    if resolution.get("terminal_verification_confirmed") is not True:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_TERMINAL_VERIFICATION_REQUIRED"
+        )
+
+    symptoms = _bounded_string_list(
+        resolution.get("symptoms"),
+        field_name="symptoms",
+        maximum_items=25,
+    )
+    attributes_raw = resolution.get("attributes", {})
+    if not isinstance(attributes_raw, Mapping):
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_ATTRIBUTES_INVALID"
+        )
+    if len(attributes_raw) > 32:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_ATTRIBUTES_TOO_MANY"
+        )
+    attributes = {
+        str(key).strip(): str(value).strip()
+        for key, value in attributes_raw.items()
+        if str(key).strip() and str(value).strip()
+    }
+    if any(len(key) > 100 or len(value) > 500 for key, value in attributes.items()):
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_ATTRIBUTE_TOO_LONG"
+        )
+
+    steps_raw = resolution.get("steps")
+    if not isinstance(steps_raw, list) or not steps_raw or len(steps_raw) > 50:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_STEPS_REQUIRED"
+        )
+    normalized_steps: list[dict[str, Any]] = []
+    has_terminal_verification_step = False
+    for index, raw_step in enumerate(steps_raw, start=1):
+        if not isinstance(raw_step, Mapping):
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_COMPLETE_STEP_INVALID"
+            )
+        allowed_step = {
+            "kind",
+            "action_key",
+            "action_summary",
+            "outcome",
+            "evidence_summary",
+            "read_only",
+            "approval_required",
+            "disruptive",
+        }
+        if set(raw_step) - allowed_step:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_COMPLETE_STEP_FIELD_NOT_ALLOWED"
+            )
+        try:
+            kind = ResolutionStepKind(
+                str(raw_step.get("kind") or "").strip().casefold()
+            )
+            step_outcome = ResolutionOutcome(
+                str(raw_step.get("outcome") or "").strip().casefold()
+            )
+        except ValueError as error:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_COMPLETE_STEP_ENUM_INVALID"
+            ) from error
+        action_key = str(raw_step.get("action_key") or "").strip()
+        action_summary = str(raw_step.get("action_summary") or "").strip()
+        evidence_summary = str(raw_step.get("evidence_summary") or "").strip()
+        if not action_key or not action_summary or not evidence_summary:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_COMPLETE_STEP_EVIDENCE_REQUIRED"
+            )
+        if max(len(action_key), len(action_summary), len(evidence_summary)) > 2000:
+            raise ValueError(
+                "AUTOTASK_TICKET_WORK_COMPLETE_STEP_TEXT_TOO_LONG"
+            )
+        step = ResolutionStep(
+            step_id=f"autotask-{ticket_id}-step-{index}",
+            ordinal=index,
+            kind=kind,
+            action_key=action_key,
+            action_summary=action_summary,
+            outcome=step_outcome,
+            evidence_summary=evidence_summary,
+            read_only=raw_step.get("read_only") is True,
+            approval_required=raw_step.get("approval_required") is True,
+            disruptive=raw_step.get("disruptive") is True,
+        )
+        step.validate()
+        if (
+            kind is ResolutionStepKind.VERIFICATION
+            and step_outcome in {
+                ResolutionOutcome.RESOLVED,
+                ResolutionOutcome.IMPROVED,
+            }
+        ):
+            has_terminal_verification_step = True
+        normalized_steps.append(
+            {
+                "step_id": step.step_id,
+                "ordinal": step.ordinal,
+                "kind": step.kind.value,
+                "action_key": step.action_key,
+                "action_summary": step.action_summary,
+                "outcome": step.outcome.value,
+                "evidence_summary": step.evidence_summary,
+                "read_only": step.read_only,
+                "approval_required": step.approval_required,
+                "disruptive": step.disruptive,
+            }
+        )
+
+    if not has_terminal_verification_step:
+        raise ValueError(
+            "AUTOTASK_TICKET_WORK_COMPLETE_VERIFICATION_STEP_REQUIRED"
+        )
+
+    return {
+        "payload": {
+            "id": ticket_id,
+            "status": "Complete",
+        },
+        "jason_policy_class": "ticket_work_complete",
+        "jason_resolution_package": {
+            "case_id": f"autotask-ticket-{ticket_id}-resolution-v1",
+            "ticket_id": str(ticket_id),
+            "company_id": str(company_id),
+            "signature": {
+                "category": required_text["category"],
+                "product": required_text["product"],
+                "device_role": required_text["device_role"],
+                "platform": required_text["platform"],
+                "product_version": str(
+                    resolution.get("product_version") or ""
+                ).strip(),
+                "symptoms": list(symptoms),
+                "attributes": attributes,
+            },
+            "root_cause": required_text["root_cause"],
+            "final_resolution": required_text["final_resolution"],
+            "outcome": ResolutionOutcome.RESOLVED.value,
+            "technician_confirmed": True,
+            "terminal_verification_confirmed": True,
+            "steps": normalized_steps,
+        },
+    }
+
+
+def _ingest_completed_ticket_resolution(
+    *,
+    package: Mapping[str, Any],
+    principal: str,
+    organization: str,
+    correlation_id: str,
+) -> str:
+    signature_raw = package.get("signature")
+    steps_raw = package.get("steps")
+    if not isinstance(signature_raw, Mapping) or not isinstance(steps_raw, list):
+        raise ResolutionIngestionError(
+            "invalid canonical resolution ingestion package"
+        )
+    now = datetime.now(timezone.utc)
+    steps = tuple(
+        ResolutionStep(
+            step_id=str(item["step_id"]),
+            ordinal=int(item["ordinal"]),
+            kind=ResolutionStepKind(str(item["kind"])),
+            action_key=str(item["action_key"]),
+            action_summary=str(item["action_summary"]),
+            outcome=ResolutionOutcome(str(item["outcome"])),
+            evidence_summary=str(item["evidence_summary"]),
+            read_only=bool(item["read_only"]),
+            approval_required=bool(item["approval_required"]),
+            disruptive=bool(item["disruptive"]),
+        )
+        for item in steps_raw
+    )
+    company_id = str(package["company_id"])
+    candidate = ConfirmedResolutionIngestion(
+        case_id=str(package["case_id"]),
+        organization_id=organization,
+        client_id=company_id,
+        ticket_id=str(package["ticket_id"]),
+        ticket_company_id=company_id,
+        current_company_id=company_id,
+        signature=ResolutionSignature(
+            category=str(signature_raw["category"]),
+            product=str(signature_raw["product"]),
+            device_role=str(signature_raw["device_role"]),
+            platform=str(signature_raw["platform"]),
+            product_version=str(signature_raw.get("product_version") or ""),
+            symptoms=tuple(signature_raw.get("symptoms") or ()),
+            attributes=dict(signature_raw.get("attributes") or {}),
+        ),
+        source_references=(
+            ResolutionSourceReference(
+                source_type="autotask_ticket",
+                source_id=str(package["ticket_id"]),
+                correlation_id=correlation_id,
+            ),
+        ),
+        steps=steps,
+        root_cause=str(package["root_cause"]),
+        final_resolution=str(package["final_resolution"]),
+        outcome=ResolutionOutcome(str(package["outcome"])),
+        technician_confirmed=bool(package["technician_confirmed"]),
+        terminal_verification_confirmed=bool(
+            package["terminal_verification_confirmed"]
+        ),
+        recorded_at=now,
+        resolved_at=now,
+        owner=principal,
+    )
+    case = _resolution_memory_ingestion_service().ingest_confirmed_resolution(
+        candidate
+    )
+    return case.case_id
+
+
+
 def _ticket_work_handoff_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     allowed = {
         "ticket_id",
@@ -2800,6 +3167,8 @@ def _canonicalize_governed_action_arguments(
             return _ticket_work_start_arguments(raw)
         if raw.get("return_work") is True:
             return _ticket_work_handoff_arguments(raw)
+        if raw.get("complete_work") is True:
+            return _ticket_work_complete_arguments(raw)
         return _direct_ticket_update_arguments(raw)
 
     if capability_name == SERVICE_TICKET_ATTACHMENT_CREATE:
@@ -3417,6 +3786,7 @@ def _governed_execute(
     )
 
     result = app.governed_orchestrator.execute(request)
+    resolution_memory_result: dict[str, Any] | None = None
 
     if (
         capability_name == "service.ticket.update"
@@ -3445,6 +3815,36 @@ def _governed_execute(
                 reason_class=str(canonical_arguments["jason_handoff_reason_class"]),
                 blocker_fingerprint=str(canonical_arguments["jason_blocker_fingerprint"]),
             )
+        elif policy_class == "ticket_work_complete":
+            ticket_id = int(canonical_arguments["payload"]["id"])
+            package = canonical_arguments.get("jason_resolution_package")
+            if not isinstance(package, Mapping):
+                resolution_memory_result = {
+                    "status": "failed",
+                    "error_code": "resolution_package_missing",
+                }
+            else:
+                try:
+                    case_id = _ingest_completed_ticket_resolution(
+                        package=package,
+                        principal=principal,
+                        organization=organization,
+                        correlation_id=result.correlation_id or correlation_id,
+                    )
+                    _ticket_work_claim_store().mark_completed(
+                        ticket_id,
+                        resolution_case_id=case_id,
+                    )
+                    resolution_memory_result = {
+                        "status": "succeeded",
+                        "case_id": case_id,
+                        "grants_authority": False,
+                    }
+                except (ResolutionIngestionError, ValueError, OSError) as error:
+                    resolution_memory_result = {
+                        "status": "failed",
+                        "error_code": type(error).__name__,
+                    }
 
     response = {
         "status": result.status.value,
@@ -3462,6 +3862,9 @@ def _governed_execute(
             capability_name,
             result.output,
         )
+
+    if resolution_memory_result is not None:
+        response["resolution_memory"] = resolution_memory_result
 
     return response
 

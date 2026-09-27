@@ -82,3 +82,29 @@ def test_claim_store_blocks_reclaim_after_human_review_until_blocker_changes(tmp
         blocker_fingerprint="technician-returned-to-jason",
     )
     assert next_claim.state == "pending"
+
+
+def test_claim_store_marks_completion_idempotently(tmp_path: Path) -> None:
+    store = TicketWorkClaimStore(tmp_path / "claims.json")
+    store.stage({"id": 777, "queueID": 8, "status": 1})
+    store.mark_claimed(777)
+
+    completed = store.mark_completed(
+        777,
+        resolution_case_id="autotask-ticket-777-resolution-v1",
+    )
+    assert completed.state == "completed"
+    assert completed.resolution_case_id == "autotask-ticket-777-resolution-v1"
+    assert completed.completed_at
+
+    repeated = store.mark_completed(
+        777,
+        resolution_case_id="autotask-ticket-777-resolution-v1",
+    )
+    assert repeated == completed
+
+    with pytest.raises(ValueError, match="COMPLETION_CONFLICT"):
+        store.mark_completed(
+            777,
+            resolution_case_id="different-resolution-case",
+        )
