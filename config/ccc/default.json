@@ -57,13 +57,87 @@
     "infrastructure/jason-runtime/"
   ],
   "provider_canaries": [
-    {"name":"autotask","capability":"service.ticket.search","arguments":{"company_id":0,"page_size":1},"expected_provider":"autotask"},
-    {"name":"datto_rmm","capability":"endpoint.device.read","arguments":{"resource_id":"69571572-83f7-1e33-9cdf-01717d4e74a4"},"expected_provider":"datto_rmm"},
-    {"name":"datto_edr","capability":"endpoint.security.status.read","arguments":{"resource_id":"69571572-83f7-1e33-9cdf-01717d4e74a4"},"expected_provider":"datto_edr"},
-    {"name":"dnsfilter","capability":"dns.protection.organization.read","arguments":{"company_id":"0"},"expected_provider":"dnsfilter"},
-    {"name":"backup_net","capability":"backup.endpoint.asset.search","arguments":{"company_id":"0","page_number":1,"page_size":1},"expected_provider":"backup_net"},
-    {"name":"kyocera_kfs","capability":"print.device.search","arguments":{},"expected_provider":"kyocera_kfs"},
-    {"name":"microsoft_graph","capability":"identity.user.search","arguments":{"display_name":"Al Davis","page_size":1},"expected_provider":"microsoft_graph"},
-    {"name":"system_registry","capability":"system.registry.search","arguments":{"query":"jason"},"expected_provider":"system_registry"}
+    {
+      "name": "autotask",
+      "capability": "service.ticket.search",
+      "arguments": {
+        "company_id": 0,
+        "page_size": 1
+      },
+      "expected_provider": "autotask",
+      "expected_status": "denied",
+      "expected_error_code": "INFORMATION_RELEASE_DENIED",
+      "expected_reason_codes_contains": [
+        "SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED"
+      ]
+    },
+    {
+      "name": "datto_rmm",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": "69571572-83f7-1e33-9cdf-01717d4e74a4"
+      },
+      "expected_provider": "datto_rmm",
+      "expected_status": "succeeded"
+    },
+    {
+      "name": "datto_edr",
+      "capability": "endpoint.security.status.read",
+      "arguments": {
+        "resource_id": "69571572-83f7-1e33-9cdf-01717d4e74a4"
+      },
+      "expected_provider": "datto_edr",
+      "expected_status": "succeeded"
+    },
+    {
+      "name": "dnsfilter",
+      "capability": "dns.protection.organization.read",
+      "arguments": {
+        "company_id": "0"
+      },
+      "expected_provider": "dnsfilter",
+      "expected_status": "succeeded"
+    },
+    {
+      "name": "backup_net",
+      "capability": "backup.endpoint.asset.search",
+      "arguments": {
+        "company_id": "0",
+        "page_number": 1,
+        "page_size": 1
+      },
+      "expected_provider": "backup_net",
+      "expected_status": "succeeded"
+    },
+    {
+      "name": "kyocera_kfs",
+      "capability": "print.device.search",
+      "arguments": {},
+      "expected_provider": null,
+      "expected_status": "denied",
+      "expected_reason_codes_contains": [
+        "no_eligible_provider"
+      ]
+    },
+    {
+      "name": "microsoft_graph",
+      "capability": "identity.user.search",
+      "arguments": {
+        "display_name": "Al Davis",
+        "page_size": 1
+      },
+      "expected_provider": "microsoft_graph",
+      "expected_status": "failed",
+      "expected_error_code": "CONNECTOR_AUTHORIZATION_DENIED"
+    },
+    {
+      "name": "system_registry",
+      "capability": "system.registry.search",
+      "arguments": {
+        "query": "jason"
+      },
+      "expected_provider": "system_registry",
+      "expected_status": "succeeded"
+    }
   ]
 }
