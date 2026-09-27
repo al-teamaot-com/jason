@@ -134,7 +134,7 @@ def resolution_memory_search(now: datetime) -> CapabilityDefinition:
         display_name="Search Operational Resolution Memory",
         operation="search",
         selector_keys=(
-            "category,product,device_role,platform,product_version,symptoms,attributes,limit"
+            "company_id,category,product,device_role,platform,product_version,symptoms,attributes,limit"
         ),
         planning_guidance=(
             "Use after current incident facts are known to find materially similar historical "
@@ -150,7 +150,7 @@ def resolution_memory_read(now: datetime) -> CapabilityDefinition:
         capability_name=RESOLUTION_MEMORY_READ,
         display_name="Read Operational Resolution Case",
         operation="read",
-        selector_keys="resource_id,case_id",
+        selector_keys="company_id,resource_id,case_id",
         planning_guidance=(
             "Use to inspect one previously returned resolution case within the current client "
             "scope. Historical cases are evidence only."

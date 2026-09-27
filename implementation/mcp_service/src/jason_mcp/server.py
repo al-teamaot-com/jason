@@ -95,6 +95,10 @@ from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_TICKET_ATTACHMENT_CREATE,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from jason_runtime.resolution_memory_runtime import (
+    RESOLUTION_MEMORY_READ,
+    RESOLUTION_MEMORY_SEARCH,
+)
 from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_NAME,
     DATTO_AD_HOC_POWERSHELL_UID,
@@ -935,9 +939,13 @@ def _contract_client_context_for_identity(
     arguments: Mapping[str, Any],
 ) -> tuple[str | None, ExecutionContext | None]:
     scoped_reads = {
-        SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ,
-        SERVICE_TICKET_ATTACHMENT_SEARCH, SERVICE_TICKET_ATTACHMENT_READ,
+        SERVICE_CONTRACT_SEARCH,
+        SERVICE_CONTRACT_READ,
+        SERVICE_TICKET_ATTACHMENT_SEARCH,
+        SERVICE_TICKET_ATTACHMENT_READ,
         SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
+        RESOLUTION_MEMORY_SEARCH,
+        RESOLUTION_MEMORY_READ,
     }
     if capability_name not in scoped_reads:
         return bound_client_id, None

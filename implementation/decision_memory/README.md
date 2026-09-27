@@ -84,3 +84,10 @@ Failures remain first-class evidence. Repeated failed steps can be marked `histo
 The RESMEM-001 data/ranking foundation is being built first. It does **not** yet mean every Autotask ticket or Datto alert is automatically ingested, and it does not yet automatically inject Resolution Memory into every technician conversation. Those are subsequent integration slices after the durable model, isolation, ranking, and regression contract are proven.
 
 The first live integrations should ingest verified closed/resolved work from authoritative sources and expose a governed read path for similar-case evidence. Automatic provider actions remain outside this memory subsystem.
+
+
+## Owner-scoped live retrieval
+
+Organization-scoped AOT owners may explicitly select an Autotask company for `operations.resolution.search` or `operations.resolution.read` with `company_id`. Jason verifies that company through the ordinary governed `service.company.read` path, proves the owner already has the exact organization-scoped OBSERVE grant for the Resolution Memory capability, and derives a short-lived one-minute client-specific OBSERVE context.
+
+This does not create a cross-client search mode. Raw historical cases remain restricted to the selected client, non-owner callers cannot derive this scope, and failure to verify the Autotask company or exact Resolution Memory authority fails closed.
