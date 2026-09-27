@@ -406,7 +406,12 @@ class ResolutionMemoryMatcher:
             failures = int(bucket["failures"])
             successes = int(bucket["successes"])
 
-            if attempts >= 2 and failures > successes:
+            if successes > 0 and failures > 0:
+                # Mixed outcomes are contradictory evidence. Never collapse a
+                # materially conflicted history into a positive recommendation
+                # merely because successes currently outnumber failures.
+                disposition = "historically_conflicted"
+            elif attempts >= 2 and failures > successes:
                 disposition = "historically_unreliable"
             elif successes >= 2 and confidence >= 0.60:
                 disposition = "historically_supported"
@@ -439,7 +444,8 @@ class ResolutionMemoryMatcher:
         rank = {
             "historically_supported": 0,
             "insufficient_history": 1,
-            "historically_unreliable": 2,
+            "historically_conflicted": 2,
+            "historically_unreliable": 3,
         }
         evidence.sort(
             key=lambda item: (
