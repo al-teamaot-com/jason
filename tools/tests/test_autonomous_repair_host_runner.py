@@ -124,6 +124,24 @@ class HostRepairRunnerTests(unittest.TestCase):
             runner._canonical_request(payload)
         self.assertEqual(caught.exception.code, "REQUEST_FINGERPRINT_MISMATCH")
 
+    def test_wait_live_health_tolerates_startup_transition(self):
+        with patch.object(
+            runner,
+            "_live_health",
+            side_effect=["starting", "starting", "healthy"],
+        ), patch.object(runner.time, "sleep") as sleep:
+            health = runner._wait_live_health(attempts=3, interval_seconds=0.1)
+        self.assertEqual(health, "healthy")
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_wait_live_health_fails_closed_after_bound(self):
+        with patch.object(runner, "_live_health", return_value="starting"), patch.object(
+            runner.time, "sleep"
+        ):
+            with self.assertRaises(runner.RepairRunnerError) as caught:
+                runner._wait_live_health(attempts=2, interval_seconds=0)
+        self.assertEqual(caught.exception.code, "PRODUCTION_NOT_HEALTHY")
+
     def test_live_rollback_mismatch_fails_before_git_or_build(self):
         with tempfile.TemporaryDirectory() as td:
             request_path = Path(td) / "request.json"

@@ -198,6 +198,10 @@ def _build_create_command(
         env_map[key] = value
         env_keys.append(key)
 
+    if "JASON_SOURCE_REVISION" not in env_keys:
+        env_map["JASON_SOURCE_REVISION"] = source_revision
+        env_keys.append("JASON_SOURCE_REVISION")
+
     for assignment in set_env:
         key, value = _parse_env_assignment(assignment)
         env_map[key] = value

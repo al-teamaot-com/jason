@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -178,6 +179,20 @@ def _live_health() -> str:
         ],
         capture=True,
     ).strip().casefold()
+
+
+def _wait_live_health(*, attempts: int = 30, interval_seconds: float = 1.0) -> str:
+    attempts = max(1, int(attempts))
+    for attempt in range(1, attempts + 1):
+        health = _live_health()
+        if health == "healthy":
+            return health
+        if attempt < attempts:
+            time.sleep(max(0.0, float(interval_seconds)))
+    raise RepairRunnerError(
+        "PRODUCTION_NOT_HEALTHY",
+        "live Jason runtime did not become healthy within the bounded startup window",
+    )
 
 
 def _verify_git(repo: Path, candidate: str) -> None:
@@ -358,11 +373,7 @@ def _process(
     request = _canonical_request(raw)
     request_id = str(request["request_id"])
     live_before = _live_revision()
-    if _live_health() != "healthy":
-        raise RepairRunnerError(
-            "PRODUCTION_NOT_HEALTHY",
-            "live Jason runtime is not healthy before autonomous repair",
-        )
+    _wait_live_health()
     rollback_sha = str(request["rollback_sha"]).casefold()
     candidate = str(request["candidate_sha"]).casefold()
     if live_before != rollback_sha:

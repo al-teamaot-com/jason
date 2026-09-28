@@ -180,7 +180,7 @@ def production_freshness(
 
 
 MERGE_PR_NUMBER = re.compile(
-    r"(?im)^Merge (?:PR|pull request) #(\\d+)\\b"
+    r"(?im)^Merge (?:PR|pull request) #(\d+)\b"
 )
 
 
