@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "automatic_authorization_enabled": true,
+  "automatic_production_execution_enabled": false,
+  "execution_path_requirement": "named_governed_deployment_capability",
+  "required_support_prefix": "SUPPORT-",
+  "production_evidence_max_age_minutes": 30,
+  "max_changed_files": 25,
+  "max_changed_lines": 800,
+  "required_checks": [
+    "cap-001",
+    "cap-003",
+    "cap-007",
+    "system-registry",
+    "runtime-service",
+    "documentation",
+    "repository-hygiene",
+    "conversation-experience",
+    "teams-gateway",
+    "governed-security-regressions",
+    "provider-read-runtime-credentials",
+    "GitGuardian Security Checks"
+  ],
+  "required_metadata": {
+    "release_class": "autonomous-repair-candidate",
+    "new_capability": "no",
+    "security_impact": "none",
+    "new_authority_or_permission": "no",
+    "provider_api_contract_change": "no",
+    "schema_or_migration": "no",
+    "new_dependency": "no",
+    "infrastructure_or_topology_change": "no",
+    "client_scope_expansion": "no",
+    "disruptive_operational_behavior": "no"
+  },
+  "required_nonempty_metadata": [
+    "support_item",
+    "previously_approved_behavior",
+    "regression_test",
+    "post_deploy_verification"
+  ],
+  "denied_path_prefixes": [
+    ".github/workflows/",
+    "deploy/",
+    "infrastructure/",
+    "migrations/",
+    "implementation/kernel/governance/",
+    "implementation/kernel/identity/",
+    "implementation/kernel/security/",
+    "implementation/connectors/",
+    "deploy/openbao/"
+  ],
+  "denied_path_fragments": [
+    "/policy/",
+    "/policies/",
+    "/authorization/",
+    "/authority/",
+    "/approval/",
+    "/secrets/",
+    "/credentials/"
+  ],
+  "denied_filenames": [
+    "pyproject.toml",
+    "poetry.lock",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Dockerfile",
+    "compose.yaml",
+    "docker-compose.yml"
+  ],
+  "test_path_prefixes": [
+    "tools/tests/"
+  ],
+  "denied_exact_paths": [
+    "CONTRIBUTING.md",
+    ".github/pull_request_template.md",
+    "docs/engineering/Jason-Change-Integration-and-Release-Standard.md",
+    "docs/architecture/JASON_DEPLOYMENT_SYSTEM.md"
+  ],
+  "denied_path_terms": [
+    "authorization",
+    "authority",
+    "approval",
+    "credential",
+    "governance",
+    "identity",
+    "permission",
+    "policy",
+    "secret",
+    "security"
+  ],
+  "test_path_fragments": [
+    "/tests/"
+  ]
+}
