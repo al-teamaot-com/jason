@@ -1,0 +1,47 @@
+name: Development Release Control Board
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+  push:
+    branches:
+      - main
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+      - ready_for_review
+      - converted_to_draft
+  workflow_run:
+    workflows:
+      - Validate Jason
+    types:
+      - completed
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: jason-development-release-control-board
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Generate and publish derived control board
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B tools/development_release_coordinator.py --publish
