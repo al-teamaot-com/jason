@@ -1164,9 +1164,102 @@ class OperationalAutonomyMaintenance:
             )
         return scope
 
+    @staticmethod
+    def _structured_ticket_hostname(title: str) -> str | None:
+        for pattern in (
+            r"^Vulnerability Detected by VulScan\s*-\s*([A-Za-z0-9._-]+)\s*\(",
+            r"\bfor\s+([A-Za-z0-9._-]+)\s*$",
+        ):
+            match = re.search(pattern, title, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def _write_verified_ci_association(
+        self, *, candidate, scope: PlaybookScope, ci_id: int
+    ) -> int:
+        output = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {"payload": {"id": int(candidate.resource_id), "configurationItemID": ci_id}},
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "configurationItemID" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError(
+                "device association write was not verified by provider readback"
+            )
+        return ci_id
+
     def _associate_exact_ticket_device(
         self, *, candidate, scope: PlaybookScope, company_id: int
     ) -> int:
+        title = str(candidate.context.get("title") or "")
+        structured_hostname = self._structured_ticket_hostname(title)
+        if structured_hostname:
+            data = self._read_data(
+                "service.configuration.search",
+                {
+                    "company_id": company_id,
+                    "name": structured_hostname,
+                    "page_size": 25,
+                },
+            )
+            raw_items = data.get("items")
+            if not isinstance(raw_items, list):
+                raise OperationalAutonomyError(
+                    "configuration search returned invalid items"
+                )
+            matches = [
+                item
+                for item in raw_items
+                if isinstance(item, Mapping)
+                and item.get("isActive") is True
+                and self._company_id(item.get("companyID")) == company_id
+                and str(item.get("referenceTitle") or "").strip().casefold()
+                == structured_hostname.casefold()
+                and str(item.get("referenceNumber") or "").strip()
+            ]
+            if len(matches) != 1:
+                raise OperationalAutonomyError(
+                    "structured hostname did not resolve to one active same-company configuration item"
+                )
+            ci = matches[0]
+            ci_id = self._positive_int(ci.get("id"), "configuration item id")
+            endpoint_uid = str(ci.get("referenceNumber") or "").strip()
+            endpoint = self._read_record(
+                "endpoint.device.read", {"resource_id": endpoint_uid}
+            )
+            read_uid = str(
+                endpoint.get("resource_id")
+                or endpoint.get("uid")
+                or endpoint.get("deviceUid")
+                or ""
+            ).strip()
+            read_hostname = str(
+                endpoint.get("hostname")
+                or endpoint.get("hostName")
+                or endpoint.get("name")
+                or ""
+            ).strip()
+            if read_uid != endpoint_uid:
+                raise OperationalAutonomyError(
+                    "same-company configuration Datto identity readback mismatch"
+                )
+            if read_hostname.casefold() != structured_hostname.casefold():
+                raise OperationalAutonomyError(
+                    "same-company configuration and Datto hostname do not match"
+                )
+            return self._write_verified_ci_association(
+                candidate=candidate, scope=scope, ci_id=ci_id
+            )
+
         material = " ".join(
             (
                 str(candidate.context.get("title") or ""),
