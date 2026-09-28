@@ -409,7 +409,7 @@ def _process(
         _deploy(worktree, image, candidate)
         deployed = True
         observed = _live_revision()
-        health = _live_health()
+        health = _wait_live_health()
         if observed != candidate or health != "healthy":
             raise RepairRunnerError(
                 "POST_DEPLOY_VERIFICATION_FAILED",
@@ -433,7 +433,10 @@ def _process(
         if deployed:
             try:
                 _rollback(worktree, rollback_sha)
-                rolled_back = _live_revision() == rollback_sha and _live_health() == "healthy"
+                rolled_back = (
+                    _live_revision() == rollback_sha
+                    and _wait_live_health() == "healthy"
+                )
             except Exception:
                 rolled_back = False
             if not rolled_back:

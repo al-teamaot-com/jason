@@ -142,6 +142,15 @@ class HostRepairRunnerTests(unittest.TestCase):
                 runner._wait_live_health(attempts=2, interval_seconds=0)
         self.assertEqual(caught.exception.code, "PRODUCTION_NOT_HEALTHY")
 
+    def test_post_deploy_verification_waits_for_health_transition(self):
+        with patch.object(
+            runner,
+            "_wait_live_health",
+            return_value="healthy",
+        ) as wait_health:
+            self.assertEqual(runner._wait_live_health(), "healthy")
+        wait_health.assert_called_once()
+
     def test_live_rollback_mismatch_fails_before_git_or_build(self):
         with tempfile.TemporaryDirectory() as td:
             request_path = Path(td) / "request.json"
