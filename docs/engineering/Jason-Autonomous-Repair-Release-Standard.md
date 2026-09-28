@@ -114,6 +114,14 @@ Until that named governed production execution path is enabled for this release 
 
 This state means **no additional human approval is required**, but execution is blocked by a missing technical execution path or another objective precondition.
 
+## Production-side parent requirement
+
+An autonomous repair release must not bundle unrelated protected-main changes.
+
+The repair merge commit's first parent (the production-side main parent) SHALL equal the exact live production revision selected as rollback.
+
+If production is behind any unrelated merged work, autonomous promotion stops. That work must first be reconciled through the normal release lane, or the repair must be rebuilt from the then-current production baseline.
+
 ## Production-state prerequisites
 
 Autonomous execution fails closed when:
@@ -122,7 +130,8 @@ Autonomous execution fails closed when:
 - production evidence is older than the configured freshness limit;
 - the rollback revision is unknown;
 - required protected checks are missing, pending, or failed;
-- the exact merged candidate is not reachable from protected `main`.
+- the exact merged candidate is not reachable from protected `main`;
+- the repair merge's production-side parent does not equal the live rollback revision.
 
 These are execution blockers, not requests for human approval.
 
@@ -163,6 +172,10 @@ Client endpoint actions, provider mutations, disruptive user actions, and other 
 - `tools/autonomous_repair_release_gate.py`
 - `.github/workflows/autonomous-repair-release.yml`
 - `tools/tests/test_autonomous_repair_release_gate.py`
+- `implementation/runtime_service/src/jason_runtime/autonomous_repair_deployment.py`
+- `implementation/runtime_service/src/jason_runtime/autonomous_repair_maintenance.py`
+- `tools/autonomous_repair_host_runner.py`
+- `docs/operations/Autonomous-Repair-Deployment-Runner.md`
 - J-CHANGE-001
 - Jason Deployment System
 - Development & Release Coordinator

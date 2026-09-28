@@ -600,6 +600,7 @@ class OperationalAutonomyMaintenance:
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
+        completion_notifier=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -620,6 +621,7 @@ class OperationalAutonomyMaintenance:
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
+        self.completion_notifier = completion_notifier
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
 
@@ -1969,9 +1971,10 @@ class OperationalAutonomyMaintenance:
             )
             reason = "VulScan diagnostic complete; one or more exact KBs are not approved."
         elif classification == "stale_or_recovered_finding":
-            reboot_gated = bool(endpoint.get("reboot_required")) or any(
-                reboot for _, _, reboot in rows
-            )
+            # Current endpoint reboot state is authoritative. Patch-level
+            # rebootRequired is update metadata, not proof that the endpoint
+            # still has a pending reboot after installation.
+            reboot_gated = bool(endpoint.get("reboot_required"))
             if not reboot_gated:
                 note += (
                     "All exact reported KBs are installed and no reboot is required. "
@@ -1983,6 +1986,10 @@ class OperationalAutonomyMaintenance:
                     reason="All exact VulScan KBs verified installed with no reboot required.",
                 )
                 self._write_note(work, note, "Jason - Autonomous VulScan Resolution")
+                self._notify_patch_completion(
+                    work,
+                    patch_summary=patch_summary,
+                )
                 return
             note += (
                 "All exact reported KBs are installed, but a reboot requirement is present. "
@@ -2877,6 +2884,47 @@ class OperationalAutonomyMaintenance:
                 component_uid=None,
                 last_reason=reason,
             )
+        )
+
+    def _notify_patch_completion(
+        self,
+        work: OperationalWork,
+        *,
+        patch_summary: str,
+    ) -> None:
+        if self.completion_notifier is None:
+            return
+        fingerprint = hashlib.sha256(
+            (
+                "patch_completed|"
+                + work.ticket_number
+                + "|"
+                + work.hostname
+                + "|"
+                + patch_summary
+            ).encode("utf-8")
+        ).hexdigest()
+        note_title = "Teams - Autonomous Patch Completion"
+        if (
+            self.store.last_note_fingerprint(
+                work.ticket_id,
+                work.playbook_id,
+                note_title,
+            )
+            == fingerprint
+        ):
+            return
+        self.completion_notifier.send(
+            "patch_completed",
+            ticket_number=work.ticket_number,
+            hostname=work.hostname,
+            patch_summary=patch_summary[:300],
+        )
+        self.store.remember_note_fingerprint(
+            work.ticket_id,
+            work.playbook_id,
+            note_title,
+            fingerprint,
         )
 
     def _complete(self, work: OperationalWork, stdout: str) -> None:

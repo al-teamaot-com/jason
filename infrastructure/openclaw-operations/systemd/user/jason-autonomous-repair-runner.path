@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for governed Jason autonomous repair requests
+
+[Path]
+PathExistsGlob=/var/lib/jason/openclaw/autonomous-repair/requests/*.json
+Unit=jason-autonomous-repair-runner.service
+
+[Install]
+WantedBy=default.target

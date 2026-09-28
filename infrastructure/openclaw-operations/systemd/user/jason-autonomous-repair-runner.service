@@ -1,0 +1,17 @@
+[Unit]
+Description=Jason governed autonomous repair deployment runner
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/al/projects/jason
+Environment=HOME=/home/al
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=GITHUB_REPOSITORY=al-teamaot-com/jason
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/autonomous_repair_host_runner.py --repo /home/al/projects/jason --spool /var/lib/jason/openclaw/autonomous-repair
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/al/jason-worktrees /home/al/projects/jason /var/lib/jason/openclaw/autonomous-repair /home/al/.docker
