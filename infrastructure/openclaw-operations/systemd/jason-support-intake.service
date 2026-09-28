@@ -1,0 +1,20 @@
+[Unit]
+Description=Jason native support-list intake
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/opt/jason/current
+Environment=HOME=/home/al
+Environment=GH_CONFIG_DIR=/home/al/.config/gh
+ExecStart=/usr/bin/python3 /opt/jason/current/tools/jason_support_intake.py --repository al-teamaot-com/jason --state-dir /var/lib/jason/openclaw/support-intake
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/opt/jason/current /home/al/.config/gh
+ReadWritePaths=/var/lib/jason/openclaw/support-intake
+UMask=0077
