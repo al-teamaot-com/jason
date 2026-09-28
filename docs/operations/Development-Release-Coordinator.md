@@ -51,13 +51,17 @@ An overlap does not automatically prohibit parallel work. It means the workstrea
 
 ## Recommendations
 
-Recommendations are advisory only.
+Recommendations are advisory only and intentionally separated into two questions:
 
-The initial deterministic priority is:
+- **Release attention** — recently active PRs that are stale or failing and therefore need reconciliation before promotion.
+- **Recommended next development** — work that is useful to advance next, independent of release-lane housekeeping.
 
-1. stale or failing PRs that are candidates for advancement;
-2. open P0/P1 support defects in `SUPPORT.md`;
-3. unblocked governed TODO items by priority.
+Development recommendation priority is:
+
+1. open P0/P1 support defects in `SUPPORT.md`;
+2. unblocked governed TODO items by priority.
+
+The board shows recently active PRs and summarizes older open PRs rather than allowing historical branches to dominate the working view. Any older PR that resumes must still reconcile with current `main`.
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 

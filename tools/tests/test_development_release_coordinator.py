@@ -74,6 +74,30 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         parsed = coordinator.parse_todos(text)
         self.assertEqual([item["id"] for item in parsed], ["TODO-OPS-001"])
 
+    def test_release_attention_is_separate_from_development_recommendation(self):
+        prs = [
+            {
+                "number": 10,
+                "title": "Stale release candidate",
+                "state": "Needs revalidation",
+                "recent": True,
+            }
+        ]
+        self.assertIn("PR #10", coordinator.release_attention(prs))
+
+        support = [
+            {
+                "id": "SUPPORT-OPS-023",
+                "priority": "P1",
+                "status": "Open",
+                "title": "SQLite locking",
+            }
+        ]
+        self.assertIn(
+            "SUPPORT-OPS-023",
+            coordinator.development_recommendation(support, []),
+        )
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))
