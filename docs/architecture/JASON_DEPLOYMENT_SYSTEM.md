@@ -349,6 +349,8 @@ jason.deployment.status
 jason.deployment.preflight
 jason.deployment.plan
 jason.deployment.apply
+deployment.repair.apply
+deployment.repair.status
 jason.deployment.verify
 jason.deployment.rollback
 jason.deployment.evidence.get
@@ -367,6 +369,8 @@ Example request:
 ```
 
 Agents may request these capabilities but may not directly invoke one another or bypass central orchestration.
+
+`deployment.repair.apply` is the narrow J-CHANGE-002 exception for pre-authorized repairs. It queues exact immutable repair material through Central Orchestration and a separate rootless host runner; it does not expose Docker or host shell authority to Jason Runtime.
 
 ## 13. Initial Implementation Sequence
 
