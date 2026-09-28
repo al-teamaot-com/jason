@@ -84,13 +84,9 @@ class AutotaskConnector(ConnectorBase):
             },
         )
 
-        payload = self._transport.request(
-            method=prepared.method,
-            url=prepared.url,
-            headers=prepared.headers,
-            params=prepared.params,
-            json=prepared.json,
-            timeout_seconds=prepared.timeout_seconds,
+        payload = self._request_with_bounded_notes_retry(
+            request=request,
+            prepared=prepared,
         )
 
         page_count = 1
@@ -117,6 +113,44 @@ class AutotaskConnector(ConnectorBase):
             provider=self.provider_name,
             data=payload,
         )
+
+
+    def _request_with_bounded_notes_retry(
+        self,
+        *,
+        request: ConnectorRequest,
+        prepared: PreparedRequest,
+    ) -> Mapping[str, Any]:
+        attempts = 2 if request.context.capability == "autotask.ticket.notes.list" else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._transport.request(
+                    method=prepared.method,
+                    url=prepared.url,
+                    headers=prepared.headers,
+                    params=prepared.params,
+                    json=prepared.json,
+                    timeout_seconds=prepared.timeout_seconds,
+                )
+            except ConnectorTransportError as exc:
+                if attempt >= attempts or not self._is_transient_transport_failure(exc):
+                    raise
+                self._audit.record(
+                    "connector.retrying",
+                    request.context,
+                    {
+                        "provider": self.provider_name,
+                        "operation": prepared.audit_operation or prepared.url,
+                        "attempt": attempt + 1,
+                        "reason": "transient_transport_failure",
+                    },
+                )
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _is_transient_transport_failure(error: ConnectorTransportError) -> bool:
+        status = error.status_code
+        return status is None or status in {408, 429} or (500 <= status <= 599)
 
     @staticmethod
     def _requested_record_limit(
