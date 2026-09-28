@@ -14,7 +14,7 @@
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-autonomy-flight-recorder.json",
-      "sha256": "3c3ecd5f2b678edaac74183c3cae4e72872d27d95625bcb50be856f95c5c19a0",
+      "sha256": "6fb5c59d26178a4546c46cd6ad45609bb1e5c8fc2246f3ac5a933ac98b09b06c",
       "title": "Jason Flight Recorder",
       "uid": "jason-autonomy-flight-recorder"
     },
@@ -26,7 +26,7 @@
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-command-center.json",
-      "sha256": "511d5086650c269afb6f9d90544bf6971e306d39a5e18daa1c188db2c0700287",
+      "sha256": "9a4a83a3515a44516754fba37a0260b9c5172dc3f973d4049f6487b298c6644f",
       "title": "Jason Command Center",
       "uid": "jason-command-center"
     },
