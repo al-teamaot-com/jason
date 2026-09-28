@@ -229,6 +229,20 @@ def _independent_classification(
     if not pr.get("merged_at"):
         raise RepairRunnerError("PR_NOT_MERGED", "repair PR is not merged")
 
+    commit = api.request(f"/commits/{candidate}")
+    parents = list(commit.get("parents") or [])
+    if len(parents) < 2:
+        raise RepairRunnerError(
+            "REPAIR_MERGE_SHAPE_INVALID",
+            "autonomous repair candidate must be a merge commit with a production-side parent",
+        )
+    production_parent = str((parents[0] or {}).get("sha") or "").casefold()
+    if production_parent != live_revision:
+        raise RepairRunnerError(
+            "UNRELATED_MAIN_CHANGES_PRESENT",
+            "repair merge parent does not equal live production; autonomous promotion would bundle unrelated main changes",
+        )
+
     files = api.paged(f"/pulls/{pr_number}/files")
     checks_payload = api.request(f"/commits/{candidate}/check-runs")
     main = api.request("/branches/main")
