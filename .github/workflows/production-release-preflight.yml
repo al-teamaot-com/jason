@@ -1,0 +1,86 @@
+name: Production Release Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Exact merged main commit SHA to promote
+        required: true
+        type: string
+      expected_current_production_sha:
+        description: Expected currently accepted production SHA, if known
+        required: false
+        type: string
+      release_summary:
+        description: Short reason for this production promotion
+        required: true
+        type: string
+      rollback_sha:
+        description: Known previously accepted immutable SHA for rollback
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jason-production-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected immutable release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Verify release and rollback SHAs are on protected main
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          ROLLBACK_SHA: ${{ inputs.rollback_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$RELEASE_SHA")"
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          git merge-base --is-ancestor "$ROLLBACK_SHA" origin/main
+
+      - name: Write immutable release manifest
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          EXPECTED_CURRENT_PRODUCTION_SHA: ${{ inputs.expected_current_production_sha }}
+          RELEASE_SUMMARY: ${{ inputs.release_summary }}
+          ROLLBACK_SHA: ${{ inputs.rollback_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          manifest = {
+              "release_sha": os.environ["RELEASE_SHA"],
+              "expected_current_production_sha": os.environ.get("EXPECTED_CURRENT_PRODUCTION_SHA", ""),
+              "rollback_sha": os.environ["ROLLBACK_SHA"],
+              "release_summary": os.environ["RELEASE_SUMMARY"],
+              "source_branch": "main",
+              "immutable": True,
+              "production_verification_required": True,
+          }
+          Path("jason-production-release-manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          cat jason-production-release-manifest.json
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: jason-production-release-${{ inputs.release_sha }}
+          path: jason-production-release-manifest.json
+          if-no-files-found: error
