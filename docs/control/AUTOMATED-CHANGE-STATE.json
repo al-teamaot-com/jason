@@ -30,11 +30,11 @@
   },
   "schema_version": "1.0",
   "validated_source": {
-    "observed_at": "2026-09-28T06:19:59+00:00",
-    "revision": "9f669b3d5fb489a204084b5784455df76841c54a",
+    "observed_at": "2026-09-28T06:40:04+00:00",
+    "revision": "d296407d6e4d7183db4ea851728752aeb7795c0e",
     "status": "ci_passed",
     "workflow": "Validate Jason",
-    "workflow_run_id": "36378155578",
-    "workflow_url": "https://github.com/al-teamaot-com/jason/actions/runs/36378155578"
+    "workflow_run_id": "31492716475",
+    "workflow_url": "https://github.com/al-teamaot-com/jason/actions/runs/31492716475"
   }
 }
