@@ -42,6 +42,7 @@ def build_autonomy_worker_maintenance(
     max_active_work_items: int = 2,
     interval_seconds: int = 60,
     audit=None,
+    completion_notifier=None,
 ):
     """Build the production worker or return None without side effects."""
 
@@ -101,4 +102,5 @@ def build_autonomy_worker_maintenance(
         max_active_work_items=max_active_work_items,
         interval_seconds=interval_seconds,
         audit=audit,
+        completion_notifier=completion_notifier,
     )
