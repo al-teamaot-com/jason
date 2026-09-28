@@ -641,6 +641,27 @@ class OperationalAutonomyMaintenance:
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
+        backupiq_queue_blocked: set[int] = set()
+
+        # BackupIQ ownership is a queue-routing invariant, not an active-work
+        # scheduling decision. Normalize every open BackupIQ candidate before
+        # evaluating active slots, endpoint availability, or remediation.
+        for item in candidates:
+            if (
+                self._is_backupiq_ticket(item.context)
+                and str(item.source_queue).strip().casefold() != "jason"
+            ):
+                try:
+                    self._normalize_backupiq_queue(item)
+                except Exception:
+                    ticket_id = int(item.resource_id)
+                    backupiq_queue_blocked.add(ticket_id)
+                    classifications[ticket_id] = (
+                        "governance_blocked",
+                        "backupiq_queue_normalization_failed",
+                        item.source_version,
+                        False,
+                    )
 
         active = list(self.store.list_open())
         processed: set[int] = set()
@@ -692,6 +713,9 @@ class OperationalAutonomyMaintenance:
 
         for item in candidates:
             ticket_id = int(item.resource_id)
+            if ticket_id in backupiq_queue_blocked:
+                governance_blocked += 1
+                continue
             existing = self.store.get(ticket_id)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 if (
@@ -708,7 +732,10 @@ class OperationalAutonomyMaintenance:
                 # changed the Autotask source-version marker.
                 human_handoff = (
                     existing.phase == "escalated"
-                    and str(item.source_queue).strip().casefold() != "jason"
+                    and (
+                        existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                        or str(item.source_queue).strip().casefold() != "jason"
+                    )
                 )
                 if (
                     not human_handoff
@@ -772,7 +799,12 @@ class OperationalAutonomyMaintenance:
                     continue
                 if existing.phase == "escalated":
                     human_review += 1
-                    if str(item.source_queue).strip().casefold() == "jason":
+                    if existing.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+                        state, reason_code = (
+                            "waiting_human_review",
+                            "technician_review_required",
+                        )
+                    elif str(item.source_queue).strip().casefold() == "jason":
                         try:
                             self._handoff_to_helpdesk(existing)
                             state, reason_code = (
@@ -1139,6 +1171,34 @@ class OperationalAutonomyMaintenance:
         title = str(ticket.get("title") or "").strip().casefold()
         return title.startswith("backupiq:") and "backup" in title
 
+    def _normalize_backupiq_queue(self, candidate) -> None:
+        output = self.actions.execute(
+            BACKUPIQ_SCOPE,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": int(candidate.resource_id),
+                    "queueID": "Jason",
+                }
+            },
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(verified_fields, Sequence)
+            and not isinstance(verified_fields, (str, bytes))
+            and "queueID" in {str(value) for value in verified_fields}
+        ):
+            raise OperationalAutonomyError(
+                "BackupIQ queue normalization readback did not verify queueID"
+            )
+
     @staticmethod
     def _is_low_disk_ticket(ticket: Mapping[str, Any]) -> bool:
         title = str(ticket.get("title") or "").strip().casefold()
@@ -1448,7 +1508,10 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
-        if endpoint.get("online") is not True:
+        if (
+            endpoint.get("online") is not True
+            and scope.playbook_id != BACKUPIQ_SCOPE.playbook_id
+        ):
             raise OperationalAutonomyError("endpoint is not currently online")
 
         return OperationalWork(
@@ -3029,7 +3092,11 @@ class OperationalAutonomyMaintenance:
         reason: str,
         clear_job: bool = False,
     ) -> None:
-        self._handoff_to_helpdesk(work)
+        # Open BackupIQ work remains Jason-owned even when technician review is
+        # required. Generic human-review routing must not break the invariant
+        # Open + BackupIQ => Jason queue.
+        if work.playbook_id != BACKUPIQ_SCOPE.playbook_id:
+            self._handoff_to_helpdesk(work)
         changes: dict[str, Any] = {
             "phase": "escalated",
             "last_reason": reason,
