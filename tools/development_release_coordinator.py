@@ -172,19 +172,25 @@ def parse_todos(text: str) -> list[dict[str, str]]:
     ]
 
 
-def recommendation(
-    support: list[dict[str, str]],
-    todos: list[dict[str, str]],
-    pr_states: list[dict[str, Any]],
-) -> str:
-    failing = [pr for pr in pr_states if pr["state"] in {"Blocked", "Needs revalidation"}]
-    if failing:
-        pr = failing[0]
+def release_attention(pr_states: list[dict[str, Any]]) -> str:
+    candidates = [
+        pr
+        for pr in pr_states
+        if pr.get("recent") and pr["state"] in {"Blocked", "Needs revalidation"}
+    ]
+    if candidates:
+        pr = candidates[0]
         return (
             f"Reconcile PR #{pr['number']} ({pr['title']}) before considering it for promotion. "
             "Independent development may continue in separate workstreams."
         )
+    return "No recently active PR currently requires release-lane reconciliation."
 
+
+def development_recommendation(
+    support: list[dict[str, str]],
+    todos: list[dict[str, str]],
+) -> str:
     for priority in ("P0", "P1", "P2", "P3"):
         candidates = [item for item in support if item["priority"] == priority]
         if candidates:
@@ -230,9 +236,9 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         f"/pulls?state=open&base={urllib.parse.quote(base, safe='')}&sort=updated&direction=desc"
     )
     required = list(config["required_checks"])
-    active_cutoff = datetime.now(timezone.utc) - timedelta(
-        days=int(config.get("active_overlap_days", 7))
-    )
+    now = datetime.now(timezone.utc)
+    active_cutoff = now - timedelta(days=int(config.get("active_overlap_days", 7)))
+    display_cutoff = now - timedelta(days=int(config.get("active_display_days", 3)))
 
     pr_states: list[dict[str, Any]] = []
     active_files: dict[int, set[str]] = {}
@@ -252,6 +258,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
             bool(config.get("preproduction", {}).get("configured", False)),
         )
         updated = datetime.fromisoformat(str(pr["updated_at"]).replace("Z", "+00:00"))
+        recent = updated >= display_cutoff
         if updated >= active_cutoff:
             files = api.paged(f"/pulls/{number}/files")
             active_files[number] = {
@@ -272,6 +279,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
                 "check_count": check_count,
                 "check_detail": check_detail,
                 "state": state,
+                "recent": recent,
             }
         )
 
@@ -298,7 +306,9 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         "support": support,
         "todos": todos,
         "roadmap": roadmap,
-        "recommendation": recommendation(support, todos, pr_states),
+        "release_attention": release_attention(pr_states),
+        "development_recommendation": development_recommendation(support, todos),
+        "older_open_pr_count": sum(1 for pr in pr_states if not pr.get("recent")),
         "preproduction": config.get("preproduction", {}),
         "production_policy": config.get("production", {}),
     }
@@ -316,26 +326,37 @@ def render(board: dict[str, Any]) -> str:
         f"**Current main:** `{board['main_sha']}`  ",
         f"**Production revision:** `{prod.get('revision', 'unknown')}`  ",
         f"**Production health:** {prod.get('status', 'unknown')}  ",
+        f"**Production evidence observed:** {prod.get('observed_at', 'unknown')}  ",
         f"**Pre-production environment:** {'configured' if preprod.get('configured') else 'not configured'}  ",
         "",
-        "## Recommendation",
+        "## Release attention",
         "",
-        board["recommendation"],
+        board["release_attention"],
         "",
-        "## Active development",
+        "## Recommended next development",
+        "",
+        board["development_recommendation"],
+        "",
+        "## Recently active development",
         "",
         "| PR | State | Main drift | Required checks | Updated |",
         "| --- | --- | ---: | --- | --- |",
     ]
-    for pr in board["pr_states"]:
+    recent_prs = [pr for pr in board["pr_states"] if pr.get("recent")]
+    for pr in recent_prs:
         title = pr["title"].replace("|", "\\|")
         lines.append(
             f"| [#{pr['number']}]({pr['url']}) {title} | {pr['state']} | "
             f"{pr['behind_by']} behind | {pr['check_count']} ({pr['check_state']}) | "
             f"{pr['updated_at']} |"
         )
-    if not board["pr_states"]:
-        lines.append("| — | No open PRs | — | — | — |")
+    if not recent_prs:
+        lines.append("| — | No recently active PRs | — | — | — |")
+    if board["older_open_pr_count"]:
+        lines.append(
+            f"\nOlder open PRs not shown: **{board['older_open_pr_count']}**. "
+            "If resumed, they must reconcile with current main before merge."
+        )
 
     lines.extend(["", "## Active implementation overlaps", ""])
     if board["overlaps"]:
