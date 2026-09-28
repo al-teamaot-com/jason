@@ -272,3 +272,78 @@ def test_ticket_search_follows_third_page_within_requested_bound() -> None:
     assert transport.requests[3]["params"] is None
     assert audit.events[-1][0] == "connector.completed"
     assert audit.events[-1][1]["provider_pages_examined"] == 3
+
+class FlakyNotesTransport(FakeTransport):
+    def __init__(self, failures):
+        super().__init__("https://webservices3.autotask.net/atservicesrest/")
+        self.failures = list(failures)
+
+    def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+        if url.endswith("/v1.0/zoneInformation"):
+            return super().request(method=method, url=url, headers=headers, params=params, json=json, timeout_seconds=timeout_seconds)
+        self.requests.append({"method": method, "url": url, "headers": dict(headers), "params": params, "json": json, "timeout_seconds": timeout_seconds})
+        if self.failures:
+            raise self.failures.pop(0)
+        return {"items": [{"id": 1, "ticketID": 12345}], "pageDetails": {"count": 1}}
+
+
+def _notes_request() -> ConnectorRequest:
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-notes",
+            principal_id="user-1",
+            organization_id="team-aot",
+            client_id=None,
+            capability="autotask.ticket.notes.list",
+            mode="observe",
+        ),
+        arguments={"ticket_id": 12345},
+    )
+
+
+def test_ticket_notes_retries_one_transient_transport_failure() -> None:
+    from connectors.core.contracts import ConnectorTransportError
+
+    transport = FlakyNotesTransport([ConnectorTransportError("synthetic timeout")])
+    audit = FakeAudit()
+    connector = AutotaskConnector(secrets=FakeSecrets(), transport=transport, audit=audit)
+
+    result = connector.execute(_notes_request())
+
+    assert result.data["items"][0]["ticketID"] == 12345
+    note_requests = [r for r in transport.requests if "/Tickets/12345/Notes" in r["url"]]
+    assert len(note_requests) == 2
+    assert [e for e in audit.events if e[0] == "connector.retrying"] == [
+        ("connector.retrying", {
+            "provider": "autotask",
+            "operation": "/V1.0/Tickets/12345/Notes",
+            "attempt": 2,
+            "reason": "transient_transport_failure",
+        })
+    ]
+
+
+def test_ticket_notes_does_not_retry_nontransient_4xx() -> None:
+    from connectors.core.contracts import ConnectorTransportError
+
+    transport = FlakyNotesTransport([ConnectorTransportError("bad request", status_code=400)])
+    connector = AutotaskConnector(secrets=FakeSecrets(), transport=transport, audit=FakeAudit())
+
+    with pytest.raises(ConnectorTransportError):
+        connector.execute(_notes_request())
+
+    note_requests = [r for r in transport.requests if "/Tickets/12345/Notes" in r["url"]]
+    assert len(note_requests) == 1
+
+
+def test_non_notes_read_remains_single_attempt() -> None:
+    from connectors.core.contracts import ConnectorTransportError
+
+    transport = FlakyNotesTransport([ConnectorTransportError("synthetic timeout")])
+    connector = AutotaskConnector(secrets=FakeSecrets(), transport=transport, audit=FakeAudit())
+
+    with pytest.raises(ConnectorTransportError):
+        connector.execute(_request())
+
+    ticket_requests = [r for r in transport.requests if "/Tickets/12345" in r["url"]]
+    assert len(ticket_requests) == 1
