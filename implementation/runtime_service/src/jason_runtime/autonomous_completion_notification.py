@@ -36,6 +36,9 @@ from orchestrator.contracts import OrchestrationRequest
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import InvocationResult
+from autonomous_remediation.autonomous_principal import AutonomousPrincipal, AutonomousRequestFactory
+from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
+from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 
 
 CAPABILITY = "communication.teams.autonomy_completion.send"
@@ -264,6 +267,21 @@ def _bounded(value: Any, field: str, maximum: int = 300) -> str:
 
 
 def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
+    allowed = {
+        "event_type",
+        "candidate_sha",
+        "support_item",
+        "ticket_number",
+        "hostname",
+        "patch_summary",
+        "resolution_summary",
+    }
+    unknown = set(arguments) - allowed
+    if unknown:
+        raise ValueError(
+            "unsupported autonomous completion notification arguments: "
+            + ", ".join(sorted(str(value) for value in unknown))
+        )
     event = str(arguments.get("event_type") or "").strip().casefold()
     if event not in _ALLOWED_EVENTS:
         raise ValueError("unsupported autonomous completion event_type")
@@ -422,3 +440,57 @@ def register_invoker(
     invoker: AutonomousCompletionTeamsInvoker,
 ) -> None:
     invokers.register(CAPABILITY, invoker)
+
+
+@dataclass(slots=True)
+class GovernedAutonomousCompletionNotifier:
+    request_factory: AutonomousRequestFactory
+    orchestrator: Any
+
+    def send(self, event_type: str, **arguments: Any) -> Mapping[str, Any]:
+        request = self.request_factory.build(
+            capability_name=CAPABILITY,
+            arguments={"event_type": event_type, **arguments},
+            client_id=None,
+            standing_policy=None,
+            correlation_id=None,
+        )
+        result = self.orchestrator.execute(request)
+        status = getattr(getattr(result, "status", None), "value", "")
+        if status != "succeeded":
+            raise RuntimeError(
+                "autonomous completion Teams notification failed: "
+                + str(
+                    getattr(result, "error_code", None)
+                    or getattr(result, "reason_codes", ())
+                    or status
+                )
+            )
+        output = getattr(result, "output", None)
+        return dict(output) if isinstance(output, Mapping) else {}
+
+
+def build_notifier(
+    *,
+    enabled: bool,
+    identity_authority,
+    capabilities,
+    approvals,
+    execution_ledger: SQLiteGovernedExecutionLedger,
+    orchestrator,
+    promotion_db: Path,
+):
+    if not enabled:
+        return None
+    request_factory = AutonomousRequestFactory(
+        principal=AutonomousPrincipal(),
+        authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approvals,
+        execution_ledger=execution_ledger,
+        promotion_store=SQLitePlaybookAutonomyApprovalStore(promotion_db),
+    )
+    return GovernedAutonomousCompletionNotifier(
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+    )
