@@ -369,8 +369,22 @@ def _canonical_request(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _request_fingerprint(payload: Mapping[str, Any]) -> str:
+    authority_material = {
+        key: payload[key]
+        for key in (
+            "capability",
+            "provider",
+            "principal_id",
+            "organization_id",
+            "candidate_sha",
+            "rollback_sha",
+            "support_item",
+            "pr_number",
+            "post_deploy_verification",
+        )
+    }
     encoded = json.dumps(
-        dict(payload),
+        authority_material,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
