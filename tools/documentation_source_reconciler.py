@@ -57,18 +57,56 @@ def successful_main_runs() -> list[dict[str, Any]]:
         "--branch", "main",
         "--event", "push",
         "--status", "success",
-        "--limit", "20",
+        "--limit", "100",
         "--json", "databaseId,headSha,url,createdAt",
     )
     return list(data or [])
 
 
+def first_parent_history(limit: int = 200) -> tuple[str, ...]:
+    output = run(
+        "git",
+        "-C",
+        str(REPO_ROOT),
+        "rev-list",
+        "--first-parent",
+        f"--max-count={limit}",
+        "origin/main",
+    )
+    return tuple(line.strip() for line in output.splitlines() if line.strip())
+
+
 def latest_material_success() -> dict[str, Any] | None:
-    for item in successful_main_runs():
-        revision = str(item.get("headSha") or "")
-        if revision and is_material(changed_paths(revision)):
+    by_revision = {
+        str(item.get("headSha") or ""): item
+        for item in successful_main_runs()
+        if str(item.get("headSha") or "")
+    }
+    for revision in first_parent_history():
+        item = by_revision.get(revision)
+        if item is not None and is_material(changed_paths(revision)):
             return item
     return None
+
+
+def is_ancestor(ancestor: str, descendant: str) -> bool:
+    if not ancestor or not descendant:
+        return False
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def publish_source_if_needed() -> None:
@@ -77,14 +115,25 @@ def publish_source_if_needed() -> None:
     if latest is None:
         print("SOURCE_DOCUMENTATION_RECONCILIATION=NO_MATERIAL_SUCCESS")
         return
+
     revision = str(latest["headSha"])
-    if revision == recorded_revision():
+    recorded = recorded_revision()
+    if revision == recorded:
         print("SOURCE_DOCUMENTATION_RECONCILIATION=UP_TO_DATE")
         return
+    if recorded and not is_ancestor(recorded, revision):
+        print(
+            "SOURCE_DOCUMENTATION_RECONCILIATION=REFUSED_BACKWARD "
+            f"recorded={recorded} candidate={revision}"
+        )
+        return
+
     script = Path(__file__).resolve().with_name("publish_documentation_reconciliation.sh")
     run(
-        "bash", str(script),
-        "source", revision,
+        "bash",
+        str(script),
+        "source",
+        revision,
         str(latest.get("databaseId") or ""),
         str(latest.get("url") or ""),
     )
