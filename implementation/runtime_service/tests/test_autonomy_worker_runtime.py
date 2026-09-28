@@ -2153,6 +2153,74 @@ def test_missing_ci_is_exactly_correlated_and_verified_before_claim(tmp_path: Pa
     store.close()
 
 
+def test_structured_letters_only_hostname_correlates_within_company_before_datto(tmp_path: Path):
+    class CompanyFirstReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.endpoint_search_called = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.search":
+                assert arguments == {"company_id": 827, "name": "VMHOST", "page_size": 25}
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{
+                        "id": 35,
+                        "companyID": 827,
+                        "isActive": True,
+                        "referenceNumber": "vmhost-device-uid",
+                        "referenceTitle": "VMHOST",
+                    }]}},
+                }
+            if capability == "endpoint.device.read":
+                assert arguments == {"resource_id": "vmhost-device-uid"}
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vmhost-device-uid",
+                        "hostname": "VMHOST",
+                        "online": True,
+                    }},
+                }
+            if capability == "endpoint.device.search":
+                self.endpoint_search_called = True
+                raise AssertionError("structured company-first correlation must not use global endpoint search")
+            return super().execute(capability, arguments)
+
+    item = candidate(title="Vulnerability Detected by VulScan - VMHOST (192.168.1.177 / D4:F5:EF:8F:E7:21)")
+    item.context["companyID"] = 827
+    item.context.pop("configurationItemID", None)
+    reads = CompanyFirstReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    ci_id = worker._associate_exact_ticket_device(
+        candidate=item, scope=scope, company_id=827
+    )
+
+    assert ci_id == 35
+    assert reads.endpoint_search_called is False
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "configurationItemID": 35}]
+    store.close()
+
+
 def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_path: Path):
     class InternalCompanyReads(Reads):
         def execute(self, capability, arguments):
