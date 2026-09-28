@@ -8,11 +8,11 @@ This record is updated by Jason's post-success documentation reconciliation proc
 
 ## Latest validated source
 
-- Revision: `8ad5a06a53361c92308d927c4fbf6514fbc4749e`
+- Revision: `3b308681bd68ba188206d21ff332a4f2cd1524c4`
 - Status: `ci_passed`
 - Workflow: `Validate Jason`
-- Workflow run: `36166395398`
-- Observed: `2026-09-28T13:53:12+00:00`
+- Workflow run: `36433115637`
+- Observed: `2026-09-28T14:18:27+00:00`
 
 ## Latest production alignment
 
