@@ -88,6 +88,7 @@ nav:
   - Operations:
       - Operations Authority Map: operations/README.md
       - Development & Release Coordinator: operations/Development-Release-Coordinator.md
+      - Jason Native Support Intake: operations/Jason-Native-Support-Intake.md
       - Microsoft Teams Integration: operations/Runbook-Teams-Integration.md
       - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md
