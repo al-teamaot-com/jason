@@ -477,6 +477,7 @@ def process_one(
             "error_message": str(error)[:700],
             "verification_passed": False,
             "rollback_performed": False,
+            "retry_count": int(raw.get("retry_count") or 0),
         }
     except Exception as error:
         result = {
@@ -488,6 +489,7 @@ def process_one(
             "error_message": str(error)[:700],
             "verification_passed": False,
             "rollback_performed": False,
+            "retry_count": int(raw.get("retry_count") or 0) if isinstance(raw, dict) else 0,
         }
 
     _atomic_json(results / source.name, result)

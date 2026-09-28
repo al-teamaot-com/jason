@@ -80,6 +80,27 @@ def test_build_create_command_adds_nonsecret_env_and_readonly_bind(
     )
 
 
+def test_build_create_command_adds_source_revision_when_live_env_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    existing = tmp_path / "existing"
+    existing.write_text("existing")
+    live = _live(existing)
+    live["Config"]["Env"] = ["JASON_OPENBAO_URL=http://openbao:8200"]
+    monkeypatch.setattr(deploy, "_inspect", lambda name: live)
+
+    command, env_map, _, _ = deploy._build_create_command(
+        live="jason-runtime",
+        image="jason-runtime:test",
+        source_revision="exact-new-revision",
+        harden=True,
+    )
+
+    assert env_map["JASON_SOURCE_REVISION"] == "exact-new-revision"
+    assert "--env" in command
+    assert "JASON_SOURCE_REVISION" in command
+
+
 def test_readonly_bind_is_idempotent_when_live_container_already_has_it(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -44,6 +44,8 @@ AUTONOMOUS_REPAIR_PROFILE_ENV = "JASON_AUTONOMOUS_REPAIR_DEPLOYMENT_PROFILE"
 AUTONOMOUS_REPAIR_PROFILE = "autonomous-repair-v1"
 AUTONOMOUS_REPAIR_SPOOL_ENV = "JASON_AUTONOMOUS_REPAIR_SPOOL"
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/autonomous-repair")
+TRANSIENT_REPAIR_RETRY_CODES = {"PRODUCTION_NOT_HEALTHY"}
+MAX_TRANSIENT_RETRIES = 3
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SUPPORT = re.compile(r"^SUPPORT-[A-Z]+-[0-9]+$")
@@ -458,6 +460,38 @@ class AutonomousRepairDeploymentInvoker:
 
         if result_path.exists():
             existing = json.loads(result_path.read_text(encoding="utf-8"))
+            retry_count = int(existing.get("retry_count") or 0)
+            transient_retry = (
+                existing.get("state") == "rejected"
+                and str(existing.get("error_code") or "") in TRANSIENT_REPAIR_RETRY_CODES
+                and retry_count < MAX_TRANSIENT_RETRIES
+            )
+            if transient_retry:
+                archive_dir = results / "archive"
+                archive_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+                archive_path = archive_dir / f"{request_id}.retry-{retry_count}.json"
+                os.replace(result_path, archive_path)
+                payload["retry_count"] = retry_count + 1
+                if not request_path.exists():
+                    _atomic_write(request_path, payload)
+                return InvocationResult(
+                    output={
+                        "provider": AUTONOMOUS_REPAIR_DEPLOYMENT_PROVIDER,
+                        "provider_capability": DEPLOYMENT_REPAIR_APPLY,
+                        "data": {
+                            "status": "queued",
+                            "request_id": request_id,
+                            "candidate_sha": canonical["candidate_sha"],
+                            "rollback_sha": canonical["rollback_sha"],
+                            "support_item": canonical["support_item"],
+                            "retry_count": retry_count + 1,
+                            "host_mutation_performed": False,
+                        },
+                        "evidence_ids": (f"repair-deployment:{request_id}",),
+                        "warnings": (),
+                    },
+                    attempts=1,
+                )
             return InvocationResult(
                 output={
                     "provider": AUTONOMOUS_REPAIR_DEPLOYMENT_PROVIDER,
@@ -467,6 +501,7 @@ class AutonomousRepairDeploymentInvoker:
                         "request_id": request_id,
                         "candidate_sha": canonical["candidate_sha"],
                         "result_state": existing.get("state", "unknown"),
+                        "retry_count": retry_count,
                     },
                     "evidence_ids": (f"repair-deployment:{request_id}",),
                     "warnings": (),

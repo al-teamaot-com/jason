@@ -111,6 +111,37 @@ class AutonomousRepairDeploymentTests(unittest.TestCase):
             self.assertEqual(payload["rollback_sha"], ROLLBACK)
             self.assertFalse(first.output["data"]["host_mutation_performed"])
 
+    def test_transient_pre_mutation_rejection_requeues_with_bound(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            invoker = AutonomousRepairDeploymentInvoker(root)
+            queued = invoker.invoke(request=request(), resolution=resolution())
+            request_id = queued.output["data"]["request_id"]
+            request_path = root / "requests" / f"{request_id}.json"
+            request_path.unlink()
+            result_dir = root / "results"
+            result_dir.mkdir(parents=True, exist_ok=True)
+            (result_dir / f"{request_id}.json").write_text(
+                json.dumps(
+                    {
+                        "state": "rejected",
+                        "error_code": "PRODUCTION_NOT_HEALTHY",
+                        "retry_count": 0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            retried = invoker.invoke(request=request(execution="exec-2"), resolution=resolution())
+
+            self.assertEqual(retried.output["data"]["status"], "queued")
+            self.assertEqual(retried.output["data"]["retry_count"], 1)
+            payload = json.loads(request_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["retry_count"], 1)
+            self.assertTrue(
+                (root / "results" / "archive" / f"{request_id}.retry-0.json").exists()
+            )
+
     def test_status_reads_bounded_result(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
