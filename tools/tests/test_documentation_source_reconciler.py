@@ -6,6 +6,57 @@ def test_material_change_excludes_docs_and_workflow_only_changes():
     assert is_material(("tools/example.py", "docs/control/CURRENT.md"))
 
 
+def test_latest_material_success_follows_main_history_not_run_order(monkeypatch):
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.successful_main_runs",
+        lambda: [
+            {"headSha": "older", "databaseId": 1},
+            {"headSha": "newer", "databaseId": 2},
+        ],
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.first_parent_history",
+        lambda: ("newer", "docs-only", "older"),
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.changed_paths",
+        lambda revision: {
+            "newer": ("implementation/runtime.py",),
+            "older": ("tools/older.py",),
+        }[revision],
+    )
+    from tools.documentation_source_reconciler import latest_material_success
+
+    assert latest_material_success()["headSha"] == "newer"
+
+
+def test_publish_refuses_backward_candidate(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr("tools.documentation_source_reconciler.run", fake_run)
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.latest_material_success",
+        lambda: {"headSha": "older", "databaseId": 1, "url": "https://example.invalid/run/1"},
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.recorded_revision",
+        lambda: "newer",
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.is_ancestor",
+        lambda ancestor, descendant: False,
+    )
+
+    from tools.documentation_source_reconciler import publish_source_if_needed
+
+    publish_source_if_needed()
+    output = capsys.readouterr().out
+    assert "SOURCE_DOCUMENTATION_RECONCILIATION=REFUSED_BACKWARD" in output
+    assert not any(call and call[0] == "bash" for call in calls)
 
 
 def test_main_does_not_republish_while_generated_pr_is_waiting(monkeypatch):
