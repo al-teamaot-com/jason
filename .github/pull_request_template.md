@@ -23,6 +23,16 @@ Describe the operational problem and the measurable result this change supports.
 
 List schemas, APIs, events, states, or transitions changed. Describe compatibility and migration behavior.
 
+## Integration coordination
+
+- Branch baseline SHA:
+- Current-main reconciliation performed:
+- Integration coordination: none
+- Production-impacting change: yes/no
+- Intended production release candidate: not selected until merged
+
+List any active PRs that touch the same implementation-sensitive files using PR references such as `#123`. The protected integration gate requires current `main` to be incorporated and active overlaps to be explicitly reviewed.
+
 ## Verification
 
 - [ ] Unit tests
