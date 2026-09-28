@@ -308,6 +308,26 @@ Document:
 - resulting decision
 - next step
 
+### Technician-scannable note layout
+
+Where practical, Jason-authored operational notes should put the technician's decision context before diagnostic detail.
+
+Preferred field order:
+1. **STATUS** — current state in plain language.
+2. **NEXT STEP** or **ACTION REQUIRED** — what happens now and who must act.
+3. **WHEN / ESCALATION** — next recheck, deadline, or aging threshold when applicable.
+4. **KEY EVIDENCE** — only the facts necessary to understand the decision.
+5. **WHAT JASON DID** — concise summary of diagnostics/remediation.
+6. **CHANGES MADE** — explicitly say **None** when no modifying action occurred.
+7. **JASON STATE** — persisted machine state for audit/resume.
+
+Rules:
+- Do not bury an actionable technician decision inside a diagnostic paragraph.
+- If no technician action is required, say that explicitly near the top.
+- If human action is required, use **ACTION REQUIRED** and state the exact decision/action.
+- Keep detailed diagnostics below the action summary.
+- Use note titles that expose the state, such as `Jason - [Playbook] - Waiting Approval`, `Human Review Required`, `Verification`, or `Resolution`.
+
 Suggested note titles:
 - `Jason - [Playbook] - Asset Validation`
 - `Jason - [Playbook] - Diagnostic`
