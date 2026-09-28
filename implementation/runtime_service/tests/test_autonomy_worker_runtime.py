@@ -1483,13 +1483,71 @@ def test_backupiq_requires_separate_promotion(tmp_path: Path):
         ),
         max_active_work_items=2,
         interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    worker.tick()
+
+    assert store.get(141185) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_backupiq_queue_normalization_precedes_active_capacity(tmp_path: Path):
+    class MultiQueueSource:
+        def reconcile_candidates(self):
+            return (
+                candidate(),
+                replace(
+                    backupiq_candidate(),
+                    source_queue="Monitoring Alert",
+                    owned_by_jason=False,
+                ),
+            )
+
+    actions = Actions()
+    reads = Reads()
+    reads.job_status = "active"
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=140933,
+            ticket_number="T20260925.9999",
+            title="[Monitor] Antivirus status issue",
+            playbook_id="datto_edr_av",
+            source_queue="Jason",
+            company_id=507,
+            configuration_item_id=1583,
+            device_uid="device-uid-1",
+            hostname="PC-1",
+            phase="health_wait",
+            job_uid="job-active",
+            component_uid="component-active",
+        )
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=MultiQueueSource(),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("datto_edr_av", "backupiq_endpoint_backup")
+        ),
+        max_active_work_items=1,
+        interval_seconds=30,
         monotonic=iter((0.0,)).__next__,
     )
 
     worker.tick()
 
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141185, "queueID": "Jason"} in update_calls
     assert store.get(141185) is None
-    assert actions.calls == []
     store.close()
 
 
@@ -1523,6 +1581,29 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
                         }
                     },
                 }
+            if capability == "backup.endpoint.asset.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "backup-asset-1",
+                                    "name": "APD-50399",
+                                    "status": "offline",
+                                    "backupEnabled": True,
+                                    "lastSuccessfulBackupTimestamp": "2026-09-24T08:00:00Z",
+                                    "lastOnlineTimestamp": "2026-09-24T09:00:00Z",
+                                }
+                            ]
+                        }
+                    },
+                }
+            if capability == "backup.backupiq.alert.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{"id": "alert-1"}]}},
+                }
             return super().execute(capability, arguments)
 
     actions = Actions()
@@ -1549,7 +1630,10 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
 
     worker.tick()
 
-    assert store.get(141185) is None
+    work = store.get(141185)
+    assert work is not None
+    assert work.phase == "escalated"
+    assert "inactive/offline endpoint" in work.last_reason
     component_calls = [
         args
         for _, capability, args in actions.calls
@@ -1557,17 +1641,26 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
     ]
     assert component_calls == []
     note_calls = [
-        args
+        args["payload"]
         for _, capability, args in actions.calls
         if capability == "service.ticket.note.create"
     ]
-    assert note_calls == []
+    assert len(note_calls) == 1
+    assert "Classification=inactive_or_offline_device" in note_calls[0]["description"]
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [{"id": 141185, "status": "Waiting Device Access"}]
+    assert update_calls == [
+        {
+            "id": 141185,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+        }
+    ]
+    assert all(payload.get("queueID") != "Help Desk I" for payload in update_calls)
     store.close()
 
 
