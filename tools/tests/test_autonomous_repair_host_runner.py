@@ -169,6 +169,22 @@ class HostRepairRunnerTests(unittest.TestCase):
                 runner._wait_live_revision_health(CANDIDATE, attempts=2)
         self.assertEqual(caught.exception.code, "POST_DEPLOY_VERIFICATION_FAILED")
 
+    def test_wait_live_revision_health_supports_verified_rollback(self):
+        with patch.object(
+            runner,
+            "_live_revision",
+            return_value=ROLLBACK,
+        ), patch.object(
+            runner,
+            "_live_health",
+            side_effect=["starting", "healthy"],
+        ), patch.object(runner.time, "sleep"):
+            revision, health = runner._wait_live_revision_health(
+                ROLLBACK, attempts=2, interval_seconds=0
+            )
+        self.assertEqual(revision, ROLLBACK)
+        self.assertEqual(health, "healthy")
+
     def test_live_rollback_mismatch_fails_before_git_or_build(self):
         with tempfile.TemporaryDirectory() as td:
             request_path = Path(td) / "request.json"

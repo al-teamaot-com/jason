@@ -454,7 +454,13 @@ def _process(
         if deployed:
             try:
                 _rollback(worktree, rollback_sha)
-                rolled_back = _live_revision() == rollback_sha and _live_health() == "healthy"
+                rollback_revision, rollback_health = _wait_live_revision_health(
+                    rollback_sha
+                )
+                rolled_back = (
+                    rollback_revision == rollback_sha
+                    and rollback_health == "healthy"
+                )
             except Exception:
                 rolled_back = False
             if not rolled_back:
