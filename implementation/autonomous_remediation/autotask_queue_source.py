@@ -150,7 +150,7 @@ class AutotaskQueueSource:
                 }
                 if after_resource_id is not None:
                     arguments["after_resource_id"] = after_resource_id
-                result = self.reads.execute(SERVICE_TICKET_SEARCH, arguments)
+                result = self._ticket_search_with_retry(arguments)
                 items = self._items(result)
                 trace["pages_traversed"] += 1
                 trace["provider_items"] += len(items)
@@ -216,6 +216,16 @@ class AutotaskQueueSource:
                 if after_resource_id is not None and next_after <= after_resource_id:
                     raise RuntimeError("Autotask ticket search pagination did not advance")
                 after_resource_id = next_after
+
+    def _ticket_search_with_retry(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                return self.reads.execute(SERVICE_TICKET_SEARCH, arguments)
+            except Exception as exc:
+                last_error = exc
+        assert last_error is not None
+        raise last_error
 
     def _ensure_metadata(self) -> None:
         if self._queue_ids is not None and self._priority_scores is not None:

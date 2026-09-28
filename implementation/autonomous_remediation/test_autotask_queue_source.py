@@ -212,3 +212,44 @@ def test_open_scope_search_traverses_all_pages_and_retains_assigned_for_assessme
     assert source.last_trace.provider_items == 3
     assert source.last_trace.unique_candidates == 3
     assert source.last_trace.assigned_elsewhere == 1
+
+
+def test_ticket_search_retries_one_transient_failure():
+    class FlakyReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.failed = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search" and not self.failed:
+                self.failed = True
+                self.calls.append((capability, dict(arguments)))
+                raise RuntimeError("CAPABILITY_INVOCATION_FAILED")
+            return super().execute(capability, arguments)
+
+    reads = FlakyReads()
+    source = AutotaskQueueSource(reads=reads, config=config())
+    found = {item.resource_id for item in source.reconcile_candidates()}
+    assert {"10", "11", "20"}.issubset(found)
+    ticket_calls = [args for capability, args in reads.calls if capability == "service.ticket.search"]
+    assert len(ticket_calls) >= 3
+
+
+def test_ticket_search_fails_after_two_attempts():
+    class BrokenReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search":
+                self.calls.append((capability, dict(arguments)))
+                raise RuntimeError("CAPABILITY_INVOCATION_FAILED")
+            return super().execute(capability, arguments)
+
+    reads = BrokenReads()
+    source = AutotaskQueueSource(reads=reads, config=config())
+    try:
+        source.reconcile_candidates()
+    except RuntimeError as exc:
+        assert "CAPABILITY_INVOCATION_FAILED" in str(exc)
+    else:
+        raise AssertionError("persistent search failure must still fail closed")
+    ticket_calls = [args for capability, args in reads.calls if capability == "service.ticket.search"]
+    assert len(ticket_calls) == 2
