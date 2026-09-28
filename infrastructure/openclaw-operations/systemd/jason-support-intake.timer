@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll canonical Project Jason support list
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=jason-support-intake.service
+
+[Install]
+WantedBy=timers.target
