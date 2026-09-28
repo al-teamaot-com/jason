@@ -1,10 +1,9 @@
 [Unit]
-Description=Run Jason documentation reconciliation every five minutes
+Description=Run Jason documentation reconciliation at noon and midnight
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnCalendar=*-*-* 00,12:00:00
+AccuracySec=5min
 Persistent=true
 Unit=jason-documentation-reconciliation.service
 
