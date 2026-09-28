@@ -27,9 +27,9 @@
     "autonomous_repair": {
       "classification_enabled": true,
       "human_approval_required_when_eligible": false,
-      "automatic_execution_enabled": false,
+      "automatic_execution_enabled": true,
       "policy_path": "config/autonomous-repair-release-policy.json",
-      "execution_blocker": "named governed deployment capability not yet enabled"
+      "execution_blocker": "none"
     }
   },
   "active_display_days": 3

@@ -60,6 +60,31 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         parsed = coordinator.parse_support(text)
         self.assertEqual([item["id"] for item in parsed], ["SUPPORT-OPS-023"])
 
+    def test_support_repair_prs_recognizes_autonomous_candidate(self):
+        pulls = [
+            {
+                "number": 586,
+                "title": "Fix SUPPORT-OPS-027",
+                "html_url": "https://example.invalid/586",
+                "draft": False,
+                "body": """## Autonomous repair release
+
+- Release class: autonomous-repair-candidate
+- Support item: SUPPORT-OPS-027
+""",
+            },
+            {
+                "number": 100,
+                "title": "Unrelated",
+                "html_url": "https://example.invalid/100",
+                "draft": False,
+                "body": "No repair metadata",
+            },
+        ]
+        repairs = coordinator.support_repair_prs(pulls)
+        self.assertEqual(repairs["SUPPORT-OPS-027"]["number"], 586)
+        self.assertNotIn("SUPPORT-OPS-999", repairs)
+
     def test_todo_parser_excludes_blocked(self):
         text = """### TODO-OPS-001 — Ready work
 
