@@ -2921,7 +2921,7 @@ def test_offline_candidates_do_not_consume_actionable_admission_budget(tmp_path:
     store.close()
 
 
-def test_offline_probe_budget_is_bounded(tmp_path: Path):
+def test_candidate_evaluation_budget_bounds_all_offline_probes(tmp_path: Path):
     class MultiQueue:
         def reconcile_candidates(self):
             items = []
@@ -2946,11 +2946,75 @@ def test_offline_probe_budget_is_bounded(tmp_path: Path):
     worker = OfflineWorker(
         queue_source=MultiQueue(), reads=Reads(), actions=Actions(), store=store,
         promotion_store=PromotionStore(), max_active_work_items=2,
-        max_admission_attempts_per_scan=4, interval_seconds=30,
-        monotonic=iter((0.0,)).__next__,
+        max_admission_attempts_per_scan=4, max_candidate_evaluations_per_scan=8,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
     )
 
     worker.tick()
 
     assert worker.calls == 8
+    store.close()
+
+
+def test_eight_offline_candidates_do_not_starve_online_candidate(tmp_path: Path):
+    class MultiQueue:
+        def reconcile_candidates(self):
+            items = []
+            for i in range(9):
+                base = candidate()
+                items.append(
+                    replace(
+                        base,
+                        resource_id=str(180000 + i),
+                        context={
+                            **base.context,
+                            "id": 180000 + i,
+                            "ticketNumber": f"F{i}",
+                        },
+                    )
+                )
+            return tuple(items)
+
+    class FairWorker(OperationalAutonomyMaintenance):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.calls = []
+
+        def _scope_is_promoted(self, scope):
+            return True
+
+        def _admit(self, candidate, scope):
+            ticket_id = int(candidate.resource_id)
+            self.calls.append(ticket_id)
+            if ticket_id < 180008:
+                raise RuntimeError("endpoint is not currently online")
+            return OperationalWork(
+                ticket_id=ticket_id,
+                ticket_number="F8",
+                title="Synthetic online candidate",
+                playbook_id=scope.playbook_id,
+                source_queue=str(candidate.source_queue),
+                company_id=1,
+                configuration_item_id=1,
+                device_uid="online-device",
+                hostname="ONLINE-PC",
+                phase="claim",
+            )
+
+        def _advance(self, work, ticket):
+            self.store.put(self._replace(work, phase="active_test"))
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = FairWorker(
+        queue_source=MultiQueue(), reads=Reads(), actions=Actions(), store=store,
+        promotion_store=PromotionStore(), max_active_work_items=2,
+        max_admission_attempts_per_scan=4, max_candidate_evaluations_per_scan=12,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert worker.calls == [180000, 180001, 180002, 180003, 180004, 180005, 180006, 180007, 180008]
+    assert store.get(180008) is not None
+    assert store.latest_scan().selected == 1
     store.close()
