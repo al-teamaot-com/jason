@@ -168,6 +168,7 @@ SECURITY_LOG_QUICK_TEST_UID = "a50d486b-2cce-4658-9e11-64fb6bf9ab9d"
 SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
 SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
+RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 
 
 class OperationalAutonomyError(RuntimeError):
@@ -680,6 +681,13 @@ class OperationalAutonomyMaintenance:
             ticket_id = int(item.resource_id)
             existing = self.store.get(ticket_id)
             if existing is not None and existing.phase in TERMINAL_PHASES:
+                if (
+                    existing.phase == "blocked"
+                    and self._recoverable_block_retry_due(existing)
+                ):
+                    self.store.delete(ticket_id)
+                    existing = None
+            if existing is not None and existing.phase in TERMINAL_PHASES:
                 observed_version = str(item.source_version or "").strip() or None
                 # A human-review handoff remains terminal while it stays outside
                 # the Jason queue. The worker must not immediately reselect its
@@ -1032,6 +1040,25 @@ class OperationalAutonomyMaintenance:
             )
         )
         return True
+
+    def _recoverable_block_retry_due(self, work: OperationalWork) -> bool:
+        reason = str(work.last_reason or "").casefold()
+        retryable = any(
+            token in reason
+            for token in (
+                "governed read failed",
+                "database is locked",
+                "execution_plan_authorization_rejected",
+                "datto_component_autonomy_requires_standing_safe",
+            )
+        )
+        if not retryable:
+            return False
+        updated = self._parse_iso_timestamp(work.updated_at)
+        if updated is None:
+            return False
+        age = (datetime.now(timezone.utc) - updated).total_seconds()
+        return age >= RECOVERABLE_BLOCK_RETRY_SECONDS
 
     def _classify_persisted_work(self, ticket_id: int) -> tuple[str, str]:
         current = self.store.get(ticket_id)
