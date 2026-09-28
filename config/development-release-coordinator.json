@@ -24,5 +24,6 @@
   "production": {
     "serialized_promotion": true,
     "human_approval_required": true
-  }
+  },
+  "active_display_days": 3
 }
