@@ -124,13 +124,10 @@ def _canonical_request(raw: Mapping[str, Any]) -> dict[str, Any]:
     material = {
         key: raw[key]
         for key in (
-            "schema_version",
             "capability",
             "provider",
             "principal_id",
             "organization_id",
-            "execution_id",
-            "correlation_id",
             "candidate_sha",
             "rollback_sha",
             "support_item",
