@@ -23,7 +23,14 @@
   },
   "production": {
     "serialized_promotion": true,
-    "human_approval_required": true
+    "human_approval_required": true,
+    "autonomous_repair": {
+      "classification_enabled": true,
+      "human_approval_required_when_eligible": false,
+      "automatic_execution_enabled": false,
+      "policy_path": "config/autonomous-repair-release-policy.json",
+      "execution_blocker": "named governed deployment capability not yet enabled"
+    }
   },
   "active_display_days": 3
 }

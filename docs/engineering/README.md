@@ -24,6 +24,8 @@ Provider-specific documentation must not override JIS, capability/provider regis
 
 [`Jason-Change-Integration-and-Release-Standard.md`](Jason-Change-Integration-and-Release-Standard.md) governs concurrent branch/worktree isolation, current-main reconciliation, active implementation overlap review, immutable release-candidate selection, and serialized production promotion.
 
+[`Jason-Autonomous-Repair-Release-Standard.md`](Jason-Autonomous-Repair-Release-Standard.md) defines the pre-authorized repair class for restoring previously approved Jason behavior without new capability, authority, security, provider, dependency, schema, topology, client-scope, or disruptive-operational change.
+
 ### `adr/`
 
 Implementation-engineering Architecture Decision Records. These use the historical `ADR-000x` engineering namespace and are distinct from project-level governed decisions in `docs/decisions/`.

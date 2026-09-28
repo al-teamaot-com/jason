@@ -1,6 +1,6 @@
 # Development & Release Coordinator
 
-**Status:** Proposed implementation  
+**Status:** Active  
 **Owner:** Jason Architecture Authority  
 **Authority:** `docs/engineering/Jason-Change-Integration-and-Release-Standard.md`  
 **Scope:** Derived development/release visibility and advisory next-work recommendations  
@@ -71,7 +71,9 @@ Production remains governed by J-CHANGE-001 and the existing J-900/J-901 release
 
 The coordinator does not deploy.
 
-Production promotion remains serialized, requires an exact merged main SHA, and remains human-approved under current policy.
+Production promotion remains serialized and requires an exact merged main SHA.
+
+Normal releases remain human-approved. J-CHANGE-002 defines a narrow Autonomous Repair Release class where a new human production approval is not required when the change only restores previously approved behavior and passes every deterministic eligibility gate. Autonomous repair execution remains blocked until Jason's named governed deployment capability is enabled for that release class; classification alone is not deployment authority.
 
 ## Automation
 

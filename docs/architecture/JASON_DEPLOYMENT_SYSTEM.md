@@ -104,7 +104,9 @@ Any sudo authorization must be limited to approved commands and arguments where 
 
 ### 4.3 Human Authority
 
-Risk determines approval requirements. Production deployments, privileged changes, destructive migrations, security-control changes, and irreversible operations require explicit approval by an authorized human.
+Risk determines approval requirements. New capabilities, material production changes, privileged changes, destructive migrations, security-control changes, and irreversible operations require explicit approval by an authorized human.
+
+A narrowly bounded repair that only restores previously approved behavior may use the pre-authorized Autonomous Repair Release class defined by J-CHANGE-002. That exception does not apply to new capability, authority, security, provider, dependency, schema, topology, client-scope, or disruptive-operational changes.
 
 ## 5. Deployment Technology Model
 
