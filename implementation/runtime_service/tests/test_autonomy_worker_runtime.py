@@ -1824,6 +1824,105 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     store.close()
 
 
+
+def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path):
+    class InstalledReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68, "companyID": 597, "isActive": True,
+                        "referenceNumber": "vul-device-1", "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1", "hostname": "GAI-DT2850",
+                        "online": True, "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"patches": [{
+                        "kbArticleId": kb.replace("KB", ""),
+                        "installStatus": "INSTALLED",
+                        "rebootRequired": False,
+                    }], "match_count": 1, "exact_selector_match": True, "ambiguous": False}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()), reads=InstalledReads(), actions=actions,
+        store=store, promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "complete"
+    updates = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.update"]
+    assert updates[-1] == {"id": 141183, "status": "Complete"}
+    assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
+    notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
+    assert len(notes) == 1
+    assert "verified stale/recovered VulScan finding" in notes[0]["description"]
+    store.close()
+
+
+def test_vulscan_installed_but_reboot_required_still_escalates(tmp_path: Path):
+    class InstalledRebootReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68, "companyID": 597, "isActive": True,
+                        "referenceNumber": "vul-device-1", "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1", "hostname": "GAI-DT2850",
+                        "online": True, "reboot_required": True,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"patches": [{
+                        "kbArticleId": kb.replace("KB", ""),
+                        "installStatus": "INSTALLED",
+                        "rebootRequired": True,
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()), reads=InstalledRebootReads(), actions=actions,
+        store=store, promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert "reboot remains required" in final.last_reason
+    updates = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.update"]
+    assert updates[-1] == {"id": 141183, "queueID": "Help Desk I", "status": "New"}
+    store.close()
+
 def test_vulscan_offline_endpoint_waits_for_device_access(tmp_path: Path):
     class OfflineVulscanReads(Reads):
         def execute(self, capability, arguments):

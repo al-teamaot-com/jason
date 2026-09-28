@@ -1920,11 +1920,26 @@ class OperationalAutonomyMaintenance:
             )
             reason = "VulScan diagnostic complete; one or more exact KBs are not approved."
         elif classification == "stale_or_recovered_finding":
-            note += (
-                "All exact reported KBs are installed. Automatic ticket completion remains "
-                "gated until stale/recovered VulScan closure is separately accepted."
+            reboot_gated = bool(endpoint.get("reboot_required")) or any(
+                reboot for _, _, reboot in rows
             )
-            reason = "VulScan diagnostic complete; reported KBs appear installed, closure gated."
+            if not reboot_gated:
+                note += (
+                    "All exact reported KBs are installed and no reboot is required. "
+                    "This is a verified stale/recovered VulScan finding; Jason may close "
+                    "the ticket without patching, rebooting, or other endpoint mutation."
+                )
+                self._complete_verified_ticket(
+                    work,
+                    reason="All exact VulScan KBs verified installed with no reboot required.",
+                )
+                self._write_note(work, note, "Jason - Autonomous VulScan Resolution")
+                return
+            note += (
+                "All exact reported KBs are installed, but a reboot requirement is present. "
+                "Ticket completion remains gated because Jason has no autonomous reboot authority."
+            )
+            reason = "VulScan diagnostic complete; reported KBs installed but reboot remains required."
         elif classification == "approved_pending":
             note += (
                 "At least one exact KB is approved/pending. Patch-window timing and any "
@@ -2785,22 +2800,19 @@ class OperationalAutonomyMaintenance:
             "EDR/AV remains non-Healthy after the single standing-safe repair attempt.",
         )
 
-    def _complete(self, work: OperationalWork, stdout: str) -> None:
-        summary = self._bounded_health_summary(stdout)
+    def _complete_verified_ticket(self, work: OperationalWork, *, reason: str) -> None:
+        scope = self._scope_for_work(work)
         update_output = self.actions.execute(
-            EDR_SCOPE,
+            scope,
             "service.ticket.update",
             {"payload": {"id": work.ticket_id, "status": "Complete"}},
         )
         update_data = self._action_data(update_output)
         verification = update_data.get("jasonVerification")
-        if not isinstance(verification, Mapping):
-            raise OperationalAutonomyError(
-                "ticket completion returned no jasonVerification readback evidence"
-            )
-        verified_fields = verification.get("verifiedFields")
+        verified_fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
         if (
-            verification.get("readbackVerified") is not True
+            not isinstance(verification, Mapping)
+            or verification.get("readbackVerified") is not True
             or not isinstance(verified_fields, Sequence)
             or isinstance(verified_fields, (str, bytes))
             or "status" not in {str(value) for value in verified_fields}
@@ -2808,23 +2820,29 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "ticket completion readback did not verify the requested status"
             )
-
-        note = (
-            "Jason autonomous EDR/AV playbook completed. "
-            f"Endpoint {work.hostname} returned authoritative Status=Healthy"
-            + (" after one standing-safe repair attempt." if work.repair_attempts else ".")
-            + f" Verification: {summary}. Autotask terminal status readback verified."
-        )
-        self._write_note(work, note, "Jason - Autonomous EDR/AV Resolution")
         self.store.put(
             self._replace(
                 work,
                 phase="complete",
                 job_uid=None,
                 component_uid=None,
-                last_reason="Verified healthy and ticket completion readback succeeded.",
+                last_reason=reason,
             )
         )
+
+    def _complete(self, work: OperationalWork, stdout: str) -> None:
+        summary = self._bounded_health_summary(stdout)
+        note = (
+            "Jason autonomous EDR/AV playbook completed. "
+            f"Endpoint {work.hostname} returned authoritative Status=Healthy"
+            + (" after one standing-safe repair attempt." if work.repair_attempts else ".")
+            + f" Verification: {summary}. Autotask terminal status readback verified."
+        )
+        self._complete_verified_ticket(
+            work,
+            reason="Verified healthy and ticket completion readback succeeded.",
+        )
+        self._write_note(work, note, "Jason - Autonomous EDR/AV Resolution")
 
     def _escalate(self, work: OperationalWork, reason: str) -> None:
         if work.playbook_id == IDLE_LOG_OFF_SCOPE.playbook_id:
