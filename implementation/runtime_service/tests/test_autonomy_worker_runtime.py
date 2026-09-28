@@ -1489,10 +1489,7 @@ def test_backupiq_requires_separate_promotion(tmp_path: Path):
     worker.tick()
     worker.tick()
 
-    work = store.get(141185)
-    assert work is not None
-    assert work.phase == "escalated"
-    assert "inactive/offline endpoint" in work.last_reason
+    assert store.get(141185) is None
     assert actions.calls == []
     store.close()
 
@@ -1633,7 +1630,10 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
 
     worker.tick()
 
-    assert store.get(141185) is None
+    work = store.get(141185)
+    assert work is not None
+    assert work.phase == "escalated"
+    assert "inactive/offline endpoint" in work.last_reason
     component_calls = [
         args
         for _, capability, args in actions.calls
