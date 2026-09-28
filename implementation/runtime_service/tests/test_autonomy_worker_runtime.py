@@ -203,6 +203,76 @@ class OfflineReads(Reads):
         return super().execute(capability, arguments)
 
 
+def test_recoverable_block_is_retried_after_backoff(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="governed read failed: CAPABILITY_INVOCATION_FAILED",
+        updated_at="2026-09-28T00:00:00+00:00",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "health_wait"
+    assert any(capability == "automation.component.execute" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_identity_resolution_block_remains_terminal(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="structured hostname did not resolve to one active same-company configuration item",
+        updated_at="2026-09-28T00:00:00+00:00",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "blocked"
+    assert actions.calls == []
+    store.close()
+
+
 def test_owned_offline_ticket_moves_to_waiting_device_access_without_active_slot(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
