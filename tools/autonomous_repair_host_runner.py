@@ -195,6 +195,33 @@ def _wait_live_health(*, attempts: int = 30, interval_seconds: float = 1.0) -> s
     )
 
 
+def _wait_live_revision_health(
+    expected_revision: str,
+    *,
+    attempts: int = 30,
+    interval_seconds: float = 1.0,
+) -> tuple[str, str]:
+    attempts = max(1, int(attempts))
+    last_revision = ""
+    last_health = ""
+    for attempt in range(1, attempts + 1):
+        last_revision = _live_revision()
+        last_health = _live_health()
+        if last_revision != expected_revision:
+            raise RepairRunnerError(
+                "POST_DEPLOY_VERIFICATION_FAILED",
+                f"live revision changed unexpectedly: {last_revision}",
+            )
+        if last_health == "healthy":
+            return last_revision, last_health
+        if attempt < attempts:
+            time.sleep(max(0.0, float(interval_seconds)))
+    raise RepairRunnerError(
+        "POST_DEPLOY_VERIFICATION_FAILED",
+        f"live candidate did not become healthy within bounded verification window: revision={last_revision} health={last_health}",
+    )
+
+
 def _verify_git(repo: Path, candidate: str) -> None:
     _run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
     _run(["git", "cat-file", "-e", f"{candidate}^{{commit}}"], cwd=repo)
@@ -408,13 +435,7 @@ def _process(
         image = _build_candidate(worktree, candidate)
         _deploy(worktree, image, candidate)
         deployed = True
-        observed = _live_revision()
-        health = _live_health()
-        if observed != candidate or health != "healthy":
-            raise RepairRunnerError(
-                "POST_DEPLOY_VERIFICATION_FAILED",
-                f"live verification mismatch revision={observed} health={health}",
-            )
+        observed, health = _wait_live_revision_health(candidate)
         return {
             "state": "succeeded",
             "request_id": request_id,

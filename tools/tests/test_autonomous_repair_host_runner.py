@@ -142,6 +142,33 @@ class HostRepairRunnerTests(unittest.TestCase):
                 runner._wait_live_health(attempts=2, interval_seconds=0)
         self.assertEqual(caught.exception.code, "PRODUCTION_NOT_HEALTHY")
 
+    def test_wait_live_revision_health_tolerates_candidate_startup(self):
+        with patch.object(
+            runner,
+            "_live_revision",
+            return_value=CANDIDATE,
+        ), patch.object(
+            runner,
+            "_live_health",
+            side_effect=["starting", "healthy"],
+        ), patch.object(runner.time, "sleep") as sleep:
+            revision, health = runner._wait_live_revision_health(
+                CANDIDATE, attempts=2, interval_seconds=0.1
+            )
+        self.assertEqual(revision, CANDIDATE)
+        self.assertEqual(health, "healthy")
+        self.assertEqual(sleep.call_count, 1)
+
+    def test_wait_live_revision_health_fails_on_revision_change(self):
+        with patch.object(
+            runner,
+            "_live_revision",
+            return_value=ROLLBACK,
+        ), patch.object(runner, "_live_health", return_value="healthy"):
+            with self.assertRaises(runner.RepairRunnerError) as caught:
+                runner._wait_live_revision_health(CANDIDATE, attempts=2)
+        self.assertEqual(caught.exception.code, "POST_DEPLOY_VERIFICATION_FAILED")
+
     def test_live_rollback_mismatch_fails_before_git_or_build(self):
         with tempfile.TemporaryDirectory() as td:
             request_path = Path(td) / "request.json"
