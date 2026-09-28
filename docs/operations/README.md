@@ -18,6 +18,8 @@ Runbooks, checklists, activation procedures, deployment/recovery procedures, and
 
 Examples include:
 
+- `Development-Release-Coordinator.md`;
+
 - `CAP-007-AWS-SES-Activation-Runbook.md`;
 - `INF-001-Morning-Execution-Checklist.md`;
 - `INF-010-Microsoft-Cloud-Deployment-Checklist.md`;
