@@ -825,6 +825,8 @@ class OperationalAutonomyMaintenance:
         started = 0
         waiting_device = 0
         admission_attempts = 0
+        offline_probes = 0
+        max_offline_probes_per_scan = self.max_admission_attempts_per_scan * 2
         for candidate, scope in eligible:
             # Recompute occupancy after every advancement. If a ticket completes,
             # blocks, or hands off immediately, refill the freed slot during this
@@ -833,24 +835,30 @@ class OperationalAutonomyMaintenance:
                 break
             if admission_attempts >= self.max_admission_attempts_per_scan:
                 break
-            admission_attempts += 1
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:
                 if "endpoint is not currently online" in str(exc).casefold():
+                    offline_probes += 1
                     waiting_device += 1
                     classifications[int(candidate.resource_id)] = (
                         "waiting_device_access", "endpoint_offline",
                         candidate.source_version, False,
                     )
-                else:
-                    classifications[int(candidate.resource_id)] = (
-                        "governance_blocked", "admission_identity_or_governance_failure",
-                        candidate.source_version, False,
-                    )
-                # Transient admission failures do not consume an active-work slot.
+                    self._record_admission_failure(candidate, scope, exc)
+                    if offline_probes >= max_offline_probes_per_scan:
+                        break
+                    continue
+                admission_attempts += 1
+                classifications[int(candidate.resource_id)] = (
+                    "governance_blocked", "admission_identity_or_governance_failure",
+                    candidate.source_version, False,
+                )
+                # Non-offline admission failures consume the bounded admission
+                # budget because they can involve expensive identity/governance work.
                 self._record_admission_failure(candidate, scope, exc)
                 continue
+            admission_attempts += 1
             started += 1
             classifications[int(candidate.resource_id)] = (
                 "eligible_now", "active_work", candidate.source_version, True
