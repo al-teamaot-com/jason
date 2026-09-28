@@ -20,6 +20,10 @@ Provider-specific documentation must not override JIS, capability/provider regis
 
 ## Structure
 
+### Change integration and production release
+
+[`Jason-Change-Integration-and-Release-Standard.md`](Jason-Change-Integration-and-Release-Standard.md) governs concurrent branch/worktree isolation, current-main reconciliation, active implementation overlap review, immutable release-candidate selection, and serialized production promotion.
+
 ### `adr/`
 
 Implementation-engineering Architecture Decision Records. These use the historical `ADR-000x` engineering namespace and are distinct from project-level governed decisions in `docs/decisions/`.
