@@ -52,8 +52,8 @@ def resolution(capability=DEPLOYMENT_REPAIR_APPLY):
 
 class AutonomousRepairDeploymentTests(unittest.TestCase):
     def test_profile_activation_is_fail_closed(self):
-        capabilities = CapabilityRegistryService(InMemoryCapabilityRegistry())
-        providers = ExecutionProviderRegistryService(InMemoryExecutionProviderRegistry())
+        capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+        providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop(AUTONOMOUS_REPAIR_PROFILE_ENV, None)
             state = register_autonomous_repair_deployment_foundation(
@@ -68,8 +68,8 @@ class AutonomousRepairDeploymentTests(unittest.TestCase):
         )
 
     def test_exact_profile_activates_both_capabilities(self):
-        capabilities = CapabilityRegistryService(InMemoryCapabilityRegistry())
-        providers = ExecutionProviderRegistryService(InMemoryExecutionProviderRegistry())
+        capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
+        providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
         with patch.dict(os.environ, {AUTONOMOUS_REPAIR_PROFILE_ENV: AUTONOMOUS_REPAIR_PROFILE}):
             state = register_autonomous_repair_deployment_foundation(
                 capabilities=capabilities,

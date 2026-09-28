@@ -1921,7 +1921,7 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
                     "evidence": {"data": {"patches": [{
                         "kbArticleId": kb.replace("KB", ""),
                         "installStatus": "INSTALLED",
-                        "rebootRequired": False,
+                        "rebootRequired": True,
                     }], "match_count": 1, "exact_selector_match": True, "ambiguous": False}},
                 }
             return super().execute(capability, arguments)
