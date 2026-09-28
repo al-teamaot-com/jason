@@ -112,7 +112,46 @@ def production(observed_at="2026-09-28T13:50:00+00:00"):
     }
 
 
+class FakeMergeApi:
+    def __init__(self, *, fail_commit_pulls=False):
+        self.fail_commit_pulls = fail_commit_pulls
+
+    def paged(self, path):
+        if self.fail_commit_pulls:
+            raise gate.urllib.error.HTTPError(
+                "https://api.github.com/example",
+                500,
+                "Internal Server Error",
+                None,
+                None,
+            )
+        return []
+
+    def request(self, path, method="GET", payload=None):
+        if path == "/commits/merge123":
+            return {"commit": {"message": "Merge PR #123: repair support intake"}}
+        if path == "/pulls/123":
+            return pr()
+        raise AssertionError(path)
+
+
 class AutonomousRepairReleaseGateTests(unittest.TestCase):
+    def test_resolve_pr_falls_back_to_governed_merge_title(self):
+        resolved = gate.resolve_pr(
+            FakeMergeApi(),
+            pr_number=None,
+            merged_sha="merge123",
+        )
+        self.assertEqual(resolved["number"], 123)
+
+    def test_resolve_pr_falls_back_after_commit_pulls_http_500(self):
+        resolved = gate.resolve_pr(
+            FakeMergeApi(fail_commit_pulls=True),
+            pr_number=None,
+            merged_sha="merge123",
+        )
+        self.assertEqual(resolved["merge_commit_sha"], "merge123")
+
     def test_metadata_parser_normalizes_labels(self):
         metadata = gate.parse_metadata(BODY)
         self.assertEqual(metadata["release_class"], "autonomous-repair-candidate")
