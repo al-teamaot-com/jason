@@ -141,8 +141,6 @@ NOT_APPROVED is therefore a timed dependency state, not an immediate escalation.
 
 ### C. Patch-window check
 
-### B. Patch-window check
-
 If APPROVED_PENDING and the applicable patch window has not completed:
 - do not force-install
 - set state=waiting_patch_window
@@ -197,7 +195,11 @@ Before repair:
 - no conflicting patch-policy/maintenance condition exists
 
 Before reboot:
-- query live Windows interactive session state; never use DRMM last_logged_in_user as proof
+- determine the **current endpoint reboot state** from authoritative endpoint evidence
+- treat endpoint-level `reboot_required` as authoritative for whether a reboot is currently pending
+- treat patch-object `rebootRequired=True` only as metadata about that update's reboot behavior; it is **not** proof that the endpoint currently requires a reboot after installation
+- never block stale/recovered-ticket closure solely because an installed patch object has `rebootRequired=True` when endpoint `reboot_required=False`
+- query live Windows interactive session state before any actual reboot; never use DRMM last_logged_in_user as proof
 - Active or Disconnected session = user session present
 - no user session = unattended
 
@@ -404,7 +406,8 @@ Authoritative verification must include:
 - patch no longer APPROVED_PENDING/INSTALL_ERROR for the targeted condition
 - DRMM patch status healthy or otherwise explained
 - no unexpected approved pending patch remains
-- reboot_required=False after any required reboot
+- current endpoint-level `reboot_required=False` when closure requires no pending reboot
+- patch-object `rebootRequired` may be recorded as evidence but must not override current endpoint reboot state
 - endpoint remains healthy/online
 - VulScan/monitor finding clears or is proven stale
 
@@ -413,8 +416,9 @@ Authoritative verification must include:
 Complete only when:
 - identity/association are correct
 - patch state/root cause is classified
-- required remediation/reboot completed
+- required remediation/reboot completed when actually required by current endpoint state
 - authoritative exact-KB/build verification succeeds
+- current endpoint reboot state is authoritative; an installed patch's `rebootRequired=True` metadata alone does not prevent completion when endpoint `reboot_required=False`
 - related monitoring condition is resolved/stale by evidence
 - final internal note exists
 
@@ -466,7 +470,9 @@ Acceptance must prove:
 14. live-session gate protects logged-in users from reboot
 15. 2:30 AM/3:00 AM scheduled reboot/resume path works
 16. maximum two repair cycles
-17. exact final KB/build verification before completion
+17. installed-patch `rebootRequired=True` does not create a false reboot block when endpoint `reboot_required=False`
+18. stale/recovered installed findings can complete after endpoint-health and exact-KB verification
+19. exact final KB/build verification before completion
 
 ## 22. Section Goal Closure
 
