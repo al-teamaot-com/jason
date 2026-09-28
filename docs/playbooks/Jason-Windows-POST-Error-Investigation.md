@@ -2,15 +2,17 @@
 
 ## 1. Section Goal
 
-**Goal:** Jason must process Windows Power-On-Self-Test (POST) error alerts from exact asset identification through evidence-based classification, documentation, verification, and escalation. The baseline playbook is diagnostic-first and does not autonomously perform firmware, BIOS, storage, memory, or hardware-changing remediation.
+**Goal:** Jason must process Windows Power-On-Self-Test (POST) error alerts from exact asset identification through evidence-based classification, documentation, verification, autonomous closure of isolated healthy workstation cases, and Human Review for recurring/protected/hardware-risk cases. The playbook does not autonomously perform firmware, BIOS, storage, memory, or hardware-changing remediation.
 
 **Success means:**
 - exact ticket, client/site, CI, DRMM endpoint, and alert timestamp are proven;
 - current endpoint availability and boot state are checked;
 - recent related tickets and DRMM activity are reviewed;
 - Windows, hardware, storage, WHEA, crash, and boot evidence is gathered where available;
-- the alert is classified as stale/isolated, recurring, storage-related, memory/hardware-related, firmware/BIOS-related, power-related, or inconclusive;
+- the alert is classified as isolated_healthy, recurring_post, storage_risk, memory_hardware_risk, firmware_risk, power_shutdown_correlation, protected_role_review, or evidence_inconclusive;
 - dangerous or ambiguous conditions are escalated rather than “fixed” speculatively;
+- isolated healthy workstation cases resolve the exact alert and complete the ticket automatically after all evidence gates pass;
+- recurring, protected-role, or hardware-risk conditions go to Help Desk I / Human Review with a specific next action;
 - closure requires current healthy evidence and no unresolved recurrence/hardware risk.
 
 ## 2. Trigger
@@ -77,18 +79,22 @@ A successful Windows boot does not by itself prove the POST alert was harmless.
 
 ## 6. State Model
 
-identified -> diagnosing -> classifying -> verifying -> complete
+identified -> diagnosing -> classifying -> verifying -> resolving_alert -> completing_ticket -> complete
+
+Classification states:
+- isolated_healthy
+- recurring_post
+- storage_risk
+- memory_hardware_risk
+- firmware_risk
+- power_shutdown_correlation
+- protected_role_review
+- evidence_inconclusive
 
 Exception states:
 - waiting_endpoint
-- recurring_post
-- storage_risk
-- hardware_risk
-- firmware_risk
-- power_or_shutdown_correlation
 - dependency_blocked
-- inconclusive
-- escalated
+- human_review
 
 Persist completed evidence steps so rechecks do not repeat diagnostics unnecessarily.
 
@@ -180,18 +186,25 @@ The baseline POST playbook has no standing autonomous hardware/firmware remediat
 
 ### Baseline behavior
 
-Diagnostic/documentation only.
+No speculative hardware change is performed.
 
-If current evidence proves a stale/isolated alert and the endpoint is healthy:
-- no speculative hardware change is performed;
-- verify alert state and document resolution.
+If current evidence proves an isolated healthy workstation event:
+- classify `isolated_healthy`;
+- resolve the exact triggering DRMM alert;
+- verify the exact alert is no longer open;
+- write the final resolution note;
+- complete the Autotask ticket automatically;
+- independently read back status=Complete.
 
-If evidence indicates a specific hardware/storage/firmware issue:
-- classify it;
-- preserve evidence;
-- escalate with the recommended technician/vendor next step.
+No Help Desk review is required for `isolated_healthy`.
 
-Any future automated repair branch must be separately designed, tested, and promoted for the exact capability.
+If evidence indicates recurrence, protected infrastructure, storage risk, memory/hardware risk, firmware risk, power/shutdown correlation, or inconclusive evidence:
+- classify the exact risk state;
+- preserve the evidence;
+- hand off to Help Desk I with status Human Review;
+- state the next safest technician/vendor action clearly.
+
+Any future hardware/firmware repair branch must be separately designed, tested, and promoted for the exact capability.
 
 ## 10. Retry Policy
 
@@ -239,12 +252,33 @@ Current controlled-target dependency: #257 tracks a PowerShell 3-compatible/lega
 
 ## 14. Documentation Requirements
 
+Use the standard technician-scannable Jason note layout:
+
+- **STATUS**
+- **NEXT STEP** or **ACTION REQUIRED**
+- **DEVICE / ALERT**
+- **RECURRENCE**
+- **KEY HARDWARE EVIDENCE**
+- **WHAT JASON CHECKED**
+- **CHANGES MADE**
+- **JASON STATE**
+
+For isolated healthy closure, lead with:
+- STATUS: VERIFIED HEALTHY — ISOLATED POST EVENT
+- NEXT STEP: Resolve exact alert and complete ticket automatically
+- RECURRENCE: None found in the defined review window
+
+For Human Review, lead with:
+- STATUS: HUMAN REVIEW REQUIRED
+- ACTION REQUIRED: Review the identified hardware/firmware/recurrence risk
+- include the exact subsystem/risk and recommended next diagnostic
+
 Suggested internal note titles:
 - Jason - POST Error - Asset Validation
 - Jason - POST Error - Diagnostic
 - Jason - POST Error - Correlation
 - Jason - POST Error - Verification
-- Jason - POST Error - Escalation
+- Jason - POST Error - Human Review Required
 - Jason - POST Error - Resolution
 
 Document:
@@ -256,6 +290,8 @@ Document:
 - WHEA/storage/crash/boot findings;
 - BIOS/firmware evidence when available;
 - classification;
+- exact alert-resolution result where applicable;
+- ticket-completion readback where applicable;
 - next action.
 
 Do not copy secrets or irrelevant raw logs into the ticket.
@@ -275,7 +311,7 @@ Fail closed and document:
 
 ## 16. Escalation Criteria
 
-Escalate when:
+Hand off to Help Desk I / Human Review when:
 - POST error recurs;
 - WHEA or storage/controller errors are present;
 - memory/hardware failure is indicated;
@@ -283,33 +319,43 @@ Escalate when:
 - endpoint fails to boot reliably;
 - condition correlates with crashes/BSODs/unexpected shutdowns;
 - evidence is contradictory or insufficient;
-- protected/server role increases risk.
+- device is a protected server/hypervisor/domain controller/physical host;
+- exact alert resolution or completion readback fails.
 
-Escalation should identify the likely subsystem and the next safest technician/vendor diagnostic.
+Human Review must identify the likely subsystem and the next safest technician/vendor diagnostic.
 
 ## 17. Verification
 
-For a stale/isolated case:
+For an `isolated_healthy` workstation case:
 1. endpoint is currently online/stable;
 2. current uptime/boot state is healthy;
-3. no new matching POST alert is present;
-4. no current WHEA/storage/hardware evidence indicates unresolved risk;
-5. related monitoring/ticket state is re-read;
-6. final classification is documented.
+3. no second matching POST alert exists in the defined recurrence window;
+4. no current/recent WHEA evidence indicates hardware risk;
+5. no disk/controller/NTFS evidence indicates storage risk;
+6. no memory/hardware alert is active;
+7. no crash/BSOD pattern is active;
+8. no unresolved unexpected-shutdown pattern materially correlates;
+9. no other open hardware/boot ticket covers the same condition;
+10. device is not a protected server/hypervisor/domain controller/physical host;
+11. exact triggering alert is stale/resolved or can be safely resolved;
+12. final classification is documented.
 
-A component returning success is not sufficient by itself.
+A successful Windows boot or component return is not sufficient by itself.
 
 ## 18. Completion Criteria
 
-Complete only when:
+Complete automatically only when:
 - exact endpoint is verified;
-- required diagnostics completed;
+- classification is `isolated_healthy`;
+- all required diagnostics completed;
 - current health is established;
 - no recurring/unresolved hardware risk remains;
-- alert/ticket state is verified;
-- documentation is complete.
+- device is not in a protected role;
+- exact triggering alert is resolved and resolution is read back;
+- final resolution note exists;
+- Autotask completion succeeds and status=Complete is independently read back.
 
-Otherwise escalate.
+All other classifications go to Help Desk I / Human Review.
 
 ## 19. Final Resolution Note
 
@@ -341,7 +387,9 @@ No additional write capability is required for the baseline diagnostic branch.
 
 ## 21. Acceptance Test
 
-**Initial controlled target:** ticket T20260923.0075 / CI 383 / VZ-HYPER-V, a physical HP ProLiant DL380p Gen8 Hyper-V host. Production evidence already shows recurrent POST events in June and September 2026 and host-level interruption correlation across guest VMs, so acceptance must exercise the protected-hypervisor escalation branch rather than auto-remediation.
+**Protected-role controlled target:** ticket T20260923.0075 / CI 383 / VZ-HYPER-V, a physical HP ProLiant DL380p Gen8 Hyper-V host. Production evidence already shows recurrent POST events in June and September 2026 and host-level interruption correlation across guest VMs, so this target must exercise the protected-hypervisor Human Review branch.
+
+A second controlled target must be an ordinary Windows workstation with a single isolated POST event and no WHEA/storage/memory/crash/shutdown risk, to prove exact-alert resolution and autonomous completion.
 
 Prove:
 1. trigger recognition;
@@ -351,11 +399,14 @@ Prove:
 5. DRMM activity correlation;
 6. read-only WHEA/storage/crash/boot evidence;
 7. hardware/firmware evidence where supported;
-8. deterministic classification;
+8. deterministic classification into the explicit state set;
 9. no firmware/hardware mutation;
 10. current-health verification;
-11. internal documentation;
-12. complete vs escalate decision.
+11. protected/recurring/hardware-risk case routes to Help Desk I / Human Review;
+12. isolated healthy workstation case resolves the exact alert automatically;
+13. isolated healthy workstation ticket completes automatically with readback;
+14. technician-scannable documentation;
+15. no unrelated production object is changed.
 
 No unrelated production object may be changed.
 
