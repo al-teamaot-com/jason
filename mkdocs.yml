@@ -86,6 +86,7 @@ nav:
       - CAP-001 Autotask Live-Read Command: components/capabilities/CAP-001-Autotask-Live-Read-Command.md
   - Operations:
       - Operations Authority Map: operations/README.md
+      - Development & Release Coordinator: operations/Development-Release-Coordinator.md
       - Microsoft Teams Integration: operations/Runbook-Teams-Integration.md
       - Bootstrap and Secrets Management: operations/Jason-Bootstrap-and-Secrets-Runbook.md
       - Secret Provider Deployment Record: operations/Jason-Secret-Provider-Deployment-Record.md

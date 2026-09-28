@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "base_branch": "main",
+  "control_board_issue": 526,
+  "active_overlap_days": 7,
+  "required_checks": [
+    "cap-001",
+    "cap-003",
+    "cap-007",
+    "system-registry",
+    "runtime-service",
+    "documentation",
+    "repository-hygiene",
+    "conversation-experience",
+    "teams-gateway"
+  ],
+  "parallel_development_allowed": true,
+  "recommendation_mode": "advisory_only",
+  "preproduction": {
+    "configured": false,
+    "environment_name": "jason-preprod",
+    "automatic_deploy": false
+  },
+  "production": {
+    "serialized_promotion": true,
+    "human_approval_required": true
+  }
+}
