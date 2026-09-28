@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -178,18 +179,48 @@ def production_freshness(
     return True, f"production evidence fresh ({age_minutes:.1f} minutes old)"
 
 
+MERGE_PR_NUMBER = re.compile(
+    r"(?im)^Merge (?:PR|pull request) #(\d+)\b"
+)
+
+
+def _resolve_pr_from_merge_commit(api: Api, merged_sha: str) -> dict[str, Any]:
+    commit = api.request(f"/commits/{urllib.parse.quote(merged_sha, safe='')}")
+    message = str(((commit or {}).get("commit") or {}).get("message") or "")
+    match = MERGE_PR_NUMBER.search(message)
+    if not match:
+        raise RuntimeError(
+            f"Unable to derive merged PR number from commit {merged_sha}"
+        )
+    pr = api.request(f"/pulls/{int(match.group(1))}")
+    if not pr.get("merged_at") or pr.get("merge_commit_sha") != merged_sha:
+        raise RuntimeError(
+            f"Merge-title PR does not match commit {merged_sha}"
+        )
+    return pr
+
+
 def resolve_pr(api: Api, *, pr_number: int | None, merged_sha: str | None) -> dict[str, Any]:
     if pr_number is not None:
         return api.request(f"/pulls/{pr_number}")
     if not merged_sha:
         raise RuntimeError("Either --pr-number or --merged-sha is required")
-    pulls = api.paged(f"/commits/{urllib.parse.quote(merged_sha, safe='')}/pulls")
+
+    pulls: list[dict[str, Any]] = []
+    try:
+        pulls = api.paged(f"/commits/{urllib.parse.quote(merged_sha, safe='')}/pulls")
+    except urllib.error.HTTPError as exc:
+        if exc.code < 500:
+            raise
+
     merged = [pr for pr in pulls if pr.get("merged_at") and pr.get("merge_commit_sha") == merged_sha]
-    if len(merged) != 1:
+    if len(merged) == 1:
+        return merged[0]
+    if len(merged) > 1:
         raise RuntimeError(
             f"Expected exactly one merged PR for commit {merged_sha}; found {len(merged)}"
         )
-    return merged[0]
+    return _resolve_pr_from_merge_commit(api, merged_sha)
 
 
 def classify(
