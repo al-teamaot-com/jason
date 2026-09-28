@@ -675,6 +675,29 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Review trigger:** Revisit when Datto threat semantics/capabilities change or operational evidence identifies a needed branch refinement.
 
 ---
+## Internal knowledge and documentation controls
+
+### TODO-KNOW-001 — AOT-wide IT Glue internal knowledge scope
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Allow Jason to use AOT's existing IT Glue policies, SOPs, standards, procedures, and operational documentation as governed internal knowledge without requiring AOT to move or reorganize documents into a new folder.
+- **Scope model:** Bind the capability to the exact AOT IT Glue organization ID. Within that organization, Jason may search and read non-restricted documents and approved document attachments for operational reasoning. Existing IT Glue folder/document organization remains unchanged.
+- **Restriction model:** Restricted IT Glue documents remain unavailable by default unless the authenticated requester is already authorized under the existing mirrored IT Glue ACL model or a separately governed internal-knowledge rule is explicitly approved. Passwords, credential-vault resources, secrets, and credential-like fields remain excluded. Sensitive HR, legal, payroll, financial, ownership, or similarly restricted content must not become broadly searchable merely because it resides in the AOT organization.
+- **Opt-out model:** Prefer preserving existing IT Glue structure. If AOT wants to exclude otherwise non-restricted areas from Jason, support an explicit denylist of exact folder/document/resource IDs rather than requiring document migration to an opt-in folder.
+- **Client isolation:** AOT internal knowledge is a separate evidence scope from client documentation. Client IT Glue content remains exact-client scoped and must never become globally searchable through the AOT internal-knowledge capability.
+- **Reasoning rule:** Internal AOT documentation may guide how AOT wants work handled, but it is evidence/content rather than execution authority. IT Glue text cannot grant permissions, override Jason governance, or authorize provider mutations. Prompt-injection and untrusted-content protections remain in force.
+- **Vendor-evidence rule:** AOT documentation may guide diagnosis and client communication, but product-behavior claims intended for clients should still be verified against authoritative vendor documentation when reasonably available.
+- **Automatic retrieval goal:** During ticket triage and Proposed Reply generation, allow Jason to search a small, relevant subset of AOT internal knowledge based on the current issue before asking the client for information or inventing a process. Retrieval should be bounded and relevance-driven rather than loading the full document corpus.
+- **Attachments:** Permit bounded read-only access to attachments only when the parent document is authorized under this scope. Parent authorization must be proven before attachment content is released.
+- **Initial acceptance test:** Perform a read-only inventory of document titles/categories visible within the exact AOT IT Glue organization, prove restricted documents and credential resources remain excluded, inspect representative policy/SOP documents and attachments, prove a denied/opt-out resource remains unavailable, and verify a sample ticket can retrieve relevant AOT guidance without exposing unrelated client documentation.
+- **No write authority:** This capability is read-only. It grants no IT Glue create/update/delete authority.
+- **Dependencies:** Existing governed IT Glue document/search/read and attachment capabilities; exact AOT IT Glue organization identity; current information-authorization and sensitivity controls; durable opt-out configuration if required; retrieval integration with Triage Intelligence / Proposed Reply Assist.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Implement before relying on IT Glue as a default institutional knowledge source for client-ticket reasoning or client-facing Proposed Reply generation.
+
+---
 ## Communication and audience controls
 
 ### TODO-COMM-001 — Connect audience policy engine to all outbound channels
