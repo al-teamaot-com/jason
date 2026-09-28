@@ -172,6 +172,8 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_change_integration_gate
       - name: Test development release coordinator
         run: python3 -B -m unittest tools.tests.test_development_release_coordinator
+      - name: Test autonomous repair release classifier
+        run: python3 -B -m unittest tools.tests.test_autonomous_repair_release_gate
       - name: Validate concurrent change integration
         if: github.event_name == 'pull_request'
         env:
