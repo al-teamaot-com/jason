@@ -78,7 +78,7 @@ A change outside those limits is not presumed unsafe, but it is too broad for au
 
 The candidate must be merged into protected `main` and the exact merged SHA must pass the required post-merge checks.
 
-Branch-local or pre-merge success is not sufficient production evidence.
+Branch-local success alone is not sufficient production evidence. Universal protected checks must pass again on the merged SHA. Path-scoped or provider-specific checks that do not emit on an unrelated merge remain enforced by protected pull-request validation and are not treated as missing post-merge checks when their paths were not changed.
 
 ## Human approval rule
 

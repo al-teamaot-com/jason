@@ -18,9 +18,7 @@
     "repository-hygiene",
     "conversation-experience",
     "teams-gateway",
-    "governed-security-regressions",
-    "provider-read-runtime-credentials",
-    "GitGuardian Security Checks"
+    "governed-security-regressions"
   ],
   "required_metadata": {
     "release_class": "autonomous-repair-candidate",
