@@ -2624,3 +2624,75 @@ def test_new_admission_attempts_are_throttled_per_scan(tmp_path: Path):
     assert store.get(150004) is None
     assert store.get(150005) is None
     store.close()
+
+
+def test_offline_candidates_do_not_consume_actionable_admission_budget(tmp_path: Path):
+    class MultiQueue:
+        def reconcile_candidates(self):
+            items = []
+            for i in range(8):
+                base = candidate()
+                items.append(replace(base, resource_id=str(160000 + i), context={**base.context, "id": 160000 + i, "ticketNumber": f"O{i}"}))
+            return tuple(items)
+
+    class CountingWorker(OperationalAutonomyMaintenance):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.calls = 0
+
+        def _scope_is_promoted(self, scope):
+            return True
+
+        def _admit(self, candidate, scope):
+            self.calls += 1
+            if self.calls <= 4:
+                raise RuntimeError("endpoint is not currently online")
+            raise RuntimeError("synthetic actionable admission failure")
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = CountingWorker(
+        queue_source=MultiQueue(), reads=Reads(), actions=Actions(), store=store,
+        promotion_store=PromotionStore(), max_active_work_items=2,
+        max_admission_attempts_per_scan=4, interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert worker.calls == 8
+    store.close()
+
+
+def test_offline_probe_budget_is_bounded(tmp_path: Path):
+    class MultiQueue:
+        def reconcile_candidates(self):
+            items = []
+            for i in range(12):
+                base = candidate()
+                items.append(replace(base, resource_id=str(170000 + i), context={**base.context, "id": 170000 + i, "ticketNumber": f"P{i}"}))
+            return tuple(items)
+
+    class OfflineWorker(OperationalAutonomyMaintenance):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.calls = 0
+
+        def _scope_is_promoted(self, scope):
+            return True
+
+        def _admit(self, candidate, scope):
+            self.calls += 1
+            raise RuntimeError("endpoint is not currently online")
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OfflineWorker(
+        queue_source=MultiQueue(), reads=Reads(), actions=Actions(), store=store,
+        promotion_store=PromotionStore(), max_active_work_items=2,
+        max_admission_attempts_per_scan=4, interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert worker.calls == 8
+    store.close()
