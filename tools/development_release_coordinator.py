@@ -311,6 +311,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         "older_open_pr_count": sum(1 for pr in pr_states if not pr.get("recent")),
         "preproduction": config.get("preproduction", {}),
         "production_policy": config.get("production", {}),
+        "autonomous_repair_policy": config.get("production", {}).get("autonomous_repair", {}),
     }
 
 
@@ -397,7 +398,11 @@ def render(board: dict[str, Any]) -> str:
             "",
             f"- Parallel development allowed: **yes**.",
             f"- Production promotion serialized: **{'yes' if board['production_policy'].get('serialized_promotion') else 'no'}**.",
-            f"- Human production approval required: **{'yes' if board['production_policy'].get('human_approval_required') else 'no'}**.",
+            f"- Human production approval required for normal releases: **{'yes' if board['production_policy'].get('human_approval_required') else 'no'}**.",
+            f"- Autonomous repair classification enabled: **{'yes' if board['autonomous_repair_policy'].get('classification_enabled') else 'no'}**.",
+            f"- Human approval required for an eligible autonomous repair: **{'yes' if board['autonomous_repair_policy'].get('human_approval_required_when_eligible') else 'no'}**.",
+            f"- Autonomous repair production execution enabled: **{'yes' if board['autonomous_repair_policy'].get('automatic_execution_enabled') else 'no'}**.",
+            f"- Autonomous repair execution blocker: {board['autonomous_repair_policy'].get('execution_blocker', 'none')}.",
             "- A CI-ready PR is not production-ready when pre-production is not configured.",
             "- Production promotion must use an exact merged main SHA and the governed release preflight.",
         ]
