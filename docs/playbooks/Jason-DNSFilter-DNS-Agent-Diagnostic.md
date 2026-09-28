@@ -172,9 +172,9 @@ Decision:
 - exact provider-side agent match -> record agent state/status/version, authorized network/site, policy relationship where returned, and relevant sync/traffic state;
 - no provider-side match -> continue local install/service diagnostics; absence from the provider search alone is not proof that the local client is absent;
 - multiple or cross-client candidates -> `identification_blocked`;
-- `CONNECTOR_AUTHORIZATION_DENIED` or missing safe client boundary -> document native connector evidence as unavailable, continue with the DRMM diagnostic path, and do not weaken isolation. Current client-network isolation gap is tracked in GitHub #253.
+- `CONNECTOR_AUTHORIZATION_DENIED` or missing safe client boundary -> document native connector evidence as unavailable, continue with the DRMM diagnostic path, and do not weaken isolation. Client-network isolation work tracked in GitHub #253 is complete; any remaining authorization denial must be treated as a live mapping/scope problem rather than bypassed.
 
-**Production evidence — 2026-09-24:** AOT self-company reads succeeded and returned AOT-50282 as an active/protected Windows agent, version 3.3.6, on the AOT Office network. The same native reads for AVMAC company 1179 failed closed with `CONNECTOR_AUTHORIZATION_DENIED`. Inspection confirmed AOT's DNSFilter organization is an MSP/master container holding multiple client networks, so client enablement requires network/site-level isolation rather than simply mapping every Autotask company to the same DNSFilter organization ID.
+**Production evidence — 2026-09-24:** AOT self-company reads succeeded and returned AOT-50282 as an active/protected Windows agent, version 3.3.6, on the AOT Office network. Earlier AVMAC reads failed closed until client network/site isolation was designed and implemented under GitHub #253. Preserve the rule that client execution is bounded to the server-derived authorized network/site set; never map every client broadly to the shared MSP/master organization.
 
 ### Step 2 — Native software inventory
 
@@ -500,18 +500,33 @@ Use the AOT/Jason session-summary rule:
 - not one note per command/read;
 - a later offline/waiting recheck is a separate note-worthy event.
 
-Minimum note:
-- endpoint/alert;
-- online/offline state;
+Use the standard technician-scannable Jason note layout wherever practical:
+
+- **STATUS** — HEALTHY / REINSTALLING / VERIFIED RESOLVED / HUMAN REVIEW REQUIRED.
+- **NEXT STEP** or **ACTION REQUIRED** — state the immediate action at the top.
+- **DEVICE / ALERT** — endpoint and exact DRMM alert.
+- **KEY EVIDENCE** — service state, installed version, DNS resolution/filtering result, relevant bounded event/log evidence.
+- **WHAT JASON DID** — diagnostic/install/reinstall/alert-resolution actions.
+- **CHANGES MADE** — explicitly state None when no modifying action occurred.
+- **JASON STATE** — persisted playbook state.
+
+For a verified healthy or successfully repaired case, the note should make the terminal action obvious:
+- STATUS: VERIFIED RESOLVED
+- NEXT STEP: Resolve exact DNSFilter alert and complete ticket automatically
+
+For a failed bounded reinstall:
+- STATUS: HUMAN REVIEW REQUIRED
+- ACTION REQUIRED: Review failed DNSFilter reinstall/verification evidence
+- NEXT STEP: technician action only; Jason must not repeat the reinstall loop
+
+Also include where relevant:
+- endpoint online/offline state;
 - DNS Agent service state/start mode;
 - installed version evidence;
-- relevant recent SCM error/event evidence;
+- recent SCM/DNSFilter error evidence;
 - DNS resolution result;
-- vendor evidence if used;
-- job/correlation ID;
-- classification;
-- remediation performed, if any;
-- next step.
+- job/correlation IDs;
+- exact alert-resolution result and ticket-completion readback.
 
 Never document secrets or raw browsing/query history.
 
