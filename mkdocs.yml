@@ -37,6 +37,7 @@ nav:
   - Engineering Architecture:
       - Engineering Authority Map: engineering/README.md
       - Change Integration and Production Release Standard: engineering/Jason-Change-Integration-and-Release-Standard.md
+      - Autonomous Repair Release Standard: engineering/Jason-Autonomous-Repair-Release-Standard.md
       - JIS Engineering Guide: engineering/jis/README.md
       - Engineering ADR Index: engineering/adr/README.md
       - Provider Engineering: engineering/providers/README.md
