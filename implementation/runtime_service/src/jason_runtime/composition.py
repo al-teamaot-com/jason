@@ -195,6 +195,17 @@ from orchestrator.teams_identity_binding_sqlite import (
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 
+from .autonomous_repair_deployment import (
+    DEPLOYMENT_REPAIR_APPLY,
+    DEPLOYMENT_REPAIR_STATUS,
+    build_autonomous_repair_deployment_invoker,
+    ensure_autonomous_repair_authority,
+    register_autonomous_repair_deployment_foundation,
+    register_autonomous_repair_deployment_invokers,
+)
+from .autonomous_repair_maintenance import (
+    build_autonomous_repair_deployment_maintenance,
+)
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
     register_autotask_ticket_create_invoker,
@@ -1112,6 +1123,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         integration_broker=integration_broker,
         now=now,
     )
+    autonomous_repair_deployment_activation = (
+        register_autonomous_repair_deployment_foundation(
+            capabilities=capabilities,
+            providers=providers,
+            now=now,
+        )
+    )
     register_autotask_ticket_create_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1181,6 +1199,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             capabilities=capabilities, providers=providers
         ),
     )
+    if autonomous_repair_deployment_activation.enabled:
+        ensure_autonomous_repair_authority(identity_authority)
+
 
     ollama_client = OllamaStructuredJsonClient(
         transport=http_transport,
@@ -1580,6 +1601,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         audit=Cap007EventAudit(orchestration_events),
     )
 
+    autonomous_repair_deployment_invoker = (
+        build_autonomous_repair_deployment_invoker()
+        if autonomous_repair_deployment_activation.enabled
+        else None
+    )
+
     invokers = CapabilityInvokerRegistry()
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
@@ -1686,6 +1713,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             invokers=invokers,
             invoker=dnsfilter_mcp_mutation_invoker,
             capability_names=dnsfilter_mutation_activation.capability_names,
+        )
+    if autonomous_repair_deployment_invoker is not None:
+        register_autonomous_repair_deployment_invokers(
+            invokers=invokers,
+            invoker=autonomous_repair_deployment_invoker,
         )
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
@@ -1893,6 +1925,20 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
     )
+    autonomous_repair_deployment_maintenance = (
+        build_autonomous_repair_deployment_maintenance(
+            enabled=autonomous_repair_deployment_activation.enabled,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            promotion_db=settings.autonomy_promotion_db,
+            interval_seconds=int(
+                os.getenv("JASON_AUTONOMOUS_REPAIR_INTERVAL_SECONDS", "300")
+            ),
+        )
+    )
     operational_autonomy_maintenance = build_autonomy_worker_maintenance(
         enabled=settings.autonomy_worker_enabled,
         identity_authority=identity_authority,
@@ -1909,6 +1955,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,
+        autonomous_repair_deployment_maintenance,
         operational_autonomy_maintenance,
         shadow_autonomy_maintenance,
     )
