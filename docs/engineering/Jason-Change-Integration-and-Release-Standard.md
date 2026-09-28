@@ -1,6 +1,6 @@
 # J-CHANGE-001 — Change Integration and Production Release Standard
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Status:** Active  
 **Owner:** Jason Architecture Authority  
 **Authority:** Jason Constitution; `CONTRIBUTING.md`; protected `main` branch validation  
@@ -84,7 +84,13 @@ A production promotion must preserve:
 - verification plan;
 - rollback target.
 
-### 6. Verification after promotion
+### 6. Autonomous repair exception
+
+Production promotion normally requires human approval. J-CHANGE-002 defines a narrow pre-authorized Autonomous Repair Release class for restoring previously approved Jason behavior without new capability, authority, security, provider, dependency, schema, topology, client-scope, or disruptive-operational change.
+
+A candidate that does not satisfy every J-CHANGE-002 criterion remains in the normal human-approved release lane.
+
+### 7. Verification after promotion
 
 A source promotion is not complete merely because files copied, containers rebuilt, or services restarted successfully.
 
@@ -92,11 +98,11 @@ Post-promotion verification SHALL confirm the live runtime is actually running t
 
 If production does not match the selected release SHA, the release is incomplete and must fail closed or roll back.
 
-### 7. Rollback
+### 8. Rollback
 
 Rollback SHALL target a known previously accepted immutable production revision. Rollback SHALL NOT be implemented as an uncontrolled reverse merge or by rebuilding from an unknown mutable branch state.
 
-### 8. Documentation reconciliation is downstream evidence, not a competing source lane
+### 9. Documentation reconciliation is downstream evidence, not a competing source lane
 
 Automated documentation reconciliation may create follow-up PRs after validated source changes. Those PRs remain normal workstreams and must not cause a production deployment process to change its already-selected release SHA.
 
@@ -145,7 +151,8 @@ Source integration evidence is produced by:
 
 Release-candidate evidence is produced by:
 
-- `.github/workflows/production-release-preflight.yml`;
+- `.github/workflows/production-release-preflight.yml`
+- `docs/engineering/Jason-Autonomous-Repair-Release-Standard.md`;
 - the exact target SHA;
 - the generated release manifest artifact.
 
@@ -178,4 +185,5 @@ Retirement requires an equal or stronger mechanism that preserves exact-source r
 
 ## Revision notes
 
+- 2026-09-28: Added J-CHANGE-002 autonomous repair release exception for previously approved behavior restorations.
 - 2026-09-28: Initial active standard created to prevent concurrent Project Jason workstreams from stepping on one another during merge and production promotion.
