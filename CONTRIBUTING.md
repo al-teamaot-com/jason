@@ -19,6 +19,8 @@ Conversation memory is not authoritative. Existing fundamentals must not be reco
 
 ## Before changing code
 
+All material concurrent work is governed by [J-CHANGE-001](docs/engineering/Jason-Change-Integration-and-Release-Standard.md). Create an isolated branch/worktree from an identified `main` revision. Before merge, reconcile with current protected `main`, review active implementation-sensitive overlaps, and re-run validation. Production release candidates are exact merged `main` SHAs and are promoted through one serialized release lane.
+
 1. Classify the component/change using the Extension Construction Map.
 2. Identify the capability, service, standard, decision, and authority affected.
 3. Confirm an approved native platform capability cannot satisfy the need more safely/simply.
@@ -84,6 +86,8 @@ If the next contributor must rediscover fundamentals or reverse-engineer a reusa
 Use the relevant implementation test environment for the changed component/capability. Build documentation from the repository root with strict validation and the current repository tooling.
 
 ## Pull requests
+
+The protected `repository-hygiene` check enforces current-main reconciliation and active implementation-overlap review. Use the PR template's `Integration coordination:` line to acknowledge reviewed overlapping PRs. Do not treat a successful branch-local test run as proof that the branch is safe to merge if `main` moved afterward.
 
 A pull request should explain:
 
