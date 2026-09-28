@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,7 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "development_release_coordin
 SPEC = importlib.util.spec_from_file_location("development_release_coordinator", MODULE_PATH)
 coordinator = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
+sys.modules[SPEC.name] = coordinator
 SPEC.loader.exec_module(coordinator)
 
 
