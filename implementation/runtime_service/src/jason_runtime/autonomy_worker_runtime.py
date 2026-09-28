@@ -455,6 +455,13 @@ class SQLiteOperationalWorkStore:
                     ),
                 )
 
+    def classification_state(self, ticket_id: int) -> str | None:
+        row = self._connection.execute(
+            "SELECT state FROM autonomy_ticket_classification WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return None if row is None else str(row["state"])
+
     def last_note_fingerprint(
         self, ticket_id: int, playbook_id: str, note_title: str
     ) -> str | None:
@@ -589,6 +596,7 @@ class OperationalAutonomyMaintenance:
         promotion_store: SQLitePlaybookAutonomyApprovalStore,
         max_active_work_items: int = 2,
         max_admission_attempts_per_scan: int = 4,
+        max_candidate_evaluations_per_scan: int = 40,
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
@@ -597,6 +605,8 @@ class OperationalAutonomyMaintenance:
             raise ValueError("max_active_work_items must be between 1 and 20")
         if not 1 <= int(max_admission_attempts_per_scan) <= 20:
             raise ValueError("max_admission_attempts_per_scan must be between 1 and 20")
+        if not 1 <= int(max_candidate_evaluations_per_scan) <= 200:
+            raise ValueError("max_candidate_evaluations_per_scan must be between 1 and 200")
         if int(interval_seconds) < 30:
             raise ValueError("operational autonomy interval must be at least 30 seconds")
         self.queue_source = queue_source
@@ -606,6 +616,7 @@ class OperationalAutonomyMaintenance:
         self.promotion_store = promotion_store
         self.max_active_work_items = int(max_active_work_items)
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
+        self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
@@ -822,8 +833,17 @@ class OperationalAutonomyMaintenance:
 
         # Keep prioritization deliberately simple and auditable: urgent first,
         # then PSA priority, then already-owned work, then oldest ticket ID.
+        # Endpoints already proven offline in the previous scan are deprioritized
+        # so unrelated work gets first use of the bounded candidate-evaluation budget.
+        # Offline state is local to the affected ticket and never consumes an active
+        # work slot or the non-offline admission-attempt budget.
+        prior_states = {
+            int(item.resource_id): self.store.classification_state(int(item.resource_id))
+            for item, _ in eligible
+        }
         eligible.sort(
             key=lambda pair: (
+                int(prior_states.get(int(pair[0].resource_id)) == "waiting_device_access"),
                 -int(pair[0].urgent),
                 -pair[0].priority,
                 -int(pair[0].owned_by_jason),
@@ -833,8 +853,7 @@ class OperationalAutonomyMaintenance:
         started = 0
         waiting_device = 0
         admission_attempts = 0
-        offline_probes = 0
-        max_offline_probes_per_scan = self.max_admission_attempts_per_scan * 2
+        candidate_evaluations = 0
         for candidate, scope in eligible:
             # Recompute occupancy after every advancement. If a ticket completes,
             # blocks, or hands off immediately, refill the freed slot during this
@@ -843,19 +862,22 @@ class OperationalAutonomyMaintenance:
                 break
             if admission_attempts >= self.max_admission_attempts_per_scan:
                 break
+            if candidate_evaluations >= self.max_candidate_evaluations_per_scan:
+                break
+            candidate_evaluations += 1
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:
                 if "endpoint is not currently online" in str(exc).casefold():
-                    offline_probes += 1
                     waiting_device += 1
                     classifications[int(candidate.resource_id)] = (
                         "waiting_device_access", "endpoint_offline",
                         candidate.source_version, False,
                     )
                     self._record_admission_failure(candidate, scope, exc)
-                    if offline_probes >= max_offline_probes_per_scan:
-                        break
+                    # An offline endpoint is local to this ticket. Defer it and keep
+                    # searching for unrelated eligible work; the overall candidate-
+                    # evaluation ceiling bounds provider work for the scan.
                     continue
                 admission_attempts += 1
                 classifications[int(candidate.resource_id)] = (
