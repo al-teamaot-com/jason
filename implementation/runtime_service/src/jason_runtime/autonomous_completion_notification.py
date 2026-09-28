@@ -494,3 +494,90 @@ def build_notifier(
         request_factory=request_factory,
         orchestrator=orchestrator,
     )
+
+
+@dataclass(slots=True)
+class AutonomousDeploymentCompletionNotificationMaintenance:
+    notifier: GovernedAutonomousCompletionNotifier
+    spool_root: Path = Path("/var/lib/jason/openclaw/autonomous-repair")
+    interval_seconds: int = 60
+    now: Any = None
+    _next_due_at: Any = None
+
+    def __post_init__(self) -> None:
+        if self.interval_seconds < 30:
+            raise ValueError("notification maintenance interval must be at least 30 seconds")
+        if self.now is None:
+            from datetime import datetime, timezone
+            self.now = lambda: datetime.now(timezone.utc)
+
+    def tick(self) -> bool:
+        from datetime import timedelta
+        current = self.now()
+        if self._next_due_at is not None and current < self._next_due_at:
+            return False
+        self._next_due_at = current + timedelta(seconds=self.interval_seconds)
+
+        results = self.spool_root / "results"
+        notified = self.spool_root / "notifications"
+        if not results.exists():
+            return False
+        notified.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        handled = False
+        for path in sorted(results.glob("*.json"), key=lambda item: item.stat().st_mtime):
+            marker = notified / path.name
+            if marker.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if (
+                payload.get("state") != "succeeded"
+                or payload.get("verification_passed") is not True
+                or str(payload.get("candidate_sha") or "").strip()
+                != str(payload.get("live_revision") or "").strip()
+            ):
+                continue
+            candidate = str(payload.get("candidate_sha") or "").strip().casefold()
+            support_item = str(payload.get("support_item") or "").strip().upper()
+            if len(candidate) != 40 or not support_item:
+                continue
+
+            self.notifier.send(
+                "deployment_completed",
+                candidate_sha=candidate,
+                support_item=support_item,
+            )
+            temp = marker.with_suffix(marker.suffix + ".tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "event_type": "deployment_completed",
+                        "candidate_sha": candidate,
+                        "support_item": support_item,
+                        "notified_at": current.isoformat(),
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            os.chmod(temp, 0o600)
+            os.replace(temp, marker)
+            handled = True
+        return handled
+
+
+def build_deployment_notification_maintenance(
+    *,
+    notifier: GovernedAutonomousCompletionNotifier | None,
+    spool_root: Path = Path("/var/lib/jason/openclaw/autonomous-repair"),
+):
+    if notifier is None:
+        return None
+    return AutonomousDeploymentCompletionNotificationMaintenance(
+        notifier=notifier,
+        spool_root=spool_root,
+    )
