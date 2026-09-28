@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "enabled": true,
   "automatic_authorization_enabled": true,
-  "automatic_production_execution_enabled": false,
+  "automatic_production_execution_enabled": true,
   "execution_path_requirement": "named_governed_deployment_capability",
   "required_support_prefix": "SUPPORT-",
   "production_evidence_max_age_minutes": 30,
