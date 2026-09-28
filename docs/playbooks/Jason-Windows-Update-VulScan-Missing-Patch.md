@@ -70,8 +70,14 @@ identified -> patch_state_check
 patch_state_check ->
 - complete_candidate
 - waiting_patch_window
+- waiting_patch_approval
 - diagnosing_install_failure
-- approval_blocked
+
+waiting_patch_approval ->
+- waiting_patch_approval
+- waiting_patch_window
+- complete_candidate
+- human_review
 
 waiting_patch_window -> post_window_verification
 
@@ -99,7 +105,7 @@ post_reboot_verification -> verifying
 
 verifying -> complete | escalated
 
-Persist ticket ID, device UID, configuration item ID, KB/patch ID, current state, patch-window timestamp, diagnostic job IDs/results, repair attempts, reboot decision, and next recheck.
+Persist ticket ID, device UID, configuration item ID, KB/patch ID, current state, first NOT_APPROVED observation timestamp, patch-window timestamp, diagnostic job IDs/results, repair attempts, reboot decision, next recheck, and any durable technician approve/defer decision.
 
 ## 7. Diagnostic Workflow
 
@@ -111,10 +117,29 @@ Branch:
 - INSTALLED: move to verification.
 - APPROVED_PENDING: determine whether the normal patch window has occurred.
 - INSTALL_ERROR/FAILED: move to diagnostics.
-- NOT_APPROVED: set approval_blocked; Jason does not approve patches unless specifically authorized.
+- NOT_APPROVED: set state=waiting_patch_approval. Keep the ticket in queue **Jason** and do not send it immediately to Help Desk I. Jason does not approve patches unless specifically authorized. Persist the first observed NOT_APPROVED timestamp and begin the 10-day approval-aging window.
 - ambiguous/missing object: investigate supersedence or identity before remediation.
 
 An approved-pending patch before its maintenance window is not a failure.
+
+### B. Patch-approval waiting
+
+If an exact reported KB is NOT_APPROVED:
+- keep the ticket in queue **Jason**
+- set state=waiting_patch_approval
+- do not classify NOT_APPROVED alone as a technician failure
+- preserve the first observed NOT_APPROVED timestamp
+- recheck the exact KB approval state daily
+- suppress duplicate ticket notes when the observed state is unchanged
+- if the patch becomes APPROVED_PENDING before day 10, transition to waiting_patch_window and resume automatically
+- if the patch becomes INSTALLED or is authoritatively superseded, transition to verification
+- if the exact KB remains NOT_APPROVED for 10 calendar days, move the ticket to **Help Desk I**, set status **Human Review**, and write one action-required escalation note
+- the Human Review note must state clearly at the top: **ACTION REQUIRED: Approve or intentionally defer the listed patch(es)**
+- if a technician intentionally defers/declines the patch, persist that decision so unchanged evidence does not recycle back into Human Review every 10 days
+
+NOT_APPROVED is therefore a timed dependency state, not an immediate escalation.
+
+### C. Patch-window check
 
 ### B. Patch-window check
 
@@ -125,7 +150,7 @@ If APPROVED_PENDING and the applicable patch window has not completed:
 - use Scheduled - Remote or another appropriate waiting status if configured
 - resume after the patch window plus reasonable processing/reboot grace
 
-### C. Standard Windows Update diagnostic component
+### D. Standard Windows Update diagnostic component
 
 Primary component:
 **Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**
@@ -146,7 +171,7 @@ Purpose:
 
 Retrieve terminal job state and actual StdOut/StdErr. Job submission alone is not success.
 
-### D. Supplemental evidence when needed
+### E. Supplemental evidence when needed
 
 If diagnosis is inconclusive or patch failure persists:
 - exact WindowsUpdateClient Event ID/error/HRESULT
@@ -241,6 +266,13 @@ Do not repeat DISM/SFC/cache-reset work indefinitely.
 
 ## 11. Periodic Rechecks
 
+For waiting_patch_approval:
+- recheck the exact reported KB approval state once per day
+- retain the ticket in queue Jason through day 9 while the exact KB remains NOT_APPROVED
+- do not create a new ticket note when the recheck produces no meaningful state change
+- if state changes to APPROVED_PENDING, resume the patch-window path automatically
+- at 10 calendar days still NOT_APPROVED, hand off to Help Desk I with status Human Review
+
 For waiting_patch_window:
 - recheck after the scheduled maintenance window plus a reasonable grace period.
 
@@ -254,7 +286,13 @@ Suppress duplicate scheduled jobs/reboots and stop rechecks after complete/escal
 
 ## 12. Aging / Stale Condition
 
-If a critical missing-patch ticket remains unresolved across multiple patch windows or beyond the defined SLA:
+For NOT_APPROVED findings:
+- day 0 is the first authoritative DRMM observation that the exact reported KB is NOT_APPROVED
+- days 0-9 remain Jason-owned in state=waiting_patch_approval
+- at day 10, if the same exact KB remains NOT_APPROVED and no durable technician decision exists, move to Help Desk I with status Human Review
+- a durable intentional defer/decline decision suppresses repeated 10-day re-escalation until the patch identity, policy state, or technician decision materially changes
+
+For other critical missing-patch tickets that remain unresolved across multiple patch windows or beyond the defined SLA:
 - investigate stale VulScan evidence
 - check supersedence/build mismatch
 - check endpoint rename/reimage/replacement
@@ -296,15 +334,40 @@ Document:
 - live-session/reboot decision
 - post-action verification
 
-Suggested notes:
-- Jason - Patch Playbook - Asset Validation
-- Jason - Patch Playbook - Waiting Patch Window
-- Jason - Patch Playbook - Diagnostic
-- Jason - Patch Playbook - Windows Update Repair
-- Jason - Patch Playbook - Reboot Scheduled
-- Jason - Patch Playbook - Verification
-- Jason - Patch Playbook - Escalation
-- Jason - Patch Playbook - Resolution
+Use a technician-scannable layout wherever practical. The first lines must make the current state and next action obvious.
+
+Preferred field order:
+- **STATUS**
+- **NEXT STEP** or **ACTION REQUIRED**
+- **WHEN / ESCALATION**
+- **DEVICE**
+- **PATCH STATUS / KEY EVIDENCE**
+- **WHAT JASON FOUND**
+- **WHAT JASON DID**
+- **CHANGES MADE**
+- **JASON STATE**
+
+For waiting_patch_approval, the top of the note should read conceptually:
+- STATUS: WAITING — PATCH NOT APPROVED
+- NEXT STEP: No technician action required yet; Jason will continue monitoring
+- ESCALATION: If still NOT_APPROVED at 10 days, move to Help Desk I / Human Review
+
+For the day-10 Human Review handoff, the top of the note should read conceptually:
+- STATUS: HUMAN REVIEW REQUIRED
+- ACTION REQUIRED: Approve or intentionally defer the listed patch(es)
+- WHY: The exact patch has remained NOT_APPROVED for 10 days
+- AFTER APPROVAL: Jason resumes the normal patch workflow automatically
+
+Suggested note titles:
+- Jason - VulScan - Asset Validation
+- Jason - VulScan - Waiting Patch Approval
+- Jason - VulScan - Waiting Patch Window
+- Jason - VulScan - Diagnostic
+- Jason - VulScan - Windows Update Repair
+- Jason - VulScan - Reboot Scheduled
+- Jason - VulScan - Verification
+- Jason - VulScan - Human Review Required
+- Jason - VulScan - Resolution
 
 ## 15. Failure Handling
 
@@ -323,6 +386,7 @@ Do not infer success from a component submission.
 ## 16. Escalation Criteria
 
 Escalate to Help Desk I when:
+- an exact reported KB remains NOT_APPROVED for 10 calendar days with no durable technician approve/defer decision; set status Human Review
 - two full repair/install cycles fail
 - Windows servicing corruption cannot be repaired by the approved component path
 - patch remains missing across authorized windows without explainable state
@@ -389,15 +453,20 @@ Acceptance must prove:
 1. ticket moved/kept in Jason queue
 2. correct configuration item association
 3. exact KB identification
-4. APPROVED_PENDING before-window path waits instead of forcing install
-5. post-window path rechecks exact KB
-6. diagnostic component first runs with all repair flags false
-7. WU_AutoFixCore=True is only used after repair gate
-8. WSUS clearing remains separately gated
-9. live-session gate protects logged-in users from reboot
-10. 2:30 AM/3:00 AM scheduled reboot/resume path works
-11. maximum two repair cycles
-12. exact final KB/build verification before completion
+4. NOT_APPROVED enters waiting_patch_approval instead of immediate Help Desk escalation
+5. unchanged NOT_APPROVED state stays Jason-owned through day 9 with duplicate-note suppression
+6. approval before day 10 resumes automatically into the patch-window path
+7. still NOT_APPROVED at day 10 moves to Help Desk I with status Human Review and a clear ACTION REQUIRED note
+8. durable technician defer/decline prevents unchanged 10-day re-escalation loops
+9. APPROVED_PENDING before-window path waits instead of forcing install
+10. post-window path rechecks exact KB
+11. diagnostic component first runs with all repair flags false
+12. WU_AutoFixCore=True is only used after repair gate
+13. WSUS clearing remains separately gated
+14. live-session gate protects logged-in users from reboot
+15. 2:30 AM/3:00 AM scheduled reboot/resume path works
+16. maximum two repair cycles
+17. exact final KB/build verification before completion
 
 ## 22. Section Goal Closure
 
@@ -416,6 +485,6 @@ Approval owner: person-al
 Approval date: 2026-09-26
 Approved scope: exact `vulscan_missing_patch@1.0.0` diagnostic/classification branch using governed endpoint/device and exact DRMM patch reads plus internal ticket work-start/note updates.
 
-The autonomous branch may extract exact KB identities from the ticket, read the matching DRMM patch objects, classify INSTALLED, APPROVED_PENDING, NOT_APPROVED, INSTALL_ERROR/FAILED, ambiguous/supersedence-review states, document reboot-required/online state, and stop for technician review.
+The autonomous branch may extract exact KB identities from the ticket, read the matching DRMM patch objects, classify INSTALLED, APPROVED_PENDING, NOT_APPROVED, INSTALL_ERROR/FAILED, ambiguous/supersedence-review states, document reboot-required/online state, and maintain a non-remediating waiting_patch_approval state for NOT_APPROVED findings. A NOT_APPROVED finding alone must not immediately become technician review. After 10 calendar days unchanged, the playbook may perform the governed handoff to Help Desk I / Human Review when that lifecycle branch has passed acceptance and owner review.
 
 It may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.
