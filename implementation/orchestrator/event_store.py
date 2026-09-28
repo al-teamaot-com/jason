@@ -10,6 +10,9 @@ from types import MappingProxyType
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+_SQLITE_BUSY_TIMEOUT_SECONDS = 30.0
+_SQLITE_BUSY_TIMEOUT_MS = int(_SQLITE_BUSY_TIMEOUT_SECONDS * 1000)
+
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -101,9 +104,15 @@ class SQLiteOrchestrationEventStore:
         # rather than failing after authority succeeds and before/while execution.
         self._connection = sqlite3.connect(
             str(path),
+            timeout=_SQLITE_BUSY_TIMEOUT_SECONDS,
             check_same_thread=False,
         )
         self._connection.row_factory = sqlite3.Row
+        self._connection.execute(f"PRAGMA busy_timeout = {_SQLITE_BUSY_TIMEOUT_MS}")
+        if str(path) != ":memory:":
+            journal_mode = self._connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            if str(journal_mode).casefold() != "wal":
+                raise RuntimeError("orchestration event store could not enable WAL mode")
         self._connection.executescript(_SCHEMA)
         self._connection.commit()
         if str(path) != ":memory:":

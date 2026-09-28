@@ -124,3 +124,71 @@ def test_audit_sink_adapter_requires_canonical_context() -> None:
         assert events[0].event_type == "orchestration.request.received"
     finally:
         store.close()
+
+
+def test_file_store_uses_wal_and_extended_busy_timeout(tmp_path) -> None:
+    path = tmp_path / "events.sqlite3"
+    store = SQLiteOrchestrationEventStore(path)
+    try:
+        journal_mode = store._connection.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = store._connection.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert str(journal_mode).casefold() == "wal"
+        assert int(busy_timeout) >= 30_000
+    finally:
+        store.close()
+
+
+def test_memory_store_preserves_memory_journal_mode() -> None:
+    store = SQLiteOrchestrationEventStore()
+    try:
+        journal_mode = store._connection.execute("PRAGMA journal_mode").fetchone()[0]
+        assert str(journal_mode).casefold() == "memory"
+    finally:
+        store.close()
+
+
+def test_two_file_store_connections_wait_through_short_write_contention(tmp_path) -> None:
+    import threading
+    import time
+
+    path = tmp_path / "events.sqlite3"
+    first = SQLiteOrchestrationEventStore(path)
+    second = SQLiteOrchestrationEventStore(path)
+    errors = []
+
+    try:
+        first._connection.execute("BEGIN IMMEDIATE")
+        first._connection.execute(
+            """
+            INSERT INTO orchestration_events(
+                event_id, schema_version, event_type, execution_id,
+                correlation_id, organization_id, principal_id,
+                capability_name, stage, payload, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "held-event", "1.0", "orchestration.test", "exec-held",
+                "corr-held", "aot", "operator-al", "autotask.ticket.search",
+                "received", '{"sequence":0}',
+                datetime(2026, 8, 6, 17, 0, 0, tzinfo=timezone.utc).isoformat(),
+            ),
+        )
+
+        def append_second() -> None:
+            try:
+                second.append_event(event(event_id="event-after-lock", execution_id="exec-2"))
+            except Exception as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        worker = threading.Thread(target=append_second)
+        worker.start()
+        time.sleep(0.25)
+        first._connection.commit()
+        worker.join(timeout=5)
+
+        assert not worker.is_alive()
+        assert errors == []
+        assert second.get("event-after-lock") is not None
+    finally:
+        first.close()
+        second.close()
