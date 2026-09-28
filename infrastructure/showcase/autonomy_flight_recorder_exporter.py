@@ -607,6 +607,53 @@ def load_worker_summary() -> dict[str, Any]:
         c.close()
     return result
 
+def load_ticket_lifecycle_summary(window_hours: int = 48) -> dict[str, int]:
+    result = {"completed": 0, "claimed": 0, "returned_helpdesk": 0, "human_review": 0}
+    if not LEDGER_DB.exists():
+        return result
+    cutoff = datetime.now(timezone.utc).timestamp() - (window_hours * 3600)
+    completed, claimed, returned = set(), set(), set()
+    c = _db(LEDGER_DB)
+    try:
+        rows = c.execute(
+            "SELECT state,completed_at,execution_plan_json,result_json FROM governed_action_approvals "
+            "WHERE principal_id=? AND capability_name='service.ticket.update' AND completed_at IS NOT NULL",
+            (PRINCIPAL,),
+        ).fetchall()
+        for row in rows:
+            try:
+                when = datetime.fromisoformat(str(row['completed_at']).replace('Z', '+00:00')).timestamp()
+            except Exception:
+                continue
+            if when < cutoff or str(row['state']) != 'succeeded':
+                continue
+            plan = _json(row['execution_plan_json'], {}) or {}
+            payload = plan.get('normalized_payload') if isinstance(plan.get('normalized_payload'), dict) else {}
+            result_json = _json(row['result_json'], {}) or {}
+            verification = (((result_json.get('output') or {}).get('data') or {}).get('jasonVerification') or {})
+            if verification.get('readbackVerified') is not True:
+                continue
+            ticket_id = str(payload.get('id') or plan.get('resource_identifier') or '').strip()
+            if not ticket_id:
+                continue
+            status = payload.get('status')
+            queue_id = payload.get('queueID')
+            if status == 5:
+                completed.add(ticket_id)
+            if status == 8 and queue_id == 29683489:
+                claimed.add(ticket_id)
+            if status == 1 and queue_id == 29682833:
+                returned.add(ticket_id)
+    finally:
+        c.close()
+    result['completed'] = len(completed)
+    result['claimed'] = len(claimed)
+    result['returned_helpdesk'] = len(returned)
+    worker = load_worker_summary()
+    result['human_review'] = int((worker.get('scan') or {}).get('human_review') or 0)
+    return result
+
+
 def metrics_text() -> str:
     actions = load_actions(500)
     today = datetime.now(timezone.utc).date().isoformat()
@@ -616,6 +663,7 @@ def metrics_text() -> str:
     verified = sum(1 for a in today_actions if a.get("verified"))
     shadow = load_shadow_summary()
     worker = load_worker_summary()
+    lifecycle48 = load_ticket_lifecycle_summary(48)
     lines = [
         "# HELP jason_autonomy_actions_today Autonomous executions observed today.",
         "# TYPE jason_autonomy_actions_today gauge",
@@ -678,6 +726,12 @@ def metrics_text() -> str:
         lines.append(
             f'jason_ticket_worker_reason{{state="{safe_state}",reason="{safe_reason}"}} {int(count)}'
         )
+    lines.extend([
+        "# HELP jason_ticket_lifecycle_48h Unique tickets changed by Jason autonomy during the rolling 48-hour window.",
+        "# TYPE jason_ticket_lifecycle_48h gauge",
+    ])
+    for state, count in lifecycle48.items():
+        lines.append(f'jason_ticket_lifecycle_48h{{state="{state}"}} {int(count)}')
     lines.extend([
         "# HELP jason_ticket_worker_oldest_eligible_age_seconds Age of the oldest currently eligible ticket.",
         "# TYPE jason_ticket_worker_oldest_eligible_age_seconds gauge",
