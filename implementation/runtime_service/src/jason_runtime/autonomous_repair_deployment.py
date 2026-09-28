@@ -31,6 +31,7 @@ from kernel.execution_providers import (
     ProviderType,
 )
 from kernel.resolution import CapabilityResolutionResult
+from kernel.identity_authority import AuthorityGrant, IdentityRecord, PermissionMode
 from orchestrator.contracts import OrchestrationRequest
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import InvocationResult
@@ -525,6 +526,65 @@ class AutonomousRepairDeploymentInvoker:
             },
             attempts=1,
         )
+
+
+AUTONOMOUS_REPAIR_EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-deployment-repair-apply-v1"
+AUTONOMOUS_REPAIR_STATUS_GRANT_ID = "grant-jason-autonomy-worker-deployment-repair-status-v1"
+
+
+def ensure_autonomous_repair_authority(identity_authority) -> tuple[str, ...]:
+    """Persist only the exact J-CHANGE-002 workload grants when profile is active."""
+
+    if not autonomous_repair_deployment_enabled():
+        return ()
+
+    identity = identity_authority.identities.get("jason-autonomy-worker")
+    expected_identity = IdentityRecord(
+        identity_id="jason-autonomy-worker",
+        identity_type="service",
+        organization_id="aot",
+        status="active",
+    )
+    if identity is None:
+        identity_authority.identities.put(expected_identity)
+    elif identity != expected_identity:
+        raise AutonomousRepairDeploymentActivationError(
+            "autonomous repair worker identity conflicts with existing JKD-001 identity"
+        )
+
+    expected = (
+        AuthorityGrant(
+            grant_id=AUTONOMOUS_REPAIR_EXECUTE_GRANT_ID,
+            subject_id="jason-autonomy-worker",
+            capability=DEPLOYMENT_REPAIR_APPLY,
+            organization_id="aot",
+            client_id=None,
+            permission=PermissionMode.EXECUTE,
+            approval_required=False,
+            status="active",
+        ),
+        AuthorityGrant(
+            grant_id=AUTONOMOUS_REPAIR_STATUS_GRANT_ID,
+            subject_id="jason-autonomy-worker",
+            capability=DEPLOYMENT_REPAIR_STATUS,
+            organization_id="aot",
+            client_id=None,
+            permission=PermissionMode.OBSERVE,
+            approval_required=False,
+            status="active",
+        ),
+    )
+    created: list[str] = []
+    for grant in expected:
+        existing = identity_authority.grants.get(grant.grant_id)
+        if existing is None:
+            identity_authority.grants.put(grant)
+            created.append(grant.grant_id)
+        elif existing != grant:
+            raise AutonomousRepairDeploymentActivationError(
+                f"autonomous repair authority grant conflicts: {grant.grant_id}"
+            )
+    return tuple(created)
 
 
 def build_autonomous_repair_deployment_invoker() -> AutonomousRepairDeploymentInvoker:
