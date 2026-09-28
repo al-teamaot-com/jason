@@ -33,6 +33,27 @@ List schemas, APIs, events, states, or transitions changed. Describe compatibili
 
 List any active PRs that touch the same implementation-sensitive files using PR references such as `#123`. The protected integration gate requires current `main` to be incorporated and active overlaps to be explicitly reviewed.
 
+## Autonomous repair release
+
+Complete only when requesting J-CHANGE-002 autonomous repair classification.
+
+- Release class: normal
+- Support item:
+- Previously approved behavior:
+- New capability: no
+- Security impact: none
+- New authority or permission: no
+- Provider/API contract change: no
+- Schema or migration: no
+- New dependency: no
+- Infrastructure or topology change: no
+- Client scope expansion: no
+- Disruptive operational behavior: no
+- Regression test:
+- Post-deploy verification:
+
+Use `Release class: autonomous-repair-candidate` only for a currently open `SUPPORT-*` defect that restores previously approved behavior. Any uncertain answer routes the release back to normal human approval.
+
 ## Verification
 
 - [ ] Unit tests
