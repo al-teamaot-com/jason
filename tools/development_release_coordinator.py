@@ -187,6 +187,30 @@ def release_attention(pr_states: list[dict[str, Any]]) -> str:
     return "No recently active PR currently requires release-lane reconciliation."
 
 
+def support_repair_prs(pulls: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    repairs: dict[str, dict[str, Any]] = {}
+    for pr in pulls:
+        body = str(pr.get("body") or "")
+        release = re.search(
+            r"(?im)^\s*-\s*Release class\s*:\s*autonomous-repair-candidate\s*$",
+            body,
+        )
+        support = re.search(
+            r"(?im)^\s*-\s*Support item\s*:\s*(SUPPORT-[A-Z]+-[0-9]+)\s*$",
+            body,
+        )
+        if not release or not support:
+            continue
+        item_id = support.group(1).upper()
+        repairs[item_id] = {
+            "number": int(pr["number"]),
+            "title": str(pr.get("title") or ""),
+            "url": str(pr.get("html_url") or ""),
+            "draft": bool(pr.get("draft")),
+        }
+    return repairs
+
+
 def development_recommendation(
     support: list[dict[str, str]],
     todos: list[dict[str, str]],
@@ -294,6 +318,15 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
     production = load_json(AUTOMATED_CHANGE_STATE)
     roadmap = load_json(ROADMAP_STATUS)
     support = parse_support(SUPPORT.read_text(encoding="utf-8"))
+    repair_prs = support_repair_prs(pulls)
+    for item in support:
+        repair = repair_prs.get(item["id"])
+        if repair:
+            item["repair_state"] = "repair_pr_active"
+            item["repair_pr"] = str(repair["number"])
+            item["repair_url"] = repair["url"]
+        else:
+            item["repair_state"] = "implementation_needed"
     todos = parse_todos(TODO_BACKLOG.read_text(encoding="utf-8"))
 
     return {
@@ -374,9 +407,14 @@ def render(board: dict[str, Any]) -> str:
     lines.extend(["", "## Open support defects", ""])
     if board["support"]:
         for item in board["support"][:12]:
+            repair = (
+                f"; repair PR #{item['repair_pr']} active"
+                if item.get("repair_state") == "repair_pr_active"
+                else "; implementation needed"
+            )
             lines.append(
                 f"- **{item['priority']} {item['id']}** — {item['title']} "
-                f"_(status: {item['status']})_"
+                f"_(status: {item['status']}{repair})_"
             )
     else:
         lines.append("- No open support defects were parsed from SUPPORT.md.")
