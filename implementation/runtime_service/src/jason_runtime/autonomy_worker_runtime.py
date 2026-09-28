@@ -1624,9 +1624,7 @@ class OperationalAutonomyMaintenance:
             "or perform any other modifying/user-disruptive action."
         )
         self._write_note(work, note, "Jason - Autonomous Idle Log Off Diagnostic")
-        self.store.put(
-            self._replace(work, phase="escalated", last_reason=reason)
-        )
+        self._persist_human_review_escalation(work, reason=reason)
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
@@ -1730,15 +1728,12 @@ class OperationalAutonomyMaintenance:
             "completion, reboot, or other modifying action was attempted."
         )
         self._write_note(work, note, "Jason - Autonomous Disk Event ID 7 Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=(
-                    "Disk Event ID 7 diagnostic complete; authoritative physical-disk "
-                    "mapping remains component/technician gated."
-                ),
-            )
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Disk Event ID 7 diagnostic complete; authoritative physical-disk "
+                "mapping remains component/technician gated."
+            ),
         )
 
     def _investigate_vulscan(
@@ -1851,13 +1846,7 @@ class OperationalAutonomyMaintenance:
             reason = f"VulScan diagnostic classified {classification}; remediation remains gated."
 
         self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=reason,
-            )
-        )
+        self._persist_human_review_escalation(work, reason=reason)
 
     def _investigate_low_disk(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
@@ -1985,13 +1974,7 @@ class OperationalAutonomyMaintenance:
             )
 
         self._write_note(work, note, "Jason - Autonomous Low Disk Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=reason,
-            )
-        )
+        self._persist_human_review_escalation(work, reason=reason)
 
     @staticmethod
     def _parse_iso_timestamp(value: Any) -> datetime | None:
@@ -2067,15 +2050,12 @@ class OperationalAutonomyMaintenance:
                 ),
                 "Jason - Autonomous BackupIQ Asset Validation",
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="escalated",
-                    last_reason=(
-                        "BackupIQ provider asset identity was not uniquely established; "
-                        "technician review required."
-                    ),
-                )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "BackupIQ provider asset identity was not uniquely established; "
+                    "technician review required."
+                ),
             )
             return
 
@@ -2163,13 +2143,7 @@ class OperationalAutonomyMaintenance:
             )
 
         self._write_note(work, note, "Jason - Autonomous BackupIQ Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=reason,
-            )
-        )
+        self._persist_human_review_escalation(work, reason=reason)
 
     @staticmethod
     def _unexpected_shutdown_alert(alert: Mapping[str, Any]) -> bool:
@@ -2367,13 +2341,7 @@ class OperationalAutonomyMaintenance:
                 "Unexpected-shutdown diagnostic complete; isolated closure branch not yet promoted."
             )
         self._write_note(work, note, "Jason - Autonomous Unexpected Shutdown Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=reason,
-            )
-        )
+        self._persist_human_review_escalation(work, reason=reason)
 
     def _investigate_post_error(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
@@ -2469,17 +2437,14 @@ class OperationalAutonomyMaintenance:
             )
 
         self._write_note(work, note, "Jason - Autonomous POST Diagnostic")
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                last_reason=(
-                    "POST diagnostic complete; protected/recurring/closure branch "
-                    "requires technician review."
-                    if protected_role or recurring
-                    else "POST diagnostic complete; isolated closure branch not yet promoted."
-                ),
-            )
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "POST diagnostic complete; protected/recurring/closure branch "
+                "requires technician review."
+                if protected_role or recurring
+                else "POST diagnostic complete; isolated closure branch not yet promoted."
+            ),
         )
 
     def _poll_security_log(self, work: OperationalWork) -> None:
@@ -2551,17 +2516,13 @@ class OperationalAutonomyMaintenance:
                 "closed automatically."
             )
             self._write_note(work, body, "Jason - Autonomous Security Log Verification")
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="escalated",
-                    job_uid=None,
-                    component_uid=None,
-                    last_reason=(
-                        "Security Log verified healthy; exact alert and process-generated "
-                        "security-ticket cleanup remains separately gated."
-                    ),
-                )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Security Log verified healthy; exact alert and process-generated "
+                    "security-ticket cleanup remains separately gated."
+                ),
+                clear_job=True,
             )
             return
 
@@ -2636,17 +2597,13 @@ class OperationalAutonomyMaintenance:
             ),
             "Jason - Autonomous DNS Agent Diagnostic",
         )
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                job_uid=None,
-                component_uid=None,
-                last_reason=(
-                    "Standing-safe DNS diagnostic completed; remediation branch "
-                    "requires separate accepted authority."
-                ),
-            )
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Standing-safe DNS diagnostic completed; remediation branch "
+                "requires separate accepted authority."
+            ),
+            clear_job=True,
         )
 
     def _poll_job(self, work: OperationalWork) -> None:
@@ -2851,16 +2808,28 @@ class OperationalAutonomyMaintenance:
             )
             title = "Jason - Autonomous EDR/AV Escalation"
         self._write_note(work, body, title)
-        self._handoff_to_helpdesk(work)
-        self.store.put(
-            self._replace(
-                work,
-                phase="escalated",
-                job_uid=None,
-                component_uid=None,
-                last_reason=reason,
-            )
+        self._persist_human_review_escalation(
+            work,
+            reason=reason,
+            clear_job=True,
         )
+
+    def _persist_human_review_escalation(
+        self,
+        work: OperationalWork,
+        *,
+        reason: str,
+        clear_job: bool = False,
+    ) -> None:
+        self._handoff_to_helpdesk(work)
+        changes: dict[str, Any] = {
+            "phase": "escalated",
+            "last_reason": reason,
+        }
+        if clear_job:
+            changes["job_uid"] = None
+            changes["component_uid"] = None
+        self.store.put(self._replace(work, **changes))
 
     def _handoff_to_helpdesk(self, work: OperationalWork) -> None:
         # Human-review work must not be stranded in Jason's queue. Return it to

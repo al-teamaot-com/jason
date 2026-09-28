@@ -652,12 +652,15 @@ def test_dns_ticket_runs_standing_safe_diagnostic_then_escalates(tmp_path: Path)
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [{
-        "id": 140944,
-        "queueID": "Jason",
-        "status": "In Progress",
-        "billingCodeID": "Remote Support",
-    }]
+    assert update_calls == [
+        {
+            "id": 140944,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+        },
+        {"id": 140944, "queueID": "Help Desk I", "status": "New"},
+    ]
 
     note_calls = [
         args["payload"]
@@ -753,12 +756,15 @@ def test_security_log_healthy_quick_test_documents_and_stops_before_alert_cleanu
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [{
-        "id": 140955,
-        "queueID": "Jason",
-        "status": "In Progress",
-        "billingCodeID": "Remote Support",
-    }]
+    assert update_calls == [
+        {
+            "id": 140955,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+        },
+        {"id": 140955, "queueID": "Help Desk I", "status": "New"},
+    ]
 
     note_calls = [
         args["payload"]
@@ -1800,6 +1806,21 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     assert "KB5124008=NOT_APPROVED" in body
     assert "KB5126052=NOT_APPROVED" in body
     assert "No patch approval" in body
+
+    ticket_updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert ticket_updates == [
+        {
+            "id": 141183,
+            "queueID": "Jason",
+            "status": "In Progress",
+            "billingCodeID": "Remote Support",
+        },
+        {"id": 141183, "queueID": "Help Desk I", "status": "New"},
+    ]
     store.close()
 
 
