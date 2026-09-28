@@ -1,0 +1,69 @@
+name: Autonomous Repair Release Classifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged autonomous-repair candidate PR number
+        required: true
+        type: number
+  pull_request_target:
+    types:
+      - closed
+  workflow_run:
+    workflows:
+      - Validate Jason
+      - SEC-007 Security Regressions
+      - Validate Jason Teams Gateway
+      - Validate Provider Read Runtime Credentials
+      - Validate Conversation Experience Foundation
+    types:
+      - completed
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: jason-autonomous-repair-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && startsWith(github.event.workflow_run.head_commit.message, 'Merge pull request'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Classify merged support repair
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          MERGED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          args=(--candidate-only --comment)
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            args+=(--merged-sha "$MERGED_SHA")
+          else
+            args+=(--pr-number "$PR_NUMBER")
+          fi
+          python3 -B tools/autonomous_repair_release_gate.py "${args[@]}"
+
+      - name: Upload repair classification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-repair-release-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || inputs.pr_number }}
+          path: autonomous-repair-release.json
+          if-no-files-found: ignore
