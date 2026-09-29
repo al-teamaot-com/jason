@@ -67,6 +67,19 @@ from .low_disk_analysis import (
     relevant_findings,
     storage_health_summary,
 )
+from .unexpected_shutdown_analysis import (
+    INCIDENT_WINDOW_MS,
+    PHYSICAL_DISK_COMMAND as SHUTDOWN_PHYSICAL_DISK_COMMAND,
+    RELIABILITY_COMMAND as SHUTDOWN_RELIABILITY_COMMAND,
+    SHUTDOWN_EVENT_COMMAND,
+    VOLUME_HEALTH_COMMAND,
+    WHEA_EVENT_COMMAND,
+    classify_site_scope,
+    protected_role as shutdown_protected_role,
+    shutdown_character,
+    site_event_id,
+    storage_health_risk as shutdown_storage_health_risk,
+)
 from .vulscan_client_policy import (
     VULSCAN_CLIENT_NOTE_BODY,
     VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
@@ -120,7 +133,7 @@ POST_SCOPE = PlaybookScope(
 )
 UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
     playbook_id="unexpected_shutdown",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:unexpected_shutdown",
     required_action_capabilities=(
         "service.ticket.note.create",
@@ -4315,6 +4328,50 @@ class OperationalAutonomyMaintenance:
             return True
         return None
 
+    def _unexpected_shutdown_powershell_records(
+        self,
+        work: OperationalWork,
+        command: str,
+        *,
+        timeout_seconds: int = 60,
+    ) -> list[dict[str, Any]]:
+        data = self._read_data(
+            "endpoint.powershell.read",
+            {
+                "device_uid": work.device_uid,
+                "command": command,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+        stdout = data.get("stdout") or data.get("text") or ""
+        return parse_json_records(stdout)
+
+    def _unexpected_shutdown_health_evidence(
+        self,
+        work: OperationalWork,
+    ) -> dict[str, Any]:
+        reads = (
+            ("events", SHUTDOWN_EVENT_COMMAND, 90),
+            ("whea", WHEA_EVENT_COMMAND, 90),
+            ("physical_disks", SHUTDOWN_PHYSICAL_DISK_COMMAND, 60),
+            ("reliability", SHUTDOWN_RELIABILITY_COMMAND, 60),
+            ("volumes", VOLUME_HEALTH_COMMAND, 60),
+        )
+        evidence: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        for name, command, timeout_seconds in reads:
+            try:
+                evidence[name] = self._unexpected_shutdown_powershell_records(
+                    work,
+                    command,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:
+                evidence[name] = []
+                errors[name] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        evidence["errors"] = errors
+        return evidence
+
     def _investigate_unexpected_shutdown(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
             "endpoint.device.read", {"resource_id": work.device_uid}
@@ -4335,7 +4392,21 @@ class OperationalAutonomyMaintenance:
             self._block(work, "Unexpected-shutdown device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
-            self._block(work, "Unexpected-shutdown target went offline before evidence collection.")
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:shutdown_investigate",
+                    last_reason=(
+                        "Unexpected-shutdown endpoint is offline; waiting for exact "
+                        "device access without consuming the active-work slot."
+                    ),
+                )
+            )
             return
 
         history = self._read_data(
@@ -4381,15 +4452,17 @@ class OperationalAutonomyMaintenance:
 
         site = str(endpoint.get("site") or "").strip()
         physical_hits: set[str] = set()
+        active_physical_devices = 0
         ambiguous_peers = 0
         checked_peers = 0
         if self._physical_device(endpoint) is True:
             physical_hits.add(work.device_uid)
+            active_physical_devices += 1
         if site:
             site_data = self._read_data("endpoint.device.search", {"site": site})
             matches = site_data.get("resource_matches")
             if isinstance(matches, list):
-                for match in matches[:50]:
+                for match in matches[:100]:
                     if not isinstance(match, Mapping):
                         continue
                     uid = str(match.get("resource_id") or "").strip()
@@ -4403,63 +4476,145 @@ class OperationalAutonomyMaintenance:
                     if physical is False:
                         continue
                     checked_peers += 1
+                    if peer.get("online") is True:
+                        active_physical_devices += 1
                     peer_history = self._read_data(
                         "endpoint.alert.history.search", {"resource_id": uid}
                     )
                     peer_alerts = peer_history.get("alerts")
                     if not isinstance(peer_alerts, list):
+                        ambiguous_peers += 1
                         continue
                     if any(
                         isinstance(item, Mapping)
                         and self._unexpected_shutdown_alert(item)
                         and (ts := self._alert_timestamp_ms(item)) is not None
-                        and abs(ts - incident_ms) <= 15 * 60 * 1000
+                        and abs(ts - incident_ms) <= INCIDENT_WINDOW_MS
                         for item in peer_alerts
                     ):
                         physical_hits.add(uid)
 
-        recurring = len(recurrence) >= 2
-        site_wide = len(physical_hits) >= 2
-        role = endpoint.get("device_type")
-        role_text = (
-            json.dumps(role, sort_keys=True, default=str)
-            if isinstance(role, (Mapping, list))
-            else str(role or "")
+        site_classification = classify_site_scope(
+            affected_physical_devices=len(physical_hits),
+            active_physical_devices=active_physical_devices,
+            ambiguous_physical_devices=ambiguous_peers,
         )
+        site_event = (
+            site_event_id(site, incident_ms)
+            if site_classification in {"SITE_ENVIRONMENTAL", "SITE_CORRELATED_SMALL_SITE"}
+            else ""
+        )
+
+        health = self._unexpected_shutdown_health_evidence(work)
+        if health["errors"]:
+            self._write_note(
+                work,
+                (
+                    "Jason unexpected-shutdown evidence collection was incomplete. "
+                    f"Device={work.hostname}; SiteClassification={site_classification}; "
+                    f"EvidenceErrors={json.dumps(health['errors'], sort_keys=True)[:700]}. "
+                    "No repair, reboot, service change, firmware change, or disk mutation "
+                    "was attempted."
+                ),
+                "Jason - Unexpected Shutdown - Diagnostic",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason="Unexpected-shutdown health evidence was incomplete.",
+            )
+            return
+
+        storage_risk, storage_reasons = shutdown_storage_health_risk(
+            events=health["events"],
+            whea_events=health["whea"],
+            physical_disks=health["physical_disks"],
+            reliability=health["reliability"],
+            volumes=health["volumes"],
+        )
+        shutdown_type = shutdown_character(health["events"])
+        protected = shutdown_protected_role(endpoint)
+        recurring = len(recurrence) >= 2 and site_classification not in {
+            "SITE_ENVIRONMENTAL",
+            "SITE_CORRELATED_SMALL_SITE",
+        }
+        independent_risk = storage_risk or protected or recurring
+
         note = (
-            "Jason autonomous unexpected-shutdown diagnostic completed using governed "
-            "read-only endpoint and alert-history evidence. "
-            f"Device={work.hostname}; Site={site or 'unknown'}; "
-            f"IncidentTimestampMs={incident_ms}; "
-            f"ShutdownEvents30d={len(recurrence)}; Recurring={'Yes' if recurring else 'No'}; "
-            f"PhysicalDevicesInPlusMinus15Min={len(physical_hits)}; "
-            f"PossibleSiteWideEvent={'Yes' if site_wide else 'No'}; "
-            f"PhysicalPeersChecked={checked_peers}; AmbiguousPhysicalPeers={ambiguous_peers}; "
-            f"DeviceType={role_text[:180] or 'unknown'}; "
-            f"RebootRequired={'Yes' if bool(endpoint.get('reboot_required')) else 'No'}. "
-            "VM/virtual devices are excluded from the physical-device threshold when "
-            "provider classification identifies them as virtual. No reboot, shutdown, "
-            "firmware, storage repair, service change, or PowerShell action was attempted. "
+            "STATUS\n"
+            f"Unexpected shutdown classification for {work.hostname}: {site_classification}.\n\n"
+            "KEY EVIDENCE\n"
+            f"- IncidentTimestampMs={incident_ms}\n"
+            f"- ShutdownCharacter={shutdown_type}\n"
+            f"- ShutdownEvents30d={len(recurrence)}\n"
+            f"- AffectedPhysicalDevicesPlusMinus15Min={len(physical_hits)}\n"
+            f"- ActivePhysicalDevicesAtSite={active_physical_devices}\n"
+            f"- PhysicalPeersChecked={checked_peers}\n"
+            f"- AmbiguousPhysicalPeers={ambiguous_peers}\n"
+            f"- SiteEventId={site_event or 'none'}\n"
+            f"- StorageHealthRisk={'Yes' if storage_risk else 'No'}"
+            + (
+                f" ({'; '.join(storage_reasons)[:500]})"
+                if storage_reasons
+                else ""
+            )
+            + "\n"
+            f"- ProtectedOrCriticalRole={'Yes' if protected else 'No'}\n"
+            f"- IndependentDeviceRisk={'Yes' if independent_risk else 'No'}\n\n"
+            "WHAT JASON DID\n"
+            "Correlated same-site physical-device shutdown history and collected "
+            "read-only Windows shutdown, WHEA, physical-disk, reliability, and volume-health evidence.\n\n"
+            "CHANGES MADE\n"
+            "None to the endpoint. No CHKDSK repair, storage repair, reboot, firmware/driver "
+            "change, service interruption, or other disruptive action was attempted.\n\n"
+            "JASON STATE\n"
         )
-        if recurring or site_wide or ambiguous_peers:
-            note += (
-                "Technician review is required because recurrence, site-wide correlation, "
-                "or ambiguous physical-device classification remains material."
+
+        if site_classification == "UNDETERMINED":
+            note += "human_review"
+            self._write_note(work, note, "Jason - Unexpected Shutdown - Correlation")
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Site-vs-device classification could not be proven from complete "
+                    "same-site physical-device evidence."
+                ),
             )
-            reason = (
-                "Unexpected-shutdown diagnostic complete; recurrence/site-correlation "
-                "requires technician review."
+            return
+
+        if independent_risk:
+            note += "human_review"
+            self._write_note(work, note, "Jason - Unexpected Shutdown - Diagnostic")
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Unexpected shutdown has independent device risk requiring technician "
+                    "review despite site correlation."
+                ),
             )
-        else:
-            note += (
-                "No recurrence or multi-physical-device site threshold was proven. "
-                "Automatic closure remains gated until isolated-event live acceptance is complete."
+            return
+
+        if site_classification == "DEVICE_SPECIFIC":
+            note += "human_review"
+            self._write_note(work, note, "Jason - Unexpected Shutdown - Device Specific")
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Unexpected shutdown is isolated to one physical device. No hardware "
+                    "or storage damage is proven, but device-specific root cause requires "
+                    "technician review before autonomous closure."
+                ),
             )
-            reason = (
-                "Unexpected-shutdown diagnostic complete; isolated closure branch not yet promoted."
-            )
-        self._write_note(work, note, "Jason - Autonomous Unexpected Shutdown Diagnostic")
-        self._persist_human_review_escalation(work, reason=reason)
+            return
+
+        note += "complete"
+        self._write_note(work, note, "Jason - Unexpected Shutdown - Resolution")
+        self._complete_verified_ticket(
+            work,
+            reason=(
+                f"{site_classification} shutdown event verified with no independent "
+                "device/storage risk; ticket completion readback succeeded."
+            ),
+        )
 
     def _investigate_post_error(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
