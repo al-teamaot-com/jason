@@ -25,6 +25,7 @@ class PromotionStore:
                 "automation.component.execute",
                 "service.ticket.note.create",
                 "service.ticket.update",
+                "service.ticket.client.notification.create",
             ),
         )
 
@@ -41,6 +42,7 @@ class Reads:
     def __init__(self):
         self.job_status = "completed"
         self.ticket_notes = []
+        self.notification_history_reads = 0
         self.resource_license_types = {
             29682899: 1,
             29682888: 7,
@@ -53,6 +55,20 @@ class Reads:
             return {
                 "status": "succeeded",
                 "evidence": {"data": {"items": list(self.ticket_notes)}},
+            }
+        if capability == "service.notification.history.search":
+            self.notification_history_reads += 1
+            items = []
+            if self.notification_history_reads > 1:
+                items = [{
+                    "id": self.notification_history_reads,
+                    "ticketID": int(arguments["ticket_id"]),
+                    "recipientEmailAddress": "chris.benton@e-gai.com",
+                    "templateName": "Ticket - Update ticket notification 12082024",
+                }]
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": items}},
             }
         if capability == "service.resource.read":
             resource_id = int(arguments["resource_id"])
@@ -2031,8 +2047,22 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
     assert final is not None
     assert final.phase == "complete"
     updates = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.update"]
-    assert updates[-1] == {"id": 141183, "status": "Complete"}
+    assert updates[-1] == {
+        "id": 141183,
+        "contactID": 30684489,
+        "status": "Close Pending",
+    }
+    assert {"id": 141183, "status": "Complete"} not in updates
     assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
+    notifications = [
+        args for _, capability, args in actions.calls
+        if capability == "service.ticket.client.notification.create"
+    ]
+    assert len(notifications) == 1
+    assert notifications[0]["template_id"] == "vulscan-approved-or-installed-v1"
+    assert "either already been installed or has been approved" in (
+        notifications[0]["payload"]["description"]
+    )
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
     assert len(notes) == 1
     assert "verified stale/recovered VulScan finding" in notes[0]["description"]
