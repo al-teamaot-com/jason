@@ -311,6 +311,37 @@
         ],
         "policy_id": "playbook-autonomy:vulscan_missing_patch"
       }
+    },
+    {
+      "id": "drmm_recent_alert_reconciliation",
+      "name": "Jason - DRMM Recent Alert Reconciliation",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+      "trigger": {
+        "provider": "datto_rmm",
+        "scheduled": true,
+        "lookback_hours": 24
+      },
+      "review_status": "daily_recent_alert_verified_reconciliation",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "recent_window",
+          "identity",
+          "registered_verifier",
+          "current_state_healthy",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "endpoint.alert.resolve",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
+        "policy_id": "playbook-autonomy:drmm_recent_alert_reconciliation"
+      }
     }
   ]
 }
