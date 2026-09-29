@@ -10,6 +10,7 @@ autonomous_queue:
 governance:
   hierarchy:
     - global
+    - client
     - site
     - device
     - user
