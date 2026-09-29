@@ -52,6 +52,14 @@ No communication text is generated or edited at execution time. The connector re
 
 Client-notification creation is non-idempotent. The workflow must use its durable template fingerprint to avoid duplicate sends. Failed or unverified writes fail closed; no blind retry is permitted.
 
+## Activation
+
+Production activation requires:
+
+`JASON_AUTOTASK_CLIENT_NOTIFICATION_PROFILE=approved-workflow-client-notification-v1`
+
+The capability remains fail-closed when this profile is not enabled.
+
 ## Dependencies
 
 - Owner-approved playbook autonomy
