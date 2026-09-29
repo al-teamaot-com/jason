@@ -103,7 +103,7 @@ UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
 )
 BACKUPIQ_SCOPE = PlaybookScope(
     playbook_id="backupiq_endpoint_backup",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:backupiq_endpoint_backup",
     required_action_capabilities=(
         "service.ticket.note.create",
