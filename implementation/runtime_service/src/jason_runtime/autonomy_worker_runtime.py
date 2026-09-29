@@ -2408,11 +2408,13 @@ class OperationalAutonomyMaintenance:
         elif classification == "inactive_or_offline_device":
             note += (
                 "Both management/provider evidence indicate an offline/inactive condition; "
-                "the playbook correctly did not reinstall while the endpoint is offline."
+                "the playbook correctly did not reinstall while the endpoint is offline. "
+                "Jason will preserve ownership, release the active-work slot, and resume "
+                "this playbook automatically when the exact endpoint is online again."
             )
             reason = (
-                "BackupIQ diagnostic classified an inactive/offline endpoint; waiting/recheck "
-                "automation remains separately gated."
+                "BackupIQ is waiting for exact endpoint access; Jason retains queue ownership "
+                "and will resume backupiq_investigate when the endpoint returns online."
             )
         else:
             note += (
@@ -2423,7 +2425,26 @@ class OperationalAutonomyMaintenance:
                 f"BackupIQ diagnostic classified {classification}; remediation remains gated."
             )
 
-        self._write_note(work, note, "Jason - Autonomous BackupIQ Diagnostic")
+        self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+        if classification == "inactive_or_offline_device":
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:backupiq_investigate",
+                    last_reason=reason,
+                )
+            )
+            return
         self._persist_human_review_escalation(work, reason=reason)
 
     @staticmethod
