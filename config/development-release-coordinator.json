@@ -48,5 +48,23 @@
     "host_worker_has_model_credentials": false,
     "runtime_reasoner_has_shell_or_github_credentials": false,
     "playbook_path": "docs/playbooks/Jason-Support-List-Autonomous-Repair.md"
+  },
+  "integration_automation": {
+    "enabled": true,
+    "eligibility_marker": "Integration automation: enabled",
+    "validation_workflows": [
+      "validate.yml",
+      "security-regressions.yml",
+      "jason-teams-gateway.yml",
+      "conversation-experience.yml"
+    ],
+    "additional_required_checks": [
+      "governed-security-regressions"
+    ],
+    "poll_seconds": 15,
+    "timeout_seconds": 1800,
+    "max_prs_per_run": 3,
+    "max_reconcile_passes": 3,
+    "production_deployment_separate": true
   }
 }

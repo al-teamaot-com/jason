@@ -3,6 +3,12 @@ name: SEC-007 Security Regressions
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number for reconciliation validation"
+        required: false
+        type: string
 
 permissions:
   contents: read
