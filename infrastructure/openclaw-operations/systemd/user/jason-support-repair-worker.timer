@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Jason autonomous support repair reconciliation every five minutes
+Description=Run Jason autonomous support repair reconciliation daily at 2:30 AM
 
 [Timer]
-OnActiveSec=10s
-OnUnitInactiveSec=5min
+OnCalendar=*-*-* 02:30:00
+AccuracySec=1min
 Persistent=true
 Unit=jason-support-repair-worker.service
 
