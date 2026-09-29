@@ -24,10 +24,15 @@ from orchestrator.provider_mutation_capability_catalog import (
 )
 from orchestrator.service import CapabilityInvoker
 
+from .approved_client_messages import (
+    ApprovedClientMessageRegistryError,
+    resolve_approved_client_message,
+)
 from .autotask_internal_note import (
     AutotaskInternalNoteConnector,
     _internal_note_definition,
     _internal_note_provider,
+    configured_autotask_internal_note_autonomy_resource_id,
 )
 from .vulscan_client_policy import (
     GROMELSKI_COMPANY_ID,
@@ -48,11 +53,15 @@ AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE = (
     "gromelski-vulscan-client-notification-v1"
 )
 AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_EMAIL = "chris.benton@e-gai.com"
+AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE = (
+    "approved-workflow-client-notification-v1"
+)
 
 _SUPPORTED_PROFILES = frozenset(
     {
         AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
         AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
     }
 )
 
@@ -99,6 +108,13 @@ def gromelski_vulscan_notification_mode_enabled() -> bool:
     return (
         _active_profile()
         == AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE
+    )
+
+
+def approved_workflow_notification_mode_enabled() -> bool:
+    return (
+        _active_profile()
+        == AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE
     )
 
 
@@ -224,6 +240,79 @@ def validate_gromelski_vulscan_scope(
     )
 
 
+
+def validate_approved_workflow_scope(
+    *,
+    ticket_company_id: int,
+    contact_company_id: int,
+    contact_email: str,
+    receives_email_notifications: bool,
+    workflow_id: str | None,
+    template_id: str | None,
+    note_title: str,
+    note_body: str,
+    requested_recipient: str | None = None,
+) -> ClientNotificationTestScope:
+    if not approved_workflow_notification_mode_enabled():
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_APPROVED_WORKFLOW_MODE_NOT_ENABLED"
+        )
+
+    try:
+        ticket_company = int(ticket_company_id)
+        contact_company = int(contact_company_id)
+    except (TypeError, ValueError) as exc:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_COMPANY_ID_INVALID"
+        ) from exc
+
+    if ticket_company < 1 or contact_company < 1 or ticket_company != contact_company:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_TICKET_CONTACT_COMPANY_MISMATCH"
+        )
+
+    email = str(contact_email or "").strip().casefold()
+    if not email or "@" not in email:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_CONTACT_EMAIL_REQUIRED"
+        )
+
+    requested = str(requested_recipient or "").strip().casefold()
+    if requested and requested != email:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_RECIPIENT_MUST_MATCH_CONTACT"
+        )
+
+    try:
+        template = resolve_approved_client_message(
+            workflow_id=str(workflow_id or ""),
+            template_id=str(template_id or ""),
+        )
+    except ApprovedClientMessageRegistryError as exc:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_WORKFLOW_TEMPLATE_NOT_APPROVED"
+        ) from exc
+
+    if template.require_email_notifications and receives_email_notifications is not True:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_CONTACT_EMAIL_NOTIFICATIONS_DISABLED"
+        )
+    if str(note_title or "") != template.title:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_APPROVED_TITLE_MISMATCH"
+        )
+    if str(note_body or "") != template.body:
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_APPROVED_BODY_MISMATCH"
+        )
+
+    return ClientNotificationTestScope(
+        ticket_company_id=ticket_company,
+        contact_company_id=contact_company,
+        contact_email=email,
+    )
+
+
 class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
     """Ticket-note transport plus authoritative fail-closed client scope."""
 
@@ -238,17 +327,20 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
         read_request = ConnectorRequest(context=context, arguments=dict(arguments))
         credentials = self._secrets.resolve(self.logical_secret, context)
         prepared = AutotaskConnector.prepare_request(self, read_request, credentials)
-        email = self._trusted_email(read_request)
-        if email is None:
-            raise AutotaskClientNotificationScopeError(
-                "CLIENT_NOTIFICATION_REQUESTER_BINDING_REQUIRED"
-            )
-        resource_id = self._resolve_impersonation_resource_id(
-            prepared=prepared,
-            email=email,
-        )
         headers = dict(prepared.headers)
-        headers["ImpersonationResourceId"] = str(resource_id)
+        if self._is_autonomous_api_user_request(read_request):
+            headers.pop("ImpersonationResourceId", None)
+        else:
+            email = self._trusted_email(read_request)
+            if email is None:
+                raise AutotaskClientNotificationScopeError(
+                    "CLIENT_NOTIFICATION_REQUESTER_BINDING_REQUIRED"
+                )
+            resource_id = self._resolve_impersonation_resource_id(
+                prepared=prepared,
+                email=email,
+            )
+            headers["ImpersonationResourceId"] = str(resource_id)
         credentials.clear()
         payload = self._transport.request(
             method="GET",
@@ -314,14 +406,70 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             )
             return
 
+        if profile == AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE:
+            payload = request.arguments.get("payload")
+            if not isinstance(payload, Mapping):
+                raise AutotaskClientNotificationScopeError(
+                    "CLIENT_NOTIFICATION_PAYLOAD_REQUIRED"
+                )
+            validate_approved_workflow_scope(
+                ticket_company_id=ticket.get("companyID"),
+                contact_company_id=contact.get("companyID"),
+                contact_email=str(contact.get("emailAddress") or ""),
+                receives_email_notifications=(
+                    contact.get("receivesEmailNotifications") is True
+                ),
+                workflow_id=request.arguments.get("workflow_id"),
+                template_id=request.arguments.get("template_id"),
+                note_title=str(payload.get("title") or ""),
+                note_body=str(payload.get("description") or ""),
+                requested_recipient=request.arguments.get("recipient"),
+            )
+            return
+
         raise AutotaskClientNotificationScopeError(
             "CLIENT_NOTIFICATION_PROFILE_NOT_ENABLED"
         )
 
+    def _normalize_approved_workflow_request(
+        self,
+        request: ConnectorRequest,
+    ) -> ConnectorRequest:
+        if _active_profile() != AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE:
+            return request
+
+        raw_payload = request.arguments.get("payload")
+        if not isinstance(raw_payload, Mapping):
+            raise AutotaskClientNotificationScopeError(
+                "CLIENT_NOTIFICATION_PAYLOAD_REQUIRED"
+            )
+        try:
+            template = resolve_approved_client_message(
+                workflow_id=str(request.arguments.get("workflow_id") or ""),
+                template_id=str(request.arguments.get("template_id") or ""),
+            )
+        except ApprovedClientMessageRegistryError as exc:
+            raise AutotaskClientNotificationScopeError(
+                "CLIENT_NOTIFICATION_WORKFLOW_TEMPLATE_NOT_APPROVED"
+            ) from exc
+
+        payload = {
+            "ticketID": raw_payload.get("ticketID"),
+            "title": template.title,
+            "description": template.body,
+            "noteType": 3,
+            "publish": 1,
+        }
+        return ConnectorRequest(
+            context=request.context,
+            arguments={**dict(request.arguments), "payload": payload},
+        )
+
     def prepare_governed_execution(self, request: ConnectorRequest):
-        expected = self._expected_payload(request)
-        self._validate_scope(request, int(expected["ticketID"]))
-        return super().prepare_governed_execution(request)
+        normalized = self._normalize_approved_workflow_request(request)
+        expected = self._expected_payload(normalized)
+        self._validate_scope(normalized, int(expected["ticketID"]))
+        return super().prepare_governed_execution(normalized)
 
 
 def _definition(*, now: datetime):
@@ -338,6 +486,10 @@ def _definition(*, now: datetime):
                 GROMELSKI_PRIMARY_CONTACT_ID
             ),
             "gromelski_vulscan_template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            "approved_workflow_profile": (
+                AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE
+            ),
+            "workflow_template_binding": "source_controlled_exact_pair",
         }
     )
     return replace(
@@ -425,6 +577,9 @@ def build_autotask_client_notification_invoker(
         transport=transport,
         audit=audit,
         bindings=bindings,
+        autonomy_api_resource_id=(
+            configured_autotask_internal_note_autonomy_resource_id()
+        ),
     )
     return GovernedConnectorCapabilityInvoker(
         connectors={AUTOTASK_CLIENT_NOTIFICATION_PROVIDER: connector},
