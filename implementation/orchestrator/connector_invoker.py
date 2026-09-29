@@ -89,6 +89,8 @@ class GovernedConnectorCapabilityInvoker:
                 client_id=request.client_id,
                 capability=provider_capability,
                 mode=request.permission_mode,
+                policy_ids=tuple(request.policy_ids),
+                principal_attributes=dict(request.principal_attributes),
             ),
             arguments=request.arguments,
         )

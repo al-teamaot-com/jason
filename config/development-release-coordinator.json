@@ -48,5 +48,19 @@
     "host_worker_has_model_credentials": false,
     "runtime_reasoner_has_shell_or_github_credentials": false,
     "playbook_path": "docs/playbooks/Jason-Support-List-Autonomous-Repair.md"
+  },
+  "integration_automation": {
+    "enabled": true,
+    "mode": "host_authenticated_native_pr_update",
+    "eligibility_marker": "Integration automation: enabled",
+    "additional_required_checks": [
+      "governed-security-regressions"
+    ],
+    "reconcile_interval_minutes": 5,
+    "max_prs_per_run": 3,
+    "production_deployment_separate": true,
+    "host_service": "jason-pr-integration-reconciler.service",
+    "host_timer": "jason-pr-integration-reconciler.timer",
+    "systemd_scope": "user"
   }
 }
