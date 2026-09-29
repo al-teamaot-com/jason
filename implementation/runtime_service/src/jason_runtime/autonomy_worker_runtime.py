@@ -3172,7 +3172,7 @@ class OperationalAutonomyMaintenance:
         key: str,
     ) -> datetime | None:
         match = re.search(
-            rf"(?:^|;)\\s*{re.escape(key)}=([^;]+)",
+            rf"(?:^|;)\s*{re.escape(key)}=([^;]+)",
             str(work.last_reason or ""),
         )
         if match is None:
