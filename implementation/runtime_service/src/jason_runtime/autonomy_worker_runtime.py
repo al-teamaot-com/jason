@@ -1923,7 +1923,10 @@ class OperationalAutonomyMaintenance:
             or endpoint.get("name")
             or ""
         ).strip()
-        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+        if (
+            endpoint_uid != work.device_uid
+            or endpoint_hostname.casefold() != work.hostname.casefold()
+        ):
             self._block(work, "Idle Log Off device identity changed during execution.")
             return
 
@@ -1934,11 +1937,25 @@ class OperationalAutonomyMaintenance:
             else str(role or "")
         )
         role_material = (
-            f"{role_text} {endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
+            f"{role_text} "
+            f"{endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
         ).casefold()
         protected = any(
             token in role_material
-            for token in ("server", "domain controller", "rds", "terminal server", "kiosk")
+            for token in (
+                "server",
+                "domain controller",
+                "rds",
+                "terminal server",
+                "kiosk",
+            )
+        )
+        supported_workstation = (
+            "windows" in role_material
+            and any(
+                token in role_material
+                for token in ("desktop", "laptop", "notebook", "workstation")
+            )
         )
 
         if endpoint.get("online") is False:
@@ -1954,19 +1971,26 @@ class OperationalAutonomyMaintenance:
             )
             note = (
                 "STATUS\n"
-                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting for exact device access.\n\n"
+                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting "
+                "for exact device access.\n\n"
                 "NEXT STEP\n"
-                "Keep the ticket in the Jason queue and resume idle_log_off_investigate automatically "
-                "when the exact DRMM endpoint is online.\n\n"
+                "Keep the ticket in the Jason queue and resume "
+                "idle_log_off_investigate automatically when the exact DRMM endpoint "
+                "is online.\n\n"
                 "KEY EVIDENCE\n"
                 f"- Device={work.hostname}\n"
                 f"- DRMM UID={work.device_uid}\n"
                 "- DRMM online state=No\n"
-                "- No setter, alert resolution, forced logoff, reboot, policy change, or generic PowerShell was attempted.\n\n"
+                "- No setter, alert resolution, forced logoff, reboot, policy change, "
+                "or generic PowerShell was attempted.\n\n"
                 "JASON STATE\n"
                 "waiting_device_access:idle_log_off_investigate"
             )
-            self._write_note(work, note, "Jason - Idle Log Off - Waiting Device Access")
+            self._write_note(
+                work,
+                note,
+                "Jason - Idle Log Off - Waiting Device Access",
+            )
             self.store.put(
                 self._replace(
                     work,
@@ -1979,36 +2003,77 @@ class OperationalAutonomyMaintenance:
             )
             return
 
+        current_data = self._read_data(
+            "endpoint.alert.search",
+            {"resource_id": work.device_uid, "status": "open"},
+        )
+        current_items = current_data.get("items")
+        if not isinstance(current_items, list):
+            current_items = []
+        current_idle_alerts = [
+            item
+            for item in current_items
+            if isinstance(item, Mapping)
+            and "idle log off"
+            in json.dumps(item, sort_keys=True, default=str).casefold()
+        ]
+
         history = self._read_data(
             "endpoint.alert.history.search", {"resource_id": work.device_uid}
         )
-        alerts = history.get("alerts")
-        if not isinstance(alerts, list):
-            alerts = []
-        idle_alerts: list[Mapping[str, Any]] = []
-        for alert in alerts:
-            if not isinstance(alert, Mapping):
-                continue
-            material = json.dumps(alert, sort_keys=True, default=str).casefold()
-            if "idle log off" in material or "compliant: false" in material or "enabled: false" in material:
-                idle_alerts.append(alert)
-        exact = next(
+        history_items = history.get("alerts")
+        if not isinstance(history_items, list):
+            history_items = []
+        idle_history = [
+            item
+            for item in history_items
+            if isinstance(item, Mapping)
+            and (
+                "idle log off"
+                in json.dumps(item, sort_keys=True, default=str).casefold()
+                or (
+                    str(item.get("ticketNumber") or "").strip()
+                    == work.ticket_number
+                    and "compliant: false"
+                    in json.dumps(item, sort_keys=True, default=str).casefold()
+                )
+            )
+        ]
+        exact_history = next(
             (
-                item for item in idle_alerts
-                if str(item.get("ticketNumber") or "").strip() == work.ticket_number
+                item
+                for item in idle_history
+                if str(item.get("ticketNumber") or "").strip()
+                == work.ticket_number
             ),
             None,
         )
-        if exact is None and idle_alerts:
-            exact = max(idle_alerts, key=lambda item: int(item.get("timestamp") or 0))
+        if exact_history is None and idle_history:
+            exact_history = max(
+                idle_history,
+                key=lambda item: int(item.get("timestamp") or 0),
+            )
 
-        alert_material = (
-            json.dumps(exact, sort_keys=True, default=str).casefold()
-            if exact is not None
-            else work.title.casefold()
-        )
+        diagnostic_material = " ".join(
+            (
+                json.dumps(
+                    current_idle_alerts,
+                    sort_keys=True,
+                    default=str,
+                ),
+                (
+                    json.dumps(
+                        exact_history,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    if exact_history is not None
+                    else ""
+                ),
+            )
+        ).casefold()
         plumbing_error = any(
-            token in alert_material
+            token in diagnostic_material
             for token in (
                 "invalid myfiledestination",
                 "powershell",
@@ -2017,51 +2082,239 @@ class OperationalAutonomyMaintenance:
                 "script exception",
             )
         )
-        if protected:
+
+        if protected or not supported_workstation:
             classification = "protected_or_exception_role"
-            reason = "Idle Log Off diagnostic complete; protected/exception role requires human policy review."
+            reason = (
+                "Idle Log Off diagnostic complete; endpoint role is not an "
+                "autonomous workstation/laptop remediation target."
+            )
         elif plumbing_error:
             classification = "monitor_execution_failure"
-            reason = "Idle Log Off diagnostic identified monitor/plumbing failure; endpoint noncompliance is not proven."
-        else:
-            classification = "reported_noncompliance_policy_verification_required"
             reason = (
-                "Idle Log Off diagnostic found a noncompliance signal; exact applicability "
-                "and per-run approval are required before the approved setter may run."
+                "Idle Log Off diagnostic identified monitor/plumbing failure; "
+                "endpoint noncompliance is not proven."
+            )
+        elif len(current_idle_alerts) != 1:
+            classification = "current_alert_not_exact"
+            reason = (
+                "Idle Log Off autonomous remediation requires exactly one current "
+                "Idle Log Off alert on the exact endpoint."
+            )
+        else:
+            classification = "confirmed_current_noncompliance"
+            reason = (
+                "Exactly one current Idle Log Off alert is present on a supported "
+                "Windows workstation/laptop; the exact playbook-scoped setter branch "
+                "is eligible."
             )
 
         note = (
-            "Jason autonomous Idle Log Off diagnostic completed using governed endpoint "
-            "and alert-history evidence. "
-            f"Device={work.hostname}; Online={'Yes' if endpoint.get('online') is True else 'No'}; "
+            "Jason Idle Log Off diagnostic completed using governed endpoint, "
+            "current-alert, and alert-history evidence. "
+            f"Device={work.hostname}; "
+            f"Online={'Yes' if endpoint.get('online') is True else 'No'}; "
             f"DeviceType={role_text[:180] or 'unknown'}; "
             f"ProtectedOrExceptionRole={'Yes' if protected else 'No'}; "
-            f"MatchingIdleAlerts={len(idle_alerts)}; "
+            f"CurrentIdleAlerts={len(current_idle_alerts)}; "
             f"Classification={classification}. "
-            "The setter 'Set Idle Log Off AOT Ver 02042026-1' remains per-run approval "
-            "only because it intentionally affects future user sessions and Component "
-            "Control rejected standing-safe promotion. Jason did not run the setter, "
-            "resolve an alert, force a logoff, change policy, run generic PowerShell, "
-            "or perform any other modifying/user-disruptive action."
         )
+        if classification == "confirmed_current_noncompliance":
+            note += (
+                "The exact approved remediation candidate is "
+                f"{IDLE_LOG_OFF_SETTER_NAME} ({IDLE_LOG_OFF_SETTER_UID}) using "
+                "built-in defaults only. The playbook-scoped branch does not "
+                "authorize reboot, forced logoff, policy changes, generic PowerShell, "
+                "or another component."
+            )
+        else:
+            note += (
+                "Jason did not run the setter, resolve an alert, force a logoff, "
+                "change policy, run generic PowerShell, reboot, or perform another "
+                "modifying action."
+            )
         self._write_note(work, note, "Jason - Idle Log Off - Diagnostic")
-        if classification == "reported_noncompliance_policy_verification_required":
+
+        if classification == "confirmed_current_noncompliance":
             self.store.put(
                 self._replace(
                     work,
-                    phase="approval_pending",
-                    last_reason=(
-                        reason
-                        + " Proposed action: "
-                        + IDLE_LOG_OFF_SETTER_NAME
-                        + " on exact device "
-                        + work.hostname
-                        + " using built-in defaults; no action has been executed."
-                    ),
+                    phase="idle_log_off_repair_dispatch",
+                    last_reason=reason,
                 )
             )
             return
+
         self._persist_human_review_escalation(work, reason=reason)
+
+    def _poll_idle_log_off_repair(self, work: OperationalWork) -> None:
+        if not work.job_uid or work.component_uid != IDLE_LOG_OFF_SETTER_UID:
+            self._block(
+                work,
+                "Persisted Idle Log Off remediation job identity is incomplete or changed.",
+            )
+            return
+
+        job_data = self._read_data(
+            "automation.job.read", {"resource_id": work.job_uid}
+        )
+        job = (
+            job_data.get("job")
+            if isinstance(job_data.get("job"), Mapping)
+            else job_data
+        )
+        status = str(job.get("status") or "").strip().casefold()
+        if status in {"active", "running", "queued", "pending", "scheduled"}:
+            return
+        if status in {"stale_or_unknown", "unknown"}:
+            self._block(
+                work,
+                "Idle Log Off setter job state became stale or unknown; "
+                "no duplicate dispatch is allowed.",
+            )
+            return
+        if status not in {
+            "completed",
+            "complete",
+            "success",
+            "succeeded",
+            "finished",
+        }:
+            self._escalate(
+                work,
+                "Idle Log Off setter job ended with provider status "
+                f"{status or 'unknown'}; no automatic redispatch was attempted.",
+            )
+            return
+
+        stdout_data = self._read_data(
+            "automation.job.output.read",
+            {
+                "resource_id": work.job_uid,
+                "device_uid": work.device_uid,
+                "component_uid": work.component_uid,
+                "stream": "stdout",
+            },
+        )
+        stderr_data = self._read_data(
+            "automation.job.output.read",
+            {
+                "resource_id": work.job_uid,
+                "device_uid": work.device_uid,
+                "component_uid": work.component_uid,
+                "stream": "stderr",
+            },
+        )
+        stdout_text = self._output_text(stdout_data)
+        stderr_text = self._output_text(stderr_data)
+        if stderr_text.strip():
+            self._escalate(
+                work,
+                "Idle Log Off setter returned provider success but non-empty stderr; "
+                "monitor verification was not treated as resolved.",
+            )
+            return
+
+        summary = self._bounded_health_summary(stdout_text)
+        self._write_note(
+            work,
+            (
+                "Jason ran the exact playbook-scoped Idle Log Off setter using built-in "
+                f"defaults on {work.hostname}. Job={work.job_uid}; "
+                f"ProviderStatus={status}; Output={summary}. "
+                "No reboot, immediate forced logoff, policy change, generic PowerShell, "
+                "or unrelated component was used. Action success is not resolution; "
+                "Jason is waiting for the normal Idle Log Off monitor to clear."
+            ),
+            "Jason - Idle Log Off - Remediation",
+        )
+        self.store.put(
+            self._replace(
+                work,
+                phase="waiting_recheck:idle_log_off_verify_monitor",
+                job_uid=None,
+                component_uid=None,
+                last_reason=(
+                    "Idle Log Off setter completed; waiting for the authoritative "
+                    "normal monitor cycle to clear the exact alert."
+                ),
+            )
+        )
+
+    def _verify_idle_log_off_monitor(self, work: OperationalWork) -> None:
+        current_data = self._read_data(
+            "endpoint.alert.search",
+            {"resource_id": work.device_uid, "status": "open"},
+        )
+        current_items = current_data.get("items")
+        if not isinstance(current_items, list):
+            current_items = []
+        current_idle_alerts = [
+            item
+            for item in current_items
+            if isinstance(item, Mapping)
+            and "idle log off"
+            in json.dumps(item, sort_keys=True, default=str).casefold()
+        ]
+
+        if not current_idle_alerts:
+            self._write_note(
+                work,
+                (
+                    "Jason verified the normal DRMM Idle Log Off alert is no longer "
+                    f"open for {work.hostname} after the playbook-scoped setter. "
+                    "This authoritative monitor-clear evidence completes the remediation "
+                    "verification. No reboot or forced logoff was used."
+                ),
+                "Jason - Idle Log Off - Verification",
+            )
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "Idle Log Off remediation completed and the authoritative current "
+                    "DRMM alert cleared; ticket completion readback succeeded."
+                ),
+            )
+            return
+
+        waiting_since = self._parse_iso_timestamp(work.updated_at)
+        age_seconds = (
+            (datetime.now(timezone.utc) - waiting_since).total_seconds()
+            if waiting_since is not None
+            else 0
+        )
+        if age_seconds < 900:
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_recheck:idle_log_off_verify_monitor",
+                    last_reason=(
+                        "Idle Log Off alert remains open inside the bounded monitor "
+                        "propagation window; waiting without redispatch."
+                    ),
+                    updated_at=work.updated_at,
+                )
+            )
+            return
+
+        self._write_note(
+            work,
+            (
+                "Jason's exact Idle Log Off setter completed, but a current Idle Log Off "
+                "alert remains after the 15-minute monitor propagation window. "
+                "Jason did not rerun the setter, force a logoff, reboot, or change policy. "
+                "Monitor/policy investigation is required."
+            ),
+            "Jason - Idle Log Off - Verification",
+        )
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Current Idle Log Off alert remained after successful setter execution "
+                "and bounded monitor propagation; monitor/policy review is required."
+            ),
+            clear_job=True,
+        )
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
