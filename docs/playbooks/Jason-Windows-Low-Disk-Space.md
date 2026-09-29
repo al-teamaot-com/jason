@@ -187,7 +187,7 @@ For C:\Sysmon:
 
 The existence of C:\Sysmon alone is not permission to delete it.
 
-Also check old `C:\Windows\SoftwareDistribution.bak_*` folders. They are eligible only through the exact approved AOT cleanup component and only when their aggregate size is material. Active Windows Update cache is not part of this autonomous cleanup branch.
+Also check old `C:\Windows\SoftwareDistribution.bak_*` folders. Their aggregate size is useful root-cause evidence, but the current AOT cleanup component is classified by Jason component governance as destructive/review-required and is **not** standing-safe. Jason may recommend that cleanup in Help Desk I / Human Review, but must not dispatch it unattended. Active Windows Update cache is not part of this autonomous cleanup branch.
 
 ### Step 5: Check storage-health and replacement evidence
 
@@ -235,11 +235,12 @@ If any gate fails, investigate/document or request human review. Do not improvis
 
 Version 1.1 permits at most **one** additional playbook-scoped cleanup after the existing Autotask cleanup opportunity. Jason does not rerun generic `Disk Cleanup [WIN]`.
 
-The exact eligible targets are:
-- `Sysmon - Clear C:\Sysmon Folder - AOT` (`97ddcdd5-2b74-4a4b-9516-cc872af6a7b6`) only when C:\Sysmon is at least 1 GiB and no active service references that path;
-- `Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1` (`434dc4ef-6f21-442a-969c-a60e754a4435`) only when old `SoftwareDistribution.bak_*` folders total at least 1 GiB.
+The exact autonomous target is:
+- `Sysmon - Clear C:\Sysmon Folder - AOT` (`97ddcdd5-2b74-4a4b-9516-cc872af6a7b6`) only when C:\Sysmon is at least 1 GiB, no active service references that path, and the exact component has active standing-safe approval.
 
-If both are eligible, Jason selects only the larger reclaimable target for that incident cycle. The component itself must also have active standing-safe approval. User/business/application data, active Windows Update cache, Recycle Bin, browser cache, VSS, hibernation, pagefile, dumps, ISO/IMG/install media, PST/OST, VHD/VHDX, and unknown data are not part of this autonomous cleanup authority.
+The existing `Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1` component remains **review-bound** because standing-safe promotion was rejected by Jason component governance as destructive/review-required. Jason may detect and quantify those old backup folders and recommend technician cleanup, but it must not dispatch that component unattended.
+
+User/business/application data, active Windows Update cache, Recycle Bin, browser cache, VSS, hibernation, pagefile, dumps, ISO/IMG/install media, PST/OST, VHD/VHDX, and unknown data are not part of this autonomous cleanup authority.
 
 ### B. Server or protected-role cleanup
 
@@ -423,8 +424,8 @@ Prove:
 9. protected/server targets route to Help Desk I / Human Review without cleanup;
 10. legitimate retained data produces a concise capacity-upgrade recommendation rather than arbitrary deletion;
 11. C:\Sysmon is eligible only when >=1 GiB and no active service references it;
-12. SoftwareDistribution.bak_* cleanup is eligible only when aggregate size is >=1 GiB;
-13. at most one additional cleanup component is dispatched per incident cycle;
+12. material SoftwareDistribution.bak_* usage is detected and routed as a review-bound recommendation without autonomous component dispatch;
+13. at most one additional standing-safe Sysmon cleanup component is dispatched per incident cycle;
 14. successful cleanup still requires current free-space re-read and authoritative monitor clear;
 15. failed/uncleared cleanup routes to Help Desk I / Human Review with no second cleanup attempt;
 16. technician notes are relevance-filtered and do not paste raw scan/SMART output;
@@ -438,7 +439,7 @@ No unrelated production object may be modified.
 
 Design/implementation approval owner: person-al.
 Design approval date: 2026-09-29.
-Source scope: exact `low_disk_space@1.1.0` branch using governed endpoint/device/audit/alert/ticket reads, classifier-approved read-only PowerShell, internal ticket work-start/note/update, and exactly one of the two named standing-safe cleanup components when its deterministic preconditions are met.
+Source scope: exact `low_disk_space@1.1.0` branch using governed endpoint/device/audit/alert/ticket reads, classifier-approved read-only PowerShell, internal ticket work-start/note/update, and at most one standing-safe Sysmon cleanup when its deterministic preconditions are met. SoftwareDistribution backup cleanup is evidence/recommendation only and remains human-review bound.
 
 The branch may not delete arbitrary/user/business/application data; clear VSS; disable hibernation; resize partitions; empty Recycle Bin; clear active Windows Update cache; delete ISO/IMG/install media, PST/OST, VHD/VHDX, or unknown data; alter BitLocker; stop services/processes; reboot; or perform any other unrelated/disruptive action.
 
@@ -449,7 +450,8 @@ A material version/capability/component-fingerprint change requires a new durabl
 Close after:
 - playbook 1.1 source and runtime are merged;
 - deterministic/unit/security validation passes;
-- the two exact cleanup components are standing-safe with durable fingerprints;
+- the exact Sysmon cleanup component is standing-safe with a durable fingerprint;
+- the SoftwareDistribution cleanup component is explicitly recorded as review-bound and cannot be dispatched unattended;
 - exact `low_disk_space@1.1.0` playbook autonomy promotion is active;
 - controlled workstation acceptance proves grace, diagnostics, one-cleanup ceiling, verification, and Human Review routing;
 - production runtime is deployed and live readback proves 1.1 is executing;

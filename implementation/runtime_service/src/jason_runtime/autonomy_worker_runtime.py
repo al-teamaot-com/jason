@@ -204,8 +204,6 @@ BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
 LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
 LOW_DISK_SYSMON_CLEANUP_UID = "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6"
-LOW_DISK_SOFTWAREDIST_CLEANUP_NAME = "Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1"
-LOW_DISK_SOFTWAREDIST_CLEANUP_UID = "434dc4ef-6f21-442a-969c-a60e754a4435"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
@@ -1901,13 +1899,6 @@ class OperationalAutonomyMaintenance:
                     "low_disk_cleanup_wait",
                 )
                 return
-            if work.phase == "low_disk_softwaredist_cleanup_dispatch":
-                self._dispatch_component(
-                    work,
-                    LOW_DISK_SOFTWAREDIST_CLEANUP_NAME,
-                    "low_disk_cleanup_wait",
-                )
-                return
             if work.phase == "low_disk_cleanup_wait":
                 self._poll_low_disk_cleanup(work)
                 return
@@ -2025,10 +2016,6 @@ class OperationalAutonomyMaintenance:
         elif component_name == LOW_DISK_SYSMON_CLEANUP_NAME:
             component_uid = LOW_DISK_SYSMON_CLEANUP_UID
             resolved_component_name = LOW_DISK_SYSMON_CLEANUP_NAME
-            step = "low_disk_cleanup"
-        elif component_name == LOW_DISK_SOFTWAREDIST_CLEANUP_NAME:
-            component_uid = LOW_DISK_SOFTWAREDIST_CLEANUP_UID
-            resolved_component_name = LOW_DISK_SOFTWAREDIST_CLEANUP_NAME
             step = "low_disk_cleanup"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
@@ -3425,6 +3412,11 @@ class OperationalAutonomyMaintenance:
             storage_health_risk=health_risk,
         )
         artifacts = artifact_bytes(evidence["large_files"])
+        software_review_bytes = sum(
+            numeric(item.get("Bytes"))
+            for item in safe_software_distribution
+            if isinstance(item, Mapping)
+        )
         findings = relevant_findings(
             top_folders=evidence["top_folders"],
             large_files=evidence["large_files"],
@@ -3441,6 +3433,18 @@ class OperationalAutonomyMaintenance:
             cleanup_bytes=cleanup_bytes,
             artifact_bytes=artifacts,
         )
+        if (
+            not health_risk
+            and not protected
+            and cleanup_kind is None
+            and software_review_bytes >= 1024**3
+        ):
+            recommendation_text = (
+                f"Old SoftwareDistribution backup folders account for about "
+                f"{software_review_bytes / (1024**3):.1f} GB. The current cleanup "
+                "component is destructive/review-bound, so Jason will not run it "
+                "unattended; technician review can approve cleanup if appropriate."
+            )
         if evidence["errors"] and not findings:
             recommendation_text = (
                 "Root-cause evidence was incomplete and no useful large-consumer result "
@@ -3497,11 +3501,7 @@ class OperationalAutonomyMaintenance:
                 state="remediating",
             )
             self._write_note(work, note, "Jason - Low Disk - Diagnostic")
-            phase = (
-                "low_disk_sysmon_cleanup_dispatch"
-                if cleanup_kind == "sysmon"
-                else "low_disk_softwaredist_cleanup_dispatch"
-            )
+            phase = "low_disk_sysmon_cleanup_dispatch"
             self.store.put(
                 self._replace(
                     work,
@@ -3539,10 +3539,7 @@ class OperationalAutonomyMaintenance:
         )
 
     def _poll_low_disk_cleanup(self, work: OperationalWork) -> None:
-        if not work.job_uid or work.component_uid not in {
-            LOW_DISK_SYSMON_CLEANUP_UID,
-            LOW_DISK_SOFTWAREDIST_CLEANUP_UID,
-        }:
+        if not work.job_uid or work.component_uid != LOW_DISK_SYSMON_CLEANUP_UID:
             self._persist_human_review_escalation(
                 work,
                 reason="Low Disk cleanup job identity is incomplete or changed.",
@@ -3567,11 +3564,7 @@ class OperationalAutonomyMaintenance:
             )
             return
 
-        component_name = (
-            LOW_DISK_SYSMON_CLEANUP_NAME
-            if work.component_uid == LOW_DISK_SYSMON_CLEANUP_UID
-            else LOW_DISK_SOFTWAREDIST_CLEANUP_NAME
-        )
+        component_name = LOW_DISK_SYSMON_CLEANUP_NAME
         completed_at = datetime.now(timezone.utc)
         self._write_note(
             work,
