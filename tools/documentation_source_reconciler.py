@@ -22,8 +22,45 @@ def gh_json(*args: str) -> Any:
     return json.loads(text or "null")
 
 
+def ensure_complete_main_history() -> None:
+    """Refresh main without allowing ancestry checks to run on shallow history."""
+
+    shallow = run(
+        "git",
+        "-C",
+        str(REPO_ROOT),
+        "rev-parse",
+        "--is-shallow-repository",
+    ).strip().casefold()
+    if shallow == "true":
+        run(
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "fetch",
+            "--unshallow",
+            "origin",
+            "main",
+        )
+    else:
+        run("git", "-C", str(REPO_ROOT), "fetch", "origin", "main")
+
+
+def ensure_revision(revision: str) -> None:
+    """Fetch a missing revision without changing repository depth."""
+
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "cat-file", "-e", f"{revision}^{{commit}}"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        run("git", "-C", str(REPO_ROOT), "fetch", "origin", revision)
+
+
 def changed_paths(revision: str) -> tuple[str, ...]:
-    run("git", "-C", str(REPO_ROOT), "fetch", "origin", revision, "--depth=2")
+    ensure_revision(revision)
     parent = f"{revision}^1"
     output = run("git", "-C", str(REPO_ROOT), "diff", "--name-only", parent, revision)
     return tuple(line.strip() for line in output.splitlines() if line.strip())
@@ -144,7 +181,7 @@ def validated_convergence_success(
 
 
 def publish_source_if_needed() -> None:
-    run("git", "-C", str(REPO_ROOT), "fetch", "origin", "main")
+    ensure_complete_main_history()
     latest = latest_material_success()
     if latest is None:
         print("SOURCE_DOCUMENTATION_RECONCILIATION=NO_MATERIAL_SUCCESS")
