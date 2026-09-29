@@ -46,6 +46,12 @@ playbook:
 
 This playbook inherits common work-start, identity, waiting/recheck, active-slot, retry, documentation, verification, human-handoff, terminal-readback, and observability behavior from `Jason-Playbook-Runtime-Automation-Contract.md`.
 
+
+Implementation coordination for v1.1.0:
+- PR #610 adds VulScan-specific waiting states in the shared worker and must preserve the generic waiting/recheck behavior introduced here.
+- PR #604 changes VulScan client disposition and the shared registry and must preserve the Idle Log Off 1.1.0 registry scope.
+- Neither overlapping workstream changes Idle Log Off component authority.
+
 ## 1. Section Goal
 
 **Goal:**  
