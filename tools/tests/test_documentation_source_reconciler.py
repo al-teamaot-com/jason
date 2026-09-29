@@ -30,6 +30,67 @@ def test_latest_material_success_follows_main_history_not_run_order(monkeypatch)
     assert latest_material_success()["headSha"] == "newer"
 
 
+def test_publish_uses_validated_current_main_when_histories_converge(monkeypatch, capsys):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr("tools.documentation_source_reconciler.run", fake_run)
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.latest_material_success",
+        lambda: {
+            "headSha": "material",
+            "databaseId": 1,
+            "url": "https://example.invalid/run/material",
+        },
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.recorded_revision",
+        lambda: "recorded",
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.first_parent_history",
+        lambda: ("current-main", "material"),
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.successful_main_runs",
+        lambda: [
+            {
+                "headSha": "current-main",
+                "databaseId": 2,
+                "url": "https://example.invalid/run/current-main",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.is_ancestor",
+        lambda ancestor, descendant: (
+            (ancestor, descendant)
+            in {
+                ("recorded", "current-main"),
+                ("material", "current-main"),
+            }
+        ),
+    )
+
+    from tools.documentation_source_reconciler import publish_source_if_needed
+
+    publish_source_if_needed()
+    output = capsys.readouterr().out
+    assert "SOURCE_DOCUMENTATION_RECONCILIATION=CONVERGED" in output
+    assert "SOURCE_DOCUMENTATION_RECONCILIATION=PUBLISHED revision=current-main" in output
+    publish_calls = [
+        call for call in calls
+        if call and call[0] == "bash"
+    ]
+    assert len(publish_calls) == 1
+    assert publish_calls[0][3] == "current-main"
+    assert publish_calls[0][4] == "2"
+    assert publish_calls[0][5] == "https://example.invalid/run/current-main"
+
+
 def test_publish_refuses_backward_candidate(monkeypatch, capsys):
     calls = []
 
