@@ -363,6 +363,8 @@ Acceptance findings:
 
 This v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Full production acceptance remains incomplete until the new waiting -> online resume behavior is deployed and observed. Recovered-alert completion and agent remediation remain separately gated.
 
+Integration review: PR #604 supersedes #603. Its shared-runtime overlap is VulScan-specific and does not conflict with the BackupIQ waiting/resume changes in this playbook branch.
+
 ## 22. Section Goal Closure
 
 Close the Section Goal after:
