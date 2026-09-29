@@ -88,16 +88,23 @@ def recorded_revision() -> str:
 
 def successful_main_runs() -> list[dict[str, Any]]:
     data = gh_json(
-        "run", "list",
-        "--repo", REPO,
-        "--workflow", "Validate Jason",
-        "--branch", "main",
-        "--event", "push",
-        "--status", "success",
-        "--limit", "100",
-        "--json", "databaseId,headSha,url,createdAt",
+        "api",
+        (
+            f"repos/{REPO}/actions/workflows/validate.yml/runs"
+            "?branch=main&event=push&status=success&per_page=100"
+        ),
     )
-    return list(data or [])
+    runs = data.get("workflow_runs", []) if isinstance(data, dict) else []
+    return [
+        {
+            "databaseId": item.get("id"),
+            "headSha": item.get("head_sha"),
+            "url": item.get("html_url"),
+            "createdAt": item.get("created_at"),
+        }
+        for item in runs
+        if isinstance(item, dict)
+    ]
 
 
 def first_parent_history(limit: int = 200) -> tuple[str, ...]:
