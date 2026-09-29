@@ -207,11 +207,47 @@ def refresh_pr(api: Api, number: int) -> dict[str, Any]:
     return payload
 
 
+def wait_for_reconciled_head(
+    api: Api,
+    *,
+    pr_number: int,
+    previous_head_sha: str,
+    expected_head_sha: str | None,
+    poll_seconds: float = 1.0,
+    timeout_seconds: float = 60.0,
+) -> dict[str, Any]:
+    """Wait until GitHub's PR read model observes the merge-created head.
+
+    The merge endpoint can acknowledge a branch merge before the pull-request
+    endpoint reflects the new head SHA. Validation must never run against the
+    stale pre-merge head.
+    """
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        current = refresh_pr(api, pr_number)
+        current_sha = str(current["head"]["sha"])
+        if current_sha != previous_head_sha:
+            if expected_head_sha and current_sha != expected_head_sha:
+                raise ReconciliationError(
+                    f"PR #{pr_number} head changed to unexpected SHA "
+                    f"{current_sha}; expected merge head {expected_head_sha}"
+                )
+            return current
+        if time.monotonic() >= deadline:
+            raise ReconciliationError(
+                f"PR #{pr_number} head did not advance from "
+                f"{previous_head_sha} after main reconciliation"
+            )
+        time.sleep(max(0.0, poll_seconds))
+
+
 def reconcile_branch(api: Api, pr: Mapping[str, Any], main_sha: str) -> dict[str, Any]:
     number = int(pr["number"])
     head = pr["head"]
     branch = str(head["ref"])
-    api.request(
+    previous_head_sha = str(head["sha"])
+    result = api.request(
         "/merges",
         method="POST",
         payload={
@@ -222,7 +258,17 @@ def reconcile_branch(api: Api, pr: Mapping[str, Any], main_sha: str) -> dict[str
             ),
         },
     )
-    return refresh_pr(api, number)
+    expected_head_sha = (
+        str(result.get("sha"))
+        if isinstance(result, Mapping) and result.get("sha")
+        else None
+    )
+    return wait_for_reconciled_head(
+        api,
+        pr_number=number,
+        previous_head_sha=previous_head_sha,
+        expected_head_sha=expected_head_sha,
+    )
 
 
 def dispatch_validation(
