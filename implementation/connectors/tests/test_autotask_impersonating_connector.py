@@ -167,6 +167,65 @@ def test_supported_read_maps_trusted_email_and_applies_impersonation_header() ->
     assert target["headers"]["ImpersonationResourceId"] == "77"
 
 
+def test_ticket_search_resolves_queue_label_before_provider_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        AUTOTASK_REQUESTER_AUTH_MODE_ENV,
+        AUTOTASK_AUTH_MODE_JASON_MANAGED,
+    )
+    transport = _Transport(
+        [],
+        ticket_fields=[
+            {
+                "name": "queueID",
+                "isPickList": True,
+                "picklistValues": [
+                    {"value": "8", "label": "Jason"},
+                    {"value": "29682833", "label": "Help Desk I"},
+                ],
+            }
+        ],
+    )
+    connector = AutotaskImpersonatingConnector(
+        secrets=_Secrets(),
+        transport=transport,
+        audit=_Audit(),
+        bindings=_Bindings(None),
+    )
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-ticket-queue",
+            principal_id="person-al",
+            organization_id="aot",
+            client_id=None,
+            capability="autotask.ticket.search",
+            mode="observe",
+        ),
+        arguments={
+            "search": json.dumps(
+                {
+                    "MaxRecords": 10,
+                    "filter": [
+                        {"op": "eq", "field": "queueID", "value": "Jason"}
+                    ],
+                }
+            )
+        },
+    )
+
+    connector.execute(request)
+
+    assert len(transport.requests) == 3
+    metadata = transport.requests[1]
+    target = transport.requests[2]
+    assert metadata["url"].endswith("/V1.0/Tickets/entityInformation/fields")
+    assert json.loads(target["params"]["search"]) == {
+        "MaxRecords": 10,
+        "filter": [{"op": "eq", "field": "queueID", "value": 8}],
+    }
+
+
 def test_jason_managed_mode_uses_service_account_without_impersonation_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

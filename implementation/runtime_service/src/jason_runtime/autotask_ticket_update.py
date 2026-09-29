@@ -70,6 +70,8 @@ AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV = (
 )
 AUTOTASK_TICKET_UPDATE_AUTONOMY_PRINCIPAL = "jason-autonomy-worker"
 
+_MAX_RESOLUTION_LENGTH = 8000
+
 
 def configured_autotask_ticket_update_autonomy_resource_id() -> int | None:
     raw = os.getenv(AUTOTASK_TICKET_UPDATE_AUTONOMY_RESOURCE_ID_ENV, "").strip()
@@ -95,6 +97,7 @@ SAFE_TICKET_UPDATE_FIELDS = frozenset(
         "issueType",
         "subIssueType",
         "ticketType",
+        "resolution",
     }
 )
 
@@ -694,6 +697,17 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
                 )
             elif field == "dueDateTime":
                 normalized[field] = _normalized_due(value)
+            elif field == "resolution":
+                if not isinstance(value, str):
+                    raise ValueError("resolution must be a string")
+                resolution = value.strip()
+                if not resolution:
+                    raise ValueError("resolution must not be empty")
+                if len(resolution) > _MAX_RESOLUTION_LENGTH:
+                    raise ValueError(
+                        f"resolution must not exceed {_MAX_RESOLUTION_LENGTH} characters"
+                    )
+                normalized[field] = resolution
 
         return normalized
 
@@ -798,7 +812,7 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
                         f"{field} readback was invalid"
                     ) from error
 
-            if field == "dueDateTime":
+            if field in {"dueDateTime", "resolution"}:
                 observed_value = str(
                     observed_value or ""
                 ).strip()

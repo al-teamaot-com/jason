@@ -208,6 +208,61 @@ def test_status_reports_all_active_actions(monkeypatch):
     ]
 
 
+def test_status_reports_bounded_persisted_autonomy_work(monkeypatch, tmp_path):
+    import sqlite3
+
+    db = tmp_path / "autonomy-operational-work.sqlite3"
+    connection = sqlite3.connect(db)
+    connection.executescript(
+        """
+        CREATE TABLE autonomy_operational_work (
+            ticket_id INTEGER PRIMARY KEY,
+            ticket_number TEXT NOT NULL,
+            title TEXT NOT NULL,
+            playbook_id TEXT NOT NULL,
+            source_queue TEXT NOT NULL,
+            company_id INTEGER NOT NULL,
+            configuration_item_id INTEGER NOT NULL,
+            device_uid TEXT NOT NULL,
+            hostname TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            job_uid TEXT,
+            component_uid TEXT,
+            repair_attempts INTEGER NOT NULL DEFAULT 0,
+            last_reason TEXT NOT NULL DEFAULT '',
+            source_version TEXT,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO autonomy_operational_work(
+            ticket_id,ticket_number,title,playbook_id,source_queue,company_id,
+            configuration_item_id,device_uid,hostname,phase,last_reason,updated_at
+        ) VALUES
+        (101,'T1','Active ticket','vulscan','Jason',1,1,'d1','PC1',
+         'vulscan_investigate','', '2026-09-29T06:00:00+00:00'),
+        (102,'T2','Waiting ticket','backupiq','Jason',1,2,'d2','PC2',
+         'waiting_device_access:offline','endpoint offline',
+         '2026-09-29T06:01:00+00:00'),
+        (103,'T3','Completed ticket','vulscan','Jason',1,3,'d3','PC3',
+         'complete','done','2026-09-29T06:02:00+00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setattr(server, "_active_action_capabilities", lambda: [])
+
+    result = server.jason_mcp_status()
+    snapshot = result["autonomy_work"]
+
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["active_count"] == 1
+    assert snapshot["waiting_count"] == 1
+    assert [item["ticket_id"] for item in snapshot["items"]] == [101, 102]
+    assert snapshot["items"][0]["playbook"] == "vulscan"
+    assert snapshot["items"][1]["state"] == "WAITING"
+
+
 def test_discovery_reports_requester_potential_eligibility(
     monkeypatch,
 ):

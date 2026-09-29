@@ -490,6 +490,29 @@ def test_direct_ticket_update_accepts_ticket_id_alias(monkeypatch):
     assert result == {"payload": {"id": 456, "priority": 2}}
 
 
+def test_direct_ticket_update_accepts_queue_and_resolution_aliases(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: _ticket_read(_ticket(ticket_id=788)),
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "service.ticket.update",
+        {
+            "ticket_id": 788,
+            "queue": "Jason",
+            "resolution_text": "Verified resolved.",
+        },
+    )
+    assert result == {
+        "payload": {
+            "id": 788,
+            "queueID": "Jason",
+            "resolution": "Verified resolved.",
+        }
+    }
+
+
 def test_direct_ticket_update_preserves_only_requested_mutable_fields(monkeypatch):
     monkeypatch.setattr(
         server,

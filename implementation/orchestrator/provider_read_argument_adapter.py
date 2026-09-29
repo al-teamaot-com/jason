@@ -488,10 +488,18 @@ def _autotask_search(
         raise ValueError("filters must be a mapping when supplied")
 
     clauses: list[dict[str, Any]] = []
+    ticket_filter_aliases = {
+        "queue": "queueID",
+        "queue_name": "queueID",
+        "queueName": "queueID",
+        "status_name": "status",
+        "statusName": "status",
+    } if capability_name in {SERVICE_TICKET_SEARCH, SERVICE_TICKET_COUNT} else {}
     for field, value in filters.items():
         field_name = str(field).strip()
         if not field_name:
             raise ValueError("Autotask filter field names must be non-empty")
+        field_name = ticket_filter_aliases.get(field_name, field_name)
         clauses.append({"op": "eq", "field": field_name, "value": value})
 
     after_resource_id = _autotask_after_resource_id(arguments)

@@ -236,6 +236,58 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             raise ValueError("AUTOTASK_TICKET_STATUS_LABEL_NOT_UNIQUE")
         return unique[0]
 
+    def _resolve_ticket_queue_label(
+        self,
+        *,
+        prepared: PreparedRequest,
+        label: str,
+    ) -> int:
+        normalized = label.strip().casefold()
+        if not normalized:
+            raise ValueError("AUTOTASK_TICKET_QUEUE_LABEL_REQUIRED")
+
+        payload = self._transport.request(
+            method="GET",
+            url=f"{self._api_root(prepared)}/V1.0/Tickets/entityInformation/fields",
+            headers=prepared.headers,
+            params=None,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        if not isinstance(payload, Mapping):
+            raise ValueError("AUTOTASK_TICKET_QUEUE_METADATA_INVALID")
+        fields = payload.get("fields")
+        if not isinstance(fields, list):
+            item = payload.get("item")
+            if isinstance(item, Mapping):
+                fields = item.get("fields")
+        if not isinstance(fields, list):
+            raise ValueError("AUTOTASK_TICKET_QUEUE_METADATA_INVALID")
+        queue_fields = [
+            field
+            for field in fields
+            if isinstance(field, Mapping)
+            and str(field.get("name") or "").strip().casefold() == "queueid"
+        ]
+        if len(queue_fields) != 1:
+            raise ValueError("AUTOTASK_TICKET_QUEUE_METADATA_INVALID")
+        values = queue_fields[0].get("picklistValues")
+        if not isinstance(values, list):
+            raise ValueError("AUTOTASK_TICKET_QUEUE_METADATA_INVALID")
+        matches = []
+        for item in values:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("label") or "").strip().casefold() != normalized:
+                continue
+            try:
+                matches.append(int(item.get("value")))
+            except (TypeError, ValueError):
+                continue
+        unique = sorted(set(matches))
+        if len(unique) != 1:
+            raise ValueError("AUTOTASK_TICKET_QUEUE_LABEL_NOT_UNIQUE")
+        return unique[0]
+
     def _resolve_open_ticket_terminal_status_ids(
         self,
         *,
@@ -340,6 +392,25 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
                     clause["value"] = int(text)
                 except ValueError:
                     clause["value"] = self._resolve_ticket_status_label(
+                        prepared=prepared,
+                        label=text,
+                    )
+                changed = True
+
+            if field_name == "queueid" and operator == "eq":
+                value = clause.get("value")
+                if isinstance(value, bool):
+                    raise ValueError("AUTOTASK_TICKET_QUEUE_VALUE_INVALID")
+                if isinstance(value, int):
+                    filters.append(clause)
+                    continue
+                text = str(value or "").strip()
+                if not text:
+                    raise ValueError("AUTOTASK_TICKET_QUEUE_VALUE_INVALID")
+                try:
+                    clause["value"] = int(text)
+                except ValueError:
+                    clause["value"] = self._resolve_ticket_queue_label(
                         prepared=prepared,
                         label=text,
                     )

@@ -3045,6 +3045,12 @@ def _direct_ticket_update_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
         "issueType",
         "subIssueType",
         "ticketType",
+        "resolution",
+    }
+    aliases = {
+        "queue": "queueID",
+        "queue_id": "queueID",
+        "resolution_text": "resolution",
     }
     selectors = {"ticket_id", "ticketID", "id"}
 
@@ -3059,24 +3065,43 @@ def _direct_ticket_update_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
                 + ",".join(sorted(unknown_top))
             )
         payload_input = dict(payload_raw)
-        unknown_payload = set(payload_input) - mutable_fields - selectors
+        unknown_payload = set(payload_input) - mutable_fields - selectors - set(aliases)
         if unknown_payload:
             raise ValueError(
                 "AUTOTASK_TICKET_UPDATE_FIELD_NOT_ALLOWED:"
                 + ",".join(sorted(unknown_payload))
             )
+        for alias, canonical in aliases.items():
+            if alias not in payload_input:
+                continue
+            if canonical in payload_input and payload_input[canonical] != payload_input[alias]:
+                raise ValueError(
+                    "AUTOTASK_TICKET_UPDATE_ARGUMENT_CONFLICT:"
+                    + alias
+                    + ","
+                    + canonical
+                )
+            payload_input[canonical] = payload_input.pop(alias)
     else:
-        unknown = set(raw) - mutable_fields - selectors
+        unknown = set(raw) - mutable_fields - selectors - set(aliases)
         if unknown:
             raise ValueError(
                 "AUTOTASK_TICKET_UPDATE_UNSUPPORTED_ARGUMENTS:"
                 + ",".join(sorted(unknown))
             )
-        payload_input = {
-            key: value
-            for key, value in raw.items()
-            if key in mutable_fields
-        }
+        payload_input = {}
+        for key, value in raw.items():
+            canonical = aliases.get(key, key)
+            if canonical not in mutable_fields:
+                continue
+            if canonical in payload_input and payload_input[canonical] != value:
+                raise ValueError(
+                    "AUTOTASK_TICKET_UPDATE_ARGUMENT_CONFLICT:"
+                    + key
+                    + ","
+                    + canonical
+                )
+            payload_input[canonical] = value
 
     identity_values = []
     for container in (raw, payload_input):
@@ -5271,6 +5296,75 @@ def jason_ticket_activity_report(
     }
 
 
+def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
+    path = Path(
+        os.getenv(
+            "JASON_AUTONOMY_WORKER_DB",
+            "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3",
+        )
+    )
+    if not path.exists():
+        return {"status": "unavailable", "items": [], "reason": "work_db_missing"}
+    connection = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{path}?mode=ro",
+            uri=True,
+            timeout=2.0,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        rows = connection.execute(
+            """
+            SELECT ticket_id,ticket_number,title,playbook_id,phase,
+                   updated_at,last_reason
+            FROM autonomy_operational_work
+            WHERE phase NOT IN ('complete','escalated')
+            ORDER BY updated_at,ticket_id
+            LIMIT 50
+            """
+        ).fetchall()
+    except (sqlite3.Error, OSError) as error:
+        return {
+            "status": "unavailable",
+            "items": [],
+            "reason": type(error).__name__,
+        }
+    finally:
+        if connection is not None:
+            connection.close()
+
+    items = []
+    for row in rows:
+        phase = str(row["phase"] or "")
+        if phase.startswith("waiting_device_access:") or phase in {
+            "approval_pending",
+            "blocked",
+        }:
+            state = "WAITING" if phase != "blocked" else "BLOCKED"
+        else:
+            state = "ACTIVE"
+        items.append(
+            {
+                "ticket_id": int(row["ticket_id"]),
+                "ticket_number": str(row["ticket_number"] or ""),
+                "title": str(row["title"] or ""),
+                "playbook": str(row["playbook_id"] or ""),
+                "phase": phase,
+                "state": state,
+                "updated_at": str(row["updated_at"] or ""),
+                "reason": str(row["last_reason"] or ""),
+            }
+        )
+    return {
+        "status": "succeeded",
+        "items": items,
+        "active_count": sum(1 for item in items if item["state"] == "ACTIVE"),
+        "waiting_count": sum(1 for item in items if item["state"] == "WAITING"),
+        "blocked_count": sum(1 for item in items if item["state"] == "BLOCKED"),
+    }
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP governed capability state."""
@@ -5306,6 +5400,7 @@ def jason_mcp_status() -> dict[str, object]:
             if "automation.component.execute" in actions
             else None
         ),
+        "autonomy_work": _autonomous_ticket_work_snapshot(),
     }
 
 
