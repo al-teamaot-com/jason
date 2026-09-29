@@ -2415,7 +2415,87 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
     notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
     assert len(notes)==1
     assert "Classification=monitor_execution_failure" in notes[0]["description"]
+    assert notes[0]["title"] == "Jason - Idle Log Off - Diagnostic"
     assert "setter" in notes[0]["description"].casefold()
+    store.close()
+
+
+def test_idle_logoff_true_noncompliance_waits_for_exact_approval(tmp_path: Path):
+    class IdleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability=="service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":1179,"isActive":True,
+                    "referenceNumber":"idle-device-1","referenceTitle":"AVMAC-1096"}}}}
+            if capability=="endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":True,
+                    "device_type":{"category":"Desktop","type":"Desktop"},
+                    "operating_system":"Microsoft Windows 11 Pro"}}}
+            if capability=="endpoint.alert.history.search":
+                return {"status":"succeeded","evidence":{"data":{"alerts":[{
+                    "alertUid":"idle-alert","ticketNumber":"T20260924.0043","timestamp":1790416800000,
+                    "diagnostics":"Compliant: False",
+                    "alertContext":{"description":"Get Idle Log Off Status - Compliant: False"}
+                }]}}}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
+        max_active_work_items=2,interval_seconds=30,monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final=store.get(141066)
+    assert final is not None and final.phase=="approval_pending"
+    assert "Set Idle Log Off AOT Ver 02042026-1" in final.last_reason
+    assert "AVMAC-1096" in final.last_reason
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+    notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
+    assert len(notes)==1
+    assert "Classification=reported_noncompliance_policy_verification_required" in notes[0]["description"]
+    store.close()
+
+
+def test_idle_logoff_offline_uses_resumable_waiting_state(tmp_path: Path):
+    class IdleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability=="service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":1179,"isActive":True,
+                    "referenceNumber":"idle-device-1","referenceTitle":"AVMAC-1096"}}}}
+            if capability=="endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":False,
+                    "device_type":{"category":"Desktop","type":"Desktop"},
+                    "operating_system":"Microsoft Windows 11 Pro"}}}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
+        max_active_work_items=2,interval_seconds=30,monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final=store.get(141066)
+    assert final is not None
+    assert final.phase=="waiting_device_access:idle_log_off_investigate"
+    assert store.list_open()==()
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+    update_calls=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.update"]
+    assert any(x.get("status")=="Waiting Device Access" for x in update_calls)
     store.close()
 
 
