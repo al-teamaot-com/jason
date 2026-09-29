@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2218,66 +2219,169 @@ def test_low_disk_requires_separate_promotion(tmp_path: Path):
     store.close()
 
 
-def test_low_disk_workstation_diagnostic_is_read_only(tmp_path: Path):
-    class LowDiskReads(Reads):
-        def execute(self, capability, arguments):
-            if capability == "service.configuration.read":
-                return {
-                    "status": "succeeded",
-                    "evidence": {
-                        "data": {
-                            "item": {
-                                "id": 280,
-                                "companyID": 597,
-                                "isActive": True,
-                                "referenceNumber": "disk-device-1",
-                                "referenceTitle": "GAI-LT2830",
-                            }
-                        }
-                    },
-                }
-            if capability == "endpoint.device.read":
-                return {
-                    "status": "succeeded",
-                    "evidence": {
-                        "record": {
-                            "resource_id": "disk-device-1",
-                            "hostname": "GAI-LT2830",
-                            "online": True,
-                            "reboot_required": False,
-                            "device_type": {"category": "Laptop", "type": "Notebook"},
-                            "operating_system": "Microsoft Windows 11 Pro",
-                        }
-                    },
-                }
-            if capability == "endpoint.audit.read":
-                return {
-                    "status": "succeeded",
-                    "evidence": {
-                        "audit": {
-                            "logicalDisks": [
-                                {
-                                    "description": "Local Fixed Disk",
-                                    "diskIdentifier": "C:",
-                                    "freespace": 10 * 1024**3,
-                                    "size": 250 * 1024**3,
-                                }
-                            ]
-                        },
-                    },
-                }
-            if capability == "endpoint.alert.history.search":
-                return {
-                    "status": "succeeded",
-                    "evidence": {"data": {"alerts": []}},
-                }
-            return super().execute(capability, arguments)
+class LowDiskReads(Reads):
+    def __init__(
+        self,
+        *,
+        alert_open=True,
+        storage_warning=False,
+        sysmon_bytes=0,
+        software_bytes=0,
+        protected=False,
+    ):
+        super().__init__()
+        self.alert_open = alert_open
+        self.storage_warning = storage_warning
+        self.sysmon_bytes = sysmon_bytes
+        self.software_bytes = software_bytes
+        self.protected = protected
 
-    actions = Actions()
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": 280,
+                            "companyID": 597,
+                            "isActive": True,
+                            "referenceNumber": "disk-device-1",
+                            "referenceTitle": "GAI-LT2830",
+                        }
+                    }
+                },
+            }
+        if capability == "endpoint.device.read":
+            category = "Server" if self.protected else "Laptop"
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "disk-device-1",
+                        "hostname": "GAI-LT2830",
+                        "online": True,
+                        "reboot_required": False,
+                        "device_type": {"category": category, "type": "Notebook"},
+                        "operating_system": (
+                            "Microsoft Windows Server 2022"
+                            if self.protected
+                            else "Microsoft Windows 11 Pro"
+                        ),
+                    }
+                },
+            }
+        if capability == "endpoint.audit.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "audit": {
+                        "logicalDisks": [
+                            {
+                                "description": "Local Fixed Disk",
+                                "diskIdentifier": "C:",
+                                "freespace": 10 * 1024**3,
+                                "size": 250 * 1024**3,
+                            }
+                        ]
+                    },
+                },
+            }
+        if capability == "endpoint.alert.search":
+            items = []
+            if self.alert_open:
+                items = [{"description": "Low Disk Space - C:", "status": "open"}]
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": items}},
+            }
+        if capability == "endpoint.alert.history.search":
+            alerts = []
+            if self.storage_warning:
+                alerts = [{"code": "7", "description": "disk bad block"}]
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"alerts": alerts}},
+            }
+        if capability == "service.ticket.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": 141000,
+                                "title": "Low Disk Space - GAI-LT2830",
+                            }
+                        ]
+                    }
+                },
+            }
+        if capability == "endpoint.powershell.read":
+            command = arguments["command"]
+            payload = []
+            if "Get-ChildItem C:\\" in command and "-Directory -Force" in command:
+                payload = [
+                    {"FullName": r"C:\Users", "Bytes": 180 * 1024**3},
+                    {"FullName": r"C:\Windows", "Bytes": 42 * 1024**3},
+                ]
+            elif "Sort-Object Length -Descending" in command:
+                payload = [
+                    {
+                        "FullName": r"C:\ProgramData\App\data.bin",
+                        "Length": 28 * 1024**3,
+                        "Extension": ".bin",
+                    }
+                ]
+            elif "Win32_ShadowStorage" in command:
+                payload = [{"UsedSpace": 2 * 1024**3}]
+            elif "hiberfil.sys" in command:
+                payload = [{"FullName": r"C:\hiberfil.sys", "Length": 6 * 1024**3}]
+            elif "Get-PhysicalDisk" in command and "Get-StorageReliabilityCounter" not in command:
+                payload = [
+                    {
+                        "FriendlyName": "NVMe Test",
+                        "MediaType": "SSD",
+                        "BusType": "NVMe",
+                        "HealthStatus": "Warning" if self.storage_warning else "Healthy",
+                        "OperationalStatus": "OK",
+                        "Size": 250 * 1024**3,
+                    }
+                ]
+            elif "Get-StorageReliabilityCounter" in command:
+                payload = [{"ReadErrorsTotal": 0, "WriteErrorsTotal": 0}]
+            elif "Get-Item C:\\Sysmon" in command:
+                payload = (
+                    [{"FullName": r"C:\Sysmon", "Bytes": self.sysmon_bytes}]
+                    if self.sysmon_bytes
+                    else []
+                )
+            elif "Win32_Service" in command:
+                payload = []
+            elif "SoftwareDistribution.bak_*" in command:
+                payload = (
+                    [
+                        {
+                            "FullName": r"C:\Windows\SoftwareDistribution.bak_20260901",
+                            "Bytes": self.software_bytes,
+                        }
+                    ]
+                    if self.software_bytes
+                    else []
+                )
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"stdout": json.dumps(payload)}},
+            }
+        return super().execute(capability, arguments)
+
+
+def _promoted_low_disk_worker(tmp_path: Path, reads, actions=None):
+    actions = actions or Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
     worker = OperationalAutonomyMaintenance(
         queue_source=QueueSource(low_disk_candidate()),
-        reads=LowDiskReads(),
+        reads=reads,
         actions=actions,
         store=store,
         promotion_store=PromotionStore(
@@ -2293,34 +2397,194 @@ def test_low_disk_workstation_diagnostic_is_read_only(tmp_path: Path):
         ),
         max_active_work_items=2,
         interval_seconds=30,
-        monotonic=iter((0.0,)).__next__,
+        monotonic=iter(float(value * 31) for value in range(100)).__next__,
     )
+    return worker, store, actions
+
+
+def _expire_low_disk_grace(store):
+    current = store.get(141101)
+    assert current is not None
+    started = datetime.now(timezone.utc) - timedelta(minutes=20)
+    store.put(
+        replace(
+            current,
+            phase="waiting_recheck:low_disk_investigate",
+            last_reason=f"low_disk_grace_started_at={started.isoformat()}; expired",
+        )
+    )
+
+
+def test_low_disk_waits_for_existing_autotask_cleanup(tmp_path: Path):
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        LowDiskReads(),
+    )
+
+    worker.tick()
+
+    current = store.get(141101)
+    assert current is not None
+    assert current.phase == "waiting_recheck:low_disk_investigate"
+    assert "Autotask-triggered Disk Cleanup" in current.last_reason
+    assert not [
+        call for call in actions.calls
+        if call[1] == "automation.component.execute"
+    ]
+    assert not [
+        call for call in actions.calls
+        if call[1] == "service.ticket.note.create"
+    ]
+    store.close()
+
+
+def test_low_disk_recovered_after_autotask_cleanup_completes(tmp_path: Path):
+    reads = LowDiskReads(alert_open=False)
+    worker, store, actions = _promoted_low_disk_worker(tmp_path, reads)
 
     worker.tick()
 
     final = store.get(141101)
     assert final is not None
-    assert final.playbook_id == "low_disk_space"
-    assert final.phase == "escalated"
-    assert "cleanup authority remain separately gated" in final.last_reason
-
-    component_calls = [
-        args
-        for _, capability, args in actions.calls
-        if capability == "automation.component.execute"
-    ]
-    assert component_calls == []
-
+    assert final.phase == "complete"
     note_calls = [
         args["payload"]
         for _, capability, args in actions.calls
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
-    body = note_calls[0]["description"]
-    assert "Drive=C:" in body
-    assert "ProtectedRole=No" in body
-    assert "No files were deleted" in body
+    assert "existing Autotask-triggered cleanup" in note_calls[0]["description"]
+    store.close()
+
+
+def test_low_disk_root_cause_note_is_relevant_and_capacity_oriented(tmp_path: Path):
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        LowDiskReads(),
+    )
+    worker.tick()
+    _expire_low_disk_grace(store)
+    worker.tick()
+
+    final = store.get(141101)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert "no further approved autonomous cleanup target" in final.last_reason
+
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    body = note_calls[-1]["description"]
+    assert r"C:\Users - 180.0 GB" in body
+    assert "larger capacity" in body
+    assert "Recurrence: 1 prior low-disk ticket" in body
+    assert "VSS/shadow copies - 2.0 GB" in body
+    assert "ReadErrorsTotal" not in body
+    assert "ACTION REQUIRED" not in body
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141101, "queueID": "Help Desk I", "status": "Human Review"} in update_calls
+    store.close()
+
+
+def test_low_disk_storage_health_warning_prevents_cleanup(tmp_path: Path):
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        LowDiskReads(
+            storage_warning=True,
+            sysmon_bytes=20 * 1024**3,
+        ),
+    )
+    worker.tick()
+    _expire_low_disk_grace(store)
+    worker.tick()
+
+    final = store.get(141101)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert "Storage-health evidence" in final.last_reason
+    assert not [
+        call for call in actions.calls
+        if call[1] == "automation.component.execute"
+    ]
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert "Drive replacement should be reviewed" in note_calls[-1]["description"]
+    store.close()
+
+
+def test_low_disk_failed_sysmon_dependency_read_never_authorizes_cleanup(tmp_path: Path):
+    class MissingDependencyEvidenceReads(LowDiskReads):
+        def execute(self, capability, arguments):
+            if (
+                capability == "endpoint.powershell.read"
+                and "Win32_Service" in arguments.get("command", "")
+            ):
+                return {
+                    "status": "failed",
+                    "error_code": "DEPENDENCY_EVIDENCE_UNAVAILABLE",
+                }
+            return super().execute(capability, arguments)
+
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        MissingDependencyEvidenceReads(sysmon_bytes=20 * 1024**3),
+    )
+    worker.tick()
+    _expire_low_disk_grace(store)
+    worker.tick()
+
+    final = store.get(141101)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert not [
+        call for call in actions.calls
+        if call[1] == "automation.component.execute"
+    ]
+    store.close()
+
+
+def test_low_disk_runs_one_narrow_cleanup_then_verifies_monitor(tmp_path: Path):
+    reads = LowDiskReads(sysmon_bytes=12 * 1024**3)
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        reads,
+    )
+    worker.tick()
+    _expire_low_disk_grace(store)
+    worker.tick()
+    assert store.get(141101).phase == "low_disk_sysmon_cleanup_dispatch"
+
+    worker.tick()
+    current = store.get(141101)
+    assert current.phase == "low_disk_cleanup_wait"
+    assert current.repair_attempts == 1
+
+    worker.tick()
+    assert store.get(141101).phase == "waiting_recheck:low_disk_verify"
+
+    reads.alert_open = False
+    worker.tick()
+
+    final = store.get(141101)
+    assert final.phase == "complete"
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_uid"] == (
+        "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6"
+    )
     store.close()
 
 
