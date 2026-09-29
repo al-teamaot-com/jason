@@ -104,7 +104,7 @@ The workflow checks out trusted `main` even for pull-request-triggered refreshes
 
 ### Governed PR source integration
 
-The evidence-only control board remains read-only. A separate host-side source-integration service, `jason-pr-integration-reconciler.timer`, runs every five minutes under the existing authenticated `al` GitHub identity.
+The evidence-only control board remains read-only. A separate rootless user-level source-integration service, `jason-pr-integration-reconciler.timer`, runs every five minutes under the existing authenticated `al` GitHub identity. It is intentionally installed in the `al` user systemd manager so source reconciliation does not require root or production-runtime deployment authority.
 
 A PR is eligible only when it is open, non-draft, from the same repository, authored by an OWNER/MEMBER/COLLABORATOR, and contains the exact opt-in line `Integration automation: enabled`.
 
