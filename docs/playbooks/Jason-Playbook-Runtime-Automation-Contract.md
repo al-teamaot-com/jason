@@ -289,6 +289,8 @@ Typical reasons:
 - pending approval;
 - scheduled retry/recheck.
 
+Approval waiting is a first-class waiting subtype. An approval-pending playbook instance should retain ownership, release its active-work slot, persist the exact proposed action (target, capability/component, bounded arguments, expected verification, and approval identity when granted), and resume only when that exact action receives valid authority. Approval of one target/action must never authorize another.
+
 When entering waiting, persist:
 
 - reason;
