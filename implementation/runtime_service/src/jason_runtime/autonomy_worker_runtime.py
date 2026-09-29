@@ -163,6 +163,8 @@ HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
 REPAIR_COMPONENT_NAME = "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"
 DNS_DIAGNOSTIC_COMPONENT_NAME = "DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026"
 DNS_DIAGNOSTIC_COMPONENT_UID = "c3340a58-48d5-457b-bc30-5fd79e5ad8b1"
+IDLE_LOG_OFF_SETTER_NAME = "Set Idle Log Off AOT Ver 02042026-1"
+IDLE_LOG_OFF_SETTER_UID = "acc6a240-881d-4655-9470-87f60c8e35e8"
 SECURITY_LOG_QUICK_TEST_NAME = "Security Log Quick Test [WIN] AOT Ver 12012025-1"
 SECURITY_LOG_QUICK_TEST_UID = "a50d486b-2cce-4658-9e11-64fb6bf9ab9d"
 SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
@@ -1968,8 +1970,8 @@ class OperationalAutonomyMaintenance:
         else:
             classification = "reported_noncompliance_policy_verification_required"
             reason = (
-                "Idle Log Off diagnostic found a noncompliance signal; applicability and "
-                "per-run setter approval remain required."
+                "Idle Log Off diagnostic found a noncompliance signal; exact applicability "
+                "and per-run approval are required before the approved setter may run."
             )
 
         note = (
@@ -1987,6 +1989,22 @@ class OperationalAutonomyMaintenance:
             "or perform any other modifying/user-disruptive action."
         )
         self._write_note(work, note, "Jason - Idle Log Off - Diagnostic")
+        if classification == "reported_noncompliance_policy_verification_required":
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="approval_pending",
+                    last_reason=(
+                        reason
+                        + " Proposed action: "
+                        + IDLE_LOG_OFF_SETTER_NAME
+                        + " on exact device "
+                        + work.hostname
+                        + " using built-in defaults; no action has been executed."
+                    ),
+                )
+            )
+            return
         self._persist_human_review_escalation(work, reason=reason)
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
