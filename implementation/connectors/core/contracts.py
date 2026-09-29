@@ -98,6 +98,8 @@ class ConnectorContext:
     client_id: str | None
     capability: str
     mode: str = "observe"
+    policy_ids: tuple[str, ...] = ()
+    principal_attributes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
