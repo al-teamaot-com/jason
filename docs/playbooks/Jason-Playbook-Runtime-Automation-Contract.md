@@ -289,6 +289,8 @@ Typical reasons:
 - pending approval;
 - scheduled retry/recheck.
 
+Approval waiting is a first-class waiting subtype. An approval-pending playbook instance should retain ownership, release its active-work slot, persist the exact proposed action (target, capability/component, bounded arguments, expected verification, and approval identity when granted), and resume only when that exact action receives valid authority. Approval of one target/action must never authorize another.
+
 When entering waiting, persist:
 
 - reason;
@@ -370,6 +372,32 @@ The governance layer decides whether it is authorized.
 The playbook never self-authorizes.
 
 ---
+
+## 12A. Playbook-Scoped Component Authority
+
+Global component safety and playbook autonomy are separate controls.
+
+A component may remain globally classified `per_run` while one exact playbook branch is approved for autonomous use of that component. This is appropriate when the component is not universally safe, but a narrowly constrained invocation has a well-defined target, arguments, evidence gates, and verification contract.
+
+Playbook-scoped component authority must require all of the following:
+
+- exact Owner-promoted playbook ID and version;
+- exact playbook policy ID;
+- `automation.component.execute` included in that playbook's approved capability set;
+- exact source-controlled component UID and display name;
+- exact source-controlled variable contract;
+- exact target/client/identity gates from the playbook;
+- server-generated/trusted playbook context propagated through Central Orchestrator to the provider;
+- provider-side validation of the same playbook/version/policy/component/arguments;
+- single-use/idempotent execution binding;
+- bounded attempts;
+- authoritative post-action verification.
+
+Caller-supplied arguments may never declare or upgrade themselves into playbook-scoped authority.
+
+A playbook-scoped exception must **not** change the component's global Component Control classification. The same component remains approval-bound for interactive use, ad-hoc execution, other playbooks, changed arguments, changed targets, or changed versions.
+
+Reboot, forced logoff, arbitrary shell/PowerShell, destructive actions, and other constitutional disruption classes remain subject to their separate disruption rules even if a playbook is otherwise autonomous.
 
 ## 13. Retry Contract
 

@@ -54,6 +54,15 @@ def request() -> OrchestrationRequest:
         ),
         budget=ExecutionBudget(maximum_estimated_cost=Decimal("0")),
         arguments={"search": "AOT-50282"},
+        policy_ids=(
+            "autonomous-governance-v1",
+            "playbook-autonomy:idle_log_off",
+            "playbook:idle_log_off@1.1.0",
+        ),
+        principal_attributes={
+            "workload": "jason-autonomy-worker",
+            "playbook": "idle_log_off",
+        },
     )
 
 
@@ -74,6 +83,15 @@ def test_invoker_preserves_identity_scope_authority_and_maps_canonical_capabilit
     assert connector.received.context.client_id == "aot"
     assert connector.received.context.capability == "datto_rmm.device.search"
     assert connector.received.context.mode == "observe"
+    assert connector.received.context.policy_ids == (
+        "autonomous-governance-v1",
+        "playbook-autonomy:idle_log_off",
+        "playbook:idle_log_off@1.1.0",
+    )
+    assert connector.received.context.principal_attributes == {
+        "workload": "jason-autonomy-worker",
+        "playbook": "idle_log_off",
+    }
     assert result.output["provider"] == "datto_rmm"
     assert result.telemetry is not None
     assert result.telemetry.provider_resources == (
