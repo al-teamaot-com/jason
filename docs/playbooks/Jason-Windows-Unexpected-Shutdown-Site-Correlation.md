@@ -1,54 +1,60 @@
 # Jason Playbook: Windows Unexpected Shutdown / Site Correlation
 
-Version: 0.1.0  
-Playbook ID: `windows_unexpected_shutdown`  
-Status: diagnostic branch implementation-ready; isolated-event closure acceptance still pending  
-Autonomous execution: diagnostic/correlation branch approved; automatic closure remains gated
+Version: 1.1.0  
+Playbook ID: `unexpected_shutdown`  
+Status: implementation candidate; owner-approved design change on 2026-09-29; production autonomy requires exact 1.1.0 durable promotion and acceptance  
+Autonomous execution target: read-only diagnosis plus clean site-correlated closure; device-specific, ambiguous, protected-role, storage-risk, and repair branches require human review
 
 ## 1. Section Goal
 
-**Goal:** Allow Jason to investigate Windows unexpected-shutdown tickets from intake through evidence-based classification, recurrence/site correlation, documentation, verification, and safe resolution or escalation without performing disruptive remediation.
+**Goal:** Allow Jason to distinguish site/environmental shutdown events from device-specific shutdowns, verify each affected device independently for post-event storage/hardware damage, and safely complete only clean site-correlated incidents.
 
 **Success means:**
-- the exact ticket/client/site/device is identified and correctly associated;
-- the global ticket-work-start lifecycle is satisfied before substantive diagnostics;
-- Windows and DRMM evidence around the shutdown is collected and correlated;
-- recent related ticket history is checked for recurrence;
-- other physical devices at the same site are checked in the incident window;
-- site-wide evidence never masks independent device-specific risk;
-- isolated healthy events may resolve only after authoritative verification;
-- recurring, ambiguous, hardware/storage, BSOD, or site-wide-risk cases are documented and escalated appropriately.
+- exact ticket/client/site/device identity is proven;
+- shutdown timing and clean-vs-abrupt evidence is collected;
+- same-site physical devices are correlated in a bounded incident window;
+- virtual machines do not inflate the physical site threshold;
+- every affected device still receives an independent risk check;
+- read-only disk, volume, reliability, WHEA, and storage-event evidence is collected;
+- a stable site-event ID groups correlated shutdowns without merging unrelated events;
+- clean site/environmental cases may complete only after authoritative healthy verification;
+- device-specific, ambiguous, recurring unexplained, protected-role, storage-risk, or repair-required cases go to Human Review;
+- no repair or disruptive action is performed without separate authority.
 
 ## 2. Trigger
 
-Apply to tickets/alerts indicating an unexpected Windows shutdown/restart, including messages such as:
+Apply to Windows unexpected shutdown/restart alerts or tickets, including:
 
 `The previous system shutdown at <time> on <date> was unexpected.`
 
-Trigger evidence may originate from DRMM monitoring, Windows Event Log, Autotask, or a technician request tied to a specific endpoint.
+Evidence may originate from DRMM monitoring, Windows Event Log, Autotask, or a technician request tied to an exact endpoint.
 
 ## 3. Scope and Boundaries
 
 ### In Scope
 - Windows physical workstations and servers.
-- Windows VM guests for independent device analysis.
-- Autotask ticket and recent-ticket reads.
-- DRMM endpoint/alert/job/history reads.
-- Read-only Windows event/log/uptime diagnostics.
-- Site-level correlation across managed devices.
-- Internal Autotask documentation.
-- Ticket completion for isolated, verified-healthy events when policy permits.
-- Escalation/routing for recurring or higher-risk cases.
+- Windows VM guests for independent health assessment.
+- Autotask ticket/recent-ticket reads and internal documentation.
+- DRMM endpoint, alert, history, audit, and job reads.
+- Governed read-only PowerShell for Windows event, WHEA, storage, disk, reliability, and volume health.
+- Same-site physical-device correlation.
+- Stable site-event grouping.
+- Ticket completion for clean site-correlated incidents after verification.
+- Human-review routing for unsafe/uncertain/device-specific cases.
 
 ### Out of Scope
 - automatic reboot/shutdown;
-- firmware/BIOS changes;
-- power-cycle actions;
-- storage repair;
+- CHKDSK repair modes such as `/f` or `/r`;
+- offline disk repair;
+- formatting or partition modification;
+- firmware/BIOS/driver changes;
+- storage replacement;
 - crash-dump deletion;
-- driver changes;
 - UPS/PDU changes;
-- any other disruptive action without separate explicit approval.
+- service interruption;
+- any other disruptive action without separate explicit authority.
+
+The existing `Comprehensive Disk & Storage Diagnostic [WIN] AOT Ver 07232026` component is not standing-safe under current component governance and must not be silently promoted or substituted. The playbook uses the active governed read-only PowerShell capability for non-mutating health evidence. A future dedicated CHKDSK scan component may be reviewed separately.
 
 Preserve Central Orchestrator authority, `direct_provider_access=false`, exact requester grants, provider/client isolation, bounded retries, approval controls, and auditability.
 
@@ -56,372 +62,395 @@ Preserve Central Orchestrator authority, `direct_provider_access=false`, exact r
 
 Before substantive diagnostics:
 
-1. Resolve the exact Autotask ticket and client/site.
-2. Run the global device-association gate from `docs/operations/Jason-Autotask-Ticket-Work-Lifecycle.md`.
-3. Resolve the exact DRMM endpoint and hostname.
-4. Record the alert/event timestamp and timezone.
-5. Record current online state and current uptime.
-6. Determine whether the endpoint is a physical device or VM guest.
-7. Immediately before the first ticket-specific diagnostic action, complete the global ticket-work-start lifecycle:
+1. Resolve exact Autotask ticket, company, site, and configuration item.
+2. Resolve exact DRMM endpoint UID and hostname.
+3. Record alert/event timestamp and timezone.
+4. Determine physical vs virtual device classification.
+5. Record current online state and uptime where available.
+6. Complete the standard Jason work-start lifecycle:
    - queue **Jason**;
    - status **In Progress**;
-   - Work Type **Remote Support**;
-   - required readback verification.
-8. If identity or ownership transition fails, set `state=identification_blocked` or `state=ownership_blocked`, document, and stop before substantive diagnostics.
+   - Work Type **Remote Support** where applicable;
+   - authoritative readback verification.
+7. Fail closed on identity ambiguity or failed ownership transition.
 
 ## 5. Expected State
 
 Healthy expected state:
-- endpoint is currently online or has an explained current state;
-- no unresolved critical hardware/storage/WHEA condition is present;
-- no unresolved BSOD/crash condition remains;
-- no repeated unexpected shutdown pattern exists within policy window;
-- related DRMM jobs/patching/reboots explain the event when applicable;
-- site correlation is classified and documented;
-- monitoring has returned to healthy or the alert condition is no longer active.
+- endpoint is online or has an explained current state;
+- shutdown is classified as planned/clean, site-correlated, device-specific, or undetermined;
+- no unresolved BSOD/WHEA/storage/controller/NTFS/disk health concern exists;
+- no unexplained recurrence threshold is met;
+- site correlation is complete enough to support the classification;
+- current monitoring and endpoint health are stable;
+- final documentation and terminal readback succeed.
 
 ## 6. State Model
 
-Persisted states:
+Primary:
 
-`identified -> ownership_ready -> diagnosing -> correlating -> classifying -> verifying -> complete`
+`identified -> ownership_ready -> diagnosing -> correlating -> health_check -> classifying -> verifying -> complete`
 
-Exception/terminal states:
+Waiting:
+- `waiting_device_access`
+- `waiting_site_recovery`
+- `waiting_recheck`
+
+Human-review / exception:
 - `identification_blocked`
 - `ownership_blocked`
 - `diagnostic_blocked`
+- `device_specific`
+- `site_environmental`
+- `site_correlated_small_site`
+- `undetermined`
 - `recurring_issue`
-- `possible_site_wide_event`
 - `device_specific_risk`
+- `protected_role_review`
 - `evidence_conflict`
 - `escalated`
 
-Persist completed steps so rechecks do not repeat diagnostics unnecessarily.
+Persist completed evidence and classification fingerprints so retries/rechecks do not duplicate work.
 
 ## 7. Diagnostic Workflow
 
-### Step 1: Shutdown timeline evidence
+### Step 1 — Establish shutdown character
 
-**Purpose:** establish what Windows recorded around the incident.
-
-Collect read-only evidence around the event window, including:
-- Event ID 6008 — unexpected shutdown;
+Collect read-only Windows event evidence, including:
+- 6008 unexpected shutdown;
 - Kernel-Power 41;
-- User32 1074 — planned/user/process restart;
+- 6006 clean Event Log shutdown;
+- 1074 planned/user/process restart;
 - BugCheck 1001;
-- WHEA hardware errors;
-- disk/storage/NTFS/controller errors;
-- relevant service/application failures;
-- crash-dump presence and timestamps;
-- Windows Update/reboot activity where available.
+- WHEA;
+- storage/controller/NTFS events such as 7, 9, 11, 51, 55, 57, 98, 129, 140, 153, 154, 157;
+- Windows Update/reboot evidence where available.
 
-Do not infer root cause from Event ID 6008 alone.
+Classify:
+- `CLEAN_OR_PLANNED`
+- `ABRUPT_OR_UNCLEAN`
+- `UNDETERMINED`
 
-### Step 2: Current endpoint state
+Never infer root cause from Event 6008 or Event 41 alone.
+
+### Step 2 — Current endpoint state
 
 Collect:
 - online/offline;
-- current uptime / last boot;
-- logged-on user where relevant;
-- basic disk/storage health indicators;
-- critical current DRMM alerts.
+- uptime / last boot;
+- reboot-required state;
+- current critical DRMM alerts;
+- endpoint role / device type.
 
-### Step 3: DRMM operational correlation
+Offline devices enter `Waiting Device Access`; they do not consume an active-work slot.
 
-Check DRMM activity around the incident time for:
-- component jobs;
-- scripts;
-- scheduled reboots;
-- patch deployment/restart activity;
-- monitor transitions;
-- technician-initiated jobs;
-- other provider automation.
+### Step 3 — DRMM operational correlation
 
-If a Jason/AOT job explains the restart, classify it as planned only when timestamps and authoritative job evidence align.
+Check component jobs, scripts, patch/reboot activity, monitor transitions, technician jobs, and other automation near the incident.
 
-### Step 4: Recent-ticket / recurrence check
+A restart is considered planned only when authoritative job/event timestamps align.
 
-Search recent related Autotask tickets with a default **30-day lookback** for:
-- same device;
-- same user when relevant;
-- same site;
-- same or closely related shutdown/crash symptom.
+### Step 4 — Recurrence check
 
-Document matching ticket numbers, dates, symptoms, and prior resolutions.
+Search a 30-day default window for related shutdown/crash incidents on the same endpoint.
 
-If the same device has **2 or more unexpected shutdown incidents within 30 days**, classify `recurring_issue` and require technician attention.
+Recurrence becomes device-specific risk when **2 or more unexplained independent incidents** occur within 30 days.
 
-Prior resolutions are evidence only and must not be blindly repeated.
+Events belonging to the same verified site/environmental incident do not count as independent recurring device failures.
 
-### Step 5: Site-wide correlation
+### Step 5 — Site/device correlation
 
-Check other managed devices at the same client site for unexpected shutdowns in an initial incident window of approximately **±15 minutes**.
+Use an initial **±15 minute** incident window.
 
-For threshold purposes:
-- count only separate **physical devices**;
-- VM guests do **not** count toward establishing the site-wide threshold;
-- a physical hypervisor host and another physical endpoint may count separately when they are distinct managed devices.
+Count only distinct physical devices. VM guests do not establish the site threshold.
 
-If **2 or more separate physical devices** at the same site show unexpected shutdown evidence within the incident window, classify/flag:
+Record:
+- affected physical devices;
+- active physical devices at the site;
+- physical peers checked;
+- ambiguous peers;
+- affected/active ratio.
 
-`Possible Site-Wide Event`
+Classification:
+- **SITE_ENVIRONMENTAL** — at least 3 physical devices at the site show correlated unexpected shutdown evidence in the window.
+- **SITE_CORRELATED_SMALL_SITE** — exactly 2 affected physical devices and they represent all known active physical devices at the small site, with no ambiguity.
+- **DEVICE_SPECIFIC** — exactly 1 affected physical device and no unresolved peer ambiguity.
+- **UNDETERMINED** — evidence is insufficient, peers are ambiguous/unreadable, or correlation cannot be proven.
 
-### Step 6: Independent per-device risk check
+A stable site-event ID is generated from site identity plus the incident-time bucket so separate tickets from the same event converge on one operational event.
 
-Even when a site-wide event is detected, evaluate each affected device independently for:
-- prior unexpected shutdowns;
-- BSOD/bugcheck evidence;
-- WHEA errors;
-- storage/controller/NTFS errors;
-- hardware warnings;
-- related open/recent tickets;
-- abnormal uptime/restart patterns.
+### Step 6 — Independent per-device storage and hardware check
 
-Never close or downgrade an individual device issue solely because a site-wide event exists.
+Run governed read-only PowerShell for:
+- `Get-PhysicalDisk` health/operational state;
+- storage reliability counters;
+- `Get-Volume` filesystem/volume health;
+- WHEA history;
+- storage/controller/NTFS event history.
+
+This check runs even when the shutdown is clearly site/environmental.
+
+Do not treat a site event as proof that every device is healthy.
+
+### Step 7 — Stability and role check
+
+Critical/protected roles such as server, domain controller, Hyper-V/physical host, database server, or backup repository require Human Review in this version even when site correlation is strong.
+
+Workstations may proceed toward site-event closure only when all independent health evidence is clean.
 
 ## 8. Decision Gates
 
 ### Gate 1 — Exact ticket/device identity proven?
-- No -> `identification_blocked`, document and escalate.
+- No -> block/escalate.
 - Yes -> continue.
 
-### Gate 2 — Ticket ownership transition verified?
-- No -> `ownership_blocked`, stop before diagnostics.
+### Gate 2 — Work-start transition verified?
+- No -> stop before diagnostics.
 - Yes -> continue.
 
-### Gate 3 — Planned restart authoritatively explained?
-- Yes -> classify planned restart and verify no independent risk.
+### Gate 3 — Evidence collection complete?
+- No -> Human Review.
+- Yes -> continue.
+
+### Gate 4 — Site classification?
+- `SITE_ENVIRONMENTAL` -> independent device-risk check.
+- `SITE_CORRELATED_SMALL_SITE` -> independent device-risk check.
+- `DEVICE_SPECIFIC` -> deeper device-specific investigation / Human Review.
+- `UNDETERMINED` -> Human Review.
+
+### Gate 5 — Independent device risk?
+Risk includes:
+- BSOD/BugCheck;
+- WHEA;
+- storage/controller/NTFS errors;
+- physical disk/volume health warnings;
+- reliability read/write errors;
+- unexplained recurrence.
+
+If yes -> Human Review regardless of site classification.
+
+### Gate 6 — Protected/critical role?
+- Yes -> Human Review.
 - No -> continue.
 
-### Gate 4 — BSOD/crash evidence?
-- Yes -> classify crash/BSOD and escalate unless an approved diagnostic-only path fully explains and verifies health.
-- No -> continue.
-
-### Gate 5 — Hardware/storage/WHEA evidence?
-- Yes -> classify device-specific risk and escalate.
-- No -> continue.
-
-### Gate 6 — Recurrence threshold met?
-- Yes -> `recurring_issue`; escalate.
-- No -> continue.
-
-### Gate 7 — Site-wide threshold met?
-- Yes -> flag `possible_site_wide_event`, then still complete independent device assessment.
-- No -> continue.
-
-### Gate 8 — Isolated event with current healthy evidence?
-- Yes -> verification/resolution path.
-- No/uncertain -> evidence-conflict/escalation path.
+### Gate 7 — Clean site-correlated workstation?
+If site classification is `SITE_ENVIRONMENTAL` or `SITE_CORRELATED_SMALL_SITE`, all health evidence is complete/clean, endpoint is stable, and no independent risk exists -> verified closure path.
 
 ## 9. Remediation
 
-Initial version is diagnostic/documentation only.
-
-Allowed modifying actions:
+### Autonomous permitted behavior
+- governed reads;
+- governed read-only endpoint PowerShell;
 - internal Autotask notes;
-- ticket queue/status changes under the accepted global lifecycle;
-- ticket completion only for isolated, verified-healthy events where no independent risk remains.
+- standard queue/status transitions;
+- ticket completion only for a clean verified site-correlated workstation branch.
 
-No automatic disruptive repair is authorized by this playbook.
+### Human-review / approval-bound behavior
+- device-specific shutdown root-cause work;
+- filesystem repair;
+- CHKDSK repair/offline scan;
+- storage repair/replacement;
+- reboot/shutdown;
+- driver/firmware changes;
+- any service interruption.
+
+No playbook branch self-authorizes repair.
 
 ## 10. Retry Policy
 
-- Do not redispatch the same read-only diagnostic merely because output-read failed; retry the read/output operation.
-- Maximum one normal diagnostic collection pass per incident unless new evidence justifies a bounded additional read.
-- Provider/read failures may receive bounded retry under existing Jason policy.
-- No endless polling or remediation loops.
+- Maximum one normal evidence collection pass per incident.
+- Retry read/output retrieval rather than redispatching diagnostics when only output retrieval failed.
+- Use bounded provider-read retries under common runtime policy.
+- No endless polling.
+- No duplicate site-event creation for the same site/time bucket.
 
 ## 11. Periodic Rechecks
 
-Use a recheck when:
-- the device is temporarily offline;
-- current health cannot yet be verified;
-- site devices are still recovering after a suspected power/network event;
-- monitoring has not returned to healthy.
+Use rechecks when:
+- target is offline;
+- site devices are recovering;
+- monitor state has not stabilized;
+- current health cannot yet be verified.
 
-Default initial operational target: recheck every **10 minutes** for active offline/site-recovery cases when the runtime scheduler supports it.
+Initial target cadence: every 10 minutes where runtime scheduling supports it.
 
-Stop on:
-- verified recovery;
-- ticket closure;
-- escalation;
-- maximum waiting threshold;
-- stale/retired asset determination.
-
-Do not create duplicate scheduled rechecks for the same ticket/playbook generation.
+Stop on verified recovery, closure, escalation, stale threshold, or retired/replaced asset classification.
 
 ## 12. Aging / Stale Condition
 
-Escalate rather than wait indefinitely when:
-- endpoint remains offline beyond the playbook's active recheck window;
-- shutdown evidence is too old or incomplete to classify reliably;
-- device identity becomes stale/duplicate/replaced;
-- repeated events continue;
-- provider history is incomplete or contradictory.
+Escalate when:
+- endpoint remains unavailable beyond the active recheck window;
+- incident evidence is too old to classify reliably;
+- device identity is stale/duplicate/replaced;
+- required same-site evidence is unavailable;
+- repeated unexplained incidents continue;
+- provider evidence conflicts.
 
 ## 13. Dependency Handling
 
-Required dependencies may include:
-- Autotask ticket read/search/update/note capabilities;
-- DRMM endpoint/alert/job/history reads;
-- approved read-only Windows event diagnostic component/command;
+Required dependencies:
+- Autotask ticket/configuration read/search/update/note;
+- DRMM endpoint/search/read/history/audit;
+- active governed `endpoint.powershell.read`;
 - persisted playbook state;
-- scheduled recheck support.
+- scheduled recheck support where used.
 
-If scheduled rechecks are unavailable, document the limitation and hand off rather than pretending continuous monitoring exists.
+Missing capabilities are explicit blockers. Do not fall back to generic shell/provider access.
 
 ## 14. Documentation Requirements
 
-Every meaningful check must be written as an internal Autotask note.
-
-Suggested titles:
+Suggested note classes:
 - `Jason - Unexpected Shutdown - Asset Validation`
 - `Jason - Unexpected Shutdown - Diagnostic`
 - `Jason - Unexpected Shutdown - Correlation`
+- `Jason - Unexpected Shutdown - Device Specific`
 - `Jason - Unexpected Shutdown - Recheck`
 - `Jason - Unexpected Shutdown - Verification`
-- `Jason - Unexpected Shutdown - Escalation`
+- `Jason - Unexpected Shutdown - Human Review`
 - `Jason - Unexpected Shutdown - Resolution`
 
 Include:
-- what was checked and why;
-- exact read/command/component;
-- target and timestamp;
-- result;
-- job/correlation ID where available;
-- sanitized StdOut/StdErr summary;
-- recurrence matches;
-- site-correlation result;
-- classification;
-- next step.
+- incident timestamp;
+- shutdown character;
+- site classification;
+- affected and active physical-device counts;
+- site-event ID;
+- VM exclusion statement;
+- recurrence result;
+- WHEA/storage/disk/volume/reliability findings;
+- protected-role status;
+- independent-device-risk result;
+- what changed;
+- final disposition.
 
 Never record secrets.
 
 ## 15. Failure Handling
 
-Document and stop/escalate for:
-- ambiguous ticket/device identity;
+Fail closed for:
+- ambiguous identity;
 - failed ownership transition;
-- provider read failure;
-- missing event evidence;
-- ambiguous physical-vs-VM classification affecting threshold logic;
-- contradictory shutdown evidence;
-- job/output failure;
-- unavailable required capability.
+- unavailable/malformed alert history;
+- incomplete same-site evidence;
+- failed read-only PowerShell health collection;
+- physical/virtual ambiguity affecting classification;
+- conflicting evidence;
+- missing required capability.
 
-Failed checks must never be silently treated as healthy evidence.
+A failed diagnostic is not healthy evidence.
 
 ## 16. Escalation Criteria
 
-Escalate when any of the following applies:
-- 2+ unexpected shutdown incidents on the same device within 30 days;
-- BSOD/bugcheck evidence;
-- WHEA/hardware/storage/controller/NTFS risk;
+Human Review when any of the following applies:
+- `DEVICE_SPECIFIC`;
+- `UNDETERMINED`;
+- protected/critical role;
+- 2+ unexplained independent shutdowns in 30 days;
+- BSOD/BugCheck;
+- WHEA;
+- storage/controller/NTFS risk;
+- physical disk/volume health warning;
+- reliability read/write errors;
 - evidence conflict;
-- repeated current instability;
-- endpoint identity cannot be proven;
-- required diagnostics are unavailable;
-- site-wide event exists and the individual device has independent risk;
-- disruptive remediation would be required;
-- current health cannot be authoritatively verified.
+- current instability;
+- disruptive/repair action required.
 
 ## 17. Verification
 
-For an isolated-event resolution, verify:
-- exact endpoint/ticket association;
-- current endpoint state is healthy enough for closure;
+Before site-correlated closure verify:
+- exact endpoint/ticket identity;
+- current endpoint online/stable;
+- site classification proven;
+- complete read-only health evidence;
 - no unresolved BSOD/WHEA/storage risk;
-- recurrence threshold not met;
-- site correlation completed;
-- no independent device-specific condition remains;
-- monitoring/alert state is cleared or otherwise explained;
-- all documentation succeeded.
+- no unexplained independent recurrence;
+- role is eligible for automatic closure;
+- monitoring/alert state is cleared or explained;
+- final note exists;
+- Autotask terminal status write and independent readback succeed.
 
-A command returning success is not sufficient verification.
+A command returning success is not incident resolution.
 
 ## 18. Completion Criteria
 
-An isolated event may complete only when:
-1. identity and ticket association are correct;
-2. global ticket ownership lifecycle succeeded;
-3. timeline diagnostics completed;
-4. 30-day recurrence search completed;
-5. site-wide correlation completed;
-6. independent device-risk evaluation completed;
-7. no unresolved higher-risk condition remains;
-8. current healthy-state verification exists;
-9. final resolution note is present.
+Automatic completion is allowed only for:
+- `SITE_ENVIRONMENTAL` or `SITE_CORRELATED_SMALL_SITE`;
+- eligible workstation;
+- complete clean device health evidence;
+- no independent device risk;
+- successful final documentation;
+- terminal ticket-state readback.
 
-Recurring/site-wide/device-specific-risk cases remain open or are handed off/escalated according to the accepted ticket lifecycle.
+Device-specific, ambiguous, protected-role, or risk-bearing cases remain open and are handed to Help Desk I / Human Review.
 
 ## 19. Final Resolution Note
 
-Summarize:
-- original shutdown timestamp;
-- device/client/site;
-- Windows/DRMM evidence;
-- recurrence result;
-- site-correlation result;
-- physical-device threshold count;
-- independent device-risk findings;
-- classification;
-- current health verification;
-- final disposition.
+Example:
+
+`Unexpected shutdown correlated to site event <site-event-id>. 6 of 8 active physical devices showed matching shutdown evidence within ±15 minutes. This endpoint passed independent post-event checks: no WHEA/storage/controller/NTFS finding, physical disk and volume health normal, no reliability read/write errors, and no unexplained independent recurrence. No repair or reboot was performed. Ticket completed after terminal readback verification.`
 
 ## 20. Required Capabilities
 
-Narrow required capabilities:
-- Autotask ticket read/search;
-- Autotask configuration read/search;
+- Autotask ticket/configuration read/search;
 - Autotask internal note create;
-- Autotask ticket work-start/handoff/update;
-- DRMM endpoint search/read;
+- Autotask ticket work-start/handoff/update/complete;
+- DRMM endpoint search/read/audit;
 - DRMM alert/history reads;
-- DRMM component/job/output reads for approved diagnostics;
+- governed `endpoint.powershell.read`;
 - persisted playbook state;
-- scheduled recheck support when used.
+- scheduled recheck support.
 
-No new disruptive capability is required.
+No disruptive capability is required for the autonomous closure branch.
 
 ## 21. Acceptance Test
 
-Controlled initial target:
-- endpoint: **AOT-50282**
-- event: **September 17, 2026, approximately 9:19:01 AM**
-- associated Autotask ticket/alert from that incident.
+Acceptance matrix must prove:
 
-Prove:
-1. exact ticket and device association;
-2. global ticket-work-start gate before substantive diagnostics;
-3. shutdown timeline evidence collection;
-4. 30-day related-ticket recurrence search;
-5. ±15-minute same-site physical-device correlation;
-6. VM guests excluded from threshold count;
-7. independent per-device risk evaluation;
-8. documentation notes;
-9. classification;
-10. current-health verification;
-11. correct completion or escalation disposition;
-12. no disruptive remediation.
+1. one affected workstation at a healthy multi-device site -> `DEVICE_SPECIFIC` and Human Review;
+2. six of eight physical devices affected within ±15 minutes -> `SITE_ENVIRONMENTAL`;
+3. two of two physical devices at a small site -> `SITE_CORRELATED_SMALL_SITE`;
+4. VMs do not count toward physical threshold;
+5. ambiguous/unreadable peers -> `UNDETERMINED`;
+6. site event + clean workstation health -> completion;
+7. site event + Event ID 7/WHEA/reliability/volume-health risk -> Human Review;
+8. protected server role -> Human Review;
+9. offline endpoint -> waiting-device state;
+10. no CHKDSK repair/reboot/storage mutation occurs;
+11. terminal completion is independently read back;
+12. site-event IDs remain stable for tickets in the same incident bucket.
 
-Live acceptance must not be executed until Jason runtime/provider access is restored.
+Controlled historical cases may be used for evidence-only acceptance. Do not intentionally cause an abrupt shutdown.
 
 ## 22. Section Goal Closure
 
-Close only after:
-- implementation is committed;
-- controlled acceptance succeeds end-to-end;
-- limitations/TODOs are documented;
+Close implementation work only after:
+- source change is committed;
+- tests pass;
+- PR review/CI passes;
+- exact 1.1.0 durable autonomy approval is recorded;
+- production deployment is confirmed;
+- one controlled live or historical acceptance proves site correlation and disk-health evidence;
 - Grafana/Project Jason status is updated;
-- the issue's recurrence/site-correlation rules are proven in acceptance evidence.
+- any CHKDSK-scan enhancement remains documented as a separate governed capability item.
 
 ## 23. Autonomous Execution Eligibility
 
-`autonomous_allowed: diagnostic_only`
+Target autonomy:
 
-Approval owner: person-al.  
-Approval date: 2026-09-26.  
-Approved scope: exact `unexpected_shutdown@1.0.0` diagnostic/correlation branch using governed reads plus internal ticket note/work-start updates. Automatic completion remains gated until isolated-event live acceptance succeeds.  
-Material changes invalidate this approval until re-reviewed.
+`autonomous_allowed: site_environmental_clean_closure`
 
-Material changes invalidate any future autonomous approval until re-reviewed.
+Owner decision: approved in conversation on 2026-09-29 for implementation of the described site-vs-device correlation, post-shutdown disk-health checks, and safe clean-site closure behavior.
+
+The approval does **not** authorize:
+- generic shell access;
+- CHKDSK repair;
+- storage repair;
+- reboot/shutdown;
+- firmware/driver changes;
+- device-specific automatic closure.
+
+Production authority still requires a durable exact `unexpected_shutdown@1.1.0` promotion record for:
+- `service.ticket.note.create`
+- `service.ticket.update`
+
+Any later material change invalidates that exact-version promotion until re-reviewed.
