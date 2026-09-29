@@ -77,6 +77,41 @@ class PrBranchReconcilerTests(unittest.TestCase):
             )
         )
 
+    def test_reconcile_waits_until_pr_head_reflects_merge_commit(self):
+        class FakeApi:
+            repository = "al-teamaot-com/jason"
+
+            def __init__(self):
+                self.pull_reads = 0
+
+            def request(self, path, *, method="GET", payload=None):
+                if path == "/merges":
+                    self.assert_merge_payload = payload
+                    return {"sha": "merged-sha"}
+                if path == "/pulls/10":
+                    self.pull_reads += 1
+                    sha = "old-sha" if self.pull_reads == 1 else "merged-sha"
+                    return pr_fixture(
+                        head={
+                            "ref": "feature/example",
+                            "sha": sha,
+                            "repo": {"full_name": "al-teamaot-com/jason"},
+                        }
+                    )
+                raise AssertionError(f"unexpected API request: {method} {path}")
+
+        api = FakeApi()
+        pr = pr_fixture(
+            head={
+                "ref": "feature/example",
+                "sha": "old-sha",
+                "repo": {"full_name": "al-teamaot-com/jason"},
+            }
+        )
+        reconciled = reconciler.reconcile_branch(api, pr, "main-sha")
+        self.assertEqual(reconciled["head"]["sha"], "merged-sha")
+        self.assertEqual(api.pull_reads, 2)
+
     def test_latest_check_run_wins(self):
         runs = [
             {"id": 1, "name": "runtime-service", "status": "completed", "conclusion": "failure"},
