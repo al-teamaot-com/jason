@@ -3,11 +3,20 @@ from __future__ import annotations
 import pytest
 
 from jason_runtime.autotask_client_notification import (
+    AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
     AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
     AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID,
     AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
     AutotaskClientNotificationScopeError,
     validate_client_notification_test_scope,
+    validate_gromelski_vulscan_scope,
+)
+from jason_runtime.vulscan_client_policy import (
+    GROMELSKI_COMPANY_ID,
+    GROMELSKI_PRIMARY_CONTACT_ID,
+    VULSCAN_CLIENT_NOTE_BODY,
+    VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    VULSCAN_CLIENT_NOTE_TITLE,
 )
 
 
@@ -15,6 +24,13 @@ def _enable(monkeypatch):
     monkeypatch.setenv(
         AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
         AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+    )
+
+
+def _enable_gromelski(monkeypatch):
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
     )
 
 
@@ -72,6 +88,65 @@ def test_test_mode_rejects_when_profile_is_not_enabled(monkeypatch):
         )
 
 
+def test_gromelski_scope_accepts_only_primary_contact_and_exact_template(monkeypatch):
+    _enable_gromelski(monkeypatch)
+    result = validate_gromelski_vulscan_scope(
+        ticket_company_id=GROMELSKI_COMPANY_ID,
+        contact_id=GROMELSKI_PRIMARY_CONTACT_ID,
+        contact_company_id=GROMELSKI_COMPANY_ID,
+        contact_email="chris.benton@e-gai.com",
+        primary_contact=True,
+        receives_email_notifications=True,
+        note_title=VULSCAN_CLIENT_NOTE_TITLE,
+        note_body=VULSCAN_CLIENT_NOTE_BODY,
+        template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    )
+    assert result.ticket_company_id == 597
+    assert result.contact_company_id == 597
+    assert result.contact_email == "chris.benton@e-gai.com"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    (
+        ("ticket_company_id", 1158, "TICKET_COMPANY_NOT_GROMELSKI"),
+        ("contact_id", 1, "CONTACT_NOT_GROMELSKI_PRIMARY"),
+        ("contact_company_id", 1158, "CONTACT_COMPANY_NOT_GROMELSKI"),
+        ("contact_email", "other@e-gai.com", "CONTACT_EMAIL_MISMATCH"),
+        ("primary_contact", False, "CONTACT_NOT_MARKED_PRIMARY"),
+        (
+            "receives_email_notifications",
+            False,
+            "CONTACT_EMAIL_NOTIFICATIONS_DISABLED",
+        ),
+        ("note_title", "Different", "VULSCAN_TITLE_MISMATCH"),
+        ("note_body", "Different", "VULSCAN_BODY_MISMATCH"),
+        ("template_id", "different-template", "VULSCAN_TEMPLATE_ID_MISMATCH"),
+    ),
+)
+def test_gromelski_scope_fails_closed_on_scope_or_template_drift(
+    monkeypatch,
+    field,
+    value,
+    error,
+):
+    _enable_gromelski(monkeypatch)
+    arguments = {
+        "ticket_company_id": GROMELSKI_COMPANY_ID,
+        "contact_id": GROMELSKI_PRIMARY_CONTACT_ID,
+        "contact_company_id": GROMELSKI_COMPANY_ID,
+        "contact_email": "chris.benton@e-gai.com",
+        "primary_contact": True,
+        "receives_email_notifications": True,
+        "note_title": VULSCAN_CLIENT_NOTE_TITLE,
+        "note_body": VULSCAN_CLIENT_NOTE_BODY,
+        "template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    }
+    arguments[field] = value
+    with pytest.raises(AutotaskClientNotificationScopeError, match=error):
+        validate_gromelski_vulscan_scope(**arguments)
+
+
 def test_exact_profile_activates_only_client_notification(monkeypatch):
     from datetime import datetime, timezone
     from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
@@ -83,7 +158,7 @@ def test_exact_profile_activates_only_client_notification(monkeypatch):
 
     monkeypatch.setenv(
         AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
-        AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+        AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
     )
     capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
     providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
