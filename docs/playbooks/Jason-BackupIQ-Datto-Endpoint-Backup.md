@@ -209,6 +209,8 @@ While waiting_device, recheck at least hourly unless ticket policy specifies a d
 
 Unchanged rechecks update persisted state only and do not create duplicate Autotask notes.
 
+Technician-triggered, autonomous, resumed, and scheduled executions use the same semantic BackupIQ note classes. A second execution reaching the same classification with materially equivalent evidence must not write a second diagnostic note merely because its actor/origin or title wording differs.
+
 When the device becomes online:
 - document observation time
 - begin a continuous two-hour online qualification window
