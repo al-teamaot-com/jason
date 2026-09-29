@@ -691,10 +691,18 @@ class DattoRmmComponentExecutionConnector:
             )
 
         pilot = self._pilot
+        playbook_scoped_component = (
+            None
+            if pilot is not None
+            else _idle_log_off_playbook_scoped_component(request)
+        )
         autonomous_scope = (
             pilot is None
             and self._autonomy_enabled
-            and bool(self._autonomy_components)
+            and (
+                bool(self._autonomy_components)
+                or playbook_scoped_component is not None
+            )
         )
         if pilot is None and not autonomous_scope:
             raise PermissionError("DATTO_COMPONENT_EXECUTION_SCOPE_DISABLED")
@@ -735,11 +743,6 @@ class DattoRmmComponentExecutionConnector:
         requested_component_name = str(
             request.arguments.get("component_name") or ""
         ).strip()
-        playbook_scoped_component = (
-            None
-            if pilot is not None
-            else _idle_log_off_playbook_scoped_component(request)
-        )
         playbook_scoped_authorized = playbook_scoped_component is not None
         selected_component = (
             playbook_scoped_component
