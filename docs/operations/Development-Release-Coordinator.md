@@ -65,6 +65,21 @@ The board shows recently active PRs and summarizes older open PRs rather than al
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 
+## Autonomous Support List
+
+Approved open `SUPPORT-*` defects are an owner-authorized break/fix work queue, not merely advisory recommendations. When `support_autonomy.enabled=true`, Jason must reconcile the list continuously and may carry an eligible defect through diagnosis, bounded implementation, regression testing, repair PR creation, CI correction, J-CHANGE-002 eligibility, governed autonomous deployment, production acceptance, documentation, and closure without waiting for another owner `proceed` message.
+
+The native implementation boundary is split deliberately:
+
+- the Jason runtime performs bounded structured repair reasoning and has no shell, GitHub credential, or deployment authority;
+- the rootless host support-repair worker owns isolated worktree/GitHub mechanics but has no model credential and may apply only exact-text edits that pass deterministic J-CHANGE-002 path, size, regression-test, and merge checks;
+- the existing `deployment.repair.apply` capability and autonomous-repair host runner remain the only autonomous production deployment lane;
+- support closure requires the item's explicit production acceptance criteria. CI success, merge, deployment, or generic health alone do not prove resolution.
+
+A support item stops automatically only for a genuine governance/capability blocker: constitutional change, broader authority/permission, secret exposure, provider bypass, client-scope expansion, unapproved disruptive behavior, ambiguous evidence, denied repair path, bounded retry exhaustion, or missing acceptance evidence. A blocked item does not consume an active implementation slot; Jason continues other independent support items within the configured active-work limit.
+
+The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
+
 ## Production boundary
 
 Production remains governed by J-CHANGE-001 and the existing J-900/J-901 release pipeline.

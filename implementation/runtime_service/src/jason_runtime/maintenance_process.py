@@ -11,6 +11,7 @@ def autonomy_maintenance_enabled(settings: RuntimeSettings) -> bool:
         settings.autonomy_worker_enabled
         or settings.autonomy_shadow_enabled
         or settings.autonomy_review_enabled
+        or settings.support_repair_autonomy_enabled
     )
 
 
@@ -22,6 +23,7 @@ def http_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
         autonomy_worker_enabled=False,
         autonomy_shadow_enabled=False,
         autonomy_review_enabled=False,
+        support_repair_autonomy_enabled=False,
     )
 
 

@@ -32,5 +32,21 @@
       "execution_blocker": "none"
     }
   },
-  "active_display_days": 3
+  "active_display_days": 3,
+  "support_autonomy": {
+    "enabled": true,
+    "owner_approved": true,
+    "reconcile_interval_minutes": 5,
+    "max_active_items": 2,
+    "auto_claim": true,
+    "auto_continue_existing_repair_pr": true,
+    "auto_fix_repair_owned_ci_failures": true,
+    "require_production_acceptance_before_close": true,
+    "continue_other_items_when_one_blocked": true,
+    "native_repository_implementation_worker": true,
+    "reasoning_execution_separation": "runtime_reasoning_plus_bounded_host_worker",
+    "host_worker_has_model_credentials": false,
+    "runtime_reasoner_has_shell_or_github_credentials": false,
+    "playbook_path": "docs/playbooks/Jason-Support-List-Autonomous-Repair.md"
+  }
 }

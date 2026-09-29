@@ -345,6 +345,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         "preproduction": config.get("preproduction", {}),
         "production_policy": config.get("production", {}),
         "autonomous_repair_policy": config.get("production", {}).get("autonomous_repair", {}),
+        "support_autonomy_policy": config.get("support_autonomy", {}),
     }
 
 
@@ -428,6 +429,24 @@ def render(board: dict[str, Any]) -> str:
             )
     else:
         lines.append("- No unblocked TODO candidates were parsed.")
+
+    support_autonomy = board.get("support_autonomy_policy", {})
+    lines.extend(["", "## Support-list autonomy", ""])
+    lines.append(
+        f"- Native autonomous support repair enabled: **{'yes' if support_autonomy.get('enabled') else 'no'}**."
+    )
+    lines.append(
+        f"- Owner-approved standing support workflow: **{'yes' if support_autonomy.get('owner_approved') else 'no'}**."
+    )
+    lines.append(
+        f"- Maximum active support repairs: **{support_autonomy.get('max_active_items', 0)}**."
+    )
+    lines.append(
+        f"- Native repository implementation worker: **{'yes' if support_autonomy.get('native_repository_implementation_worker') else 'no'}**."
+    )
+    lines.append(
+        "- Closure requires explicit production acceptance evidence; merge/deploy alone never closes a support item."
+    )
 
     lines.extend(
         [
