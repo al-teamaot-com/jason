@@ -139,7 +139,7 @@ DISK_BAD_BLOCK_SCOPE = PlaybookScope(
 )
 IDLE_LOG_OFF_SCOPE = PlaybookScope(
     playbook_id="idle_log_off",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:idle_log_off",
     required_action_capabilities=(
         "service.ticket.note.create",
@@ -1601,9 +1601,13 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
+        offline_wait_scopes = {
+            BACKUPIQ_SCOPE.playbook_id,
+            IDLE_LOG_OFF_SCOPE.playbook_id,
+        }
         if (
             endpoint.get("online") is not True
-            and scope.playbook_id != BACKUPIQ_SCOPE.playbook_id
+            and scope.playbook_id not in offline_wait_scopes
         ):
             raise OperationalAutonomyError("endpoint is not currently online")
 
@@ -1879,6 +1883,44 @@ class OperationalAutonomyMaintenance:
             for token in ("server", "domain controller", "rds", "terminal server", "kiosk")
         )
 
+        if endpoint.get("online") is False:
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+            note = (
+                "STATUS\n"
+                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting for exact device access.\n\n"
+                "NEXT STEP\n"
+                "Keep the ticket in the Jason queue and resume idle_log_off_investigate automatically "
+                "when the exact DRMM endpoint is online.\n\n"
+                "KEY EVIDENCE\n"
+                f"- Device={work.hostname}\n"
+                f"- DRMM UID={work.device_uid}\n"
+                "- DRMM online state=No\n"
+                "- No setter, alert resolution, forced logoff, reboot, policy change, or generic PowerShell was attempted.\n\n"
+                "JASON STATE\n"
+                "waiting_device_access:idle_log_off_investigate"
+            )
+            self._write_note(work, note, "Jason - Idle Log Off - Waiting Device Access")
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:idle_log_off_investigate",
+                    last_reason=(
+                        "Idle Log Off diagnostics are waiting for exact endpoint access; "
+                        "Jason retains queue ownership and releases the active-work slot."
+                    ),
+                )
+            )
+            return
+
         history = self._read_data(
             "endpoint.alert.history.search", {"resource_id": work.device_uid}
         )
@@ -1944,7 +1986,7 @@ class OperationalAutonomyMaintenance:
             "resolve an alert, force a logoff, change policy, run generic PowerShell, "
             "or perform any other modifying/user-disruptive action."
         )
-        self._write_note(work, note, "Jason - Autonomous Idle Log Off Diagnostic")
+        self._write_note(work, note, "Jason - Idle Log Off - Diagnostic")
         self._persist_human_review_escalation(work, reason=reason)
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
