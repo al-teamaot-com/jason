@@ -161,11 +161,16 @@ jobs:
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          python3 tools/documentation_impact_gate.py
-          --event "$GITHUB_EVENT_PATH"
-          --repository "$GITHUB_REPOSITORY"
-          --pr-number "${{ inputs.pr_number }}"
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--event "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY")
+          if [ -n "${PR_NUMBER:-}" ]; then
+            args+=(--pr-number "$PR_NUMBER")
+          fi
+          python3 tools/documentation_impact_gate.py "${args[@]}"
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree
@@ -195,11 +200,16 @@ jobs:
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          python3 tools/change_integration_gate.py
-          --event "$GITHUB_EVENT_PATH"
-          --repository "$GITHUB_REPOSITORY"
-          --pr-number "${{ inputs.pr_number }}"
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--event "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY")
+          if [ -n "${PR_NUMBER:-}" ]; then
+            args+=(--pr-number "$PR_NUMBER")
+          fi
+          python3 tools/change_integration_gate.py "${args[@]}"
       - name: Reject committed secrets and generated Python files
         shell: bash
         run: |
