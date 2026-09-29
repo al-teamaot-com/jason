@@ -841,6 +841,8 @@ class OperationalAutonomyMaintenance:
                 ):
                     self.store.delete(ticket_id)
                     existing = None
+            if ticket_id in processed:
+                continue
             if existing is not None:
                 if existing.phase.startswith("waiting_device_access:"):
                     waiting_phase = existing.phase
@@ -965,8 +967,6 @@ class OperationalAutonomyMaintenance:
                 classifications[ticket_id] = (
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
-                continue
-            if ticket_id in processed:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
