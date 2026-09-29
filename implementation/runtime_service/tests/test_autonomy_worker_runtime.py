@@ -2166,10 +2166,10 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
                     "status": "succeeded",
                     "evidence": {"data": {"item": {
                         "id": 68,
-                        "companyID": 597,
+                        "companyID": 261,
                         "isActive": True,
                         "referenceNumber": "vul-device-1",
-                        "referenceTitle": "GAI-DT2850",
+                        "referenceTitle": "TEST-DT2850",
                     }}},
                 }
             if capability == "endpoint.device.read":
@@ -2177,7 +2177,7 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
                     "status": "succeeded",
                     "evidence": {"record": {
                         "resource_id": "vul-device-1",
-                        "hostname": "GAI-DT2850",
+                        "hostname": "TEST-DT2850",
                         "online": True,
                         "reboot_required": False,
                     }},
@@ -2197,8 +2197,17 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
     reads = VulscanReads()
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    base_candidate = vulscan_candidate()
+    generic_candidate = replace(
+        base_candidate,
+        context={
+            **base_candidate.context,
+            "title": "Vulnerability Detected by VulScan - TEST-DT2850",
+            "companyID": 261,
+        },
+    )
     worker = OperationalAutonomyMaintenance(
-        queue_source=QueueSource(vulscan_candidate()),
+        queue_source=QueueSource(generic_candidate),
         reads=reads,
         actions=actions,
         store=store,
