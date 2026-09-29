@@ -45,6 +45,45 @@ def test_changed_paths_does_not_re_shallow_repository(monkeypatch):
     assert not any("--depth=2" in call for call in calls if isinstance(call, tuple))
 
 
+def test_successful_main_runs_uses_actions_api_shape(monkeypatch):
+    calls = []
+
+    def fake_gh_json(*args):
+        calls.append(args)
+        return {
+            "workflow_runs": [
+                {
+                    "id": 123,
+                    "head_sha": "abc",
+                    "html_url": "https://example.invalid/run/123",
+                    "created_at": "2026-09-29T13:41:41Z",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.gh_json",
+        fake_gh_json,
+    )
+    from tools.documentation_source_reconciler import successful_main_runs
+
+    assert successful_main_runs() == [
+        {
+            "databaseId": 123,
+            "headSha": "abc",
+            "url": "https://example.invalid/run/123",
+            "createdAt": "2026-09-29T13:41:41Z",
+        }
+    ]
+    assert calls == [(
+        "api",
+        (
+            "repos/al-teamaot-com/jason/actions/workflows/validate.yml/runs"
+            "?branch=main&event=push&status=success&per_page=100"
+        ),
+    )]
+
+
 def test_latest_material_success_follows_main_history_not_run_order(monkeypatch):
     monkeypatch.setattr(
         "tools.documentation_source_reconciler.successful_main_runs",
