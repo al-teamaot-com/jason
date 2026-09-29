@@ -804,3 +804,152 @@ def test_autonomy_component_execution_rejects_per_run_component(monkeypatch):
 
     with pytest.raises(PermissionError, match="DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"):
         connector.prepare_governed_execution(request)
+
+
+def _idle_log_off_scoped_request(**argument_overrides):
+    arguments = {
+        "device_uid": "idle-device-1",
+        "component_uid": "acc6a240-881d-4655-9470-87f60c8e35e8",
+        "component_name": "Set Idle Log Off AOT Ver 02042026-1",
+        "variables": {},
+        "job_name": "Jason autonomous idle_log_off repair",
+    }
+    arguments.update(argument_overrides)
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-idle-logoff-scope",
+            principal_id="jason-autonomy-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="datto_rmm.component.execute",
+            mode="execute",
+            policy_ids=(
+                "autonomous-governance-v1",
+                "playbook-autonomy:idle_log_off",
+                "playbook:idle_log_off@1.1.0",
+            ),
+            principal_attributes={
+                "workload": "jason-autonomy-worker",
+                "playbook": "idle_log_off",
+            },
+        ),
+        arguments=arguments,
+    )
+
+
+def _idle_log_off_scope_connector(monkeypatch):
+    class ScopeSecrets:
+        def resolve(self, logical_secret, context):
+            return {
+                "api_url": "https://example.invalid",
+                "api_key": "client",
+                "api_secret": "secret",
+            }
+
+    class ScopeTransport:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30.0):
+            self.calls.append((method, url, json))
+            if method == "GET" and "/api/v2/device/" in url:
+                return {
+                    "uid": url.rsplit("/", 1)[-1],
+                    "deleted": False,
+                    "suspended": False,
+                }
+            raise AssertionError((method, url))
+
+    monkeypatch.setattr(
+        "jason_runtime.datto_component_execution.acquire_access_token",
+        lambda **kwargs: SimpleNamespace(token_type="Bearer", access_token="token"),
+    )
+    transport = ScopeTransport()
+    connector = DattoRmmComponentExecutionConnector(
+        secrets=ScopeSecrets(),
+        transport=transport,
+        audit=SimpleNamespace(record=lambda *args, **kwargs: None),
+        pilot=None,
+        autonomy_enabled=True,
+        autonomy_components=(),
+    )
+    return connector, transport
+
+
+def test_idle_logoff_playbook_scope_allows_exact_per_run_setter(monkeypatch):
+    value, transport = _idle_log_off_scope_connector(monkeypatch)
+
+    prepared = value.prepare_governed_execution(_idle_log_off_scoped_request())
+
+    assert prepared.resource_identifier == "idle-device-1"
+    assert prepared.payload["jobComponent"]["componentUid"] == (
+        "acc6a240-881d-4655-9470-87f60c8e35e8"
+    )
+    assert prepared.payload["jobComponent"]["variables"] == []
+    assert prepared.parameters["allowlist_name"] == "aot-approved-components"
+    assert [call[0] for call in transport.calls] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    "context_change,argument_change",
+    [
+        ({"policy_ids": ("playbook-autonomy:idle_log_off",)}, {}),
+        ({"principal_attributes": {"playbook": "other"}}, {}),
+        ({}, {"variables": {"MyIdleTimeInMin": "240"}}),
+        ({}, {"component_uid": "different-component"}),
+        ({}, {"component_name": "Different Component"}),
+    ],
+)
+def test_idle_logoff_playbook_scope_fails_closed_when_binding_changes(
+    monkeypatch,
+    context_change,
+    argument_change,
+):
+    value, transport = _idle_log_off_scope_connector(monkeypatch)
+    request = _idle_log_off_scoped_request(**argument_change)
+    if context_change:
+        request = ConnectorRequest(
+            context=ConnectorContext(
+                correlation_id=request.context.correlation_id,
+                principal_id=request.context.principal_id,
+                organization_id=request.context.organization_id,
+                client_id=request.context.client_id,
+                capability=request.context.capability,
+                mode=request.context.mode,
+                policy_ids=context_change.get(
+                    "policy_ids", request.context.policy_ids
+                ),
+                principal_attributes=context_change.get(
+                    "principal_attributes", request.context.principal_attributes
+                ),
+            ),
+            arguments=request.arguments,
+        )
+
+    with pytest.raises((PermissionError, ValueError)):
+        value.prepare_governed_execution(request)
+
+    assert transport.calls == []
+
+
+def test_idle_logoff_playbook_scope_is_not_available_to_human_principal(monkeypatch):
+    value, transport = _idle_log_off_scope_connector(monkeypatch)
+    request = _idle_log_off_scoped_request()
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id=request.context.correlation_id,
+            principal_id="person-al",
+            organization_id=request.context.organization_id,
+            client_id=request.context.client_id,
+            capability=request.context.capability,
+            mode=request.context.mode,
+            policy_ids=request.context.policy_ids,
+            principal_attributes=request.context.principal_attributes,
+        ),
+        arguments=request.arguments,
+    )
+
+    with pytest.raises((PermissionError, ValueError)):
+        value.prepare_governed_execution(request)
+
+    assert transport.calls == []

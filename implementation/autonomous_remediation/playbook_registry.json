@@ -126,7 +126,7 @@
     {
       "id": "idle_log_off",
       "name": "Jason - Windows Idle Log Off Compliance / Repair",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
@@ -136,20 +136,23 @@
           "Compliant: False"
         ]
       },
-      "review_status": "diagnostic_autonomous_setter_per_run_gated",
+      "review_status": "playbook_scoped_autonomous_setter_monitor_verified",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
-          "applicability",
-          "expected_condition",
-          "component_variables_valid",
+          "supported_windows_workstation",
+          "exact_current_idle_log_off_alert",
+          "no_monitor_plumbing_error",
+          "exact_setter_identity",
+          "built_in_defaults_only",
           "evidence_fresh",
           "governance_precheck",
           "autonomy_approved"
         ],
         "allowed_capabilities": [
+          "automation.component.execute",
           "service.ticket.note.create",
           "service.ticket.update"
         ],
