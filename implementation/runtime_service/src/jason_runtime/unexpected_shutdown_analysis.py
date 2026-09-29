@@ -82,14 +82,15 @@ def classify_site_scope(
     return "UNDETERMINED"
 
 
-def site_event_id(site: str, incident_ms: int, affected_device_ids: Sequence[str] = ()) -> str:
-    # Use a time bucket plus site identity so independently processed tickets from
-    # the same event converge on one operational event identifier. Device IDs are
-    # intentionally not part of the identity because discovery can expand later.
-    bucket = int(incident_ms) // INCIDENT_WINDOW_MS
+def site_event_id(site: str, anchor_incident_ms: int, affected_device_ids: Sequence[str] = ()) -> str:
+    # The caller supplies the earliest correlated physical-device event timestamp
+    # as the anchor. Each independently processed ticket for the same site event
+    # therefore converges on the same identity without relying on fragile wall-clock
+    # bucket boundaries. Device IDs are intentionally excluded because discovery can
+    # expand as additional endpoints report in.
     material = "|".join([
         str(site or "").strip().casefold(),
-        str(bucket),
+        str(int(anchor_incident_ms)),
     ])
     return "site-shutdown-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
