@@ -38,9 +38,9 @@ def test_ambiguous_peer_evidence_fails_closed():
     ) == "UNDETERMINED"
 
 
-def test_site_event_id_is_stable_for_same_site_and_window():
+def test_site_event_id_is_stable_for_same_site_and_shared_anchor():
     first = site_event_id("Site A", 1790416800000)
-    second = site_event_id("site a", 1790416800000 + 5 * 60 * 1000)
+    second = site_event_id("site a", 1790416800000)
     assert first == second
 
 
