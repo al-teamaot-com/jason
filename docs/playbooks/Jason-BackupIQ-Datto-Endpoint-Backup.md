@@ -6,7 +6,7 @@
 playbook:
   id: backupiq_endpoint_backup
   name: BackupIQ / Datto Endpoint Backup
-  version: 2.0.0-design
+  version: 1.1.0
   owner: AOT
   target_type: endpoint
   trigger:
@@ -31,8 +31,10 @@ playbook:
       - identify
       - classify
       - wait
-      - close_recovered
+      - recheck
+      - resume_on_online
     approval_bound_branches:
+      - close_recovered
       - reinstall_agent
       - lifecycle_mutation
       - backup_policy_change
@@ -361,7 +363,7 @@ Acceptance findings:
 - production v1 persisted this normal offline condition as terminal `escalated`, which released the slot but prevented automatic online resume;
 - technician-triggered and autonomous execution produced materially duplicate diagnostic notes because note deduplication was origin/title/body dependent.
 
-This v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Full production acceptance remains incomplete until the new waiting -> online resume behavior is deployed and observed. Recovered-alert completion and agent remediation remain separately gated.
+This v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Production deployment proved legacy offline-state migration and unchanged-note behavior. The waiting -> online resume transition is Owner-approved to execute when the exact endpoint naturally returns online, but its live transition proof remains an acceptance item. Recovered-alert completion and agent remediation remain separately gated.
 
 Integration review: PR #604 supersedes #603. Its shared-runtime overlap is VulScan-specific and does not conflict with the BackupIQ waiting/resume changes in this playbook branch.
 
@@ -379,32 +381,34 @@ Close the Section Goal after:
 
 ## 23. Autonomous Execution Eligibility
 
-Current production approval remains limited to the exact previously promoted diagnostic/classification branch until this v2 design passes controlled acceptance and receives a new owner promotion.
+### Owner-approved production scope — BackupIQ 1.1.0
 
-Proposed v2 branch model:
-- autonomous-safe candidate: identify
-- autonomous-safe candidate: classify
-- autonomous-safe candidate: waiting/recheck
-- autonomous-safe candidate: stale/recovered completion after authoritative verification and terminal readback
-- approval-bound: normal agent reinstall until controlled production acceptance proves the bounded branch
-- approval-bound: clean install/new asset creation
-- approval-bound: backup policy/retention/configuration changes
-- approval-bound: lifecycle mutation/delete/retire actions
+Approval owner: person-al  
+Approval date: 2026-09-29  
+Durable approval record: `pbauto_fec4b9bd00ba4618bff16af572455c36`  
+Playbook scope: `backupiq_endpoint_backup@1.1.0`  
+Policy: `playbook-autonomy:backupiq_endpoint_backup`
 
+Allowed action capabilities:
+- `service.ticket.note.create`
+- `service.ticket.update`
 
-Approval owner: person-al
-Approval date: 2026-09-26
-Approved scope: exact `backupiq_endpoint_backup@1.0.0` diagnostic/classification branch using governed DRMM and Backup.net/UniView reads plus internal ticket note/work-start updates.
+Approved autonomous branches:
+- exact ticket/client/device/provider identity;
+- diagnostic classification using governed DRMM and Backup.net/UniView reads;
+- normalize and retain open BackupIQ tickets in the Jason queue;
+- transition exact offline Jason-owned endpoint tickets to **Waiting Device Access**;
+- release the active-work slot while preserving Jason ownership;
+- perform unchanged waiting/recheck cycles without repeated ticket notes;
+- when the exact DRMM endpoint is proven online, transition back to **In Progress** and resume `backupiq_investigate`.
 
-The provider/API integration and client isolation are live. The autonomous branch may identify the exact DRMM/provider asset, classify offline/inactive, provider-connectivity, configuration, stale/recovered, and identity/lifecycle conditions, and document the result. It may not reinstall or clean-install the Endpoint Backup agent, retrieve or expose registration/encryption values, change backup policy/retention, delete provider assets/backups, restore data, or automatically close the ticket.
+This approval does not authorize automatic recovered-alert completion, agent installation/reinstallation, component execution, backup policy or retention changes, provider asset deletion/retirement, restore operations, or disruptive endpoint actions.
 
-The existing v1 diagnostic approval is not broadened by this document. Scheduled rechecks, recovered-alert completion, and normal agent repair must each pass the standard acceptance matrix before activation. Any material version/capability/fingerprint change requires owner re-review before the changed branch executes autonomously.
+Production evidence:
+- behavior implementation deployed from `bc2a065ffce8d753f598343b3fff186d2ae7aefb`;
+- T20260928.0082 / TUS-50822 proved exact identity, governed ticket lifecycle, offline classification, automatic migration to `waiting_device_access:backupiq_investigate`, active-slot release, and no additional note during migration;
+- live **Waiting Device Access -> In Progress -> resume** remains to be observed when an exact controlled endpoint naturally returns online.
 
-Acceptance must additionally prove:
-- all open matching tickets normalize to Jason regardless of active-slot capacity;
-- an offline endpoint can be classified without being rejected before ownership;
-- waiting releases the active slot while retaining ownership;
-- an unchanged recheck does not duplicate notes;
-- authoritative empty provider results are treated as negative evidence, not connector failure;
-- stale/recovered alerts can reach Complete only after terminal ticket-state readback;
-- unauthorized repair/configuration/lifecycle branches fail closed.
+The prior `backupiq_endpoint_backup@1.0.0` approval remains intact for rollback compatibility with the previously accepted production revision. It does not grant broader authority.
+
+Any material change to this 1.1.0 branch logic, required capabilities, policy ID, or authority boundary requires a new version and Owner review. Recovered-alert completion and remediation remain separately gated.
