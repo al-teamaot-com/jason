@@ -109,6 +109,40 @@ def is_ancestor(ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def validated_convergence_success(
+    recorded: str,
+    candidate: str,
+) -> dict[str, Any] | None:
+    """Return validated current main when two valid histories converge there.
+
+    Normal source documentation follows the latest material successful commit.
+    If the recorded source and latest material candidate are on different
+    histories that have since been merged, moving directly to the candidate
+    would look like a backward move. In that narrow case, current main is an
+    acceptable convergence revision only when:
+
+    - both revisions are ancestors of current main; and
+    - current main itself has a successful Validate Jason push run.
+
+    Otherwise reconciliation continues to fail closed.
+    """
+
+    history = first_parent_history()
+    if not history:
+        return None
+    current_main = history[0]
+    if not (
+        is_ancestor(recorded, current_main)
+        and is_ancestor(candidate, current_main)
+    ):
+        return None
+
+    for item in successful_main_runs():
+        if str(item.get("headSha") or "") == current_main:
+            return item
+    return None
+
+
 def publish_source_if_needed() -> None:
     run("git", "-C", str(REPO_ROOT), "fetch", "origin", "main")
     latest = latest_material_success()
@@ -122,11 +156,19 @@ def publish_source_if_needed() -> None:
         print("SOURCE_DOCUMENTATION_RECONCILIATION=UP_TO_DATE")
         return
     if recorded and not is_ancestor(recorded, revision):
+        convergence = validated_convergence_success(recorded, revision)
+        if convergence is None:
+            print(
+                "SOURCE_DOCUMENTATION_RECONCILIATION=REFUSED_BACKWARD "
+                f"recorded={recorded} candidate={revision}"
+            )
+            return
+        latest = convergence
+        revision = str(latest["headSha"])
         print(
-            "SOURCE_DOCUMENTATION_RECONCILIATION=REFUSED_BACKWARD "
+            "SOURCE_DOCUMENTATION_RECONCILIATION=CONVERGED "
             f"recorded={recorded} candidate={revision}"
         )
-        return
 
     script = Path(__file__).resolve().with_name("publish_documentation_reconciliation.sh")
     run(
