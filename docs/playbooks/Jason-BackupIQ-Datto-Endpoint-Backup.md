@@ -342,6 +342,27 @@ Acceptance must prove:
 
 Do not run the live API acceptance test until credentials are installed through the approved secret path.
 
+### 2026-09-29 controlled reference-runtime acceptance
+
+Production case: `T20260928.0082 / TUS-50822 / Terramar`.
+
+Proven:
+- exact open BackupIQ trigger and Jason queue ownership;
+- exact same-company Autotask CI 544;
+- CI referenceNumber exactly matched DRMM UID `56cf6985-cb5f-fc1c-813c-5782388d403f`;
+- exact Backup.net asset `GWN65TK04`;
+- governed work-start mutation associated the CI, set In Progress, and set Remote Support with one provider PATCH and verified readback;
+- DRMM and Backup.net independently reported the endpoint offline;
+- backup remained enabled;
+- no reinstall/component/configuration change was attempted;
+- the autonomous worker independently classified `inactive_or_offline_device`.
+
+Acceptance findings:
+- production v1 persisted this normal offline condition as terminal `escalated`, which released the slot but prevented automatic online resume;
+- technician-triggered and autonomous execution produced materially duplicate diagnostic notes because note deduplication was origin/title/body dependent.
+
+This v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Full production acceptance remains incomplete until the new waiting -> online resume behavior is deployed and observed. Recovered-alert completion and agent remediation remain separately gated.
+
 ## 22. Section Goal Closure
 
 Close the Section Goal after:
