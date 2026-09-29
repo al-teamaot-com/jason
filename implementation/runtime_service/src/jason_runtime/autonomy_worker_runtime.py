@@ -156,7 +156,19 @@ LOW_DISK_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+# Preserve the exact previously owner-promoted diagnostic/classification scope.
+# The v1.1 client-disposition branch is separately promotion-bound so adding
+# client communication cannot disable safe core VulScan work.
 VULSCAN_SCOPE = PlaybookScope(
+    playbook_id="vulscan_missing_patch",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:vulscan_missing_patch",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
+VULSCAN_CLIENT_DISPOSITION_SCOPE = PlaybookScope(
     playbook_id="vulscan_missing_patch",
     playbook_version="1.1.0",
     policy_id="playbook-autonomy:vulscan_missing_patch",
@@ -407,7 +419,8 @@ class SQLiteOperationalWorkStore:
             "SELECT * FROM autonomy_operational_work "
             "WHERE phase NOT IN ("
             "'complete','escalated','blocked','approval_pending',"
-            "'waiting_patch_approval','waiting_patch_window'"
+            "'waiting_patch_approval','waiting_patch_window',"
+            "'waiting_client_notification_authority'"
             ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
@@ -905,6 +918,49 @@ class OperationalAutonomyMaintenance:
             if ticket_id in processed:
                 continue
             if existing is not None:
+                if existing.phase == "waiting_client_notification_authority":
+                    if self._scope_is_promoted(VULSCAN_CLIENT_DISPOSITION_SCOPE):
+                        if len(self.store.list_open()) < self.max_active_work_items:
+                            existing = self._replace(
+                                existing,
+                                phase="vulscan_investigate",
+                                last_reason=(
+                                    "Exact VulScan client-disposition authority is active; "
+                                    "resuming preserved work."
+                                ),
+                            )
+                            self.store.put(existing)
+                            try:
+                                self._advance(existing, item.context)
+                            except Exception as exc:
+                                self._block(
+                                    existing,
+                                    "Execution failed closed after VulScan client-disposition "
+                                    "authority resume: "
+                                    f"{type(exc).__name__}: {str(exc)[:350]}",
+                                )
+                            state, reason_code = self._classify_persisted_work(ticket_id)
+                            classifications[ticket_id] = (
+                                state,
+                                reason_code,
+                                item.source_version,
+                                state == "eligible_now",
+                            )
+                        else:
+                            classifications[ticket_id] = (
+                                "waiting_dependency",
+                                "active_capacity_full",
+                                item.source_version,
+                                False,
+                            )
+                    else:
+                        classifications[ticket_id] = (
+                            "waiting_dependency",
+                            "client_notification_authority_pending",
+                            item.source_version,
+                            False,
+                        )
+                    continue
                 if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
                     interval = (
                         VULSCAN_APPROVAL_RECHECK_SECONDS
@@ -1379,6 +1435,8 @@ class OperationalAutonomyMaintenance:
             return "waiting_dependency", "patch_approval_pending"
         if current.phase == "waiting_patch_window":
             return "waiting_dependency", "patch_window_pending"
+        if current.phase == "waiting_client_notification_authority":
+            return "waiting_dependency", "client_notification_authority_pending"
         if current.phase == "blocked":
             return "governance_blocked", "worker_blocked"
         if current.phase == "complete":
@@ -2711,7 +2769,33 @@ class OperationalAutonomyMaintenance:
                 "client-specific VulScan policy requires a primary contact"
             )
 
-        scope = self._scope_for_work(work)
+        if not self._scope_is_promoted(VULSCAN_CLIENT_DISPOSITION_SCOPE):
+            self._write_note(
+                work,
+                (
+                    "STATUS: WAITING - CLIENT NOTIFICATION AUTHORITY. "
+                    "NEXT STEP: Jason will resume automatically when the exact "
+                    "VulScan v1.1.0 client-disposition scope is durably promoted. "
+                    "The patch classification is preserved. "
+                    "CHANGES MADE: No client contact change, client notification, "
+                    "or Close Pending transition was attempted."
+                ),
+                "Jason - VulScan - Waiting Client Notification Authority",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_client_notification_authority",
+                    last_reason=(
+                        "VulScan client disposition is waiting for exact v1.1.0 "
+                        "durable promotion; no client communication or Close Pending "
+                        "transition was attempted."
+                    ),
+                )
+            )
+            return True
+
+        scope = VULSCAN_CLIENT_DISPOSITION_SCOPE
         desired_contact = int(policy.primary_contact_id)
 
         if int(ticket.get("contactID") or 0) != desired_contact:
