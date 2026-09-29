@@ -2,8 +2,8 @@
 Description=Run Jason autonomous support repair reconciliation every five minutes
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
+OnActiveSec=10s
+OnUnitInactiveSec=5min
 Persistent=true
 Unit=jason-support-repair-worker.service
 
