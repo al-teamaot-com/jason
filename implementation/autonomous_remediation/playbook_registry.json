@@ -4,7 +4,7 @@
     {
       "id": "backupiq_endpoint_backup",
       "name": "Jason - BackupIQ Datto Endpoint Backup",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
@@ -13,21 +13,36 @@
           "BackupIQ"
         ]
       },
-      "review_status": "diagnostic_autonomous_remediation_and_closure_gated",
+      "review_status": "autonomous_reinstall_recovered_closure_human_review_routing_owner_approved",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
-          "expected_condition",
+          "dual_source_availability",
+          "provider_asset_exact",
           "evidence_fresh",
-          "governance_precheck"
+          "governance_precheck",
+          "autonomy_approved"
         ],
         "allowed_capabilities": [
+          "automation.component.execute",
           "service.ticket.note.create",
           "service.ticket.update"
         ],
-        "policy_id": "playbook-autonomy:backupiq_endpoint_backup"
+        "policy_id": "playbook-autonomy:backupiq_endpoint_backup",
+        "remediation": {
+          "component_name": "Datto Endpoint Backup Agent v2 [WIN]",
+          "component_uid": "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967",
+          "max_reinstalls_per_incident": 1,
+          "verification": "Backup.net online plus new successful backup after reinstall"
+        },
+        "human_review": {
+          "queue": "Help Desk I",
+          "queue_id": 29682833,
+          "status": "Human Review",
+          "status_id": 37
+        }
       }
     },
     {
