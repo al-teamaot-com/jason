@@ -426,7 +426,7 @@ Controlled historical cases may be used for evidence-only acceptance. Do not int
 Close implementation work only after:
 - source change is committed;
 - tests pass;
-- PR review/CI passes;
+- PR review/CI passes, including the repository documentation-impact declaration gate;
 - exact 1.1.0 durable autonomy approval is recorded;
 - production deployment is confirmed;
 - one controlled live or historical acceptance proves site correlation and disk-health evidence;
