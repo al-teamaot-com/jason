@@ -57,3 +57,8 @@ This list is break/fix for Project Jason. Put an item here when Jason should alr
 
 | SUPPORT-OPS-026 | P1 | Fix implemented in PR #596 — production acceptance pending | VulScan misreads patch reboot metadata as current endpoint reboot requirement | Patch-level `rebootRequired` metadata was being treated as proof of a current endpoint reboot requirement after installation. Current endpoint `reboot_required` is authoritative; patch metadata remains evidence only. GitHub issue #548 tracks the defect. | PR #596 preserves the endpoint-level reboot gate and regression coverage. Production acceptance must verify installed/no-current-reboot stale findings close without Human Review or automatic reopen. |
 | SUPPORT-OPS-028 | P1 | Fix implemented in PR #596 — production acceptance pending | Cannot reliably report Jason's currently active ticket work | Filtered Autotask ticket searches using queue/status labels could fail and there was no bounded governed persisted-work status surface. GitHub issue #585 tracks the defect. | PR #596 canonicalizes queue-name filters, resolves queue labels before Autotask query execution, and adds bounded persisted autonomy-work state to `jason_mcp_status`. Production acceptance must prove live queue/status search and current-work reporting through governed surfaces only. |
+
+
+### Integration coordination 2026-09-29
+
+PR #596 was reconciled with current `main`. Its overlapping autonomy-worker changes were reviewed against PR #602; #596 provides verified queue/status claim readback before diagnostics, while #602 carries the later BackupIQ waiting/resume runtime changes. PR #602 must be reconciled again after #596 lands.
