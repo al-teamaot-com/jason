@@ -81,6 +81,16 @@ waiting_patch_approval ->
 
 waiting_patch_window -> post_window_verification
 
+client_disposition_required ->
+- waiting_client_notification_authority
+- client_notification_verifying
+- vulscan_monitoring
+- complete
+
+waiting_client_notification_authority ->
+- client_disposition_required when the exact client-disposition branch is promoted
+- waiting_client_notification_authority while authority remains absent
+
 post_window_verification ->
 - complete_candidate
 - diagnosing_install_failure
@@ -284,6 +294,14 @@ For reboot_pending:
 For retrying_patch:
 - use bounded rechecks appropriate to Datto patch execution timing.
 
+For waiting_client_notification_authority:
+- retain Jason queue ownership and the already-proven patch classification
+- release the active-work slot
+- re-evaluate the exact VulScan client-disposition promotion on the normal worker cadence
+- do not change the ticket contact, send a client notification, or move to Close Pending before the exact client-disposition branch is promoted
+- suppress duplicate waiting notes while authority remains unchanged
+- resume automatically from preserved state when the exact promotion becomes active
+
 Suppress duplicate scheduled jobs/reboots and stop rechecks after complete/escalated/closed/stale state.
 
 ## 12. Aging / Stale Condition
@@ -428,15 +446,27 @@ Include original missing KB, patch state, Windows Update error/HRESULT if any, d
 
 ## 20. Required Capabilities
 
-- Autotask ticket read/update/note/create
+Core diagnostic/classification branch (exact existing `vulscan_missing_patch@1.0.0` promotion):
+- Autotask ticket read/update/internal-note create
 - Autotask configuration search/association
 - DRMM endpoint read/search
 - DRMM patch search
+- persisted state and scheduler/recheck support
+
+Client-disposition branch (exact `vulscan_missing_patch@1.1.0` promotion):
+- all required core ticket/update capabilities used by the disposition branch
+- `service.ticket.client.notification.create`
+- approved workflow/template registry resolution
+- Autotask ticket/contact authoritative reads
+- Autotask Notification History read/verification
+
+Separately approval-bound remediation capabilities:
 - DRMM component search/execute/job/output
 - governed read-only Windows commands when supplemental evidence is required
 - interactive Windows session check
 - governed reboot/scheduled reboot
-- persisted state and scheduler/recheck support
+
+Do not make the v1.1 client-notification capability a prerequisite for admitting the already-approved v1.0 diagnostic/classification branch.
 
 ## 21. Acceptance Test
 
@@ -481,6 +511,10 @@ Acceptance must prove:
 25. approved-pending Gromelski tickets remain in persisted monitoring state after Close Pending
 26. a more-specific site/device/user/ticket override wins over the client rule
 27. non-Gromelski tickets preserve the global VulScan disposition
+28. an exact v1.0.0 diagnostic/classification promotion remains eligible even when the v1.1.0 client-disposition branch is not promoted
+29. a Gromelski ticket that reaches client disposition without v1.1.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation
+30. activating the exact v1.1.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-approved-or-installed-v1
+31. the approved-workflow connector reconstructs canned title/body server-side; autonomous VulScan does not supply free-form client wording or an arbitrary recipient
 
 ## 22. Section Goal Closure
 
@@ -537,7 +571,9 @@ For an approved-pending patch, Close Pending is a client-facing disposition only
 
 For an already-installed stale/recovered finding, Jason may mark the internal playbook state complete only after the client communication, primary-contact association, Close Pending status, and notification-copy verification all succeed.
 
-If client-notification authority, contact association, notification-copy verification, or status readback fails, fail closed. Do not silently fall back to Complete.
+If the exact client-disposition branch has not yet received durable owner promotion, set `state=waiting_client_notification_authority`, retain Jason ownership, release the active-work slot, and make no client contact/status/communication mutation. Resume automatically when that exact promotion becomes active.
+
+After the client-disposition branch is authorized, any contact association failure, notification write failure, notification-copy verification failure, or status readback failure must fail closed. Do not silently fall back to Complete.
 
 ### Approved canned client communication
 
@@ -567,4 +603,10 @@ The autonomous branch may extract exact KB identities from the ticket, read the 
 
 It may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.
 
-Version 1.1.0 adds the Gromelski client-disposition branch. Source implementation is approved in design, but unattended production execution of the new client-facing communication capability remains fail-closed until the exact 1.1.0 capability set, canned-template fingerprint, contact/status behavior, Notification History verification, and controlled acceptance test receive the durable owner promotion required by Jason governance.
+Version 1.1.0 adds the Gromelski client-disposition branch and uses the source-controlled approved-workflow communication registry introduced by PR #629. The exact pair is `workflow_id=vulscan_missing_patch` + `template_id=vulscan-approved-or-installed-v1`; the connector reconstructs the approved title/body server-side and derives the recipient from the authoritative ticket contact.
+
+Branch-level authority is explicit:
+- **Core diagnostic/classification scope:** `vulscan_missing_patch@1.0.0`, policy `playbook-autonomy:vulscan_missing_patch`, capabilities `service.ticket.note.create` + `service.ticket.update`. This preserves the previously owner-promoted read/classify/wait lifecycle and must not be disabled merely because the client-communication branch changes.
+- **Client-disposition scope:** `vulscan_missing_patch@1.1.0`, same policy ID, capabilities `service.ticket.note.create` + `service.ticket.update` + `service.ticket.client.notification.create`. This branch requires its own exact durable owner promotion.
+
+Until the exact v1.1.0 client-disposition scope is promoted, qualifying Gromelski tickets enter `waiting_client_notification_authority`; Jason retains ownership, releases the active slot, preserves the patch classification, and performs no client communication/contact/Close Pending mutation. Once promoted, Jason resumes automatically and must still satisfy canned-template, contact/company, email-notification, ticket readback, and Notification History verification gates.
