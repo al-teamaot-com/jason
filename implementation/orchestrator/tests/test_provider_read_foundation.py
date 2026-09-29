@@ -411,6 +411,26 @@ def test_autotask_search_maps_durable_resource_identity_and_contact_fields() -> 
     ]
 
 
+def test_autotask_ticket_search_canonicalizes_queue_name_filter() -> None:
+    search = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_TICKET_SEARCH,
+            {
+                "filters": {"queueName": "Jason"},
+                "status": "In Progress",
+                "page_size": 50,
+            },
+        )["search"]
+    )
+    assert search == {
+        "MaxRecords": 50,
+        "filter": [
+            {"op": "eq", "field": "queueID", "value": "Jason"},
+            {"op": "eq", "field": "status", "value": "In Progress"},
+        ],
+    }
+
+
 def test_autotask_continuation_uses_durable_id_without_provider_url() -> None:
     continued = json.loads(
         adapt_autotask_arguments(

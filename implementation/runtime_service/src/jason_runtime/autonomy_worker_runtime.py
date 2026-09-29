@@ -1590,7 +1590,7 @@ class OperationalAutonomyMaintenance:
             return
 
         if work.phase == "claim":
-            self.actions.execute(
+            claim_output = self.actions.execute(
                 scope,
                 "service.ticket.update",
                 {
@@ -1602,6 +1602,27 @@ class OperationalAutonomyMaintenance:
                     }
                 },
             )
+            claim_data = self._action_data(claim_output)
+            verification = claim_data.get("jasonVerification")
+            verified_fields = (
+                verification.get("verifiedFields")
+                if isinstance(verification, Mapping)
+                else None
+            )
+            verified_field_set = (
+                {str(value) for value in verified_fields}
+                if isinstance(verified_fields, Sequence)
+                and not isinstance(verified_fields, (str, bytes))
+                else set()
+            )
+            if not (
+                isinstance(verification, Mapping)
+                and verification.get("readbackVerified") is True
+                and {"queueID", "status"}.issubset(verified_field_set)
+            ):
+                raise OperationalAutonomyError(
+                    "Jason queue claim readback did not verify queueID and status"
+                )
             if work.playbook_id == EDR_SCOPE.playbook_id:
                 next_phase = "health_dispatch"
             elif work.playbook_id == DNS_SCOPE.playbook_id:
