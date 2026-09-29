@@ -142,6 +142,7 @@ IDLE_LOG_OFF_SCOPE = PlaybookScope(
     playbook_version="1.1.0",
     policy_id="playbook-autonomy:idle_log_off",
     required_action_capabilities=(
+        "automation.component.execute",
         "service.ticket.note.create",
         "service.ticket.update",
     ),
@@ -360,6 +361,7 @@ class SQLiteOperationalWorkStore:
             "SELECT * FROM autonomy_operational_work "
             "WHERE phase NOT IN ('complete','escalated','blocked','approval_pending') "
             "AND phase NOT LIKE 'waiting_device_access:%' "
+            "AND phase NOT LIKE 'waiting_recheck:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
@@ -892,6 +894,41 @@ class OperationalAutonomyMaintenance:
                             False,
                         )
                     continue
+                if existing.phase.startswith("waiting_recheck:"):
+                    if len(self.store.list_open()) < self.max_active_work_items:
+                        waiting_phase = existing.phase
+                        resume_phase = waiting_phase.split(":", 1)[1]
+                        waiting_since = existing.updated_at
+                        existing = self._replace(
+                            existing,
+                            phase=resume_phase,
+                            last_reason="Scheduled recheck due; resuming preserved work.",
+                            updated_at=waiting_since,
+                        )
+                        self.store.put(existing)
+                        try:
+                            self._advance(existing, item.context)
+                        except Exception as exc:
+                            self._block(
+                                existing,
+                                "Execution failed closed after scheduled recheck resume: "
+                                f"{type(exc).__name__}: {str(exc)[:350]}",
+                            )
+                        state, reason_code = self._classify_persisted_work(ticket_id)
+                        classifications[ticket_id] = (
+                            state,
+                            reason_code,
+                            item.source_version,
+                            state == "eligible_now",
+                        )
+                    else:
+                        classifications[ticket_id] = (
+                            "waiting_recheck",
+                            "active_capacity_full",
+                            item.source_version,
+                            False,
+                        )
+                    continue
                 if existing.phase == "escalated":
                     human_review += 1
                     if existing.playbook_id == BACKUPIQ_SCOPE.playbook_id:
@@ -1225,6 +1262,8 @@ class OperationalAutonomyMaintenance:
             return "not_actionable", "already_complete"
         if current.phase.startswith("waiting_device_access:"):
             return "waiting_device_access", "endpoint_offline"
+        if current.phase.startswith("waiting_recheck:"):
+            return "waiting_recheck", "scheduled_recheck"
         return "eligible_now", "active_work"
 
     @staticmethod
