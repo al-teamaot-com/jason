@@ -3210,10 +3210,10 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
         if capability == "service.ticket.client.notification.create"
     ]
     assert len(notifications) == 1
+    assert notifications[0]["workflow_id"] == "vulscan_missing_patch"
     assert notifications[0]["template_id"] == "vulscan-approved-or-installed-v1"
-    assert "either already been installed or has been approved" in (
-        notifications[0]["payload"]["description"]
-    )
+    assert notifications[0]["payload"] == {"ticketID": 141183}
+    assert "recipient" not in notifications[0]
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
     assert len(notes) == 1
     assert "verified stale/recovered VulScan finding" in notes[0]["description"]
