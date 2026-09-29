@@ -300,7 +300,7 @@
     {
       "id": "unexpected_shutdown",
       "name": "Jason - Windows Unexpected Shutdown Site Correlation",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-Windows-Unexpected-Shutdown-Site-Correlation.md",
@@ -310,7 +310,7 @@
           "was unexpected"
         ]
       },
-      "review_status": "diagnostic_autonomous_closure_gated",
+      "review_status": "site_environmental_clean_closure_owner_approved_device_specific_human_review",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
@@ -318,6 +318,10 @@
           "identity",
           "recurrence_check",
           "site_correlation",
+          "shutdown_character",
+          "storage_health",
+          "protected_role",
+          "evidence_complete",
           "evidence_fresh",
           "governance_precheck"
         ],
@@ -325,7 +329,44 @@
           "service.ticket.note.create",
           "service.ticket.update"
         ],
-        "policy_id": "playbook-autonomy:unexpected_shutdown"
+        "policy_id": "playbook-autonomy:unexpected_shutdown",
+        "allowed_branches": [
+          "identify",
+          "classify_site_scope",
+          "collect_read_only_health",
+          "close_site_environmental_clean"
+        ],
+        "approval_bound_branches": [
+          "filesystem_repair",
+          "storage_repair",
+          "reboot",
+          "driver_or_firmware_change"
+        ],
+        "disruptive_branches": [
+          "reboot",
+          "offline_chkdsk",
+          "storage_repair"
+        ],
+        "classifications": [
+          "PLANNED_RESTART",
+          "SITE_ENVIRONMENTAL",
+          "SITE_CORRELATED_SMALL_SITE",
+          "DEVICE_SPECIFIC",
+          "UNDETERMINED"
+        ],
+        "site_correlation": {
+          "window_minutes": 15,
+          "environmental_min_physical_devices": 3,
+          "exclude_virtual_devices_from_threshold": true,
+          "site_event_id_enabled": true
+        },
+        "verification": {
+          "read_only_disk_health_required": true,
+          "protected_roles_require_human_review": true,
+          "device_specific_requires_human_review": true,
+          "site_environmental_clean_may_complete": true,
+          "repair_actions_authorized": false
+        }
       }
     },
     {
