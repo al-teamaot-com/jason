@@ -2119,6 +2119,58 @@ def test_backupiq_human_review_handoff_is_not_normalized_back_to_jason(tmp_path:
     store.close()
 
 
+
+def test_backupiq_second_reinstall_is_blocked_before_component_dispatch(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import (
+        BACKUPIQ_INSTALLER_NAME,
+        BACKUPIQ_SCOPE,
+        OperationalAutonomyError,
+    )
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=141185,
+        ticket_number="T20260925.0003",
+        title=backupiq_candidate().context["title"],
+        playbook_id=BACKUPIQ_SCOPE.playbook_id,
+        source_queue="Jason",
+        company_id=333,
+        configuration_item_id=1259,
+        device_uid="backup-device-1",
+        hostname="APD-50399",
+        phase="backupiq_reinstall_dispatch",
+        repair_attempts=1,
+    )
+
+    try:
+        worker._dispatch_component(
+            work,
+            BACKUPIQ_INSTALLER_NAME,
+            "backupiq_reinstall_wait",
+        )
+    except OperationalAutonomyError as exc:
+        assert "one per incident cycle" in str(exc)
+    else:
+        raise AssertionError("second BackupIQ reinstall did not fail closed")
+
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    store.close()
+
+
 def low_disk_candidate():
     return QueueCandidate(
         resource_id="141101",
