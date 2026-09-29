@@ -126,7 +126,7 @@
     {
       "id": "idle_log_off",
       "name": "Jason - Windows Idle Log Off Compliance / Repair",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
@@ -136,20 +136,23 @@
           "Compliant: False"
         ]
       },
-      "review_status": "diagnostic_autonomous_setter_per_run_gated",
+      "review_status": "playbook_scoped_autonomous_setter_monitor_verified",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
-          "applicability",
-          "expected_condition",
-          "component_variables_valid",
+          "supported_windows_workstation",
+          "exact_current_idle_log_off_alert",
+          "no_monitor_plumbing_error",
+          "exact_setter_identity",
+          "built_in_defaults_only",
           "evidence_fresh",
           "governance_precheck",
           "autonomy_approved"
         ],
         "allowed_capabilities": [
+          "automation.component.execute",
           "service.ticket.note.create",
           "service.ticket.update"
         ],
@@ -328,6 +331,37 @@
             "notification_history_verification_required": true
           }
         ]
+      }
+    },
+    {
+      "id": "drmm_recent_alert_reconciliation",
+      "name": "Jason - DRMM Recent Alert Reconciliation",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+      "trigger": {
+        "provider": "datto_rmm",
+        "scheduled": true,
+        "lookback_hours": 24
+      },
+      "review_status": "daily_recent_alert_verified_reconciliation",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "recent_window",
+          "identity",
+          "registered_verifier",
+          "current_state_healthy",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "endpoint.alert.resolve",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
+        "policy_id": "playbook-autonomy:drmm_recent_alert_reconciliation"
       }
     }
   ]

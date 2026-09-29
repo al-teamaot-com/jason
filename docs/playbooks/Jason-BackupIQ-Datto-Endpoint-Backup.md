@@ -1,5 +1,48 @@
 # Jason BackupIQ / Datto Endpoint Backup Playbook
 
+## Playbook Manifest
+
+```yaml
+playbook:
+  id: backupiq_endpoint_backup
+  name: BackupIQ / Datto Endpoint Backup
+  version: 1.1.0
+  owner: AOT
+  target_type: endpoint
+  trigger:
+    provider: Autotask / BackupIQ
+    match: open ticket title begins with "BackupIQ:"
+  ownership:
+    while_open: Jason
+    release_active_slot_when_waiting: true
+  retry:
+    max_remediation_attempts: 2
+  recheck:
+    enabled: true
+    cadence: 1h
+    stale_after: 10d
+  verification:
+    authoritative_source: Backup.net / UniView
+    success_condition: successful backup within expected threshold after recovery/remediation
+  completion:
+    terminal_disposition: Complete
+  autonomy:
+    allowed_branches:
+      - identify
+      - classify
+      - wait
+      - recheck
+      - resume_on_online
+    approval_bound_branches:
+      - close_recovered
+      - reinstall_agent
+      - lifecycle_mutation
+      - backup_policy_change
+    disruptive_branches: []
+```
+
+This playbook inherits the common lifecycle, work-start, identity, waiting/recheck, idempotence, documentation, retry, human-review, completion/readback, and observability behavior from `Jason-Playbook-Runtime-Automation-Contract.md`.
+
 ## 1. Section Goal
 
 Jason must determine whether a BackupIQ ticket represents an inactive endpoint, an Endpoint Backup agent connectivity problem, a disabled/misconfigured backup, a stale asset, or a genuine backup failure; perform only governed remediation supported by evidence; and verify a new successful backup before completion.
@@ -9,6 +52,12 @@ Jason must determine whether a BackupIQ ticket represents an inactive endpoint, 
 Apply when an Autotask ticket is created from BackupIQ / UniView indicating an endpoint backup has not completed within the configured threshold, including titles such as "BackupIQ: Backup for asset is not available for <client>".
 
 Confirm the ticket, client, endpoint/asset name, alert timestamp, threshold, and associated DRMM site/device before proceeding.
+
+Queue ownership invariant:
+
+`Open + BackupIQ => Jason queue`
+
+This invariant is independent of endpoint online/offline state, active-work capacity, waiting/recheck state, and whether remediation is currently possible. The global active-work limit controls concurrent execution only.
 
 ## 3. Scope and Boundaries
 
@@ -37,6 +86,8 @@ Boundary rules:
 
 If the provider asset cannot be uniquely matched to the DRMM endpoint, set state=identification_blocked, document the ambiguity, and escalate rather than guessing.
 
+Apply the global CI-association gate from the shared runtime contract before substantive diagnostics. If queue/work-start transition or authoritative readback fails, fail closed and do not continue ticket-specific diagnostics.
+
 ## 5. Expected State
 
 Healthy state requires:
@@ -55,7 +106,9 @@ classify -> waiting_device | waiting_backup_cycle | diagnosing | stale_asset_rev
 diagnosing -> remediating -> verifying -> complete
 Any state may transition to escalated.
 
-Persist ticket, DRMM device UID, UniView asset ID, classification, last provider query time, last successful backup, last online timestamp, current retry count, and next recheck time.
+Persist ticket, DRMM device UID, UniView asset ID, classification, last provider query time, last successful backup, last online timestamp, current retry count, next recheck time, last meaningful evidence fingerprint, last ticket-note fingerprint, active job/correlation ID, and terminal-disposition state.
+
+Waiting states retain Jason queue ownership and normally release the active-work slot.
 
 ## 7. Diagnostic Workflow
 
@@ -105,10 +158,15 @@ Do not equate DRMM last_logged_in_user with a live interactive session.
    classify=backup_configuration_issue. Do not reinstall solely for this condition. Document and escalate/change configuration only under appropriate authority.
 
 5. Provider asset missing:
-   classify=asset_identity_or_lifecycle_issue. Investigate renamed/reimaged/retired/replaced/duplicate endpoint before remediation.
+   - If the endpoint is active/expected to be protected: classify=unprotected_or_asset_lifecycle_issue. Treat the authoritative empty provider result as valid negative evidence, not as a connector failure. Investigate onboarding, asset placement, rename/reimage/replacement, retirement, or duplicate state before remediation.
+   - If endpoint lifecycle evidence indicates retirement/replacement/staleness: classify=asset_identity_or_lifecycle_issue.
+   - Do not reinstall solely because the provider asset is absent.
 
 6. Recent successful backup within threshold:
-   classify=stale_or_recovered_alert. Verify provider health and close ticket/alert when appropriate.
+   classify=stale_or_recovered_alert. Verify provider health and complete the ticket automatically when all common completion/readback gates pass and no contradictory evidence exists.
+
+7. Backup disabled:
+   classify=backup_configuration_issue. Configuration/policy changes remain approval-bound unless separately promoted for autonomy.
 
 ## 8. Decision Gates
 
@@ -149,7 +207,11 @@ After two failed attempts, escalate.
 
 ## 11. Periodic Rechecks
 
-While waiting_device, recheck at least hourly unless ticket policy specifies a different cadence.
+While waiting_device, recheck at least hourly unless ticket policy specifies a different cadence. The ticket remains in the Jason queue but releases its active-work slot.
+
+Unchanged rechecks update persisted state only and do not create duplicate Autotask notes.
+
+Technician-triggered, autonomous, resumed, and scheduled executions use the same semantic BackupIQ note classes. A second execution reaching the same classification with materially equivalent evidence must not write a second diagnostic note merely because its actor/origin or title wording differs.
 
 When the device becomes online:
 - document observation time
@@ -212,7 +274,9 @@ Treat API authentication failure, provider timeout, unmatched asset, contradicto
 
 ## 16. Escalation Criteria
 
-Escalate when:
+Use Human Review when a technician decision is specifically required. Escalate only for operational failure/out-of-scope conditions.
+
+Escalate or hand off when:
 - asset identity cannot be established
 - provider API remains unavailable beyond bounded retries
 - backup disabled requires policy decision
@@ -236,6 +300,8 @@ Preferred authoritative resolution evidence:
 ## 18. Completion Criteria
 
 Complete only when the endpoint/provider asset mapping is correct, classification is established, required work is documented, and provider evidence shows a successful backup within the expected window or the alert is proven stale/recovered.
+
+A successful component/job result is not resolution. Terminal Autotask disposition must be written and independently read back before state=complete.
 
 ## 19. Final Resolution Note
 
@@ -278,6 +344,31 @@ Acceptance must prove:
 
 Do not run the live API acceptance test until credentials are installed through the approved secret path.
 
+### 2026-09-29 controlled reference-runtime acceptance
+
+Production case: `T20260928.0082 / TUS-50822 / Terramar`.
+
+Proven:
+- exact open BackupIQ trigger and Jason queue ownership;
+- exact same-company Autotask CI 544;
+- CI referenceNumber exactly matched DRMM UID `56cf6985-cb5f-fc1c-813c-5782388d403f`;
+- exact Backup.net asset `GWN65TK04`;
+- governed work-start mutation associated the CI, set In Progress, and set Remote Support with one provider PATCH and verified readback;
+- DRMM and Backup.net independently reported the endpoint offline;
+- backup remained enabled;
+- no reinstall/component/configuration change was attempted;
+- the autonomous worker independently classified `inactive_or_offline_device`.
+
+Acceptance findings:
+- production v1 persisted this normal offline condition as terminal `escalated`, which released the slot but prevented automatic online resume;
+- technician-triggered and autonomous execution produced materially duplicate diagnostic notes because note deduplication was origin/title/body dependent.
+
+This v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Production deployment proved legacy offline-state migration and unchanged-note behavior. The waiting -> online resume transition is Owner-approved to execute when the exact endpoint naturally returns online, but its live transition proof remains an acceptance item. Recovered-alert completion and agent remediation remain separately gated.
+
+Integration review: PR #604 supersedes #603. Its shared-runtime overlap is VulScan-specific and does not conflict with the BackupIQ waiting/resume changes in this playbook branch.
+
+The PR integration gate is coordinated with #596, #603, and #604.
+
 ## 22. Section Goal Closure
 
 Close the Section Goal after:
@@ -290,12 +381,34 @@ Close the Section Goal after:
 
 ## 23. Autonomous Execution Eligibility
 
-autonomous_allowed: diagnostic_only
+### Owner-approved production scope — BackupIQ 1.1.0
 
-Approval owner: person-al
-Approval date: 2026-09-26
-Approved scope: exact `backupiq_endpoint_backup@1.0.0` diagnostic/classification branch using governed DRMM and Backup.net/UniView reads plus internal ticket note/work-start updates.
+Approval owner: person-al  
+Approval date: 2026-09-29  
+Durable approval record: `pbauto_fec4b9bd00ba4618bff16af572455c36`  
+Playbook scope: `backupiq_endpoint_backup@1.1.0`  
+Policy: `playbook-autonomy:backupiq_endpoint_backup`
 
-The provider/API integration and client isolation are live. The autonomous branch may identify the exact DRMM/provider asset, classify offline/inactive, provider-connectivity, configuration, stale/recovered, and identity/lifecycle conditions, and document the result. It may not reinstall or clean-install the Endpoint Backup agent, retrieve or expose registration/encryption values, change backup policy/retention, delete provider assets/backups, restore data, or automatically close the ticket.
+Allowed action capabilities:
+- `service.ticket.note.create`
+- `service.ticket.update`
 
-Remediation, scheduled rechecks, and recovered-alert completion remain gated until their individual live acceptance criteria are satisfied. Material changes invalidate this approval until re-reviewed.
+Approved autonomous branches:
+- exact ticket/client/device/provider identity;
+- diagnostic classification using governed DRMM and Backup.net/UniView reads;
+- normalize and retain open BackupIQ tickets in the Jason queue;
+- transition exact offline Jason-owned endpoint tickets to **Waiting Device Access**;
+- release the active-work slot while preserving Jason ownership;
+- perform unchanged waiting/recheck cycles without repeated ticket notes;
+- when the exact DRMM endpoint is proven online, transition back to **In Progress** and resume `backupiq_investigate`.
+
+This approval does not authorize automatic recovered-alert completion, agent installation/reinstallation, component execution, backup policy or retention changes, provider asset deletion/retirement, restore operations, or disruptive endpoint actions.
+
+Production evidence:
+- behavior implementation deployed from `bc2a065ffce8d753f598343b3fff186d2ae7aefb`;
+- T20260928.0082 / TUS-50822 proved exact identity, governed ticket lifecycle, offline classification, automatic migration to `waiting_device_access:backupiq_investigate`, active-slot release, and no additional note during migration;
+- live **Waiting Device Access -> In Progress -> resume** remains to be observed when an exact controlled endpoint naturally returns online.
+
+The prior `backupiq_endpoint_backup@1.0.0` approval remains intact for rollback compatibility with the previously accepted production revision. It does not grant broader authority.
+
+Any material change to this 1.1.0 branch logic, required capabilities, policy ID, or authority boundary requires a new version and Owner review. Recovered-alert completion and remediation remain separately gated.

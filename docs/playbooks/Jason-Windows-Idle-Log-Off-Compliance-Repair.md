@@ -1,5 +1,57 @@
 # Jason Playbook: Windows Idle Log Off Compliance / Repair
 
+## Playbook Manifest
+
+```yaml
+playbook:
+  id: idle_log_off
+  name: Windows Idle Log Off Compliance / Repair
+  version: 1.1.0
+  owner: AOT
+  target_type: endpoint
+  trigger:
+    provider: Autotask / Datto RMM
+    match: Idle Log Off compliance alert or exact Jason-owned noncompliance ticket
+  ownership:
+    while_open: Jason
+    release_active_slot_when_waiting: true
+  retry:
+    max_remediation_attempts: 1
+  recheck:
+    enabled: true
+    cadence: normal Jason queue-review cadence
+    stale_after: normal support aging threshold
+  verification:
+    authoritative_source: Datto job/output plus normal DRMM current-alert state
+    success_condition: exact setter job succeeds with no stderr and the current Idle Log Off alert clears
+  completion:
+    terminal_disposition: Complete
+  autonomy:
+    allowed_branches:
+      - identify
+      - classify
+      - wait
+      - recheck
+      - resume_on_online
+      - remediate_exact_current_noncompliance
+      - verify_monitor_clear
+      - complete_verified_ticket
+    approval_bound_branches:
+      - client_specific_override
+      - stale_alert_resolution_without_normal_clear
+    disruptive_branches:
+      - forced_logoff
+      - reboot
+```
+
+This playbook inherits common work-start, identity, waiting/recheck, active-slot, retry, documentation, verification, human-handoff, terminal-readback, and observability behavior from `Jason-Playbook-Runtime-Automation-Contract.md`.
+
+
+Implementation coordination for v1.1.0:
+- PR #610 adds VulScan-specific waiting states in the shared worker and must preserve the generic waiting/recheck behavior introduced here.
+- PR #604 changes VulScan client disposition and the shared registry and must preserve the Idle Log Off 1.1.0 registry scope.
+- Neither overlapping workstream changes Idle Log Off component authority.
+
 ## 1. Section Goal
 
 **Goal:**  
@@ -136,7 +188,7 @@ dependency_blocked
 remediation_failed
 escalated
 
-A ticket that is In Progress but waiting/parked does not count as one of the owner's two actively-worked tickets.
+A waiting Idle Log Off ticket remains owned by Jason but releases its active-work slot. Offline cases use the shared `waiting_device_access:idle_log_off_investigate` state and resume from preserved work when the exact DRMM endpoint returns online.
 
 ---
 
@@ -260,7 +312,10 @@ All gates must pass before repair/install:
 8. Use the production-validated built-in defaults unless an authoritative AOT/client requirement explicitly calls for overrides.
 9. Never pass the legacy MyFileDestination value/payload. If any override is required, validate it before dispatch.
 10. No conflicting maintenance or user-disruptive operation is in progress.
-11. Current governance permits the component execution and exact per-run technician approval is present.
+11. Exact `idle_log_off@1.1.0` playbook autonomy promotion is active and includes `automation.component.execute`.
+12. The current endpoint has exactly one open Idle Log Off alert.
+13. The exact setter is source-bound to UID `acc6a240-881d-4655-9470-87f60c8e35e8`, with built-in defaults only.
+14. No client-specific variable override, generic PowerShell, reboot, forced logoff, or other component is requested.
 
 If any gate fails, do not improvise.
 
@@ -276,9 +331,24 @@ UID: acc6a240-881d-4655-9470-87f60c8e35e8
 
 **Preconditions:** all Section 8 gates pass.
 
-**Approval classification:** modifying configuration action with future user-session impact. It does not immediately force a logoff during installation, but it intentionally enforces idle-session logoff after the configured threshold.
+**Approval classification:** playbook-scoped autonomous modifying action with future user-session impact. Installation itself does not immediately force a logoff; the installed control enforces the approved idle-session policy later.
 
-**Authority intent:** Keep this setter per-run approved. Production Component Control review on 2026-09-25 rejected standing-safe promotion with DATTO_COMPONENT_DISRUPTIVE_OR_DESTRUCTIVE_REVIEW_REQUIRED. Do not weaken that guard. Jason may execute this exact setter only when the playbook gates pass and an authorized technician explicitly approves that specific remediation.
+**Authority intent:** Keep this component globally classified `per_run` in Datto Component Control. Do **not** promote it to globally standing-safe.
+
+Autonomous execution is permitted only through the exact owner-promoted `idle_log_off@1.1.0` playbook scope, whose allowed capabilities include `automation.component.execute`. The autonomous worker converts that durable playbook promotion into a short-lived, exact execution approval through the Central Orchestrator.
+
+The autonomous remediation branch is hard-bound to:
+- one exact ticket/client/CI/device identity;
+- supported Windows workstation/laptop role;
+- exactly one current open Idle Log Off alert on that endpoint;
+- no monitor/plumbing failure evidence;
+- component name `Set Idle Log Off AOT Ver 02042026-1`;
+- component UID `acc6a240-881d-4655-9470-87f60c8e35e8`;
+- built-in defaults with `variables={}`;
+- one automatic setter attempt;
+- normal DRMM monitor-clear verification before ticket completion.
+
+The playbook promotion does not authorize this component for any other playbook, target, arguments, or ad-hoc use.
 
 **Required variable handling:**
 - production acceptance validated the 02042026-1 setter with its built-in defaults and no overrides;
@@ -308,12 +378,12 @@ If the endpoint cannot be classified because the monitoring/response component f
 
 ## 10. Retry Policy
 
-- Maximum setter attempts per ticket: 2.
+- Maximum automatic setter attempts per ticket: 1.
 - Never submit a duplicate while the prior job is active.
 - Poll the same job to terminal state.
 - Retrieve stdout and stderr.
-- Retry only when evidence indicates a transient/component execution condition that has been corrected.
-- If the same deterministic failure repeats, state = remediation_failed and escalate.
+- A provider/job failure does not authorize automatic redispatch.
+- A second attempt requires new evidence and a separately reviewed path; the baseline autonomous branch escalates.
 
 No endless loops.
 
@@ -323,11 +393,11 @@ No endless loops.
 
 When waiting:
 
-**Endpoint offline:** recheck on the normal Jason queue-review cadence.
+**Endpoint offline:** move to Waiting Device Access, retain Jason queue ownership, release the active-work slot, and recheck on the normal Jason queue-review cadence. When the exact endpoint becomes online, return to In Progress and resume `idle_log_off_investigate`.
 
-**Setter completed but monitor not yet cleared:** recheck compliance after a bounded propagation interval.
+**Setter completed but monitor not yet cleared:** enter the shared `waiting_recheck:idle_log_off_verify_monitor` state, release the active-work slot, and recheck the exact current alert during a bounded 15-minute propagation window.
 
-**Approval/config dependency:** recheck only after the dependency changes; do not continuously rerun the setter.
+**Configuration dependency:** any client-specific override or policy ambiguity exits the autonomous remediation branch. Jason does not invent values or broaden the playbook-scoped component authority.
 
 Stop rechecks when:
 - valid Compliant=True is proven;
@@ -446,17 +516,19 @@ Escalation must state symptoms, evidence, attempted actions, job IDs, current st
 
 ## 17. Verification
 
-After repair/install:
+After autonomous repair/install:
 
-1. Wait for the setter job to reach terminal success or classify provider lifecycle evidence safely if Datto leaves a stale job state.
-2. Read stdout and stderr.
-3. Perform approved read-only endpoint verification of the installed Idle Log Off mechanism; do not attempt to run the monitor as an on-demand component.
-4. Require the verified task/mechanism to match the approved baseline: AOT_IdleLogOff, SYSTEM/Highest, expected executable, and arguments 240 60 unless an authoritative override applies.
-5. Observe the monitor's next normal DRMM evaluation when available. A fresh Compliant=False after successful mechanism verification is a monitor/policy investigation, not permission to blindly rerun the setter.
-6. If the existing alert contains only stale legacy-setter failure evidence and independent healthy-state verification is complete, resolve only that exact alert through governed alert resolution and require readback.
-7. Re-read the Autotask ticket and confirm expected completion or document a ticket-status governance blocker.
+1. Wait for the exact setter job to reach a terminal provider state.
+2. Read both stdout and stderr for that exact job/component/device binding.
+3. Require terminal provider success and empty stderr. This proves action execution only; it does not prove incident resolution.
+4. Enter `waiting_recheck:idle_log_off_verify_monitor`, release the active-work slot, and observe the exact endpoint's normal DRMM current-alert state.
+5. If the Idle Log Off alert clears during the bounded 15-minute propagation window, treat that normal monitor-clear as the authoritative healthy-state evidence for the autonomous branch.
+6. If a current Idle Log Off alert remains after the propagation window, do not rerun the setter. Route to monitor/policy investigation.
+7. Complete the Autotask ticket only after the alert-clear evidence is present and terminal ticket-status readback succeeds.
 
-Setter job success alone is not incident resolution; endpoint-state verification and alert/ticket disposition are required.
+The 2026-09-25 controlled acceptance separately proved the underlying scheduled-task mechanism and 240/60 baseline. Jason currently has no dedicated native scheduled-task-detail read capability, so the autonomous v1.1 branch does not claim to perform that direct mechanism inspection on every incident. A future dedicated read capability or standing-safe diagnostic may strengthen verification without changing this completion rule.
+
+Setter job success alone is never incident resolution.
 
 ---
 
@@ -467,12 +539,12 @@ Complete the individual incident only when:
 2. applicability is proven;
 3. diagnostics distinguish real noncompliance from monitor/plumbing failure;
 4. required repair/install succeeded, or no repair was needed;
-5. authoritative healthy-state evidence exists from the normal monitor cycle or approved independent mechanism verification;
-6. exact alert is cleared/resolved with readback;
+5. authoritative healthy-state evidence exists from the normal DRMM current-alert state;
+6. the exact Idle Log Off alert is no longer open;
 7. ticket documentation is complete;
 8. any remaining policy/governance engineering item is explicitly tracked rather than hidden.
 
-The playbook's autonomy Section Goal is separate from incident completion and remains open while the setter requires per-run approval or the DRMM policy still points to the legacy setter.
+The playbook's autonomy Section Goal is separate from incident completion and remains open until v1.1.0 source tests, provider-boundary controls, Owner promotion, and controlled production acceptance are complete.
 
 ---
 
@@ -533,8 +605,8 @@ Acceptance must prove:
 6. production-validated built-in-default handling with no legacy MyFileDestination override;
 7. exactly one bounded setter execution if the endpoint is truly noncompliant;
 8. terminal job/output readback or safe stale-job classification;
-9. approved independent mechanism verification, plus normal-cycle monitor observation when available;
-10. exact alert resolution with readback;
+9. job stdout/stderr capture followed by normal current-alert monitor-clear verification;
+10. ticket completion only after monitor-clear evidence and terminal Autotask readback;
 11. Autotask documentation/completion behavior;
 12. retry/failure handling;
 13. no reboot, immediate forced logoff, or unrelated endpoint changes;
@@ -558,7 +630,7 @@ AVMAC-1096 / ticket T20260924.0043 established:
 - the Autotask ticket description historically named DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket), but on 2026-09-25 the operator verified no current DRMM policy exists under that name. The historical ticket text therefore must not be treated as proof of a current provider object or as a required manual change.
 - a fresh governed alert read confirmed no current Idle Log Off alert remained on AVMAC-1096 after resolution.
 
-The AVMAC-1096 incident is resolved and has no remaining policy-change dependency. The broader playbook remains per-run governed because the setter has future user-session impact; no additional provider change is required for this incident.
+The AVMAC-1096 incident is resolved and has no remaining policy-change dependency. At the time of that 2026-09-25 acceptance, the broader playbook remained per-run governed because the setter has future user-session impact. The v1.1.0 design intentionally preserves the component's global per-run classification while proposing a narrower playbook-scoped autonomous authority.
 
 ---
 
@@ -567,8 +639,9 @@ The AVMAC-1096 incident is resolved and has no remaining policy-change dependenc
 The Section Goal closes when:
 - this playbook is merged into Project Jason;
 - the preferred setter and built-in-default behavior are production-validated;
-- AVMAC-1096 acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout branches;
-- the approved component-control state is documented;
+- AVMAC-1096 historical acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout mechanics;
+- v1.1.0 source acceptance proves exact playbook-scoped setter execution, provider-boundary binding, waiting/recheck behavior, and monitor-clear completion;
+- the globally per-run component-control state and the narrower playbook-scoped authority are both documented;
 - historical provider-object names are not treated as current without live verification;
 - Grafana/Project Jason operational status is updated where applicable;
 - known limitations and follow-up engineering items are recorded.
@@ -580,12 +653,49 @@ Do not create or preserve a provider-policy remediation task solely from histori
 
 ## 23. Autonomous Execution Eligibility
 
-`autonomous_allowed: diagnostic_only`
+### Current production authority
 
-Approval owner: person-al.  
-Approval date: 2026-09-26.  
-Approved scope: exact `idle_log_off@1.0.0` diagnostic branch using governed endpoint and alert-history reads plus internal ticket work-start/note updates.
+The previously approved `idle_log_off@1.0.0` scope remains diagnostic-only in production until v1.1.0 completes controlled acceptance and receives exact Owner promotion.
 
-The autonomous branch may identify exact ticket/CI/device identity, classify protected/exception roles, distinguish known monitor/plumbing failures such as Invalid MyFileDestination from a genuine noncompliance signal, and document the result. It may not run the setter, independently alter Idle Log Off policy, resolve the alert, force a logoff, run generic PowerShell, reboot, or automatically complete the ticket.
+### v1.1.0 proposed playbook-scoped autonomous authority
 
-`Set Idle Log Off AOT Ver 02042026-1` remains per-run approved because it intentionally affects future user sessions and Component Control rejected standing-safe promotion. Material changes invalidate this diagnostic approval until re-reviewed.
+`idle_log_off@1.1.0` is designed for autonomous execution of the bounded normal-workstation remediation branch.
+
+Required action capabilities:
+- `automation.component.execute`
+- `service.ticket.note.create`
+- `service.ticket.update`
+
+Autonomous branches:
+- exact ticket/client/CI/device identification;
+- supported Windows workstation/laptop classification;
+- current exact Idle Log Off alert confirmation;
+- monitor/plumbing-error rejection;
+- offline Waiting Device Access and online resume;
+- exact `Set Idle Log Off AOT Ver 02042026-1` execution with built-in defaults only;
+- Datto job/status/stdout/stderr readback;
+- bounded monitor-clear waiting/recheck;
+- ticket completion only after the current Idle Log Off alert is no longer open and Autotask status readback succeeds.
+
+The Datto component itself remains globally `per_run` and is **not** standing-safe. The authority comes from the exact Owner-approved playbook/version/capability scope and is converted to an exact short-lived execution approval by the autonomous governance path.
+
+Hard stops / exclusions:
+- server, domain controller, RDS/terminal server, kiosk, or unsupported/ambiguous role;
+- endpoint offline until it returns online;
+- zero or multiple current Idle Log Off alerts;
+- monitor/plumbing failure such as Invalid MyFileDestination;
+- client-specific variable override;
+- component UID/name mismatch;
+- non-empty stderr or non-success provider job state;
+- current Idle Log Off alert still open after the 15-minute propagation window;
+- generic PowerShell;
+- reboot;
+- immediate/forced logoff;
+- policy mutation;
+- unrelated component execution.
+
+Any hard stop routes to waiting, blocking, or Human Review as appropriate; it never broadens execution authority.
+
+### Promotion requirement
+
+This document and its tests do not grant production authority by themselves. Promote `idle_log_off@1.1.0` only after the controlled acceptance matrix is green and Owner approval is durably recorded for the exact registry fingerprint and capability set. Any material source/version/capability change requires re-review.

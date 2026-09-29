@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1521,6 +1522,18 @@ def backupiq_candidate():
     )
 
 
+def test_backupiq_scope_is_owner_approved_version_1_1_0():
+    from jason_runtime.autonomy_worker_runtime import BACKUPIQ_SCOPE
+
+    assert BACKUPIQ_SCOPE.playbook_id == "backupiq_endpoint_backup"
+    assert BACKUPIQ_SCOPE.playbook_version == "1.1.0"
+    assert BACKUPIQ_SCOPE.policy_id == "playbook-autonomy:backupiq_endpoint_backup"
+    assert BACKUPIQ_SCOPE.required_action_capabilities == (
+        "service.ticket.note.create",
+        "service.ticket.update",
+    )
+
+
 def test_backupiq_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
@@ -1682,15 +1695,17 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         ),
         max_active_work_items=2,
         interval_seconds=30,
-        monotonic=iter((0.0,)).__next__,
+        monotonic=iter((0.0, 31.0)).__next__,
     )
 
+    worker.tick()
     worker.tick()
 
     work = store.get(141185)
     assert work is not None
-    assert work.phase == "escalated"
-    assert "inactive/offline endpoint" in work.last_reason
+    assert work.phase == "waiting_device_access:backupiq_investigate"
+    assert "waiting for exact endpoint access" in work.last_reason
+    assert store.list_open() == ()
     component_calls = [
         args
         for _, capability, args in actions.calls
@@ -1703,6 +1718,7 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
+    assert note_calls[0]["title"] == "Jason - BackupIQ - Diagnostic"
     assert "Classification=inactive_or_offline_device" in note_calls[0]["description"]
     update_calls = [
         args["payload"]
@@ -1715,9 +1731,88 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
             "queueID": "Jason",
             "status": "In Progress",
             "billingCodeID": "Remote Support",
-        }
+        },
+        {
+            "id": 141185,
+            "status": "Waiting Device Access",
+        },
     ]
     assert all(payload.get("queueID") != "Help Desk I" for payload in update_calls)
+    store.close()
+
+
+def test_backupiq_legacy_offline_escalation_migrates_to_waiting(tmp_path: Path):
+    class LegacyOfflineReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "backup-device-1",
+                            "hostname": "APD-50399",
+                            "online": False,
+                            "reboot_required": False,
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=141185,
+            ticket_number="T20260925.0003",
+            title="BackupIQ: Backup for asset is not available for Atomic Plumbing & Drain Cleaning",
+            playbook_id="backupiq_endpoint_backup",
+            source_queue="Jason",
+            company_id=333,
+            configuration_item_id=1259,
+            device_uid="backup-device-1",
+            hostname="APD-50399",
+            phase="escalated",
+            last_reason=(
+                "BackupIQ diagnostic classified an inactive/offline endpoint; "
+                "waiting/recheck automation remains separately gated."
+            ),
+        )
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=LegacyOfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(141185)
+    assert work is not None
+    assert work.phase == "waiting_device_access:backupiq_investigate"
+    assert "Migrated legacy BackupIQ offline escalation" in work.last_reason
+    assert store.list_open() == ()
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [
+        {
+            "id": 141185,
+            "status": "Waiting Device Access",
+        }
+    ]
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert note_calls == []
     store.close()
 
 
@@ -1926,8 +2021,12 @@ def test_vulscan_requires_separate_promotion(tmp_path: Path):
     store.close()
 
 
-def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
+def test_vulscan_not_approved_kbs_wait_in_jason_without_helpdesk_handoff(tmp_path: Path):
     class VulscanReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.patch_status = "NOT_APPROVED"
+
         def execute(self, capability, arguments):
             if capability == "service.configuration.read":
                 return {
@@ -1952,7 +2051,7 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
                             "resource_id": "vul-device-1",
                             "hostname": "GAI-DT2850",
                             "online": True,
-                            "reboot_required": True,
+                            "reboot_required": False,
                         }
                     },
                 }
@@ -1965,7 +2064,7 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
                             "patches": [
                                 {
                                     "kbArticleId": kb.replace("KB", ""),
-                                    "installStatus": "NOT_APPROVED",
+                                    "installStatus": self.patch_status,
                                     "rebootRequired": True,
                                 }
                             ],
@@ -1977,11 +2076,12 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
                 }
             return super().execute(capability, arguments)
 
+    reads = VulscanReads()
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
     worker = OperationalAutonomyMaintenance(
         queue_source=QueueSource(vulscan_candidate()),
-        reads=VulscanReads(),
+        reads=reads,
         actions=actions,
         store=store,
         promotion_store=PromotionStore(
@@ -1998,7 +2098,7 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
         ),
         max_active_work_items=2,
         interval_seconds=30,
-        monotonic=iter((0.0,)).__next__,
+        monotonic=iter((0.0, 31.0, 62.0)).__next__,
     )
 
     worker.tick()
@@ -2006,8 +2106,8 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     final = store.get(141183)
     assert final is not None
     assert final.playbook_id == "vulscan_missing_patch"
-    assert final.phase == "escalated"
-    assert "not approved" in final.last_reason.casefold()
+    assert final.phase == "waiting_patch_approval"
+    assert "first_not_approved_at=" in final.last_reason
 
     component_calls = [
         args
@@ -2025,7 +2125,7 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
     body = note_calls[0]["description"]
     assert "KB5124008=NOT_APPROVED" in body
     assert "KB5126052=NOT_APPROVED" in body
-    assert "No patch approval" in body
+    assert "STATUS: WAITING - PATCH NOT APPROVED" in body
 
     ticket_updates = [
         args["payload"]
@@ -2039,8 +2139,188 @@ def test_vulscan_not_approved_kbs_are_diagnostic_only(tmp_path: Path):
             "status": "In Progress",
             "billingCodeID": "Remote Support",
         },
-        {"id": 141183, "queueID": "Help Desk I", "status": "New"},
     ]
+
+    # A normal worker tick before the daily recheck is due must not emit
+    # another note or hand the ticket off.
+    worker.tick()
+    assert store.get(141183).phase == "waiting_patch_approval"
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 1
+    store.close()
+
+
+def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path):
+    class VulscanReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.patch_status = "NOT_APPROVED"
+
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68,
+                        "companyID": 597,
+                        "isActive": True,
+                        "referenceNumber": "vul-device-1",
+                        "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1",
+                        "hostname": "GAI-DT2850",
+                        "online": True,
+                        "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"patches": [{
+                        "kbArticleId": kb.replace("KB", ""),
+                        "installStatus": self.patch_status,
+                        "rebootRequired": True,
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    reads = VulscanReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    waiting = store.get(141183)
+    assert waiting is not None
+    reads.patch_status = "APPROVED_PENDING"
+    store.put(
+        replace(
+            waiting,
+            updated_at=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        )
+    )
+
+    worker.tick()
+    resumed = store.get(141183)
+    assert resumed is not None
+    assert resumed.phase == "waiting_patch_window"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
+    assert {"id": 141183, "queueID": "Help Desk I", "status": "Human Review"} not in updates
+    store.close()
+
+
+def test_vulscan_not_approved_for_ten_days_hands_off_as_human_review(tmp_path: Path):
+    class VulscanReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68,
+                        "companyID": 597,
+                        "isActive": True,
+                        "referenceNumber": "vul-device-1",
+                        "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1",
+                        "hostname": "GAI-DT2850",
+                        "online": True,
+                        "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"patches": [{
+                        "kbArticleId": kb.replace("KB", ""),
+                        "installStatus": "NOT_APPROVED",
+                        "rebootRequired": True,
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    waiting = store.get(141183)
+    assert waiting is not None
+    old = datetime.now(timezone.utc) - timedelta(days=11)
+    store.put(
+        replace(
+            waiting,
+            last_reason=(
+                "VulScan waiting for patch approval; "
+                f"first_not_approved_at={old.isoformat()}; "
+                "one or more exact KBs remain NOT_APPROVED."
+            ),
+            updated_at=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        )
+    )
+
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "escalated"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[-1] == {
+        "id": 141183,
+        "queueID": "Help Desk I",
+        "status": "Human Review",
+    }
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert any(
+        "ACTION REQUIRED: Approve or intentionally defer" in note["description"]
+        for note in notes
+    )
     store.close()
 
 
@@ -2324,6 +2604,12 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
                     "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":True,
                     "device_type":{"category":"Desktop","type":"Desktop"},
                     "operating_system":"Microsoft Windows 11 Pro"}}}
+            if capability=="endpoint.alert.search":
+                return {"status":"succeeded","evidence":{"items":[{
+                    "alertUid":"idle-alert","ticketNumber":"T20260924.0043",
+                    "diagnostics":"Invalid MyFileDestination",
+                    "alertContext":{"description":"Get Idle Log Off Status - Compliant: False"}
+                }]}}
             if capability=="endpoint.alert.history.search":
                 return {"status":"succeeded","evidence":{"data":{"alerts":[{
                     "alertUid":"idle-alert","ticketNumber":"T20260924.0043","timestamp":1790416800000,
@@ -2351,7 +2637,137 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
     notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
     assert len(notes)==1
     assert "Classification=monitor_execution_failure" in notes[0]["description"]
+    assert notes[0]["title"] == "Jason - Idle Log Off - Diagnostic"
     assert "setter" in notes[0]["description"].casefold()
+    store.close()
+
+
+def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_clear(tmp_path: Path):
+    class IdleReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.current_alert_reads = 0
+
+        def execute(self, capability, arguments):
+            if capability=="service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":1179,"isActive":True,
+                    "referenceNumber":"idle-device-1","referenceTitle":"AVMAC-1096"}}}}
+            if capability=="endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":True,
+                    "device_type":{"category":"Desktop","type":"Desktop"},
+                    "operating_system":"Microsoft Windows 11 Pro"}}}
+            if capability=="endpoint.alert.search":
+                self.current_alert_reads += 1
+                alerts = ([{
+                    "alertUid":"idle-alert","ticketNumber":"T20260924.0043",
+                    "diagnostics":"Compliant: False",
+                    "alertContext":{"description":"Get Idle Log Off Status - Compliant: False"}
+                }] if self.current_alert_reads == 1 else [])
+                return {"status":"succeeded","evidence":{"items":alerts}}
+            if capability=="endpoint.alert.history.search":
+                return {"status":"succeeded","evidence":{"data":{"alerts":[{
+                    "alertUid":"idle-alert","ticketNumber":"T20260924.0043","timestamp":1790416800000,
+                    "diagnostics":"Compliant: False",
+                    "alertContext":{"description":"Get Idle Log Off Status - Compliant: False"}
+                }]}}}
+            if capability=="automation.job.read":
+                return {"status":"succeeded","evidence":{"job":{
+                    "resource_id":arguments["resource_id"],"status":"completed"}}}
+            if capability=="automation.job.output.read":
+                text = (
+                    ""
+                    if arguments.get("stream")=="stderr"
+                    else "Idle Log Off installation completed successfully."
+                )
+                return {"status":"succeeded","evidence":{
+                    "resource_id":arguments["resource_id"],
+                    "outputs":[{
+                        "component_uid":arguments["component_uid"],
+                        "stream":arguments.get("stream"),
+                        "text":text,
+                    }]
+                }}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
+        max_active_work_items=2,interval_seconds=30,
+        monotonic=iter((0.0,31.0,62.0,93.0)).__next__,
+    )
+
+    worker.tick()
+    assert store.get(141066).phase=="idle_log_off_repair_dispatch"
+    worker.tick()
+    assert store.get(141066).phase=="idle_log_off_repair_wait"
+    worker.tick()
+    assert store.get(141066).phase=="waiting_recheck:idle_log_off_verify_monitor"
+    assert store.list_open()==()
+    worker.tick()
+
+    final=store.get(141066)
+    assert final is not None and final.phase=="complete"
+    component_calls=[
+        x[2] for x in actions.calls if x[1]=="automation.component.execute"
+    ]
+    assert len(component_calls)==1
+    assert component_calls[0]["component_uid"]=="acc6a240-881d-4655-9470-87f60c8e35e8"
+    assert component_calls[0]["component_name"]=="Set Idle Log Off AOT Ver 02042026-1"
+    assert component_calls[0]["variables"]=={}
+    notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
+    assert [n["title"] for n in notes]==[
+        "Jason - Idle Log Off - Diagnostic",
+        "Jason - Idle Log Off - Remediation",
+        "Jason - Idle Log Off - Verification",
+    ]
+    assert not any(
+        "powershell" in str(call).casefold()
+        for call in component_calls
+    )
+    store.close()
+
+
+def test_idle_logoff_offline_uses_resumable_waiting_state(tmp_path: Path):
+    class IdleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability=="service.configuration.read":
+                return {"status":"succeeded","evidence":{"data":{"item":{
+                    "id":1583,"companyID":1179,"isActive":True,
+                    "referenceNumber":"idle-device-1","referenceTitle":"AVMAC-1096"}}}}
+            if capability=="endpoint.device.read":
+                return {"status":"succeeded","evidence":{"record":{
+                    "resource_id":"idle-device-1","hostname":"AVMAC-1096","online":False,
+                    "device_type":{"category":"Desktop","type":"Desktop"},
+                    "operating_system":"Microsoft Windows 11 Pro"}}}
+            return super().execute(capability, arguments)
+
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=(
+            "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
+            "post_error_investigation","unexpected_shutdown","backupiq_endpoint_backup",
+            "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
+        max_active_work_items=2,interval_seconds=30,monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final=store.get(141066)
+    assert final is not None
+    assert final.phase=="waiting_device_access:idle_log_off_investigate"
+    assert store.list_open()==()
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+    update_calls=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.update"]
+    assert any(x.get("status")=="Waiting Device Access" for x in update_calls)
     store.close()
 
 

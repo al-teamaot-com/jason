@@ -110,7 +110,7 @@ UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
 )
 BACKUPIQ_SCOPE = PlaybookScope(
     playbook_id="backupiq_endpoint_backup",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:backupiq_endpoint_backup",
     required_action_capabilities=(
         "service.ticket.note.create",
@@ -147,9 +147,10 @@ DISK_BAD_BLOCK_SCOPE = PlaybookScope(
 )
 IDLE_LOG_OFF_SCOPE = PlaybookScope(
     playbook_id="idle_log_off",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:idle_log_off",
     required_action_capabilities=(
+        "automation.component.execute",
         "service.ticket.note.create",
         "service.ticket.update",
     ),
@@ -171,12 +172,17 @@ HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
 REPAIR_COMPONENT_NAME = "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"
 DNS_DIAGNOSTIC_COMPONENT_NAME = "DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026"
 DNS_DIAGNOSTIC_COMPONENT_UID = "c3340a58-48d5-457b-bc30-5fd79e5ad8b1"
+IDLE_LOG_OFF_SETTER_NAME = "Set Idle Log Off AOT Ver 02042026-1"
+IDLE_LOG_OFF_SETTER_UID = "acc6a240-881d-4655-9470-87f60c8e35e8"
 SECURITY_LOG_QUICK_TEST_NAME = "Security Log Quick Test [WIN] AOT Ver 12012025-1"
 SECURITY_LOG_QUICK_TEST_UID = "a50d486b-2cce-4658-9e11-64fb6bf9ab9d"
 SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
 SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 RECOVERABLE_BLOCK_RETRY_SECONDS = 300
+VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
+VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
+VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
 
 
 class OperationalAutonomyError(RuntimeError):
@@ -364,8 +370,12 @@ class SQLiteOperationalWorkStore:
     def list_open(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_operational_work "
-            "WHERE phase NOT IN ('complete','escalated','blocked','approval_pending') "
+            "WHERE phase NOT IN ("
+            "'complete','escalated','blocked','approval_pending',"
+            "'waiting_patch_approval','waiting_patch_window'"
+            ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
+            "AND phase NOT LIKE 'waiting_recheck:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
@@ -779,6 +789,45 @@ class OperationalAutonomyMaintenance:
                 governance_blocked += 1
                 continue
             existing = self.store.get(ticket_id)
+            if (
+                existing is not None
+                and existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                and existing.phase == "escalated"
+                and "inactive/offline endpoint"
+                in str(existing.last_reason or "").casefold()
+            ):
+                endpoint_online = self._endpoint_is_online(existing.device_uid)
+                desired_status = "In Progress" if endpoint_online else "Waiting Device Access"
+                status_label = str(
+                    item.context.get("_jason_source_status_label") or ""
+                ).strip()
+                if status_label.casefold() != desired_status.casefold():
+                    self.actions.execute(
+                        self._scope_for_work(existing),
+                        "service.ticket.update",
+                        {
+                            "payload": {
+                                "id": existing.ticket_id,
+                                "status": desired_status,
+                            }
+                        },
+                    )
+                existing = self._replace(
+                    existing,
+                    phase=(
+                        "backupiq_investigate"
+                        if endpoint_online
+                        else "waiting_device_access:backupiq_investigate"
+                    ),
+                    last_reason=(
+                        "Migrated legacy BackupIQ offline escalation into the "
+                        "resumable waiting-device lifecycle."
+                        if not endpoint_online
+                        else "Legacy BackupIQ offline escalation is online again; "
+                        "resuming backupiq_investigate."
+                    ),
+                )
+                self.store.put(existing)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 if (
                     existing.phase == "blocked"
@@ -806,7 +855,43 @@ class OperationalAutonomyMaintenance:
                 ):
                     self.store.delete(ticket_id)
                     existing = None
+            if ticket_id in processed:
+                continue
             if existing is not None:
+                if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                    interval = (
+                        VULSCAN_APPROVAL_RECHECK_SECONDS
+                        if existing.phase == "waiting_patch_approval"
+                        else VULSCAN_PATCH_WINDOW_RECHECK_SECONDS
+                    )
+                    updated = self._parse_iso_timestamp(existing.updated_at)
+                    due = (
+                        updated is None
+                        or (datetime.now(timezone.utc) - updated).total_seconds() >= interval
+                    )
+                    if due:
+                        existing = self._replace(
+                            existing,
+                            phase="vulscan_investigate",
+                            last_reason=existing.last_reason,
+                        )
+                        self.store.put(existing)
+                        try:
+                            self._advance(existing, item.context)
+                        except Exception as exc:
+                            self._block(
+                                existing,
+                                "Execution failed closed during VulScan waiting-state recheck: "
+                                f"{type(exc).__name__}: {str(exc)[:350]}",
+                            )
+                    state, reason_code = self._classify_persisted_work(ticket_id)
+                    classifications[ticket_id] = (
+                        state,
+                        reason_code,
+                        item.source_version,
+                        False,
+                    )
+                    continue
                 if existing.phase.startswith("waiting_device_access:"):
                     waiting_phase = existing.phase
                     if self._endpoint_is_online(existing.device_uid):
@@ -859,6 +944,41 @@ class OperationalAutonomyMaintenance:
                             False,
                         )
                     continue
+                if existing.phase.startswith("waiting_recheck:"):
+                    if len(self.store.list_open()) < self.max_active_work_items:
+                        waiting_phase = existing.phase
+                        resume_phase = waiting_phase.split(":", 1)[1]
+                        waiting_since = existing.updated_at
+                        existing = self._replace(
+                            existing,
+                            phase=resume_phase,
+                            last_reason="Scheduled recheck due; resuming preserved work.",
+                            updated_at=waiting_since,
+                        )
+                        self.store.put(existing)
+                        try:
+                            self._advance(existing, item.context)
+                        except Exception as exc:
+                            self._block(
+                                existing,
+                                "Execution failed closed after scheduled recheck resume: "
+                                f"{type(exc).__name__}: {str(exc)[:350]}",
+                            )
+                        state, reason_code = self._classify_persisted_work(ticket_id)
+                        classifications[ticket_id] = (
+                            state,
+                            reason_code,
+                            item.source_version,
+                            state == "eligible_now",
+                        )
+                    else:
+                        classifications[ticket_id] = (
+                            "waiting_recheck",
+                            "active_capacity_full",
+                            item.source_version,
+                            False,
+                        )
+                    continue
                 if existing.phase == "escalated":
                     human_review += 1
                     if existing.playbook_id == BACKUPIQ_SCOPE.playbook_id:
@@ -895,8 +1015,6 @@ class OperationalAutonomyMaintenance:
                 classifications[ticket_id] = (
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
-                continue
-            if ticket_id in processed:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
@@ -1186,12 +1304,18 @@ class OperationalAutonomyMaintenance:
             return "waiting_human_review", "technician_review_required"
         if current.phase == "approval_pending":
             return "waiting_human_review", "approval_required"
+        if current.phase == "waiting_patch_approval":
+            return "waiting_dependency", "patch_approval_pending"
+        if current.phase == "waiting_patch_window":
+            return "waiting_dependency", "patch_window_pending"
         if current.phase == "blocked":
             return "governance_blocked", "worker_blocked"
         if current.phase == "complete":
             return "not_actionable", "already_complete"
         if current.phase.startswith("waiting_device_access:"):
             return "waiting_device_access", "endpoint_offline"
+        if current.phase.startswith("waiting_recheck:"):
+            return "waiting_recheck", "scheduled_recheck"
         return "eligible_now", "active_work"
 
     @staticmethod
@@ -1570,9 +1694,13 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
+        offline_wait_scopes = {
+            BACKUPIQ_SCOPE.playbook_id,
+            IDLE_LOG_OFF_SCOPE.playbook_id,
+        }
         if (
             endpoint.get("online") is not True
-            and scope.playbook_id != BACKUPIQ_SCOPE.playbook_id
+            and scope.playbook_id not in offline_wait_scopes
         ):
             raise OperationalAutonomyError("endpoint is not currently online")
 
@@ -1710,6 +1838,19 @@ class OperationalAutonomyMaintenance:
             if work.phase == "idle_log_off_investigate":
                 self._investigate_idle_log_off(work)
                 return
+            if work.phase == "idle_log_off_repair_dispatch":
+                self._dispatch_component(
+                    work,
+                    IDLE_LOG_OFF_SETTER_NAME,
+                    "idle_log_off_repair_wait",
+                )
+                return
+            if work.phase == "idle_log_off_repair_wait":
+                self._poll_idle_log_off_repair(work)
+                return
+            if work.phase == "idle_log_off_verify_monitor":
+                self._verify_idle_log_off_monitor(work)
+                return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
             if work.phase == "security_quick_dispatch":
@@ -1776,6 +1917,10 @@ class OperationalAutonomyMaintenance:
             component_uid = SECURITY_LOG_SELF_HEAL_UID
             resolved_component_name = SECURITY_LOG_SELF_HEAL_NAME
             step = "security_repair"
+        elif component_name == IDLE_LOG_OFF_SETTER_NAME:
+            component_uid = IDLE_LOG_OFF_SETTER_UID
+            resolved_component_name = IDLE_LOG_OFF_SETTER_NAME
+            step = "idle_log_off_repair"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
             component_uid = identity.uid
@@ -1807,7 +1952,7 @@ class OperationalAutonomyMaintenance:
         if not job_uid:
             raise OperationalAutonomyError("component dispatch returned no durable job UID")
         repair_attempts = work.repair_attempts + (
-            1 if step in {"repair", "security_repair"} else 0
+            1 if step in {"repair", "security_repair", "idle_log_off_repair"} else 0
         )
         self.store.put(
             self._replace(
@@ -1836,7 +1981,10 @@ class OperationalAutonomyMaintenance:
             or endpoint.get("name")
             or ""
         ).strip()
-        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+        if (
+            endpoint_uid != work.device_uid
+            or endpoint_hostname.casefold() != work.hostname.casefold()
+        ):
             self._block(work, "Idle Log Off device identity changed during execution.")
             return
 
@@ -1847,43 +1995,143 @@ class OperationalAutonomyMaintenance:
             else str(role or "")
         )
         role_material = (
-            f"{role_text} {endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
+            f"{role_text} "
+            f"{endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
         ).casefold()
         protected = any(
             token in role_material
-            for token in ("server", "domain controller", "rds", "terminal server", "kiosk")
+            for token in (
+                "server",
+                "domain controller",
+                "rds",
+                "terminal server",
+                "kiosk",
+            )
         )
+        supported_workstation = (
+            "windows" in role_material
+            and any(
+                token in role_material
+                for token in ("desktop", "laptop", "notebook", "workstation")
+            )
+        )
+
+        if endpoint.get("online") is False:
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+            note = (
+                "STATUS\n"
+                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting "
+                "for exact device access.\n\n"
+                "NEXT STEP\n"
+                "Keep the ticket in the Jason queue and resume "
+                "idle_log_off_investigate automatically when the exact DRMM endpoint "
+                "is online.\n\n"
+                "KEY EVIDENCE\n"
+                f"- Device={work.hostname}\n"
+                f"- DRMM UID={work.device_uid}\n"
+                "- DRMM online state=No\n"
+                "- No setter, alert resolution, forced logoff, reboot, policy change, "
+                "or generic PowerShell was attempted.\n\n"
+                "JASON STATE\n"
+                "waiting_device_access:idle_log_off_investigate"
+            )
+            self._write_note(
+                work,
+                note,
+                "Jason - Idle Log Off - Waiting Device Access",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:idle_log_off_investigate",
+                    last_reason=(
+                        "Idle Log Off diagnostics are waiting for exact endpoint access; "
+                        "Jason retains queue ownership and releases the active-work slot."
+                    ),
+                )
+            )
+            return
+
+        current_data = self._read_data(
+            "endpoint.alert.search",
+            {"resource_id": work.device_uid, "status": "open"},
+        )
+        current_items = current_data.get("items")
+        if not isinstance(current_items, list):
+            current_items = []
+        current_idle_alerts = [
+            item
+            for item in current_items
+            if isinstance(item, Mapping)
+            and "idle log off"
+            in json.dumps(item, sort_keys=True, default=str).casefold()
+        ]
 
         history = self._read_data(
             "endpoint.alert.history.search", {"resource_id": work.device_uid}
         )
-        alerts = history.get("alerts")
-        if not isinstance(alerts, list):
-            alerts = []
-        idle_alerts: list[Mapping[str, Any]] = []
-        for alert in alerts:
-            if not isinstance(alert, Mapping):
-                continue
-            material = json.dumps(alert, sort_keys=True, default=str).casefold()
-            if "idle log off" in material or "compliant: false" in material or "enabled: false" in material:
-                idle_alerts.append(alert)
-        exact = next(
+        history_items = history.get("alerts")
+        if not isinstance(history_items, list):
+            history_items = []
+        idle_history = [
+            item
+            for item in history_items
+            if isinstance(item, Mapping)
+            and (
+                "idle log off"
+                in json.dumps(item, sort_keys=True, default=str).casefold()
+                or (
+                    str(item.get("ticketNumber") or "").strip()
+                    == work.ticket_number
+                    and "compliant: false"
+                    in json.dumps(item, sort_keys=True, default=str).casefold()
+                )
+            )
+        ]
+        exact_history = next(
             (
-                item for item in idle_alerts
-                if str(item.get("ticketNumber") or "").strip() == work.ticket_number
+                item
+                for item in idle_history
+                if str(item.get("ticketNumber") or "").strip()
+                == work.ticket_number
             ),
             None,
         )
-        if exact is None and idle_alerts:
-            exact = max(idle_alerts, key=lambda item: int(item.get("timestamp") or 0))
+        if exact_history is None and idle_history:
+            exact_history = max(
+                idle_history,
+                key=lambda item: int(item.get("timestamp") or 0),
+            )
 
-        alert_material = (
-            json.dumps(exact, sort_keys=True, default=str).casefold()
-            if exact is not None
-            else work.title.casefold()
-        )
+        diagnostic_material = " ".join(
+            (
+                json.dumps(
+                    current_idle_alerts,
+                    sort_keys=True,
+                    default=str,
+                ),
+                (
+                    json.dumps(
+                        exact_history,
+                        sort_keys=True,
+                        default=str,
+                    )
+                    if exact_history is not None
+                    else ""
+                ),
+            )
+        ).casefold()
         plumbing_error = any(
-            token in alert_material
+            token in diagnostic_material
             for token in (
                 "invalid myfiledestination",
                 "powershell",
@@ -1892,35 +2140,239 @@ class OperationalAutonomyMaintenance:
                 "script exception",
             )
         )
-        if protected:
+
+        if protected or not supported_workstation:
             classification = "protected_or_exception_role"
-            reason = "Idle Log Off diagnostic complete; protected/exception role requires human policy review."
+            reason = (
+                "Idle Log Off diagnostic complete; endpoint role is not an "
+                "autonomous workstation/laptop remediation target."
+            )
         elif plumbing_error:
             classification = "monitor_execution_failure"
-            reason = "Idle Log Off diagnostic identified monitor/plumbing failure; endpoint noncompliance is not proven."
-        else:
-            classification = "reported_noncompliance_policy_verification_required"
             reason = (
-                "Idle Log Off diagnostic found a noncompliance signal; applicability and "
-                "per-run setter approval remain required."
+                "Idle Log Off diagnostic identified monitor/plumbing failure; "
+                "endpoint noncompliance is not proven."
+            )
+        elif len(current_idle_alerts) != 1:
+            classification = "current_alert_not_exact"
+            reason = (
+                "Idle Log Off autonomous remediation requires exactly one current "
+                "Idle Log Off alert on the exact endpoint."
+            )
+        else:
+            classification = "confirmed_current_noncompliance"
+            reason = (
+                "Exactly one current Idle Log Off alert is present on a supported "
+                "Windows workstation/laptop; the exact playbook-scoped setter branch "
+                "is eligible."
             )
 
         note = (
-            "Jason autonomous Idle Log Off diagnostic completed using governed endpoint "
-            "and alert-history evidence. "
-            f"Device={work.hostname}; Online={'Yes' if endpoint.get('online') is True else 'No'}; "
+            "Jason Idle Log Off diagnostic completed using governed endpoint, "
+            "current-alert, and alert-history evidence. "
+            f"Device={work.hostname}; "
+            f"Online={'Yes' if endpoint.get('online') is True else 'No'}; "
             f"DeviceType={role_text[:180] or 'unknown'}; "
             f"ProtectedOrExceptionRole={'Yes' if protected else 'No'}; "
-            f"MatchingIdleAlerts={len(idle_alerts)}; "
+            f"CurrentIdleAlerts={len(current_idle_alerts)}; "
             f"Classification={classification}. "
-            "The setter 'Set Idle Log Off AOT Ver 02042026-1' remains per-run approval "
-            "only because it intentionally affects future user sessions and Component "
-            "Control rejected standing-safe promotion. Jason did not run the setter, "
-            "resolve an alert, force a logoff, change policy, run generic PowerShell, "
-            "or perform any other modifying/user-disruptive action."
         )
-        self._write_note(work, note, "Jason - Autonomous Idle Log Off Diagnostic")
+        if classification == "confirmed_current_noncompliance":
+            note += (
+                "The exact approved remediation candidate is "
+                f"{IDLE_LOG_OFF_SETTER_NAME} ({IDLE_LOG_OFF_SETTER_UID}) using "
+                "built-in defaults only. The playbook-scoped branch does not "
+                "authorize reboot, forced logoff, policy changes, generic PowerShell, "
+                "or another component."
+            )
+        else:
+            note += (
+                "Jason did not run the setter, resolve an alert, force a logoff, "
+                "change policy, run generic PowerShell, reboot, or perform another "
+                "modifying action."
+            )
+        self._write_note(work, note, "Jason - Idle Log Off - Diagnostic")
+
+        if classification == "confirmed_current_noncompliance":
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="idle_log_off_repair_dispatch",
+                    last_reason=reason,
+                )
+            )
+            return
+
         self._persist_human_review_escalation(work, reason=reason)
+
+    def _poll_idle_log_off_repair(self, work: OperationalWork) -> None:
+        if not work.job_uid or work.component_uid != IDLE_LOG_OFF_SETTER_UID:
+            self._block(
+                work,
+                "Persisted Idle Log Off remediation job identity is incomplete or changed.",
+            )
+            return
+
+        job_data = self._read_data(
+            "automation.job.read", {"resource_id": work.job_uid}
+        )
+        job = (
+            job_data.get("job")
+            if isinstance(job_data.get("job"), Mapping)
+            else job_data
+        )
+        status = str(job.get("status") or "").strip().casefold()
+        if status in {"active", "running", "queued", "pending", "scheduled"}:
+            return
+        if status in {"stale_or_unknown", "unknown"}:
+            self._block(
+                work,
+                "Idle Log Off setter job state became stale or unknown; "
+                "no duplicate dispatch is allowed.",
+            )
+            return
+        if status not in {
+            "completed",
+            "complete",
+            "success",
+            "succeeded",
+            "finished",
+        }:
+            self._escalate(
+                work,
+                "Idle Log Off setter job ended with provider status "
+                f"{status or 'unknown'}; no automatic redispatch was attempted.",
+            )
+            return
+
+        stdout_data = self._read_data(
+            "automation.job.output.read",
+            {
+                "resource_id": work.job_uid,
+                "device_uid": work.device_uid,
+                "component_uid": work.component_uid,
+                "stream": "stdout",
+            },
+        )
+        stderr_data = self._read_data(
+            "automation.job.output.read",
+            {
+                "resource_id": work.job_uid,
+                "device_uid": work.device_uid,
+                "component_uid": work.component_uid,
+                "stream": "stderr",
+            },
+        )
+        stdout_text = self._output_text(stdout_data)
+        stderr_text = self._output_text(stderr_data)
+        if stderr_text.strip():
+            self._escalate(
+                work,
+                "Idle Log Off setter returned provider success but non-empty stderr; "
+                "monitor verification was not treated as resolved.",
+            )
+            return
+
+        summary = self._bounded_health_summary(stdout_text)
+        self._write_note(
+            work,
+            (
+                "Jason ran the exact playbook-scoped Idle Log Off setter using built-in "
+                f"defaults on {work.hostname}. Job={work.job_uid}; "
+                f"ProviderStatus={status}; Output={summary}. "
+                "No reboot, immediate forced logoff, policy change, generic PowerShell, "
+                "or unrelated component was used. Action success is not resolution; "
+                "Jason is waiting for the normal Idle Log Off monitor to clear."
+            ),
+            "Jason - Idle Log Off - Remediation",
+        )
+        self.store.put(
+            self._replace(
+                work,
+                phase="waiting_recheck:idle_log_off_verify_monitor",
+                job_uid=None,
+                component_uid=None,
+                last_reason=(
+                    "Idle Log Off setter completed; waiting for the authoritative "
+                    "normal monitor cycle to clear the exact alert."
+                ),
+            )
+        )
+
+    def _verify_idle_log_off_monitor(self, work: OperationalWork) -> None:
+        current_data = self._read_data(
+            "endpoint.alert.search",
+            {"resource_id": work.device_uid, "status": "open"},
+        )
+        current_items = current_data.get("items")
+        if not isinstance(current_items, list):
+            current_items = []
+        current_idle_alerts = [
+            item
+            for item in current_items
+            if isinstance(item, Mapping)
+            and "idle log off"
+            in json.dumps(item, sort_keys=True, default=str).casefold()
+        ]
+
+        if not current_idle_alerts:
+            self._write_note(
+                work,
+                (
+                    "Jason verified the normal DRMM Idle Log Off alert is no longer "
+                    f"open for {work.hostname} after the playbook-scoped setter. "
+                    "This authoritative monitor-clear evidence completes the remediation "
+                    "verification. No reboot or forced logoff was used."
+                ),
+                "Jason - Idle Log Off - Verification",
+            )
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "Idle Log Off remediation completed and the authoritative current "
+                    "DRMM alert cleared; ticket completion readback succeeded."
+                ),
+            )
+            return
+
+        waiting_since = self._parse_iso_timestamp(work.updated_at)
+        age_seconds = (
+            (datetime.now(timezone.utc) - waiting_since).total_seconds()
+            if waiting_since is not None
+            else 0
+        )
+        if age_seconds < 900:
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_recheck:idle_log_off_verify_monitor",
+                    last_reason=(
+                        "Idle Log Off alert remains open inside the bounded monitor "
+                        "propagation window; waiting without redispatch."
+                    ),
+                    updated_at=work.updated_at,
+                )
+            )
+            return
+
+        self._write_note(
+            work,
+            (
+                "Jason's exact Idle Log Off setter completed, but a current Idle Log Off "
+                "alert remains after the 15-minute monitor propagation window. "
+                "Jason did not rerun the setter, force a logoff, reboot, or change policy. "
+                "Monitor/policy investigation is required."
+            ),
+            "Jason - Idle Log Off - Verification",
+        )
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Current Idle Log Off alert remained after successful setter execution "
+                "and bounded monitor propagation; monitor/policy review is required."
+            ),
+            clear_job=True,
+        )
 
     def _investigate_disk_bad_block(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
@@ -2356,11 +2808,52 @@ class OperationalAutonomyMaintenance:
             "change, reboot scheduling, reboot, or other modifying action was attempted. "
         )
         if classification == "approval_blocked":
+            first_seen = self._vulscan_first_not_approved_at(work)
+            now = datetime.now(timezone.utc)
+            if first_seen is None:
+                first_seen = now
+            age_seconds = max(0.0, (now - first_seen).total_seconds())
+            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS:
+                note = (
+                    "STATUS: HUMAN REVIEW REQUIRED. "
+                    "ACTION REQUIRED: Approve or intentionally defer the listed patch(es). "
+                    "WHY: One or more exact VulScan KBs have remained NOT_APPROVED for at least "
+                    "10 calendar days. "
+                    f"Device={work.hostname}; PatchStates={patch_summary}. "
+                    "No patch approval, forced installation, Windows Update repair, WSUS-policy "
+                    "change, reboot scheduling, reboot, or other modifying action was attempted."
+                )
+                self._write_note(
+                    work,
+                    note,
+                    "Jason - VulScan - Human Review Required",
+                )
+                self._handoff_vulscan_approval_review(work)
+                self.store.put(
+                    self._replace(
+                        work,
+                        phase="escalated",
+                        last_reason=(
+                            "VulScan patch approval remained NOT_APPROVED for 10 days; "
+                            "technician approve/defer decision required."
+                        ),
+                    )
+                )
+                return
             note += (
-                "At least one reported KB is currently NOT_APPROVED; the playbook will "
-                "not approve patches autonomously."
+                "At least one reported KB is currently NOT_APPROVED. "
+                "STATUS: WAITING - PATCH NOT APPROVED. "
+                "NEXT STEP: No technician action is required yet; Jason will recheck the exact "
+                "KB approval state daily and keep this ticket in the Jason queue. "
+                "ESCALATION: If the same exact KB remains NOT_APPROVED for 10 calendar days, "
+                "Jason will move the ticket to Help Desk I / Human Review for an approve-or-defer "
+                "decision. The playbook will not approve patches autonomously."
             )
-            reason = "VulScan diagnostic complete; one or more exact KBs are not approved."
+            reason = (
+                "VulScan waiting for patch approval; "
+                f"first_not_approved_at={first_seen.isoformat()}; "
+                "one or more exact KBs remain NOT_APPROVED."
+            )
         elif classification == "stale_or_recovered_finding":
             # Current endpoint reboot state is authoritative. Patch-level
             # rebootRequired is update metadata, not proof that the endpoint
@@ -2399,23 +2892,60 @@ class OperationalAutonomyMaintenance:
             reason = "VulScan diagnostic complete; reported KBs installed but reboot remains required."
         elif classification == "approved_pending":
             note += (
-                "At least one exact KB is approved/pending. Patch-window timing and any "
-                "reboot action remain separately gated."
+                "STATUS: WAITING - PATCH APPROVED/PENDING. "
+                "NEXT STEP: Jason will keep the ticket in the Jason queue and recheck after the "
+                "normal patch-processing window. No forced installation or reboot is authorized."
             )
-            self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
+            reason = (
+                "VulScan waiting for normal patch processing; one or more exact KBs are "
+                "APPROVED_PENDING."
+            )
             if self._apply_vulscan_client_disposition(
                 work,
                 ticket,
                 continue_monitoring=True,
             ):
+                self._write_note(
+                    work,
+                    note,
+                    "Jason - VulScan - Waiting Patch Window",
+                )
                 return
-            reason = "VulScan diagnostic complete; approved-pending patch requires window/recheck logic."
         else:
             note += (
                 "Technician review or a separately accepted Windows Update remediation branch "
                 "is required before modifying the endpoint."
             )
             reason = f"VulScan diagnostic classified {classification}; remediation remains gated."
+
+        if classification == "approval_blocked":
+            self._write_note(
+                work,
+                note,
+                "Jason - VulScan - Waiting Patch Approval",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_patch_approval",
+                    last_reason=reason,
+                )
+            )
+            return
+        if classification == "approved_pending":
+            self._write_note(
+                work,
+                note,
+                "Jason - VulScan - Waiting Patch Window",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_patch_window",
+                    last_reason=reason,
+                )
+            )
+            return
 
         self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
         self._persist_human_review_escalation(work, reason=reason)
@@ -2699,11 +3229,13 @@ class OperationalAutonomyMaintenance:
         elif classification == "inactive_or_offline_device":
             note += (
                 "Both management/provider evidence indicate an offline/inactive condition; "
-                "the playbook correctly did not reinstall while the endpoint is offline."
+                "the playbook correctly did not reinstall while the endpoint is offline. "
+                "Jason will preserve ownership, release the active-work slot, and resume "
+                "this playbook automatically when the exact endpoint is online again."
             )
             reason = (
-                "BackupIQ diagnostic classified an inactive/offline endpoint; waiting/recheck "
-                "automation remains separately gated."
+                "BackupIQ is waiting for exact endpoint access; Jason retains queue ownership "
+                "and will resume backupiq_investigate when the endpoint returns online."
             )
         else:
             note += (
@@ -2714,7 +3246,26 @@ class OperationalAutonomyMaintenance:
                 f"BackupIQ diagnostic classified {classification}; remediation remains gated."
             )
 
-        self._write_note(work, note, "Jason - Autonomous BackupIQ Diagnostic")
+        self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+        if classification == "inactive_or_offline_device":
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:backupiq_investigate",
+                    last_reason=reason,
+                )
+            )
+            return
         self._persist_human_review_escalation(work, reason=reason)
 
     @staticmethod
@@ -3450,6 +4001,55 @@ class OperationalAutonomyMaintenance:
             changes["job_uid"] = None
             changes["component_uid"] = None
         self.store.put(self._replace(work, **changes))
+
+    @staticmethod
+    def _vulscan_first_not_approved_at(work: OperationalWork) -> datetime | None:
+        match = re.search(
+            r"first_not_approved_at=([^;]+)",
+            str(work.last_reason or ""),
+        )
+        if match is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(match.group(1).strip())
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _handoff_vulscan_approval_review(self, work: OperationalWork) -> None:
+        scope = self._scope_for_work(work)
+        handoff = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "queueID": "Help Desk I",
+                    "status": "Human Review",
+                }
+            },
+        )
+        handoff_data = self._action_data(handoff)
+        verification = handoff_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        verified = (
+            verification.get("readbackVerified") is True
+            and isinstance(verified_fields, Sequence)
+            and not isinstance(verified_fields, (str, bytes))
+            and {"queueID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ) if isinstance(verification, Mapping) else False
+        if not verified:
+            raise OperationalAutonomyError(
+                "VulScan approval-review handoff readback did not verify queue and status"
+            )
 
     def _handoff_to_helpdesk(self, work: OperationalWork) -> None:
         # Human-review work must not be stranded in Jason's queue. Return it to
