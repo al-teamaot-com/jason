@@ -2849,10 +2849,6 @@ class OperationalAutonomyMaintenance:
                     "template_id": template.template_id,
                     "payload": {
                         "ticketID": int(work.ticket_id),
-                        "title": template.title,
-                        "description": template.body,
-                        "noteType": 3,
-                        "publish": 1,
                     },
                 },
             )
