@@ -220,6 +220,7 @@ def test_ticket_update_payload_accepts_work_lifecycle_fields():
             {
                 "id": 12345,
                 "configurationItemID": 1120,
+                "contactID": 30684489,
                 "billingCodeID": 29682801,
                 "issueType": 10,
                 "subIssueType": 104,
@@ -231,6 +232,7 @@ def test_ticket_update_payload_accepts_work_lifecycle_fields():
     assert payload == {
         "id": 12345,
         "configurationItemID": 1120,
+        "contactID": 30684489,
         "billingCodeID": 29682801,
         "issueType": 10,
         "subIssueType": 104,
