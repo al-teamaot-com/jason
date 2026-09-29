@@ -3111,3 +3111,50 @@ def test_eight_offline_candidates_do_not_starve_online_candidate(tmp_path: Path)
     assert store.get(180008) is not None
     assert store.latest_scan().selected == 1
     store.close()
+
+
+def test_operational_work_store_appends_ticket_activity_and_seeds_existing_state(tmp_path: Path):
+    path = tmp_path / "worker.sqlite3"
+    store = SQLiteOperationalWorkStore(path)
+    first = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="claim",
+        last_reason="claimed",
+        updated_at="2026-09-29T01:00:00+00:00",
+    )
+    store.put(first)
+    store.put(replace(
+        first,
+        phase="complete",
+        last_reason="verified complete",
+        updated_at="2026-09-29T01:05:00+00:00",
+    ))
+    rows = store._connection.execute(
+        "SELECT phase,reason,occurred_at FROM autonomy_ticket_activity "
+        "WHERE ticket_id=? ORDER BY activity_id",
+        (140933,),
+    ).fetchall()
+    assert [(row["phase"], row["reason"], row["occurred_at"]) for row in rows] == [
+        ("claim", "claimed", "2026-09-29T01:00:00+00:00"),
+        ("complete", "verified complete", "2026-09-29T01:05:00+00:00"),
+    ]
+
+    store._connection.execute("DELETE FROM autonomy_ticket_activity")
+    store._connection.close()
+    reopened = SQLiteOperationalWorkStore(path)
+    seeded = reopened._connection.execute(
+        "SELECT phase,reason,occurred_at FROM autonomy_ticket_activity "
+        "WHERE ticket_id=?",
+        (140933,),
+    ).fetchall()
+    assert [(row["phase"], row["reason"], row["occurred_at"]) for row in seeded] == [
+        ("complete", "verified complete", "2026-09-29T01:05:00+00:00")
+    ]

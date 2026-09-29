@@ -269,6 +269,23 @@ class SQLiteOperationalWorkStore:
         documented_at TEXT NOT NULL,
         PRIMARY KEY(ticket_id, playbook_id, note_title)
     );
+
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_activity (
+        activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER NOT NULL,
+        ticket_number TEXT NOT NULL,
+        title TEXT NOT NULL,
+        playbook_id TEXT NOT NULL,
+        source_queue TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        occurred_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_autonomy_ticket_activity_occurred
+        ON autonomy_ticket_activity(occurred_at, ticket_id);
+    CREATE INDEX IF NOT EXISTS idx_autonomy_ticket_activity_ticket
+        ON autonomy_ticket_activity(ticket_id, occurred_at);
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -307,6 +324,26 @@ class SQLiteOperationalWorkStore:
                 "ALTER TABLE autonomy_ticket_scan_cycle "
                 "ADD COLUMN duplicate_items INTEGER NOT NULL DEFAULT 0"
             )
+        # Preserve the latest known timestamp for pre-ledger work so historical
+        # reporting has a bounded migration baseline without inventing events.
+        self._connection.execute(
+            """
+            INSERT INTO autonomy_ticket_activity(
+                ticket_id,ticket_number,title,playbook_id,source_queue,phase,reason,occurred_at
+            )
+            SELECT
+                work.ticket_id,work.ticket_number,work.title,work.playbook_id,
+                work.source_queue,work.phase,work.last_reason,work.updated_at
+            FROM autonomy_operational_work AS work
+            WHERE work.updated_at <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM autonomy_ticket_activity AS activity
+                  WHERE activity.ticket_id = work.ticket_id
+                    AND activity.occurred_at = work.updated_at
+                    AND activity.phase = work.phase
+              )
+            """
+        )
         os.chmod(self.path, 0o600)
 
     def get(self, ticket_id: int) -> OperationalWork | None:
@@ -368,6 +405,23 @@ class SQLiteOperationalWorkStore:
                     work.repair_attempts,
                     work.last_reason,
                     work.source_version,
+                    value,
+                ),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_activity(
+                    ticket_id,ticket_number,title,playbook_id,source_queue,phase,reason,occurred_at
+                ) VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (
+                    work.ticket_id,
+                    work.ticket_number,
+                    work.title,
+                    work.playbook_id,
+                    work.source_queue,
+                    work.phase,
+                    work.last_reason,
                     value,
                 ),
             )

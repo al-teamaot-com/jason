@@ -1026,3 +1026,62 @@ def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
             "title": "Jason diagnostic",
         }
     }
+
+
+def test_ticket_activity_report_aggregates_durable_activity(monkeypatch, tmp_path):
+    import sqlite3
+
+    path = tmp_path / "worker.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE autonomy_ticket_activity (
+            activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            ticket_number TEXT NOT NULL,
+            title TEXT NOT NULL,
+            playbook_id TEXT NOT NULL,
+            source_queue TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            occurred_at TEXT NOT NULL
+        );
+        INSERT INTO autonomy_ticket_activity(
+            ticket_id,ticket_number,title,playbook_id,source_queue,phase,reason,occurred_at
+        ) VALUES
+        (101,'T20260928.0001','Ticket A','backupiq','Jason','claim','claimed','2026-09-29T01:00:00+00:00'),
+        (101,'T20260928.0001','Ticket A','backupiq','Jason','complete','verified','2026-09-29T01:05:00+00:00'),
+        (102,'T20260928.0002','Ticket B','vulscan','Jason','blocked','needs review','2026-09-29T02:00:00+00:00');
+        """
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(path))
+
+    result = server.jason_ticket_activity_report(
+        "2026-09-29T00:00:00+00:00",
+        "2026-09-29T03:00:00+00:00",
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["provider_independent"] is True
+    assert result["ticket_count"] == 2
+    by_number = {item["ticket_number"]: item for item in result["tickets"]}
+    assert by_number["T20260928.0001"]["activity_events"] == 2
+    assert by_number["T20260928.0001"]["last_phase"] == "complete"
+    assert by_number["T20260928.0001"]["phases"] == ["claim", "complete"]
+    assert by_number["T20260928.0002"]["last_reason"] == "needs review"
+
+
+def test_ticket_activity_report_rejects_unbounded_or_naive_windows():
+    naive = server.jason_ticket_activity_report(
+        "2026-09-29T00:00:00",
+        "2026-09-29T03:00:00+00:00",
+    )
+    assert naive["status"] == "rejected"
+
+    too_large = server.jason_ticket_activity_report(
+        "2026-08-01T00:00:00+00:00",
+        "2026-09-29T03:00:00+00:00",
+    )
+    assert too_large["status"] == "rejected"
