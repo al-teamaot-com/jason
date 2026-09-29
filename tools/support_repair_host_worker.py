@@ -26,6 +26,7 @@ DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 SUPPORT_ROW = re.compile(r'^\|\s*(SUPPORT-[^|]+?)\s*\|\s*(P\d)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|')
 META = re.compile(r'(?im)^\s*-\s*Support item\s*:\s*(SUPPORT-[A-Z]+-[0-9]+)\s*$')
+SUPPORT_ID_IN_TITLE = re.compile(r'\b(SUPPORT-[A-Z]+-[0-9]+)\b', re.IGNORECASE)
 PRIORITY = {'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3}
 
 
@@ -133,6 +134,28 @@ def gh_json(args: list[str], *, cwd: Path) -> Any:
 def open_prs(repo: Path) -> list[dict[str, Any]]:
     data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft,statusCheckRollup'], cwd=repo)
     return list(data or [])
+
+
+def support_id_from_title(title: str) -> str | None:
+    match = SUPPORT_ID_IN_TITLE.search(str(title or ''))
+    return match.group(1).upper() if match else None
+
+
+def open_support_issue_ids(repo: Path) -> set[str]:
+    data = gh_json([
+        'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
+        '--limit', '100', '--json', 'number,title'
+    ], cwd=repo) or []
+    result = set()
+    for issue in data:
+        item_id = support_id_from_title(str(issue.get('title') or ''))
+        if item_id:
+            result.add(item_id)
+    return result
+
+
+def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]) -> list[dict[str, str]]:
+    return [item for item in items if item['id'] in open_issue_ids]
 
 
 def repair_pr_for(item_id: str, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -530,7 +553,17 @@ def main() -> int:
 
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     support_text = run(['git', 'show', 'origin/main:SUPPORT.md'], cwd=repo)
-    support = parse_support(support_text)
+    parsed_support = parse_support(support_text)
+    open_issue_ids = open_support_issue_ids(repo)
+    support = eligible_support_items(parsed_support, open_issue_ids)
+    state['support_state_mismatches'] = {
+        'support_open_issue_not_open': sorted(
+            item['id'] for item in parsed_support if item['id'] not in open_issue_ids
+        ),
+        'issue_open_missing_support_row': sorted(
+            item_id for item_id in open_issue_ids if item_id not in {item['id'] for item in parsed_support}
+        ),
+    }
     prs = open_prs(repo)
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')

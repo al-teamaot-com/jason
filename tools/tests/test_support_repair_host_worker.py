@@ -98,3 +98,21 @@ def test_blocked_item_does_not_consume_active_slot():
     assert 'SUPPORT-OPS-003' in selected
     assert 'SUPPORT-OPS-004' in selected
     assert 'SUPPORT-OPS-005' not in selected
+
+
+def test_support_issue_intersection_fails_closed_on_stale_rows():
+    items = [
+        {'id': 'SUPPORT-OPS-023'},
+        {'id': 'SUPPORT-OPS-025'},
+        {'id': 'SUPPORT-OPS-028'},
+    ]
+    selected = worker.eligible_support_items(
+        items,
+        {'SUPPORT-OPS-025', 'SUPPORT-OPS-028'},
+    )
+    assert [item['id'] for item in selected] == ['SUPPORT-OPS-025', 'SUPPORT-OPS-028']
+
+
+def test_support_id_from_title_is_exact_and_case_normalized():
+    assert worker.support_id_from_title('SUPPORT-OPS-028 — active status') == 'SUPPORT-OPS-028'
+    assert worker.support_id_from_title('unrelated issue') is None
