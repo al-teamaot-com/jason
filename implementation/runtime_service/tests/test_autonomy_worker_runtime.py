@@ -1671,6 +1671,81 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
     store.close()
 
 
+def test_backupiq_legacy_offline_escalation_migrates_to_waiting(tmp_path: Path):
+    class LegacyOfflineReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "backup-device-1",
+                            "hostname": "APD-50399",
+                            "online": False,
+                            "reboot_required": False,
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=141185,
+            ticket_number="T20260925.0003",
+            title="BackupIQ: Backup for asset is not available for Atomic Plumbing & Drain Cleaning",
+            playbook_id="backupiq_endpoint_backup",
+            source_queue="Jason",
+            company_id=333,
+            configuration_item_id=1259,
+            device_uid="backup-device-1",
+            hostname="APD-50399",
+            phase="escalated",
+            last_reason=(
+                "BackupIQ diagnostic classified an inactive/offline endpoint; "
+                "waiting/recheck automation remains separately gated."
+            ),
+        )
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=LegacyOfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(141185)
+    assert work is not None
+    assert work.phase == "waiting_device_access:backupiq_investigate"
+    assert "Migrated legacy BackupIQ offline escalation" in work.last_reason
+    assert store.list_open() == ()
+    update_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert update_calls == [
+        {
+            "id": 141185,
+            "status": "Waiting Device Access",
+        }
+    ]
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert note_calls == []
+    store.close()
+
+
 def low_disk_candidate():
     return QueueCandidate(
         resource_id="141101",
