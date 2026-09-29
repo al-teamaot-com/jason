@@ -723,13 +723,21 @@ class OperationalAutonomyMaintenance:
         # scheduling decision. Normalize every open BackupIQ candidate before
         # evaluating active slots, endpoint availability, or remediation.
         for item in candidates:
+            ticket_id = int(item.resource_id)
+            existing_backupiq = self.store.get(ticket_id)
             backupiq_status = str(
                 item.context.get("_jason_source_status_label") or ""
             ).strip().casefold()
+            backupiq_human_handoff = (
+                existing_backupiq is not None
+                and existing_backupiq.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                and existing_backupiq.phase == "escalated"
+            )
             if (
                 self._is_backupiq_ticket(item.context)
                 and str(item.source_queue).strip().casefold() != "jason"
                 and backupiq_status != "human review"
+                and not backupiq_human_handoff
             ):
                 try:
                     self._normalize_backupiq_queue(item)
@@ -916,10 +924,18 @@ class OperationalAutonomyMaintenance:
                                 },
                             )
                             resume_phase = waiting_phase.split(":", 1)[1]
+                            resume_reason = (
+                                existing.last_reason
+                                if (
+                                    existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                                    and resume_phase == "backupiq_verify_reinstall"
+                                )
+                                else "Exact endpoint is online again; resuming preserved work."
+                            )
                             existing = self._replace(
                                 existing,
                                 phase=resume_phase,
-                                last_reason="Exact endpoint is online again; resuming preserved work.",
+                                last_reason=resume_reason,
                             )
                             self.store.put(existing)
                             try:
@@ -957,10 +973,18 @@ class OperationalAutonomyMaintenance:
                         waiting_phase = existing.phase
                         resume_phase = waiting_phase.split(":", 1)[1]
                         waiting_since = existing.updated_at
+                        resume_reason = (
+                            existing.last_reason
+                            if (
+                                existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                                and resume_phase == "backupiq_verify_reinstall"
+                            )
+                            else "Scheduled recheck due; resuming preserved work."
+                        )
                         existing = self._replace(
                             existing,
                             phase=resume_phase,
-                            last_reason="Scheduled recheck due; resuming preserved work.",
+                            last_reason=resume_reason,
                             updated_at=waiting_since,
                         )
                         self.store.put(existing)
