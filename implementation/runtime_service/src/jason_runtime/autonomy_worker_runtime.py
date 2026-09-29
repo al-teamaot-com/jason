@@ -1986,6 +1986,11 @@ class OperationalAutonomyMaintenance:
                 if next_phase == "repair_wait"
                 else "verify"
             )
+        if step == "backupiq_reinstall" and work.repair_attempts >= 1:
+            raise OperationalAutonomyError(
+                "BackupIQ autonomous reinstall limit is one per incident cycle"
+            )
+
         output = self.actions.execute(
             scope,
             "automation.component.execute",
@@ -2017,10 +2022,6 @@ class OperationalAutonomyMaintenance:
         )
         last_reason = f"Dispatched {resolved_component_name}."
         if step == "backupiq_reinstall":
-            if work.repair_attempts >= 1:
-                raise OperationalAutonomyError(
-                    "BackupIQ autonomous reinstall limit is one per incident cycle"
-                )
             started_at = datetime.now(timezone.utc).isoformat()
             last_reason = (
                 f"backupiq_reinstall_started_at={started_at}; "
