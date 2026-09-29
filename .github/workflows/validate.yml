@@ -161,7 +161,6 @@ jobs:
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        env:
           PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
@@ -200,7 +199,6 @@ jobs:
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pr_number != '')
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        env:
           PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
