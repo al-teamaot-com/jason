@@ -6,7 +6,7 @@
 playbook:
   id: backupiq_endpoint_backup
   name: BackupIQ / Datto Endpoint Backup
-  version: 1.1.0
+  version: 1.2.0
   owner: AOT
   target_type: endpoint
   trigger:
@@ -16,7 +16,7 @@ playbook:
     while_open: Jason
     release_active_slot_when_waiting: true
   retry:
-    max_remediation_attempts: 2
+    max_remediation_attempts: 1
   recheck:
     enabled: true
     cadence: 1h
@@ -30,12 +30,14 @@ playbook:
     allowed_branches:
       - identify
       - classify
-      - wait
+      - wait_true_offline
       - recheck
       - resume_on_online
-    approval_bound_branches:
       - close_recovered
       - reinstall_agent
+      - verify_reinstall
+      - handoff_human_review
+    approval_bound_branches:
       - lifecycle_mutation
       - backup_policy_change
     disruptive_branches: []
@@ -53,11 +55,13 @@ Apply when an Autotask ticket is created from BackupIQ / UniView indicating an e
 
 Confirm the ticket, client, endpoint/asset name, alert timestamp, threshold, and associated DRMM site/device before proceeding.
 
-Queue ownership invariant:
+Queue ownership rule:
 
-`Open + BackupIQ => Jason queue`
+`Open + actionable BackupIQ => Jason queue`
 
-This invariant is independent of endpoint online/offline state, active-work capacity, waiting/recheck state, and whether remediation is currently possible. The global active-work limit controls concurrent execution only.
+Exception: when Jason determines that technician review is required, it must write an actionable internal note, move the ticket to **Help Desk I (29682833)**, set **Human Review (37)**, verify both fields by provider readback, and leave the ticket outside Jason until a human explicitly changes the disposition. The queue normalizer must not pull an explicit BackupIQ Human Review ticket back into Jason.
+
+The global active-work limit controls concurrent execution only.
 
 ## 3. Scope and Boundaries
 
@@ -145,65 +149,94 @@ Do not equate DRMM last_logged_in_user with a live interactive session.
 
 ### C. Evidence classification
 
-1. DRMM offline + Endpoint Backup offline:
-   classify=inactive_or_offline_device. Do not reinstall. Enter waiting_device.
+Availability is a two-source decision. DRMM and Backup.net must be evaluated independently before Jason decides whether the endpoint is truly offline.
 
-2. DRMM online + Endpoint Backup offline/stale:
-   classify=backup_agent_connectivity_failure. Enter diagnosing after the online-duration gate.
+1. **DRMM offline + Backup.net offline**
+   - classify=`true_offline_both_sources`
+   - this is the only normal BackupIQ **true offline** condition
+   - do not reinstall
+   - keep the ticket in Jason, set **Waiting Device Access (38)**, release the active-work slot, and resume when the exact endpoint returns
 
-3. DRMM online + Endpoint Backup online + backup enabled + stale last successful backup:
-   classify=backup_failure. Enter diagnosing after the online-duration gate.
+2. **DRMM offline + Backup.net online**
+   - classify=`drmm_only_offline_conflict`
+   - this is contradictory availability evidence, not true offline
+   - do not reinstall
+   - document DRMM state, provider state, last check-in/online timestamps and backup evidence
+   - move to **Help Desk I (29682833) + Human Review (37)** with verified readback
 
-4. Backup disabled:
-   classify=backup_configuration_issue. Do not reinstall solely for this condition. Document and escalate/change configuration only under appropriate authority.
+3. **DRMM online + Backup.net offline**
+   - classify=`backup_agent_connectivity_failure`
+   - endpoint connectivity is proven while the backup provider has lost the agent
+   - the exact approved Endpoint Backup installer/reinstaller may run autonomously
+   - one reinstall maximum per incident cycle
 
-5. Provider asset missing:
-   - If the endpoint is active/expected to be protected: classify=unprotected_or_asset_lifecycle_issue. Treat the authoritative empty provider result as valid negative evidence, not as a connector failure. Investigate onboarding, asset placement, rename/reimage/replacement, retirement, or duplicate state before remediation.
-   - If endpoint lifecycle evidence indicates retirement/replacement/staleness: classify=asset_identity_or_lifecycle_issue.
-   - Do not reinstall solely because the provider asset is absent.
+4. **DRMM online + Backup.net online + recent/successful backup**
+   - if no current BackupIQ condition remains: classify=`stale_or_recovered_alert`, document and complete automatically after verified Autotask readback
+   - if contradictory/current BackupIQ evidence remains and no lower-impact repair fits: classify=`persistent_backupiq_condition_after_success`; the approved reinstall may run autonomously
 
-6. Recent successful backup within threshold:
-   classify=stale_or_recovered_alert. Verify provider health and complete the ticket automatically when all common completion/readback gates pass and no contradictory evidence exists.
+5. **DRMM online + Backup.net online + stale/failed backup**
+   - classify=`backup_failure_or_stale_success`
+   - continue diagnosis for any exact lower-impact repair that clearly fits
+   - if no other repair fits, or a bounded applicable repair does not restore health, the approved reinstall may run autonomously
+   - one reinstall maximum per incident cycle
 
-7. Backup disabled:
-   classify=backup_configuration_issue. Configuration/policy changes remain approval-bound unless separately promoted for autonomy.
+6. **Backup disabled**
+   - classify=`backup_configuration_issue`
+   - do not reinstall solely for this condition
+   - document and move to **Help Desk I + Human Review**
+
+7. **Provider asset missing/ambiguous/duplicate**
+   - classify=`asset_identity_or_lifecycle_issue`
+   - do not guess, clean-install, or create a replacement asset autonomously
+   - document and move to **Help Desk I + Human Review**
+
+A successful installer job is action evidence only. It never proves incident resolution.
 
 ## 8. Decision Gates
 
-Before remediation all must be true:
-- exact DRMM endpoint identified
-- exact UniView Endpoint Backup asset identified
-- device has been continuously online long enough for one full AOT backup cycle (approximately two hours)
-- provider evidence still shows unhealthy/stale backup state
-- Endpoint Backup agent problem is supported by evidence
-- required DRMM site variable exists and is usable
-- remediation component is approved for the requested scope
-- no conflicting maintenance/retirement/reimage evidence exists
+Before autonomous reinstall all must be true:
+- exact Autotask client/ticket boundary is established
+- exact DRMM endpoint is established
+- exact same-client Backup.net Endpoint Backup asset is uniquely established
+- DRMM reports the endpoint online
+- backup is expected to be enabled
+- the approved reinstall branch is supported by current evidence
+- no duplicate/reimage/retirement/lifecycle conflict exists
+- the one-reinstall-per-incident limit has not already been consumed
+- the exact installer component is standing-safe for this playbook
+- installer variables are empty/server-governed only; Jason never reads or exposes registration/encryption secrets
 
-If any gate fails, do not reinstall.
+The two-hour online qualification from older design revisions is not required for the specific **DRMM online + Backup.net offline** condition. DRMM already proves endpoint access and provider-offline evidence supports the agent-connectivity repair.
+
+For Online/Online stale/failed or persistent-alert conditions, prefer an exact lower-impact repair when one exists. If none fits, reinstall is an approved bounded fallback.
 
 ## 9. Remediation
 
-Approved remediation component:
-Datto Endpoint Backup Agent v2 [WIN]
+Approved standing-safe remediation component:
 
-Component metadata requires:
-- usrDEBToken or site variable usrDEBTokenSITE (mandatory registration token)
-- optional usrDEBEncryption or site variable usrDEBEncryptionSITE
+**Datto Endpoint Backup Agent v2 [WIN]**  
+Component UID: `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`
 
-Never reveal or copy the token/encryption value into tickets, logs, chat responses, or documentation.
+Durable component approval date: 2026-09-29. The approval is limited to exact managed endpoints under this playbook's identity, evidence, retry, and verification gates.
 
-A reinstall is modifying and must remain governed. Clean install creates a new asset record and may create duplicate billing; therefore do not select clean install unless the playbook branch explicitly requires it and asset lifecycle has been reconciled.
+The component may use server-governed/site-scoped registration inputs such as `usrDEBTokenSITE` and optional `usrDEBEncryptionSITE`. Jason must not retrieve, log, copy, persist, or expose those secret values. Component invocation uses no caller-supplied secret variables.
 
-Record job ID, terminal status, actual sanitized StdOut/StdErr, and interpretation.
+Autonomous reinstall is approved when:
+- DRMM is online and Backup.net is offline; or
+- DRMM and Backup.net are online but a current BackupIQ condition/backup failure remains and no lower-impact repair clearly fits; or
+- an applicable bounded lower-impact repair was attempted and the backup condition remains.
+
+Clean install/new-provider-asset creation is **not** implied by reinstall authority. If the installer or provider evidence indicates a clean-install/new-asset/lifecycle decision, stop and route to Help Desk I / Human Review.
+
+Record component UID/name, durable job ID, terminal provider status, sanitized output when available, and interpretation. Installer stdout is useful evidence but provider-side recovery is authoritative.
 
 ## 10. Retry Policy
 
-Maximum two full remediation attempts.
+Maximum **one autonomous Endpoint Backup reinstall per incident/playbook cycle**.
 
-A full attempt includes provider pre-check, endpoint pre-check, dependency validation, component execution, terminal output, post-install service check, provider recheck, and backup verification.
+A reinstall attempt includes provider pre-check, endpoint pre-check, exact component execution, terminal job evidence, provider recheck, and successful-backup verification.
 
-After two failed attempts, escalate.
+Never enter an uninstall/reinstall loop. If the reinstall fails, cannot be verified, or the provider remains unhealthy after the bounded verification window, document the evidence and move to **Help Desk I + Human Review**.
 
 ## 11. Periodic Rechecks
 
@@ -220,7 +253,7 @@ When the device becomes online:
 
 If it goes offline during the window, reset the two-hour qualification.
 
-During verifying, poll provider state on a reasonable cadence until a new successful backup is observed or the verification window expires.
+During post-reinstall verification, poll provider state on a reasonable cadence. Completion requires the exact Backup.net asset to be online and a **new successful backup timestamp after the reinstall baseline**. Use a bounded verification window (currently three hours). If the endpoint becomes truly offline (both DRMM and Backup.net offline), transition to Waiting Device Access and resume verification later. DRMM-only offline during verification is a Human Review handoff.
 
 ## 12. Aging / Stale Condition
 
@@ -276,15 +309,18 @@ Treat API authentication failure, provider timeout, unmatched asset, contradicto
 
 Use Human Review when a technician decision is specifically required. Escalate only for operational failure/out-of-scope conditions.
 
-Escalate or hand off when:
+Escalate or hand off to **Help Desk I (29682833) / Human Review (37)** when:
 - asset identity cannot be established
+- DRMM alone reports offline while Backup.net remains online
 - provider API remains unavailable beyond bounded retries
 - backup disabled requires policy decision
-- required secret/site variable is missing
-- two remediation attempts fail
+- required installer dependency cannot be resolved server-side
+- the single autonomous reinstall fails
 - device is stale/retired/duplicated
 - clean-install/new-asset decision is required
-- verification cannot establish a new successful backup
+- post-reinstall verification cannot establish provider recovery and a new successful backup
+
+Human-review notes must include DRMM state/last check-in, Backup.net state/last online, last successful backup, exact endpoint/provider asset identity, actions attempted, job/correlation IDs where available, and the specific reason human review is required. Never include secret values.
 
 ## 17. Verification
 
@@ -312,14 +348,15 @@ Include original BackupIQ condition, classification/root cause, DRMM availabilit
 Existing:
 - Autotask ticket read/write/note/create
 - DRMM device/software/component/job/output reads
-- DRMM site-variable presence/read controls
 - governed component execution
+- standing-safe Datto Endpoint Backup Agent v2 [WIN]
+- Backup.net Endpoint Backup asset and BackupIQ alert reads
 - persisted playbook state and scheduler/rechecks
 
-Implementation required:
-- backup.endpoint.asset.search/read
-- backup.endpoint.backup.search
-- backup.backupiq.alert.search
+Required governed read capabilities:
+- `backup.endpoint.asset.search/read`
+- `backup.endpoint.backup.search` when detailed backup history is required
+- `backup.backupiq.alert.search`
 - OAuth client-credentials broker using OpenBao-held Client ID/Secret
 - provider/client isolation and redaction
 - health/readiness evidence for the Backup.net integration
@@ -381,34 +418,41 @@ Close the Section Goal after:
 
 ## 23. Autonomous Execution Eligibility
 
-### Owner-approved production scope — BackupIQ 1.1.0
+### Owner-approved production scope — BackupIQ 1.2.0
 
 Approval owner: person-al  
 Approval date: 2026-09-29  
-Durable approval record: `pbauto_fec4b9bd00ba4618bff16af572455c36`  
-Playbook scope: `backupiq_endpoint_backup@1.1.0`  
 Policy: `playbook-autonomy:backupiq_endpoint_backup`
 
-Allowed action capabilities:
+Required action capabilities:
+- `automation.component.execute`
 - `service.ticket.note.create`
 - `service.ticket.update`
 
-Approved autonomous branches:
-- exact ticket/client/device/provider identity;
-- diagnostic classification using governed DRMM and Backup.net/UniView reads;
-- normalize and retain open BackupIQ tickets in the Jason queue;
-- transition exact offline Jason-owned endpoint tickets to **Waiting Device Access**;
-- release the active-work slot while preserving Jason ownership;
-- perform unchanged waiting/recheck cycles without repeated ticket notes;
-- when the exact DRMM endpoint is proven online, transition back to **In Progress** and resume `backupiq_investigate`.
+Approved autonomous behavior:
+- exact ticket/client/CI/DRMM/Backup.net identity;
+- dual-source availability classification;
+- **both DRMM and Backup.net offline** => Jason / Waiting Device Access;
+- **DRMM offline only** => evidence note + Help Desk I / Human Review;
+- **Backup.net offline only while DRMM online** => one standing-safe Endpoint Backup reinstall;
+- **Online/Online recent success and no current condition** => verified recovered completion;
+- **Online/Online with persistent condition, stale or failed backup** => diagnose, then one reinstall if no lower-impact repair fits or repair fails;
+- post-reinstall provider verification requiring a new successful backup after the remediation baseline;
+- Help Desk I / Human Review after failed install, unresolved verification, policy/lifecycle ambiguity, or other out-of-scope conditions.
 
-This approval does not authorize automatic recovered-alert completion, agent installation/reinstallation, component execution, backup policy or retention changes, provider asset deletion/retirement, restore operations, or disruptive endpoint actions.
+Standing-safe component:
+- `Datto Endpoint Backup Agent v2 [WIN]`
+- UID `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`
+- Durable component approval recorded 2026-09-29 by person-al.
 
-Production evidence:
-- behavior implementation deployed from `bc2a065ffce8d753f598343b3fff186d2ae7aefb`;
-- T20260928.0082 / TUS-50822 proved exact identity, governed ticket lifecycle, offline classification, automatic migration to `waiting_device_access:backupiq_investigate`, active-slot release, and no additional note during migration;
-- live **Waiting Device Access -> In Progress -> resume** remains to be observed when an exact controlled endpoint naturally returns online.
+Hard boundaries:
+- one autonomous reinstall per incident cycle;
+- no clean-install/new-provider-asset lifecycle mutation;
+- no asset deletion/retirement;
+- no policy/retention change;
+- no restore operation;
+- no registration/encryption secret disclosure;
+- no reboot or other disruptive endpoint action without separate approval.
 
-The prior `backupiq_endpoint_backup@1.0.0` approval remains intact for rollback compatibility with the previously accepted production revision. It does not grant broader authority.
+The prior `backupiq_endpoint_backup@1.1.0` approval remains historical rollback evidence only. Version 1.2.0 requires a new durable playbook-autonomy promotion for the exact three-capability set before production execution.
 
-Any material change to this 1.1.0 branch logic, required capabilities, policy ID, or authority boundary requires a new version and Owner review. Recovered-alert completion and remediation remain separately gated.

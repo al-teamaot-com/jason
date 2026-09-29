@@ -1522,13 +1522,14 @@ def backupiq_candidate():
     )
 
 
-def test_backupiq_scope_is_owner_approved_version_1_1_0():
+def test_backupiq_scope_is_owner_approved_version_1_2_0():
     from jason_runtime.autonomy_worker_runtime import BACKUPIQ_SCOPE
 
     assert BACKUPIQ_SCOPE.playbook_id == "backupiq_endpoint_backup"
-    assert BACKUPIQ_SCOPE.playbook_version == "1.1.0"
+    assert BACKUPIQ_SCOPE.playbook_version == "1.2.0"
     assert BACKUPIQ_SCOPE.policy_id == "playbook-autonomy:backupiq_endpoint_backup"
     assert BACKUPIQ_SCOPE.required_action_capabilities == (
+        "automation.component.execute",
         "service.ticket.note.create",
         "service.ticket.update",
     )
@@ -1719,7 +1720,7 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
     ]
     assert len(note_calls) == 1
     assert note_calls[0]["title"] == "Jason - BackupIQ - Diagnostic"
-    assert "Classification=inactive_or_offline_device" in note_calls[0]["description"]
+    assert "Classification=true_offline_both_sources" in note_calls[0]["description"]
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
@@ -1813,6 +1814,360 @@ def test_backupiq_legacy_offline_escalation_migrates_to_waiting(tmp_path: Path):
         if capability == "service.ticket.note.create"
     ]
     assert note_calls == []
+    store.close()
+
+
+
+class BackupIQScenarioReads(Reads):
+    def __init__(
+        self,
+        *,
+        drmm_online: bool,
+        provider_status: str,
+        last_success: str | None,
+        current_alerts: bool = True,
+        recovered_after_reinstall: bool = False,
+    ):
+        super().__init__()
+        self.drmm_online = drmm_online
+        self.provider_status = provider_status
+        self.last_success = last_success
+        self.current_alerts = current_alerts
+        self.recovered_after_reinstall = recovered_after_reinstall
+        self.asset_reads = 0
+
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"item": {
+                    "id": 1259,
+                    "companyID": 333,
+                    "isActive": True,
+                    "referenceNumber": "backup-device-1",
+                    "referenceTitle": "APD-50399",
+                }}},
+            }
+        if capability == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {"record": {
+                    "resource_id": "backup-device-1",
+                    "hostname": "APD-50399",
+                    "online": self.drmm_online,
+                    "reboot_required": False,
+                }},
+            }
+        if capability == "backup.endpoint.asset.search":
+            self.asset_reads += 1
+            status = self.provider_status
+            last_success = self.last_success
+            if self.recovered_after_reinstall and self.asset_reads > 1:
+                status = "online"
+                last_success = "2099-01-01T00:00:00Z"
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": [{
+                    "id": "backup-asset-1",
+                    "name": "APD-50399",
+                    "status": status,
+                    "backupEnabled": True,
+                    "lastSuccessfulBackupTimestamp": last_success,
+                    "lastOnlineTimestamp": "2026-09-29T14:00:00Z",
+                }]}},
+            }
+        if capability == "backup.backupiq.alert.search":
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {
+                    "items": ([{"id": "alert-1"}] if self.current_alerts else [])
+                }},
+            }
+        return super().execute(capability, arguments)
+
+
+def _backupiq_worker(tmp_path: Path, reads, actions=None, candidate_value=None, times=None):
+    actions = actions or Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate_value or backupiq_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter(times or (0.0, 31.0, 62.0, 93.0, 124.0)).__next__,
+    )
+    return worker, store, actions
+
+
+def test_backupiq_drmm_only_offline_hands_off_to_hd1_human_review(tmp_path: Path):
+    worker, store, actions = _backupiq_worker(
+        tmp_path,
+        BackupIQScenarioReads(
+            drmm_online=False,
+            provider_status="online",
+            last_success="2026-09-29T13:00:00Z",
+        ),
+    )
+
+    worker.tick()
+
+    final = store.get(141185)
+    assert final is not None
+    assert final.phase == "escalated"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[-1] == {
+        "id": 141185,
+        "queueID": "Help Desk I",
+        "status": "Human Review",
+    }
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert any("DRMMOnline=No" in note["description"] for note in notes)
+    assert any("ProviderStatus=online" in note["description"] for note in notes)
+    store.close()
+
+
+def test_backupiq_backup_only_offline_runs_one_standing_safe_reinstall_and_verifies(
+    tmp_path: Path,
+):
+    worker, store, actions = _backupiq_worker(
+        tmp_path,
+        BackupIQScenarioReads(
+            drmm_online=True,
+            provider_status="offline",
+            last_success="2026-09-24T08:00:00Z",
+            recovered_after_reinstall=True,
+        ),
+    )
+
+    worker.tick()
+    assert store.get(141185).phase == "backupiq_reinstall_dispatch"
+
+    worker.tick()
+    assert store.get(141185).phase == "backupiq_reinstall_wait"
+
+    worker.tick()
+    assert store.get(141185).phase == "waiting_recheck:backupiq_verify_reinstall"
+
+    worker.tick()
+    final = store.get(141185)
+    assert final is not None
+    assert final.phase == "complete"
+    assert final.repair_attempts == 1
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_name"] == "Datto Endpoint Backup Agent v2 [WIN]"
+    assert component_calls[0]["component_uid"] == "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
+    assert component_calls[0]["variables"] == {}
+
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[-1] == {"id": 141185, "status": "Complete"}
+    store.close()
+
+
+def test_backupiq_online_online_recent_success_can_reinstall_when_condition_persists(
+    tmp_path: Path,
+):
+    worker, store, actions = _backupiq_worker(
+        tmp_path,
+        BackupIQScenarioReads(
+            drmm_online=True,
+            provider_status="online",
+            last_success="2026-09-25T10:00:00Z",
+            current_alerts=True,
+        ),
+        times=(0.0, 31.0),
+    )
+
+    worker.tick()
+    assert store.get(141185).phase == "backupiq_reinstall_dispatch"
+    worker.tick()
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_name"] == "Datto Endpoint Backup Agent v2 [WIN]"
+    store.close()
+
+
+def test_backupiq_online_online_recovered_without_current_condition_completes(
+    tmp_path: Path,
+):
+    worker, store, actions = _backupiq_worker(
+        tmp_path,
+        BackupIQScenarioReads(
+            drmm_online=True,
+            provider_status="online",
+            last_success="2026-09-25T10:00:00Z",
+            current_alerts=False,
+        ),
+        times=(0.0,),
+    )
+
+    worker.tick()
+
+    final = store.get(141185)
+    assert final is not None
+    assert final.phase == "complete"
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[-1] == {"id": 141185, "status": "Complete"}
+    store.close()
+
+
+def test_backupiq_online_online_stale_backup_uses_reinstall_fallback(tmp_path: Path):
+    worker, store, actions = _backupiq_worker(
+        tmp_path,
+        BackupIQScenarioReads(
+            drmm_online=True,
+            provider_status="online",
+            last_success="2026-09-24T08:00:00Z",
+            current_alerts=True,
+        ),
+        times=(0.0, 31.0),
+    )
+
+    worker.tick()
+    assert store.get(141185).phase == "backupiq_reinstall_dispatch"
+    worker.tick()
+
+    component_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
+    assert len(component_calls) == 1
+    assert component_calls[0]["component_uid"] == "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
+    store.close()
+
+
+def test_backupiq_human_review_handoff_is_not_normalized_back_to_jason(tmp_path: Path):
+    human_candidate = replace(
+        backupiq_candidate(),
+        source_queue="Help Desk I",
+        owned_by_jason=False,
+        context={
+            **backupiq_candidate().context,
+            "_jason_source_status_label": "Human Review",
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(
+        OperationalWork(
+            ticket_id=141185,
+            ticket_number="T20260925.0003",
+            title=human_candidate.context["title"],
+            playbook_id="backupiq_endpoint_backup",
+            source_queue="Jason",
+            company_id=333,
+            configuration_item_id=1259,
+            device_uid="backup-device-1",
+            hostname="APD-50399",
+            phase="escalated",
+            last_reason="Technician review required.",
+        )
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(human_candidate),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert actions.calls == []
+    assert store.get(141185).phase == "escalated"
+    store.close()
+
+
+
+def test_backupiq_second_reinstall_is_blocked_before_component_dispatch(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import (
+        BACKUPIQ_INSTALLER_NAME,
+        BACKUPIQ_SCOPE,
+        OperationalAutonomyError,
+    )
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=141185,
+        ticket_number="T20260925.0003",
+        title=backupiq_candidate().context["title"],
+        playbook_id=BACKUPIQ_SCOPE.playbook_id,
+        source_queue="Jason",
+        company_id=333,
+        configuration_item_id=1259,
+        device_uid="backup-device-1",
+        hostname="APD-50399",
+        phase="backupiq_reinstall_dispatch",
+        repair_attempts=1,
+    )
+
+    try:
+        worker._dispatch_component(
+            work,
+            BACKUPIQ_INSTALLER_NAME,
+            "backupiq_reinstall_wait",
+        )
+    except OperationalAutonomyError as exc:
+        assert "one per incident cycle" in str(exc)
+    else:
+        raise AssertionError("second BackupIQ reinstall did not fail closed")
+
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "automation.component.execute"
+    ]
     store.close()
 
 

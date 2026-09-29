@@ -110,9 +110,10 @@ UNEXPECTED_SHUTDOWN_SCOPE = PlaybookScope(
 )
 BACKUPIQ_SCOPE = PlaybookScope(
     playbook_id="backupiq_endpoint_backup",
-    playbook_version="1.1.0",
+    playbook_version="1.2.0",
     policy_id="playbook-autonomy:backupiq_endpoint_backup",
     required_action_capabilities=(
+        "automation.component.execute",
         "service.ticket.note.create",
         "service.ticket.update",
     ),
@@ -178,6 +179,9 @@ SECURITY_LOG_QUICK_TEST_NAME = "Security Log Quick Test [WIN] AOT Ver 12012025-1
 SECURITY_LOG_QUICK_TEST_UID = "a50d486b-2cce-4658-9e11-64fb6bf9ab9d"
 SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
 SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
+BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
+BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
+BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
@@ -719,9 +723,21 @@ class OperationalAutonomyMaintenance:
         # scheduling decision. Normalize every open BackupIQ candidate before
         # evaluating active slots, endpoint availability, or remediation.
         for item in candidates:
+            ticket_id = int(item.resource_id)
+            existing_backupiq = self.store.get(ticket_id)
+            backupiq_status = str(
+                item.context.get("_jason_source_status_label") or ""
+            ).strip().casefold()
+            backupiq_human_handoff = (
+                existing_backupiq is not None
+                and existing_backupiq.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                and existing_backupiq.phase == "escalated"
+            )
             if (
                 self._is_backupiq_ticket(item.context)
                 and str(item.source_queue).strip().casefold() != "jason"
+                and backupiq_status != "human review"
+                and not backupiq_human_handoff
             ):
                 try:
                     self._normalize_backupiq_queue(item)
@@ -908,10 +924,18 @@ class OperationalAutonomyMaintenance:
                                 },
                             )
                             resume_phase = waiting_phase.split(":", 1)[1]
+                            resume_reason = (
+                                existing.last_reason
+                                if (
+                                    existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                                    and resume_phase == "backupiq_verify_reinstall"
+                                )
+                                else "Exact endpoint is online again; resuming preserved work."
+                            )
                             existing = self._replace(
                                 existing,
                                 phase=resume_phase,
-                                last_reason="Exact endpoint is online again; resuming preserved work.",
+                                last_reason=resume_reason,
                             )
                             self.store.put(existing)
                             try:
@@ -949,10 +973,18 @@ class OperationalAutonomyMaintenance:
                         waiting_phase = existing.phase
                         resume_phase = waiting_phase.split(":", 1)[1]
                         waiting_since = existing.updated_at
+                        resume_reason = (
+                            existing.last_reason
+                            if (
+                                existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                                and resume_phase == "backupiq_verify_reinstall"
+                            )
+                            else "Scheduled recheck due; resuming preserved work."
+                        )
                         existing = self._replace(
                             existing,
                             phase=resume_phase,
-                            last_reason="Scheduled recheck due; resuming preserved work.",
+                            last_reason=resume_reason,
                             updated_at=waiting_since,
                         )
                         self.store.put(existing)
@@ -1229,6 +1261,11 @@ class OperationalAutonomyMaintenance:
         return endpoint.get("online") is True
 
     def _pause_active_work_if_endpoint_offline(self, work: OperationalWork, candidate) -> bool:
+        # BackupIQ uses dual-source availability. DRMM-only offline is a
+        # contradiction requiring Help Desk I / Human Review, while both DRMM
+        # and Backup.net offline is the only true-offline waiting condition.
+        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+            return False
         if not work.job_uid:
             return False
         if work.phase.startswith("waiting_device_access:"):
@@ -1812,6 +1849,19 @@ class OperationalAutonomyMaintenance:
             if work.phase == "backupiq_investigate":
                 self._investigate_backupiq(work, ticket)
                 return
+            if work.phase == "backupiq_reinstall_dispatch":
+                self._dispatch_component(
+                    work,
+                    BACKUPIQ_INSTALLER_NAME,
+                    "backupiq_reinstall_wait",
+                )
+                return
+            if work.phase == "backupiq_reinstall_wait":
+                self._poll_backupiq_reinstall(work)
+                return
+            if work.phase == "backupiq_verify_reinstall":
+                self._verify_backupiq_reinstall(work)
+                return
 
         if work.playbook_id == LOW_DISK_SCOPE.playbook_id:
             if work.phase == "low_disk_investigate":
@@ -1921,6 +1971,10 @@ class OperationalAutonomyMaintenance:
             component_uid = IDLE_LOG_OFF_SETTER_UID
             resolved_component_name = IDLE_LOG_OFF_SETTER_NAME
             step = "idle_log_off_repair"
+        elif component_name == BACKUPIQ_INSTALLER_NAME:
+            component_uid = BACKUPIQ_INSTALLER_UID
+            resolved_component_name = BACKUPIQ_INSTALLER_NAME
+            step = "backupiq_reinstall"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
             component_uid = identity.uid
@@ -1932,6 +1986,11 @@ class OperationalAutonomyMaintenance:
                 if next_phase == "repair_wait"
                 else "verify"
             )
+        if step == "backupiq_reinstall" and work.repair_attempts >= 1:
+            raise OperationalAutonomyError(
+                "BackupIQ autonomous reinstall limit is one per incident cycle"
+            )
+
         output = self.actions.execute(
             scope,
             "automation.component.execute",
@@ -1952,8 +2011,22 @@ class OperationalAutonomyMaintenance:
         if not job_uid:
             raise OperationalAutonomyError("component dispatch returned no durable job UID")
         repair_attempts = work.repair_attempts + (
-            1 if step in {"repair", "security_repair", "idle_log_off_repair"} else 0
+            1
+            if step in {
+                "repair",
+                "security_repair",
+                "idle_log_off_repair",
+                "backupiq_reinstall",
+            }
+            else 0
         )
+        last_reason = f"Dispatched {resolved_component_name}."
+        if step == "backupiq_reinstall":
+            started_at = datetime.now(timezone.utc).isoformat()
+            last_reason = (
+                f"backupiq_reinstall_started_at={started_at}; "
+                f"Dispatched {resolved_component_name}."
+            )
         self.store.put(
             self._replace(
                 work,
@@ -1961,7 +2034,7 @@ class OperationalAutonomyMaintenance:
                 job_uid=job_uid,
                 component_uid=component_uid,
                 repair_attempts=repair_attempts,
-                last_reason=f"Dispatched {resolved_component_name}.",
+                last_reason=last_reason,
             )
         )
 
@@ -3093,6 +3166,45 @@ class OperationalAutonomyMaintenance:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
+    @staticmethod
+    def _backupiq_timestamp_from_reason(
+        work: OperationalWork,
+        key: str,
+    ) -> datetime | None:
+        match = re.search(
+            rf"(?:^|;)\s*{re.escape(key)}=([^;]+)",
+            str(work.last_reason or ""),
+        )
+        if match is None:
+            return None
+        return OperationalAutonomyMaintenance._parse_iso_timestamp(
+            match.group(1).strip()
+        )
+
+    def _backupiq_exact_asset(
+        self,
+        work: OperationalWork,
+    ) -> Mapping[str, Any] | None:
+        asset_data = self._read_data(
+            "backup.endpoint.asset.search",
+            {
+                "company_id": work.company_id,
+                "name": work.hostname,
+                "page_size": 100,
+            },
+        )
+        items = asset_data.get("items")
+        if not isinstance(items, list):
+            return None
+        exact_assets = [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+            and str(item.get("name") or "").strip().casefold()
+            == work.hostname.casefold()
+        ]
+        return exact_assets[0] if len(exact_assets) == 1 else None
+
     def _investigate_backupiq(
         self,
         work: OperationalWork,
@@ -3150,7 +3262,7 @@ class OperationalAutonomyMaintenance:
                     "backup deletion, retention change, or other modifying backup action "
                     "was attempted."
                 ),
-                "Jason - Autonomous BackupIQ Asset Validation",
+                "Jason - BackupIQ - Asset Validation",
             )
             self._persist_human_review_escalation(
                 work,
@@ -3163,6 +3275,7 @@ class OperationalAutonomyMaintenance:
 
         asset = exact_assets[0]
         provider_status = str(asset.get("status") or "").strip().casefold()
+        provider_online = provider_status == "online"
         backup_enabled = asset.get("backupEnabled") is True
         last_success = self._parse_iso_timestamp(
             asset.get("lastSuccessfulBackupTimestamp")
@@ -3189,22 +3302,27 @@ class OperationalAutonomyMaintenance:
             and ticket_created is not None
             and last_success >= ticket_created
         )
+
         if not backup_enabled:
             classification = "backup_configuration_issue"
-        elif not endpoint_online and provider_status != "online":
-            classification = "inactive_or_offline_device"
-        elif endpoint_online and provider_status != "online":
+        elif not endpoint_online and not provider_online:
+            classification = "true_offline_both_sources"
+        elif not endpoint_online and provider_online:
+            classification = "drmm_only_offline_conflict"
+        elif endpoint_online and not provider_online:
             classification = "backup_agent_connectivity_failure"
-        elif recovered_after_ticket:
+        elif recovered_after_ticket and not alert_items:
             classification = "stale_or_recovered_alert"
-        elif endpoint_online and provider_status == "online":
+        elif recovered_after_ticket:
+            classification = "persistent_backupiq_condition_after_success"
+        elif endpoint_online and provider_online:
             classification = "backup_failure_or_stale_success"
         else:
             classification = "provider_endpoint_state_conflict"
 
         note = (
             "Jason autonomous BackupIQ diagnostic completed using governed DRMM and "
-            "Backup.net/UniView read evidence. "
+            "Backup.net/UniView evidence. "
             f"Device={work.hostname}; DRMMOnline={'Yes' if endpoint_online else 'No'}; "
             f"ProviderAssetId={str(asset.get('id') or '')[:80] or 'unknown'}; "
             f"ProviderStatus={provider_status or 'unknown'}; "
@@ -3213,41 +3331,16 @@ class OperationalAutonomyMaintenance:
             f"LastProviderOnline={last_online.isoformat() if last_online else 'unknown'}; "
             f"CurrentBackupIQAlerts={len(alert_items)}; "
             f"Classification={classification}. "
-            "No reinstall, clean install, token/encryption retrieval, policy change, "
-            "backup deletion, retention change, restore, or other modifying backup "
-            "action was attempted. "
         )
-        if classification == "stale_or_recovered_alert":
-            note += (
-                "Provider evidence shows a successful backup at or after ticket creation. "
-                "Automatic completion remains gated until the recovered-alert closure "
-                "branch has completed live acceptance."
-            )
-            reason = (
-                "BackupIQ diagnostic complete; recovered-alert closure branch not yet promoted."
-            )
-        elif classification == "inactive_or_offline_device":
-            note += (
-                "Both management/provider evidence indicate an offline/inactive condition; "
-                "the playbook correctly did not reinstall while the endpoint is offline. "
-                "Jason will preserve ownership, release the active-work slot, and resume "
-                "this playbook automatically when the exact endpoint is online again."
-            )
-            reason = (
-                "BackupIQ is waiting for exact endpoint access; Jason retains queue ownership "
-                "and will resume backupiq_investigate when the endpoint returns online."
-            )
-        else:
-            note += (
-                "Technician review or a separately accepted remediation branch is required "
-                "before any modifying backup action."
-            )
-            reason = (
-                f"BackupIQ diagnostic classified {classification}; remediation remains gated."
-            )
 
-        self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
-        if classification == "inactive_or_offline_device":
+        if classification == "true_offline_both_sources":
+            note += (
+                "Both DRMM and Backup.net independently report the endpoint offline. "
+                "This is the playbook's true-offline condition. No reinstall was attempted; "
+                "Jason will retain ownership, release the active-work slot, and resume "
+                "when the exact endpoint is available again."
+            )
+            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
@@ -3262,11 +3355,360 @@ class OperationalAutonomyMaintenance:
                 self._replace(
                     work,
                     phase="waiting_device_access:backupiq_investigate",
-                    last_reason=reason,
+                    last_reason=(
+                        "BackupIQ true-offline state verified by both DRMM and Backup.net; "
+                        "waiting for exact endpoint access."
+                    ),
                 )
             )
             return
-        self._persist_human_review_escalation(work, reason=reason)
+
+        if classification == "drmm_only_offline_conflict":
+            note += (
+                "DRMM alone reports the endpoint offline while Backup.net reports the "
+                "provider asset online. This is contradictory availability evidence, not "
+                "a true-offline condition. No reinstall was attempted."
+            )
+            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "DRMM-only offline conflict: Backup.net remains online. "
+                    "Moved to Help Desk I / Human Review with evidence."
+                ),
+            )
+            return
+
+        if classification == "backup_configuration_issue":
+            note += (
+                "Backup is disabled or provider configuration is not in the expected state. "
+                "Policy/configuration changes remain outside autonomous remediation."
+            )
+            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "BackupIQ configuration/policy condition requires technician review."
+                ),
+            )
+            return
+
+        if classification == "stale_or_recovered_alert":
+            note += (
+                "Both providers are online, Backup.net shows a successful backup at or "
+                "after ticket creation, and no current BackupIQ alert remains. The alert "
+                "is recovered/stale and can be completed automatically."
+            )
+            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "BackupIQ recovered/healthy evidence verified and ticket completion "
+                    "readback succeeded."
+                ),
+            )
+            return
+
+        if classification in {
+            "backup_agent_connectivity_failure",
+            "persistent_backupiq_condition_after_success",
+            "backup_failure_or_stale_success",
+        }:
+            if work.repair_attempts >= 1:
+                note += (
+                    "The single approved autonomous Endpoint Backup reinstall has already "
+                    "been used for this incident cycle. Additional remediation requires "
+                    "technician review."
+                )
+                self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+                self._persist_human_review_escalation(
+                    work,
+                    reason=(
+                        "BackupIQ remains unhealthy after the one approved autonomous "
+                        "reinstall attempt."
+                    ),
+                )
+                return
+            note += (
+                "DRMM confirms the endpoint is online. The current evidence either shows "
+                "Backup.net offline, an unresolved BackupIQ condition despite a recent "
+                "successful backup, or a stale/failed backup while both providers are "
+                "online. No lower-impact playbook repair fits this evidence, so the "
+                "owner-approved standing-safe Endpoint Backup reinstall is the bounded "
+                "fallback remediation."
+            )
+            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="backupiq_reinstall_dispatch",
+                    last_reason=f"BackupIQ classification={classification}; reinstall approved.",
+                )
+            )
+            return
+
+        note += (
+            "Availability/provider evidence does not match an approved autonomous branch. "
+            "Technician review is required."
+        )
+        self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                f"BackupIQ diagnostic classified {classification}; technician review required."
+            ),
+        )
+
+    def _poll_backupiq_reinstall(self, work: OperationalWork) -> None:
+        if not work.job_uid or not work.component_uid:
+            self._persist_human_review_escalation(
+                work,
+                reason="BackupIQ reinstall job identity is incomplete.",
+                clear_job=True,
+            )
+            return
+
+        job_data = self._read_data(
+            "automation.job.read", {"resource_id": work.job_uid}
+        )
+        job = job_data.get("job") if isinstance(job_data.get("job"), Mapping) else job_data
+        status = str(job.get("status") or "").strip().casefold()
+        if status in {"active", "running", "queued", "pending", "scheduled"}:
+            return
+        if status not in {"completed", "complete", "success", "succeeded", "finished"}:
+            self._write_note(
+                work,
+                (
+                    "Jason's approved Endpoint Backup reinstall did not complete "
+                    f"successfully. Job={work.job_uid}; ProviderStatus={status or 'unknown'}. "
+                    "No second autonomous reinstall was attempted."
+                ),
+                "Jason - BackupIQ - Remediation",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Endpoint Backup reinstall failed or ended in a non-success terminal "
+                    "state; technician review required."
+                ),
+                clear_job=True,
+            )
+            return
+
+        started_at = self._backupiq_timestamp_from_reason(
+            work, "backupiq_reinstall_started_at"
+        )
+        if started_at is None:
+            self._persist_human_review_escalation(
+                work,
+                reason="BackupIQ reinstall verification baseline timestamp is missing.",
+                clear_job=True,
+            )
+            return
+
+        summary = "provider job completed successfully"
+        try:
+            output = self._read_data(
+                "automation.job.output.read",
+                {
+                    "resource_id": work.job_uid,
+                    "device_uid": work.device_uid,
+                    "component_uid": work.component_uid,
+                    "stream": "stdout",
+                },
+            )
+            text = self._output_text(output)
+            if text:
+                summary = self._bounded_health_summary(text)
+        except Exception:
+            # Provider-side backup verification below is authoritative for incident
+            # resolution, so unreadable installer stdout does not itself trigger a
+            # second install or false failure.
+            summary = "provider job succeeded; installer stdout unavailable"
+
+        self._write_note(
+            work,
+            (
+                "Jason ran the owner-approved standing-safe Endpoint Backup reinstall. "
+                f"Component={BACKUPIQ_INSTALLER_NAME}; Job={work.job_uid}; "
+                f"Result={summary}. Installer success is not incident resolution; "
+                "Backup.net must report the exact asset online and a new successful "
+                "backup after the reinstall baseline before completion."
+            ),
+            "Jason - BackupIQ - Remediation",
+        )
+
+        deadline = started_at.timestamp() + BACKUPIQ_REINSTALL_VERIFY_SECONDS
+        deadline_at = datetime.fromtimestamp(deadline, tz=timezone.utc)
+        self.store.put(
+            self._replace(
+                work,
+                phase="waiting_recheck:backupiq_verify_reinstall",
+                job_uid=None,
+                component_uid=None,
+                last_reason=(
+                    f"backupiq_reinstall_started_at={started_at.isoformat()}; "
+                    f"backupiq_verify_deadline_at={deadline_at.isoformat()}; "
+                    "Reinstall completed; waiting for provider recovery and a new "
+                    "successful backup."
+                ),
+            )
+        )
+
+    def _verify_backupiq_reinstall(self, work: OperationalWork) -> None:
+        started_at = self._backupiq_timestamp_from_reason(
+            work, "backupiq_reinstall_started_at"
+        )
+        deadline_at = self._backupiq_timestamp_from_reason(
+            work, "backupiq_verify_deadline_at"
+        )
+        if started_at is None or deadline_at is None:
+            self._persist_human_review_escalation(
+                work,
+                reason="BackupIQ post-reinstall verification timestamps are missing.",
+            )
+            return
+
+        endpoint = self._read_record(
+            "endpoint.device.read", {"resource_id": work.device_uid}
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+            self._persist_human_review_escalation(
+                work,
+                reason="BackupIQ device identity changed during post-reinstall verification.",
+            )
+            return
+
+        asset = self._backupiq_exact_asset(work)
+        if asset is None:
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "Exact Backup.net asset could not be uniquely re-established after reinstall."
+                ),
+            )
+            return
+
+        provider_status = str(asset.get("status") or "").strip().casefold()
+        provider_online = provider_status == "online"
+        endpoint_online = endpoint.get("online") is True
+        backup_enabled = asset.get("backupEnabled") is True
+        last_success = self._parse_iso_timestamp(
+            asset.get("lastSuccessfulBackupTimestamp")
+        )
+
+        if not backup_enabled:
+            self._persist_human_review_escalation(
+                work,
+                reason="Backup became disabled during post-reinstall verification.",
+            )
+            return
+
+        if not endpoint_online and not provider_online:
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "status": "Waiting Device Access",
+                    }
+                },
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:backupiq_verify_reinstall",
+                    last_reason=work.last_reason,
+                )
+            )
+            return
+
+        if not endpoint_online and provider_online:
+            self._write_note(
+                work,
+                (
+                    "Post-reinstall verification found DRMM offline while Backup.net "
+                    "remains online. This is contradictory availability evidence and "
+                    "requires technician review."
+                ),
+                "Jason - BackupIQ - Verification",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "DRMM-only offline conflict during BackupIQ post-reinstall verification."
+                ),
+            )
+            return
+
+        if (
+            endpoint_online
+            and provider_online
+            and last_success is not None
+            and last_success > started_at
+        ):
+            self._write_note(
+                work,
+                (
+                    "BackupIQ post-remediation verification succeeded. "
+                    f"Device={work.hostname}; DRMMOnline=Yes; BackupNetOnline=Yes; "
+                    f"NewSuccessfulBackup={last_success.isoformat()}; "
+                    f"ReinstallBaseline={started_at.isoformat()}. "
+                    "The successful backup occurred after remediation."
+                ),
+                "Jason - BackupIQ - Verification",
+            )
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "Endpoint Backup reinstall independently verified by Backup.net "
+                    "online state and a new successful backup."
+                ),
+            )
+            return
+
+        if datetime.now(timezone.utc) >= deadline_at:
+            self._write_note(
+                work,
+                (
+                    "BackupIQ post-reinstall verification window expired without proving "
+                    "a new successful backup after remediation. "
+                    f"DRMMOnline={'Yes' if endpoint_online else 'No'}; "
+                    f"BackupNetStatus={provider_status or 'unknown'}; "
+                    f"LastSuccessfulBackup={last_success.isoformat() if last_success else 'unknown'}; "
+                    f"ReinstallBaseline={started_at.isoformat()}."
+                ),
+                "Jason - BackupIQ - Verification",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "BackupIQ did not produce a verified new successful backup within "
+                    "the bounded post-reinstall verification window."
+                ),
+            )
+            return
+
+        self.store.put(
+            self._replace(
+                work,
+                phase="waiting_recheck:backupiq_verify_reinstall",
+                last_reason=work.last_reason,
+            )
+        )
 
     @staticmethod
     def _unexpected_shutdown_alert(alert: Mapping[str, Any]) -> bool:
@@ -3933,10 +4375,16 @@ class OperationalAutonomyMaintenance:
             title = "Jason - Autonomous Low Disk Escalation"
         elif work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
             body = (
-                "Jason autonomous BackupIQ diagnostic stopped for technician review. "
-                f"{reason} No reinstall, clean install, backup deletion, retention/policy "
-                "change, restore, credential disclosure, or other modifying backup action "
-                "was attempted."
+                "Jason autonomous BackupIQ work stopped for technician review. "
+                f"{reason} "
+                + (
+                    "One owner-approved bounded Endpoint Backup reinstall was attempted. "
+                    if work.repair_attempts
+                    else "No Endpoint Backup reinstall was attempted. "
+                )
+                + "No clean install/new-asset lifecycle mutation, backup deletion, "
+                "retention/policy change, restore, credential disclosure, reboot, or "
+                "other unrelated modifying backup action was attempted."
             )
             title = "Jason - Autonomous BackupIQ Escalation"
         elif work.playbook_id == UNEXPECTED_SHUTDOWN_SCOPE.playbook_id:
@@ -3988,10 +4436,9 @@ class OperationalAutonomyMaintenance:
         reason: str,
         clear_job: bool = False,
     ) -> None:
-        # Open BackupIQ work remains Jason-owned even when technician review is
-        # required. Generic human-review routing must not break the invariant
-        # Open + BackupIQ => Jason queue.
-        if work.playbook_id != BACKUPIQ_SCOPE.playbook_id:
+        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+            self._handoff_to_helpdesk(work, status="Human Review")
+        else:
             self._handoff_to_helpdesk(work)
         changes: dict[str, Any] = {
             "phase": "escalated",
@@ -4051,7 +4498,12 @@ class OperationalAutonomyMaintenance:
                 "VulScan approval-review handoff readback did not verify queue and status"
             )
 
-    def _handoff_to_helpdesk(self, work: OperationalWork) -> None:
+    def _handoff_to_helpdesk(
+        self,
+        work: OperationalWork,
+        *,
+        status: str = "New",
+    ) -> None:
         # Human-review work must not be stranded in Jason's queue. Return it to
         # Help Desk I with an actionable status and require provider readback.
         scope = self._scope_for_work(work)
@@ -4062,7 +4514,7 @@ class OperationalAutonomyMaintenance:
                 "payload": {
                     "id": work.ticket_id,
                     "queueID": "Help Desk I",
-                    "status": "New",
+                    "status": status,
                 }
             },
         )
