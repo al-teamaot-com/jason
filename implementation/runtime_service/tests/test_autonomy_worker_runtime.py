@@ -2552,6 +2552,33 @@ def test_low_disk_failed_sysmon_dependency_read_never_authorizes_cleanup(tmp_pat
     store.close()
 
 
+def test_low_disk_softwaredistribution_cleanup_is_review_bound(tmp_path: Path):
+    worker, store, actions = _promoted_low_disk_worker(
+        tmp_path,
+        LowDiskReads(software_bytes=14 * 1024**3),
+    )
+    worker.tick()
+    _expire_low_disk_grace(store)
+    worker.tick()
+
+    final = store.get(141101)
+    assert final is not None
+    assert final.phase == "escalated"
+    assert not [
+        call for call in actions.calls
+        if call[1] == "automation.component.execute"
+    ]
+    note_calls = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    body = note_calls[-1]["description"]
+    assert "SoftwareDistribution backup folders - 14.0 GB" in body
+    assert "destructive/review-bound" in body
+    store.close()
+
+
 def test_low_disk_runs_one_narrow_cleanup_then_verifies_monitor(tmp_path: Path):
     reads = LowDiskReads(sysmon_bytes=12 * 1024**3)
     worker, store, actions = _promoted_low_disk_worker(

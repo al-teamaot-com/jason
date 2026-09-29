@@ -148,16 +148,15 @@ def choose_cleanup(
 ) -> tuple[str | None, float]:
     if storage_health_risk:
         return None, 0.0
+    # The current SoftwareDistribution cleanup component is intentionally
+    # review-bound: Jason's component-governance layer classifies it as
+    # destructive and will not grant standing-safe authority. Keep detecting
+    # and reporting those folders, but never select that component for
+    # unattended remediation.
     sysmon_bytes = _sum(sysmon, "Bytes") if not sysmon_dependencies else 0.0
-    software_bytes = _sum(software_distribution, "Bytes")
-    choices = [
-        ("sysmon", sysmon_bytes),
-        ("software_distribution_backups", software_bytes),
-    ]
-    kind, amount = max(choices, key=lambda item: item[1])
-    if amount < SAFE_CLEANUP_MIN_BYTES:
-        return None, amount
-    return kind, amount
+    if sysmon_bytes < SAFE_CLEANUP_MIN_BYTES:
+        return None, sysmon_bytes
+    return "sysmon", sysmon_bytes
 
 
 def relevant_findings(

@@ -8,15 +8,26 @@ from jason_runtime.low_disk_analysis import (
 )
 
 
-def test_choose_cleanup_prefers_larger_safe_target():
+def test_choose_cleanup_only_selects_standing_safe_sysmon_target():
     kind, amount = choose_cleanup(
         sysmon=[{"Bytes": 4 * ONE_GIB}],
         sysmon_dependencies=[],
         software_distribution=[{"Bytes": 7 * ONE_GIB}],
         storage_health_risk=False,
     )
-    assert kind == "software_distribution_backups"
-    assert amount == 7 * ONE_GIB
+    assert kind == "sysmon"
+    assert amount == 4 * ONE_GIB
+
+
+def test_software_distribution_cleanup_remains_review_bound():
+    kind, amount = choose_cleanup(
+        sysmon=[],
+        sysmon_dependencies=[],
+        software_distribution=[{"Bytes": 7 * ONE_GIB}],
+        storage_health_risk=False,
+    )
+    assert kind is None
+    assert amount == 0
 
 
 def test_sysmon_is_not_safe_when_service_depends_on_it():

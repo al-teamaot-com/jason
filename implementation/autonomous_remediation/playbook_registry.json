@@ -216,11 +216,13 @@
               "component_name": "Sysmon - Clear C:\\Sysmon Folder - AOT",
               "component_uid": "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6",
               "precondition": "C:\\Sysmon is >=1 GiB and no active service references that path"
-            },
+            }
+          ],
+          "review_bound_targets": [
             {
               "component_name": "Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1",
               "component_uid": "434dc4ef-6f21-442a-969c-a60e754a4435",
-              "precondition": "old SoftwareDistribution.bak_* folders total >=1 GiB"
+              "reason": "standing-safe promotion rejected by component governance as destructive/review-required"
             }
           ],
           "verification": "current free space plus authoritative DRMM low-disk monitor clear"
