@@ -328,6 +328,8 @@ Persist fingerprints for:
 
 A repeated unchanged observation is not a new event.
 
+Duplicate suppression is semantic and cross-origin. The deduplication key must not depend on whether the same playbook/state was reached by the autonomous worker, a technician-triggered governed run, a resumed session, or a scheduled recheck. Cosmetic note-title differences must not defeat suppression. Where two actors converge on the same playbook, target, classification/state, and materially equivalent evidence fingerprint within the same state-transition window, the runtime should preserve one authoritative ticket note and record the additional execution only in operational/audit state.
+
 ---
 
 ## 11. Decision-Gate Stack
@@ -461,6 +463,8 @@ Jason-authored notes use the common layout:
 7. **JASON STATE**
 
 The runtime should generate this structure centrally where possible.
+
+Note classes/titles are canonical per playbook state. Autonomous execution must not create a separate note class merely by adding words such as "Autonomous" when the semantic state is the same. Origin/actor belongs in audit metadata, not in the note's semantic deduplication identity.
 
 Meaningful state transitions are documented.
 
