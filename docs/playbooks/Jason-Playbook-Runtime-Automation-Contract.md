@@ -595,3 +595,7 @@ The target authoring experience is:
 A new playbook should not require bespoke implementations of ticket claiming, scheduling, retry tracking, note formatting, state persistence, handoff, or terminal readback.
 
 BackupIQ is the initial reference implementation for this model because it exercises multi-provider evidence, offline waiting, provider cycles, asset lifecycle, remediation, retries, verification, recovered-alert closure, and human exceptions.
+
+## Integration Coordination Note — 2026-09-29
+
+PR #603 was reviewed for overlap with this runtime standard. Its shared-runtime changes are limited to VulScan client-disposition and client-notification behavior; this branch's runtime changes are limited to BackupIQ waiting/resume behavior. The overlapping files contain separate functional hunks and no conflicting lifecycle or authority semantics were identified.
