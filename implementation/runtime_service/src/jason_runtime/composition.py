@@ -214,6 +214,7 @@ from .autonomous_repair_deployment import (
 from .autonomous_repair_maintenance import (
     build_autonomous_repair_deployment_maintenance,
 )
+from .support_repair_reasoning import build_support_repair_reasoning_maintenance
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
     register_autotask_ticket_create_invoker,
@@ -455,6 +456,10 @@ class RuntimeSettings:
     autonomy_review_interval_seconds: int = 300
     autonomy_review_audit_path: Path = Path(
         "/var/lib/jason/openclaw/autonomy-promotion-admin.jsonl"
+    )
+    support_repair_autonomy_enabled: bool = False
+    support_repair_spool: Path = Path(
+        "/var/lib/jason/openclaw/support-repair"
     )
     teams_gateway_internal_url: str = "http://jason-teams-gateway:3979"
     teams_proactive_token_file: Path = Path(
@@ -794,6 +799,15 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_PLAYBOOK_AUTONOMY_REVIEW_AUDIT",
                     "/var/lib/jason/openclaw/autonomy-promotion-admin.jsonl",
+                )
+            ),
+            support_repair_autonomy_enabled=os.getenv(
+                "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            support_repair_spool=Path(
+                os.getenv(
+                    "JASON_SUPPORT_REPAIR_SPOOL",
+                    "/var/lib/jason/openclaw/support-repair",
                 )
             ),
             teams_gateway_internal_url=os.getenv(
@@ -1965,6 +1979,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             notifier=autonomous_completion_notifier,
         )
     )
+    support_repair_reasoning_maintenance = build_support_repair_reasoning_maintenance(
+        enabled=settings.support_repair_autonomy_enabled,
+        structured_client=hosted_conversation_client or ollama_client,
+        spool=settings.support_repair_spool,
+    )
     autonomous_repair_deployment_maintenance = (
         build_autonomous_repair_deployment_maintenance(
             enabled=autonomous_repair_deployment_activation.enabled,
@@ -1997,6 +2016,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,
         autonomous_deployment_completion_notification_maintenance,
+        support_repair_reasoning_maintenance,
         autonomous_repair_deployment_maintenance,
         operational_autonomy_maintenance,
         shadow_autonomy_maintenance,

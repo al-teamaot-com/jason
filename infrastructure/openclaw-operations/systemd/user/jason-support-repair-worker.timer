@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Jason autonomous support repair reconciliation every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=jason-support-repair-worker.service
+
+[Install]
+WantedBy=timers.target

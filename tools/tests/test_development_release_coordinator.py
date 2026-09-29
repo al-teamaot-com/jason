@@ -123,6 +123,33 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
             coordinator.development_recommendation(support, []),
         )
 
+    def test_render_surfaces_native_support_autonomy(self):
+        board = {
+            "generated_at": "2026-09-29T00:00:00+00:00",
+            "main_sha": "abc",
+            "production": {},
+            "preproduction": {"configured": False},
+            "release_attention": "none",
+            "development_recommendation": "none",
+            "pr_states": [],
+            "older_open_pr_count": 0,
+            "overlaps": [],
+            "support": [],
+            "todos": [],
+            "production_policy": {},
+            "autonomous_repair_policy": {},
+            "support_autonomy_policy": {
+                "enabled": True,
+                "owner_approved": True,
+                "max_active_items": 2,
+                "native_repository_implementation_worker": True,
+            },
+        }
+        rendered = coordinator.render(board)
+        self.assertIn("Native autonomous support repair enabled: **yes**", rendered)
+        self.assertIn("Native repository implementation worker: **yes**", rendered)
+        self.assertIn("Maximum active support repairs: **2**", rendered)
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))
