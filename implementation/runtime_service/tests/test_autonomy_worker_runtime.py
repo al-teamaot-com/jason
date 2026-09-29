@@ -1333,7 +1333,7 @@ def test_unexpected_shutdown_requires_separate_promotion(tmp_path: Path):
     store.close()
 
 
-def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation(
+def test_unexpected_shutdown_correlates_small_site_and_closes_after_clean_health_checks(
     tmp_path: Path,
 ):
     incident_ms = 1790416800000
@@ -1401,6 +1401,11 @@ def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation
                             {"resource_id": "device-uid-vm", "hostname": "VM-1"},
                         ]
                     },
+                }
+            if capability == "endpoint.powershell.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"stdout": "[]"}},
                 }
             if capability == "endpoint.alert.history.search":
                 rid = str(arguments["resource_id"])
@@ -1481,8 +1486,8 @@ def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation
     final = store.get(141099)
     assert final is not None
     assert final.playbook_id == "unexpected_shutdown"
-    assert final.phase == "escalated"
-    assert "recurrence/site-correlation" in final.last_reason
+    assert final.phase == "complete"
+    assert "SITE_CORRELATED_SMALL_SITE" in final.last_reason
 
     component_calls = [
         args
@@ -1499,9 +1504,10 @@ def test_unexpected_shutdown_correlates_recurring_and_site_wide_without_mutation
     assert len(note_calls) == 1
     body = note_calls[0]["description"]
     assert "ShutdownEvents30d=2" in body
-    assert "PossibleSiteWideEvent=Yes" in body
-    assert "PhysicalDevicesInPlusMinus15Min=2" in body
-    assert "No reboot" in body
+    assert "SITE_CORRELATED_SMALL_SITE" in body
+    assert "AffectedPhysicalDevicesPlusMinus15Min=2" in body
+    assert "StorageHealthRisk=No" in body
+    assert "No CHKDSK repair" in body
     store.close()
 
 
