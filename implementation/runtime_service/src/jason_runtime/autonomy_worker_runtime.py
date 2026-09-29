@@ -172,6 +172,9 @@ SECURITY_LOG_SELF_HEAL_NAME = "Security Log Self-Heal [WIN] AOT Ver 11262025-2"
 SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 RECOVERABLE_BLOCK_RETRY_SECONDS = 300
+VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
+VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
+VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
 
 
 class OperationalAutonomyError(RuntimeError):
@@ -359,7 +362,10 @@ class SQLiteOperationalWorkStore:
     def list_open(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_operational_work "
-            "WHERE phase NOT IN ('complete','escalated','blocked','approval_pending') "
+            "WHERE phase NOT IN ("
+            "'complete','escalated','blocked','approval_pending',"
+            "'waiting_patch_approval','waiting_patch_window'"
+            ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
             "ORDER BY updated_at,ticket_id"
@@ -844,6 +850,40 @@ class OperationalAutonomyMaintenance:
             if ticket_id in processed:
                 continue
             if existing is not None:
+                if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                    interval = (
+                        VULSCAN_APPROVAL_RECHECK_SECONDS
+                        if existing.phase == "waiting_patch_approval"
+                        else VULSCAN_PATCH_WINDOW_RECHECK_SECONDS
+                    )
+                    updated = self._parse_iso_timestamp(existing.updated_at)
+                    due = (
+                        updated is None
+                        or (datetime.now(timezone.utc) - updated).total_seconds() >= interval
+                    )
+                    if due:
+                        existing = self._replace(
+                            existing,
+                            phase="vulscan_investigate",
+                            last_reason=existing.last_reason,
+                        )
+                        self.store.put(existing)
+                        try:
+                            self._advance(existing, item.context)
+                        except Exception as exc:
+                            self._block(
+                                existing,
+                                "Execution failed closed during VulScan waiting-state recheck: "
+                                f"{type(exc).__name__}: {str(exc)[:350]}",
+                            )
+                    state, reason_code = self._classify_persisted_work(ticket_id)
+                    classifications[ticket_id] = (
+                        state,
+                        reason_code,
+                        item.source_version,
+                        False,
+                    )
+                    continue
                 if existing.phase.startswith("waiting_device_access:"):
                     waiting_phase = existing.phase
                     if self._endpoint_is_online(existing.device_uid):
@@ -1256,6 +1296,10 @@ class OperationalAutonomyMaintenance:
             return "waiting_human_review", "technician_review_required"
         if current.phase == "approval_pending":
             return "waiting_human_review", "approval_required"
+        if current.phase == "waiting_patch_approval":
+            return "waiting_dependency", "patch_approval_pending"
+        if current.phase == "waiting_patch_window":
+            return "waiting_dependency", "patch_window_pending"
         if current.phase == "blocked":
             return "governance_blocked", "worker_blocked"
         if current.phase == "complete":
@@ -2511,11 +2555,52 @@ class OperationalAutonomyMaintenance:
             "change, reboot scheduling, reboot, or other modifying action was attempted. "
         )
         if classification == "approval_blocked":
+            first_seen = self._vulscan_first_not_approved_at(work)
+            now = datetime.now(timezone.utc)
+            if first_seen is None:
+                first_seen = now
+            age_seconds = max(0.0, (now - first_seen).total_seconds())
+            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS:
+                note = (
+                    "STATUS: HUMAN REVIEW REQUIRED. "
+                    "ACTION REQUIRED: Approve or intentionally defer the listed patch(es). "
+                    "WHY: One or more exact VulScan KBs have remained NOT_APPROVED for at least "
+                    "10 calendar days. "
+                    f"Device={work.hostname}; PatchStates={patch_summary}. "
+                    "No patch approval, forced installation, Windows Update repair, WSUS-policy "
+                    "change, reboot scheduling, reboot, or other modifying action was attempted."
+                )
+                self._write_note(
+                    work,
+                    note,
+                    "Jason - VulScan - Human Review Required",
+                )
+                self._handoff_vulscan_approval_review(work)
+                self.store.put(
+                    self._replace(
+                        work,
+                        phase="escalated",
+                        last_reason=(
+                            "VulScan patch approval remained NOT_APPROVED for 10 days; "
+                            "technician approve/defer decision required."
+                        ),
+                    )
+                )
+                return
             note += (
-                "At least one reported KB is currently NOT_APPROVED; the playbook will "
-                "not approve patches autonomously."
+                "At least one reported KB is currently NOT_APPROVED. "
+                "STATUS: WAITING - PATCH NOT APPROVED. "
+                "NEXT STEP: No technician action is required yet; Jason will recheck the exact "
+                "KB approval state daily and keep this ticket in the Jason queue. "
+                "ESCALATION: If the same exact KB remains NOT_APPROVED for 10 calendar days, "
+                "Jason will move the ticket to Help Desk I / Human Review for an approve-or-defer "
+                "decision. The playbook will not approve patches autonomously."
             )
-            reason = "VulScan diagnostic complete; one or more exact KBs are not approved."
+            reason = (
+                "VulScan waiting for patch approval; "
+                f"first_not_approved_at={first_seen.isoformat()}; "
+                "one or more exact KBs remain NOT_APPROVED."
+            )
         elif classification == "stale_or_recovered_finding":
             # Current endpoint reboot state is authoritative. Patch-level
             # rebootRequired is update metadata, not proof that the endpoint
@@ -2544,16 +2629,49 @@ class OperationalAutonomyMaintenance:
             reason = "VulScan diagnostic complete; reported KBs installed but reboot remains required."
         elif classification == "approved_pending":
             note += (
-                "At least one exact KB is approved/pending. Patch-window timing and any "
-                "reboot action remain separately gated."
+                "STATUS: WAITING - PATCH APPROVED/PENDING. "
+                "NEXT STEP: Jason will keep the ticket in the Jason queue and recheck after the "
+                "normal patch-processing window. No forced installation or reboot is authorized."
             )
-            reason = "VulScan diagnostic complete; approved-pending patch requires window/recheck logic."
+            reason = (
+                "VulScan waiting for normal patch processing; one or more exact KBs are "
+                "APPROVED_PENDING."
+            )
         else:
             note += (
                 "Technician review or a separately accepted Windows Update remediation branch "
                 "is required before modifying the endpoint."
             )
             reason = f"VulScan diagnostic classified {classification}; remediation remains gated."
+
+        if classification == "approval_blocked":
+            self._write_note(
+                work,
+                note,
+                "Jason - VulScan - Waiting Patch Approval",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_patch_approval",
+                    last_reason=reason,
+                )
+            )
+            return
+        if classification == "approved_pending":
+            self._write_note(
+                work,
+                note,
+                "Jason - VulScan - Waiting Patch Window",
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_patch_window",
+                    last_reason=reason,
+                )
+            )
+            return
 
         self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
         self._persist_human_review_escalation(work, reason=reason)
@@ -3609,6 +3727,55 @@ class OperationalAutonomyMaintenance:
             changes["job_uid"] = None
             changes["component_uid"] = None
         self.store.put(self._replace(work, **changes))
+
+    @staticmethod
+    def _vulscan_first_not_approved_at(work: OperationalWork) -> datetime | None:
+        match = re.search(
+            r"first_not_approved_at=([^;]+)",
+            str(work.last_reason or ""),
+        )
+        if match is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(match.group(1).strip())
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _handoff_vulscan_approval_review(self, work: OperationalWork) -> None:
+        scope = self._scope_for_work(work)
+        handoff = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "queueID": "Help Desk I",
+                    "status": "Human Review",
+                }
+            },
+        )
+        handoff_data = self._action_data(handoff)
+        verification = handoff_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        verified = (
+            verification.get("readbackVerified") is True
+            and isinstance(verified_fields, Sequence)
+            and not isinstance(verified_fields, (str, bytes))
+            and {"queueID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ) if isinstance(verification, Mapping) else False
+        if not verified:
+            raise OperationalAutonomyError(
+                "VulScan approval-review handoff readback did not verify queue and status"
+            )
 
     def _handoff_to_helpdesk(self, work: OperationalWork) -> None:
         # Human-review work must not be stranded in Jason's queue. Return it to
