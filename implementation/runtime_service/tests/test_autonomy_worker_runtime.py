@@ -1625,15 +1625,17 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         ),
         max_active_work_items=2,
         interval_seconds=30,
-        monotonic=iter((0.0,)).__next__,
+        monotonic=iter((0.0, 31.0)).__next__,
     )
 
+    worker.tick()
     worker.tick()
 
     work = store.get(141185)
     assert work is not None
-    assert work.phase == "escalated"
-    assert "inactive/offline endpoint" in work.last_reason
+    assert work.phase == "waiting_device_access:backupiq_investigate"
+    assert "waiting for exact endpoint access" in work.last_reason
+    assert store.list_open() == ()
     component_calls = [
         args
         for _, capability, args in actions.calls
@@ -1646,6 +1648,7 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
+    assert note_calls[0]["title"] == "Jason - BackupIQ - Diagnostic"
     assert "Classification=inactive_or_offline_device" in note_calls[0]["description"]
     update_calls = [
         args["payload"]
@@ -1658,7 +1661,11 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
             "queueID": "Jason",
             "status": "In Progress",
             "billingCodeID": "Remote Support",
-        }
+        },
+        {
+            "id": 141185,
+            "status": "Waiting Device Access",
+        },
     ]
     assert all(payload.get("queueID") != "Help Desk I" for payload in update_calls)
     store.close()
