@@ -473,6 +473,14 @@ Acceptance must prove:
 17. installed-patch `rebootRequired=True` does not create a false reboot block when endpoint `reboot_required=False`
 18. stale/recovered installed findings can complete after endpoint-health and exact-KB verification
 19. exact final KB/build verification before completion
+20. Gromelski company 597 resolves the client-specific disposition rule
+21. Chris Benton contact 30684489 is associated and independently read back
+22. exact canned template `vulscan-approved-or-installed-v1` is used with no generated wording
+23. Gromelski terminal ticket status is Close Pending (21), never Complete
+24. Notification History proves a new same-ticket copy to chris.benton@e-gai.com
+25. approved-pending Gromelski tickets remain in persisted monitoring state after Close Pending
+26. a more-specific site/device/user/ticket override wins over the client rule
+27. non-Gromelski tickets preserve the global VulScan disposition
 
 ## 22. Section Goal Closure
 
@@ -483,14 +491,80 @@ Close after:
 - Grafana/Project Jason playbook status is updated
 - limitations/support items are documented
 
+
+## Client / Site / Device / User Disposition Overrides
+
+VulScan remediation logic remains one canonical playbook. Client-specific behavior is resolved through a deterministic policy hierarchy rather than by forking the playbook.
+
+Precedence from least to most specific:
+
+`global -> client -> site -> device -> user -> ticket`
+
+A more-specific matching rule replaces the less-specific disposition rule. Evidence does not create authority; only source-controlled approved policy entries may change behavior.
+
+### Gromelski And Associates Inc. client override
+
+Authoritative Autotask identities verified 2026-09-29:
+
+- Company: **Gromelski And Associates Inc.**
+- Company ID: **597**
+- Primary Contact: **Chris Benton**
+- Contact ID: **30684489**
+- Primary Contact flag: **true**
+- Receives email notifications: **true**
+- Terminal PSA status: **Close Pending**
+- Autotask status ID: **21**
+
+This override applies only when the exact ticket company is 597 unless a more-specific approved site/device/user/ticket rule replaces it.
+
+When a Gromelski VulScan ticket reaches either of these states:
+
+1. all exact reported KBs are already installed and endpoint reboot state does not block resolution; or
+2. the exact required patch is approved for implementation and is waiting for the regular maintenance window;
+
+Jason must:
+
+1. resolve the applicable VulScan disposition policy;
+2. require the exact authoritative Gromelski company identity;
+3. associate Chris Benton as the ticket contact through governed `service.ticket.update` and require `contactID` readback;
+4. publish exactly the approved canned communication through `service.ticket.client.notification.create`;
+5. set ticket status to **Close Pending** rather than **Complete**;
+6. require readback of both `contactID` and `status`;
+7. verify a new Autotask Notification History record for the same ticket was sent to `chris.benton@e-gai.com`;
+8. suppress duplicate client communications using the approved template fingerprint.
+
+For an approved-pending patch, Close Pending is a client-facing disposition only; it does **not** end Jason's technical responsibility. Persist `vulscan_monitoring` and continue exact-KB verification through the normal patch window. When the patch becomes installed and endpoint state is healthy, Jason may mark the internal playbook state complete while leaving the PSA ticket in Close Pending for the normal client-facing close lifecycle.
+
+For an already-installed stale/recovered finding, Jason may mark the internal playbook state complete only after the client communication, primary-contact association, Close Pending status, and notification-copy verification all succeed.
+
+If client-notification authority, contact association, notification-copy verification, or status readback fails, fail closed. Do not silently fall back to Complete.
+
+### Approved canned client communication
+
+Template ID: `vulscan-approved-or-installed-v1`
+
+Title: `Vulnerability Update`
+
+Text:
+
+> The identified vulnerability mentioned in this ticket has been reviewed. The required update has either already been installed or has been approved for implementation and is scheduled to be applied during the device’s next regular patching window in accordance with our maintenance policy.
+>
+> No further action is required at this time. Monitoring will continue to confirm successful deployment and remediation. Please reopen the ticket if you experience any issues following the update.
+
+The template is source-controlled approved text. Jason must not paraphrase, expand, summarize, or otherwise alter it during autonomous use.
+
 ## 23. Autonomous Execution Eligibility
 
 autonomous_allowed: diagnostic_only
 
 Approval owner: person-al
 Approval date: 2026-09-26
+
+Client-disposition design approval: person-al, 2026-09-29
 Approved scope: exact `vulscan_missing_patch@1.0.0` diagnostic/classification branch using governed endpoint/device and exact DRMM patch reads plus internal ticket work-start/note updates.
 
 The autonomous branch may extract exact KB identities from the ticket, read the matching DRMM patch objects, classify INSTALLED, APPROVED_PENDING, NOT_APPROVED, INSTALL_ERROR/FAILED, ambiguous/supersedence-review states, document reboot-required/online state, and maintain a non-remediating waiting_patch_approval state for NOT_APPROVED findings. A NOT_APPROVED finding alone must not immediately become technician review. After 10 calendar days unchanged, the playbook may perform the governed handoff to Help Desk I / Human Review when that lifecycle branch has passed acceptance and owner review.
 
 It may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.
+
+Version 1.1.0 adds the Gromelski client-disposition branch. Source implementation is approved in design, but unattended production execution of the new client-facing communication capability remains fail-closed until the exact 1.1.0 capability set, canned-template fingerprint, contact/status behavior, Notification History verification, and controlled acceptance test receive the durable owner promotion required by Jason governance.
