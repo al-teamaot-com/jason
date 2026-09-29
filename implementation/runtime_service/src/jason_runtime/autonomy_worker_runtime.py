@@ -80,12 +80,8 @@ from .unexpected_shutdown_analysis import (
     site_event_id,
     storage_health_risk as shutdown_storage_health_risk,
 )
-from .vulscan_client_policy import (
-    VULSCAN_CLIENT_NOTE_BODY,
-    VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
-    VULSCAN_CLIENT_NOTE_TITLE,
-    resolve_vulscan_policy,
-)
+from .approved_client_messages import resolve_approved_client_message
+from .vulscan_client_policy import resolve_vulscan_policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -2747,16 +2743,12 @@ class OperationalAutonomyMaintenance:
                     "VulScan primary-contact association failed readback"
                 )
 
-        note_key = "Client - VulScan Approved Communication"
-        note_fingerprint = hashlib.sha256(
-            (
-                VULSCAN_CLIENT_NOTE_TEMPLATE_ID
-                + "|"
-                + VULSCAN_CLIENT_NOTE_TITLE
-                + "|"
-                + VULSCAN_CLIENT_NOTE_BODY
-            ).encode("utf-8")
-        ).hexdigest()
+        template = resolve_approved_client_message(
+            workflow_id=work.playbook_id,
+            template_id=str(policy.client_notification_template_id or ""),
+        )
+        note_key = f"Client - Approved Communication - {template.template_id}"
+        note_fingerprint = template.fingerprint
         prior = self.store.last_note_fingerprint(
             work.ticket_id,
             work.playbook_id,
@@ -2769,11 +2761,12 @@ class OperationalAutonomyMaintenance:
                 scope,
                 "service.ticket.client.notification.create",
                 {
-                    "template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+                    "workflow_id": template.workflow_id,
+                    "template_id": template.template_id,
                     "payload": {
                         "ticketID": int(work.ticket_id),
-                        "title": VULSCAN_CLIENT_NOTE_TITLE,
-                        "description": VULSCAN_CLIENT_NOTE_BODY,
+                        "title": template.title,
+                        "description": template.body,
                         "noteType": 3,
                         "publish": 1,
                     },

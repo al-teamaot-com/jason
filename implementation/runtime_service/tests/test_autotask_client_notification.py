@@ -3,11 +3,13 @@ from __future__ import annotations
 import pytest
 
 from jason_runtime.autotask_client_notification import (
+    AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
     AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
     AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
     AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID,
     AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
     AutotaskClientNotificationScopeError,
+    validate_approved_workflow_scope,
     validate_client_notification_test_scope,
     validate_gromelski_vulscan_scope,
 )
@@ -175,3 +177,100 @@ def test_exact_profile_activates_only_client_notification(monkeypatch):
     assert providers.get(
         AUTOTASK_CLIENT_NOTIFICATION_PROVIDER
     ).lifecycle_status.value == "available"
+
+
+def _enable_approved_workflow(monkeypatch):
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
+    )
+
+
+def test_approved_workflow_accepts_exact_registered_template(monkeypatch):
+    _enable_approved_workflow(monkeypatch)
+    result = validate_approved_workflow_scope(
+        ticket_company_id=597,
+        contact_company_id=597,
+        contact_email="client@example.com",
+        receives_email_notifications=True,
+        workflow_id="vulscan_missing_patch",
+        template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+        note_title=VULSCAN_CLIENT_NOTE_TITLE,
+        note_body=VULSCAN_CLIENT_NOTE_BODY,
+        requested_recipient="CLIENT@example.com",
+    )
+    assert result.ticket_company_id == 597
+    assert result.contact_company_id == 597
+    assert result.contact_email == "client@example.com"
+
+
+def test_approved_workflow_rejects_template_bound_to_other_workflow(monkeypatch):
+    _enable_approved_workflow(monkeypatch)
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="WORKFLOW_TEMPLATE_NOT_APPROVED",
+    ):
+        validate_approved_workflow_scope(
+            ticket_company_id=597,
+            contact_company_id=597,
+            contact_email="client@example.com",
+            receives_email_notifications=True,
+            workflow_id="different_workflow",
+            template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            note_title=VULSCAN_CLIENT_NOTE_TITLE,
+            note_body=VULSCAN_CLIENT_NOTE_BODY,
+        )
+
+
+def test_approved_workflow_rejects_modified_canned_body(monkeypatch):
+    _enable_approved_workflow(monkeypatch)
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="APPROVED_BODY_MISMATCH",
+    ):
+        validate_approved_workflow_scope(
+            ticket_company_id=597,
+            contact_company_id=597,
+            contact_email="client@example.com",
+            receives_email_notifications=True,
+            workflow_id="vulscan_missing_patch",
+            template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            note_title=VULSCAN_CLIENT_NOTE_TITLE,
+            note_body="Changed by caller",
+        )
+
+
+def test_approved_workflow_rejects_cross_company_contact(monkeypatch):
+    _enable_approved_workflow(monkeypatch)
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="TICKET_CONTACT_COMPANY_MISMATCH",
+    ):
+        validate_approved_workflow_scope(
+            ticket_company_id=597,
+            contact_company_id=598,
+            contact_email="client@example.com",
+            receives_email_notifications=True,
+            workflow_id="vulscan_missing_patch",
+            template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            note_title=VULSCAN_CLIENT_NOTE_TITLE,
+            note_body=VULSCAN_CLIENT_NOTE_BODY,
+        )
+
+
+def test_approved_workflow_requires_contact_email_notifications(monkeypatch):
+    _enable_approved_workflow(monkeypatch)
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="EMAIL_NOTIFICATIONS_DISABLED",
+    ):
+        validate_approved_workflow_scope(
+            ticket_company_id=597,
+            contact_company_id=597,
+            contact_email="client@example.com",
+            receives_email_notifications=False,
+            workflow_id="vulscan_missing_patch",
+            template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            note_title=VULSCAN_CLIENT_NOTE_TITLE,
+            note_body=VULSCAN_CLIENT_NOTE_BODY,
+        )
