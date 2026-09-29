@@ -73,3 +73,8 @@ Close this Section Goal only after one support item completes end-to-end through
 ## 23. Autonomous Execution Eligibility and Owner Review
 `autonomous_allowed: exact bounded support-repair workflow`.
 This owner instruction approves continuous processing of approved Support List defects under the existing governance boundaries. It does not grant new provider authority, constitutional authority, disruptive-action authority, secret access, or permission to bypass release gates. Material changes to those boundaries require separate owner review.
+
+
+## Execution cadence
+
+The native host worker runs once daily at 2:30 AM local host time. Operators may manually start `jason-support-repair-worker.service` at any time for an immediate support-list reconciliation; the daily timer remains the fallback cadence.
