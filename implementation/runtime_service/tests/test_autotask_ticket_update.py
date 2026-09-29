@@ -516,6 +516,80 @@ def test_completion_plan_is_stable_single_write_and_readback_verified(monkeypatc
     }
 
 
+def test_ticket_update_resolution_is_bounded_and_verified(monkeypatch):
+    from connectors.autotask.mutation_connector import AutotaskMutationConnector
+    from connectors.core.connector_base import PreparedRequest
+
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+    calls = []
+
+    class Secrets:
+        def resolve(self, logical_name, context):
+            return {
+                "base_url": "https://zone.example",
+                "username": "u",
+                "secret": "s",
+                "integration_code": "i",
+            }
+
+    class Transport:
+        def request(self, *, method, url, headers, params=None, json=None, timeout_seconds=30):
+            calls.append((method, url, json))
+            if method == "PATCH":
+                return {"id": 12345, "status": 5, "resolution": "Verified fixed."}
+            raise AssertionError((method, url))
+
+    connector = AutotaskTicketUpdateConnector(
+        secrets=Secrets(),
+        transport=Transport(),
+        audit=SimpleNamespace(record=lambda *a, **k: None),
+        bindings=None,
+    )
+    base = PreparedRequest(
+        method="PATCH",
+        url="https://zone.example/atservicesrest/V1.0/Tickets",
+        headers={},
+        params=None,
+        json=None,
+        audit_operation="/V1.0/Tickets",
+    )
+    monkeypatch.setattr(connector, "_provider_resolution_context", lambda request: (base, {}))
+    monkeypatch.setattr(
+        AutotaskMutationConnector,
+        "prepare_request",
+        lambda self, req, credentials: PreparedRequest(
+            method="PATCH",
+            url="https://dynamic-zone.example/atservicesrest/V1.0/Tickets",
+            headers={},
+            params=None,
+            json=dict(req.arguments["payload"]),
+            audit_operation="/V1.0/Tickets",
+        ),
+    )
+    monkeypatch.setattr(
+        connector,
+        "_readback",
+        lambda **kwargs: {
+            "id": 12345,
+            "status": 5,
+            "resolution": "Verified fixed.",
+        },
+    )
+
+    prepared = connector.prepare_governed_execution(
+        request({"id": 12345, "status": 5, "resolution": " Verified fixed. "})
+    )
+    assert prepared.payload["resolution"] == "Verified fixed."
+    result = connector.execute_governed_execution(prepared)
+    assert len([call for call in calls if call[0] == "PATCH"]) == 1
+    assert result.data["jasonVerification"]["verifiedFields"] == ["resolution", "status"]
+
+    with pytest.raises(ValueError, match="must not exceed"):
+        connector.validated_payload(
+            request({"id": 12345, "resolution": "x" * 8001})
+        )
+
+
 def autonomy_request(payload):
     return ConnectorRequest(
         context=ConnectorContext(
