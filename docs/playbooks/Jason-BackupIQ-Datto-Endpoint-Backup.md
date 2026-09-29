@@ -365,6 +365,8 @@ This v2 branch therefore implements resumable `waiting_device_access:backupiq_in
 
 Integration review: PR #604 supersedes #603. Its shared-runtime overlap is VulScan-specific and does not conflict with the BackupIQ waiting/resume changes in this playbook branch.
 
+The PR integration gate is coordinated with #596, #603, and #604.
+
 ## 22. Section Goal Closure
 
 Close the Section Goal after:
