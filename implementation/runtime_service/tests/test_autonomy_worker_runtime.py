@@ -2397,7 +2397,7 @@ def _promoted_low_disk_worker(tmp_path: Path, reads, actions=None):
         ),
         max_active_work_items=2,
         interval_seconds=30,
-        monotonic=iter(float(value) for value in range(100)).__next__,
+        monotonic=iter(float(value * 31) for value in range(100)).__next__,
     )
     return worker, store, actions
 
