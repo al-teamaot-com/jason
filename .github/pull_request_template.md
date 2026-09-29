@@ -28,10 +28,11 @@ List schemas, APIs, events, states, or transitions changed. Describe compatibili
 - Branch baseline SHA:
 - Current-main reconciliation performed:
 - Integration coordination: none
+- Integration automation: disabled
 - Production-impacting change: yes/no
 - Intended production release candidate: not selected until merged
 
-List any active PRs that touch the same implementation-sensitive files using PR references such as `#123`. The protected integration gate requires current `main` to be incorporated and active overlaps to be explicitly reviewed.
+List any active PRs that touch the same implementation-sensitive files using PR references such as `#123`. The protected integration gate requires current `main` to be incorporated and active overlaps to be explicitly reviewed. Set `Integration automation: enabled` only for a trusted, reviewed PR that may be automatically reconciled with current `main`, revalidated, and merged when every required gate passes. This never authorizes production deployment.
 
 ## Autonomous repair release
 
