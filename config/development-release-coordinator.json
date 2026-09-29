@@ -60,6 +60,7 @@
     "max_prs_per_run": 3,
     "production_deployment_separate": true,
     "host_service": "jason-pr-integration-reconciler.service",
-    "host_timer": "jason-pr-integration-reconciler.timer"
+    "host_timer": "jason-pr-integration-reconciler.timer",
+    "systemd_scope": "user"
   }
 }
