@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -5143,6 +5144,130 @@ def bulk_revoke_datto_component_unsupervised_approvals(
         "failed_count": len(failed),
         "revoked": revoked,
         "failed": failed,
+    }
+
+
+def _activity_time(value: str, *, field: str) -> datetime:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field} is required")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must include a timezone offset")
+    return parsed.astimezone(timezone.utc)
+
+
+def _ticket_activity_rows(*, start: datetime, end: datetime, limit: int) -> list[dict[str, Any]]:
+    path = Path(
+        os.getenv(
+            "JASON_AUTONOMY_WORKER_DB",
+            "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3",
+        )
+    )
+    if not path.exists():
+        return []
+    connection = sqlite3.connect(
+        f"file:{path}?mode=ro", uri=True, timeout=2.0
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA query_only = ON")
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='autonomy_ticket_activity'"
+        ).fetchone()
+        if table is None:
+            return []
+        rows = connection.execute(
+            """
+            SELECT ticket_id,ticket_number,title,playbook_id,source_queue,
+                   phase,reason,occurred_at
+            FROM autonomy_ticket_activity
+            WHERE occurred_at >= ? AND occurred_at <= ?
+            ORDER BY occurred_at ASC, activity_id ASC
+            LIMIT ?
+            """,
+            (start.isoformat(), end.isoformat(), int(limit) * 100),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [dict(row) for row in rows]
+
+
+@mcp.tool()
+def jason_ticket_activity_report(
+    start_time: str,
+    end_time: str,
+    limit: int = 100,
+) -> dict[str, object]:
+    """Report durable Jason autonomous ticket activity for an exact time window."""
+
+    try:
+        start = _activity_time(start_time, field="start_time")
+        end = _activity_time(end_time, field="end_time")
+    except ValueError as exc:
+        return {"status": "rejected", "error": str(exc)}
+    if end < start:
+        return {"status": "rejected", "error": "end_time must not precede start_time"}
+    if end - start > timedelta(days=31):
+        return {"status": "rejected", "error": "activity window must not exceed 31 days"}
+    if not 1 <= int(limit) <= 500:
+        return {"status": "rejected", "error": "limit must be between 1 and 500"}
+
+    try:
+        rows = _ticket_activity_rows(start=start, end=end, limit=int(limit))
+    except (OSError, sqlite3.Error) as exc:
+        return {
+            "status": "unavailable",
+            "error": f"ticket activity ledger unavailable: {type(exc).__name__}",
+        }
+
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        ticket_id = int(row["ticket_id"])
+        item = grouped.get(ticket_id)
+        if item is None:
+            item = {
+                "ticket_id": ticket_id,
+                "ticket_number": str(row["ticket_number"] or ""),
+                "title": str(row["title"] or ""),
+                "playbook": str(row["playbook_id"] or ""),
+                "first_activity_at": str(row["occurred_at"] or ""),
+                "last_activity_at": str(row["occurred_at"] or ""),
+                "initial_queue": str(row["source_queue"] or ""),
+                "last_queue": str(row["source_queue"] or ""),
+                "initial_phase": str(row["phase"] or ""),
+                "last_phase": str(row["phase"] or ""),
+                "last_reason": str(row["reason"] or ""),
+                "activity_events": 0,
+                "phases": [],
+            }
+            grouped[ticket_id] = item
+        item["last_activity_at"] = str(row["occurred_at"] or "")
+        item["last_queue"] = str(row["source_queue"] or "")
+        item["last_phase"] = str(row["phase"] or "")
+        item["last_reason"] = str(row["reason"] or "")
+        item["activity_events"] = int(item["activity_events"]) + 1
+        phase = str(row["phase"] or "")
+        if phase and phase not in item["phases"]:
+            item["phases"].append(phase)
+
+    items = sorted(
+        grouped.values(),
+        key=lambda item: (str(item["last_activity_at"]), int(item["ticket_id"])),
+        reverse=True,
+    )[: int(limit)]
+    return {
+        "status": "succeeded",
+        "source": "jason_durable_autonomy_ticket_activity",
+        "provider_independent": True,
+        "start_time": start.isoformat(),
+        "end_time": end.isoformat(),
+        "ticket_count": len(items),
+        "tickets": items,
     }
 
 
