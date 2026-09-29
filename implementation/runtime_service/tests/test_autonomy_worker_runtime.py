@@ -187,6 +187,47 @@ def _owned_device_candidate(*, status_label: str = "In Progress") -> QueueCandid
     )
 
 
+class UnverifiedClaimActions(Actions):
+    def execute(self, scope, capability, arguments):
+        if capability == "service.ticket.update":
+            self.calls.append((scope.playbook_id, capability, arguments))
+            payload = arguments.get("payload") or {}
+            if payload.get("queueID") == "Jason":
+                return {
+                    "data": {
+                        "jasonVerification": {
+                            "readbackVerified": False,
+                            "ticketId": payload.get("id"),
+                            "verifiedFields": [],
+                        }
+                    }
+                }
+        return super().execute(scope, capability, arguments)
+
+
+def test_claim_must_verify_jason_queue_before_diagnostics(tmp_path: Path):
+    actions = UnverifiedClaimActions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    maintenance = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        interval_seconds=60,
+    )
+
+    maintenance.tick()
+
+    capabilities = [call[1] for call in actions.calls]
+    assert capabilities[0] == "service.ticket.update"
+    assert "automation.component.execute" not in capabilities
+    persisted = store.get(140933)
+    assert persisted is not None
+    assert persisted.phase == "blocked"
+    assert store.list_open() == ()
+
+
 class OfflineReads(Reads):
     def execute(self, capability, arguments):
         if capability == "endpoint.device.read":
