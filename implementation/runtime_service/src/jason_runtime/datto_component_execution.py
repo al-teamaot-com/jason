@@ -80,6 +80,13 @@ DATTO_COMPONENT_EXECUTION_AUTONOMY_ENV = (
 DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST = "aot-approved-components"
 DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS = "managed_endpoint"
 
+IDLE_LOG_OFF_PLAYBOOK_ID = "idle_log_off"
+IDLE_LOG_OFF_PLAYBOOK_VERSION = "1.1.0"
+IDLE_LOG_OFF_POLICY_ID = "playbook-autonomy:idle_log_off"
+IDLE_LOG_OFF_PLAYBOOK_POLICY_ID = "playbook:idle_log_off@1.1.0"
+IDLE_LOG_OFF_SETTER_UID = "acc6a240-881d-4655-9470-87f60c8e35e8"
+IDLE_LOG_OFF_SETTER_NAME = "Set Idle Log Off AOT Ver 02042026-1"
+
 DATTO_EXECUTION_ALLOWLIST_NAME_ENV = (
     "JASON_DATTO_COMPONENT_EXECUTION_ALLOWLIST_NAME"
 )
@@ -132,6 +139,43 @@ _PROVIDER_CAPABILITY_MAP = {
         AUTOMATION_COMPONENT_EXECUTE,
     ): "datto_rmm.component.execute",
 }
+
+
+def _idle_log_off_playbook_scoped_component(
+    request: ConnectorRequest,
+) -> DattoApprovedComponent | None:
+    """Return the exact setter only for trusted Idle Log Off 1.1 context."""
+
+    context = request.context
+    if context.principal_id != "jason-autonomy-worker":
+        return None
+    if (
+        str(context.principal_attributes.get("playbook") or "").strip()
+        != IDLE_LOG_OFF_PLAYBOOK_ID
+    ):
+        return None
+
+    policies = {str(value).strip() for value in context.policy_ids}
+    if not {
+        IDLE_LOG_OFF_POLICY_ID,
+        IDLE_LOG_OFF_PLAYBOOK_POLICY_ID,
+    }.issubset(policies):
+        return None
+
+    uid = str(request.arguments.get("component_uid") or "").strip()
+    name = str(request.arguments.get("component_name") or "").strip()
+    variables = request.arguments.get("variables", {})
+    if uid != IDLE_LOG_OFF_SETTER_UID or name != IDLE_LOG_OFF_SETTER_NAME:
+        return None
+    if not isinstance(variables, Mapping) or dict(variables):
+        return None
+
+    return DattoApprovedComponent(
+        uid=IDLE_LOG_OFF_SETTER_UID,
+        name=IDLE_LOG_OFF_SETTER_NAME,
+        approval_mode="per_run",
+        approval_source="playbook_scope",
+    )
 
 
 class DattoRmmComponentExecutionActivationError(RuntimeError):
@@ -691,15 +735,26 @@ class DattoRmmComponentExecutionConnector:
         requested_component_name = str(
             request.arguments.get("component_name") or ""
         ).strip()
-        selected_component = resolve_datto_component(
-            pilot.components if pilot is not None else self._autonomy_components,
-            component_uid=request.arguments.get("component_uid"),
-            component_name=request.arguments.get("component_name"),
-            catalog_verified=True,
+        playbook_scoped_component = (
+            None
+            if pilot is not None
+            else _idle_log_off_playbook_scoped_component(request)
+        )
+        playbook_scoped_authorized = playbook_scoped_component is not None
+        selected_component = (
+            playbook_scoped_component
+            if playbook_scoped_component is not None
+            else resolve_datto_component(
+                pilot.components if pilot is not None else self._autonomy_components,
+                component_uid=request.arguments.get("component_uid"),
+                component_name=request.arguments.get("component_name"),
+                catalog_verified=True,
+            )
         )
         if (
             request.context.principal_id == "jason-autonomy-worker"
             and selected_component.requires_explicit_approval
+            and not playbook_scoped_authorized
         ):
             raise PermissionError(
                 "DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"
@@ -716,7 +771,10 @@ class DattoRmmComponentExecutionConnector:
                     provider_component_uid=selected_component.uid,
                     allowed_target_classes=frozenset({effective_device_class}),
                     variable_policies=(),
-                    requires_per_run_approval=selected_component.requires_explicit_approval,
+                    requires_per_run_approval=(
+                        selected_component.requires_explicit_approval
+                        and not playbook_scoped_authorized
+                    ),
                     status="active",
                 ),
             )
