@@ -171,41 +171,21 @@ def load_event(path: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--event", type=Path)
-    parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    parser.add_argument("--pr-number", type=int)
+    parser.add_argument("--event", type=Path, required=True)
     parser.add_argument("--active-days", type=int, default=7)
     args = parser.parse_args()
 
-    event = load_event(args.event) if args.event and args.event.exists() else {}
+    event = load_event(args.event)
     pr = event.get("pull_request")
-    repository = args.repository
-    if not repository and isinstance(event.get("repository"), dict):
-        repository = str(event["repository"].get("full_name") or "")
-
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if not pr and args.pr_number is not None:
-        if not repository or not token:
-            print(
-                "change-integration: repository and GITHUB_TOKEN are required "
-                "for dispatched PR validation",
-                file=sys.stderr,
-            )
-            return 2
-        payload = api_json(
-            f"https://api.github.com/repos/{repository}/pulls/{int(args.pr_number)}",
-            token,
-        )
-        if isinstance(payload, dict):
-            pr = payload
-
     if not pr:
         print("change-integration: non-PR event; no PR overlap gate required")
         return 0
 
+    repository = event["repository"]["full_name"]
     current_pr = int(pr["number"])
     base_ref = str(pr["base"]["ref"])
     body = str(pr.get("body") or "")
+    token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         print("change-integration: GITHUB_TOKEN is required for PR overlap checks", file=sys.stderr)
         return 2

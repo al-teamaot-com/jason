@@ -51,20 +51,16 @@
   },
   "integration_automation": {
     "enabled": true,
+    "mode": "host_authenticated_native_pr_update",
     "eligibility_marker": "Integration automation: enabled",
-    "validation_workflows": [
-      "validate.yml",
-      "security-regressions.yml",
-      "jason-teams-gateway.yml",
-      "conversation-experience.yml"
-    ],
     "additional_required_checks": [
       "governed-security-regressions"
     ],
-    "poll_seconds": 15,
-    "timeout_seconds": 1800,
+    "reconcile_interval_minutes": 5,
     "max_prs_per_run": 3,
-    "max_reconcile_passes": 3,
-    "production_deployment_separate": true
+    "production_deployment_separate": true,
+    "host_service": "jason-pr-integration-reconciler.service",
+    "host_timer": "jason-pr-integration-reconciler.timer",
+    "systemd_scope": "user"
   }
 }
