@@ -2,11 +2,67 @@
 
 This document is the canonical default template for new Project Jason operational playbooks.
 
+This template is paired with `Jason-Playbook-Runtime-Automation-Contract.md`. New playbooks inherit the shared runtime mechanics defined there rather than reimplementing them.
+
 ## Default-use rule
 
 When a request is to build, create, design, or plan a **Jason playbook**, start from this template unless the requester explicitly specifies another structure. Preserve the sections even when a particular section is marked `Not applicable`, so playbooks remain comparable, auditable, and easy to implement.
 
 Do not treat this template as execution authority. All playbooks remain subject to the Jason Constitution, Central Orchestrator, exact requester grants, provider/client isolation, approval requirements, disruption controls, and `direct_provider_access=false`.
+
+## Runtime inheritance rule
+
+Before adding logic to an individual playbook, ask whether the behavior is domain-specific or should be common to all playbooks.
+
+Common behavior belongs in the shared runtime/contract, including:
+- queue ownership and work-start lifecycle;
+- active-work-slot handling;
+- object/CI association;
+- persisted state;
+- waiting/recheck scheduling;
+- retry counting;
+- duplicate suppression;
+- note layout;
+- governance/authority gates;
+- human handoff;
+- terminal-state readback;
+- common observability.
+
+A new playbook should mostly declare trigger, expected state, evidence questions, classifications, domain-specific gates/remediation, and authoritative verification.
+
+## Standard manifest
+
+Every playbook should provide these fields near the top, initially in Markdown or YAML and later in a machine-readable registry when implemented:
+
+```yaml
+playbook:
+  id: <stable_id>
+  name: <human_name>
+  version: <semantic_version>
+  owner: <operational_owner>
+  target_type: <ticket|endpoint|user|site|service|provider_object>
+  trigger:
+    provider: <source>
+    match: <exact rule>
+  ownership:
+    while_open: <Jason|source_queue|conditional>
+    release_active_slot_when_waiting: true
+  retry:
+    max_remediation_attempts: <n>
+  recheck:
+    enabled: true|false
+    cadence: <duration>
+    stale_after: <duration>
+  verification:
+    authoritative_source: <source>
+    success_condition: <condition>
+  completion:
+    terminal_disposition: <Complete|Human Review|other>
+  autonomy:
+    allowed_branches: []
+    approval_bound_branches: []
+    disruptive_branches: []
+```
 
 ---
 
@@ -86,7 +142,8 @@ Before troubleshooting:
    - set Work Type **Remote Support**;
    - require post-mutation readback;
    - if the ownership transition fails, do not continue substantive work as though ownership succeeded.
-9. For endpoint tickets, require authoritative current evidence that the target device is online before claiming the ticket.
+9. Do not conflate queue ownership with endpoint availability. A matching playbook may claim/own an offline ticket when its ownership policy requires that. Apply endpoint-online or continuous-online requirements as diagnostic/remediation gates, not as a universal prerequisite for queue ownership.
+10. Before substantive ticket-specific diagnostics, require the global work-start transition/readback defined by the shared runtime contract.
 
 If the affected object cannot be identified confidently:
 
@@ -119,11 +176,7 @@ Every playbook should have explicit persisted states.
 
 Suggested base states:
 
-`identified -> waiting -> diagnosing -> blocked -> remediating -> verifying -> complete`
-
-or:
-
-`escalated`
+`detected -> owned -> identified -> diagnosing -> classified -> waiting | blocked | remediating | verifying | human_review | escalated | complete`
 
 Add playbook-specific states when required.
 
@@ -137,6 +190,8 @@ Persist at minimum:
 - last ticket-documentation fingerprint.
 
 A recheck that produces no meaningful state/evidence change updates persisted state only; it does **not** create another ticket note. The persisted recheck record remains the audit evidence that the check occurred.
+
+Waiting is a first-class state. Where safe, waiting tickets should release their active-work slot while retaining the queue ownership declared by the playbook. Resume from persisted state rather than restarting completed work.
 
 ---
 
@@ -170,6 +225,8 @@ If evidence is inconclusive:
 -> gather additional evidence or escalate.
 
 Do not infer a failure solely from an alert if authoritative evidence can verify it.
+
+A successful authoritative read that returns no matching object is valid negative evidence, not automatically a connector failure. Playbooks must distinguish an authoritative empty result from a failed/unauthorized/unavailable read.
 
 ---
 
@@ -252,6 +309,8 @@ If the playbook requires waiting:
 - maximum waiting period reached
 
 Prevent duplicate scheduled jobs for the same ticket/playbook instance.
+
+Unless the playbook explicitly requires otherwise, entering a normal waiting state should release the active-work slot without changing the playbook's declared queue ownership.
 
 Periodic polling is not itself a documentable event. Write a new ticket note only when the recheck changes evidence, classification, action, dependency, authority state, escalation state, or terminal disposition.
 
@@ -489,6 +548,11 @@ Prove:
 13. persisted state
 14. duplicate-note suppression on unchanged rechecks
 15. terminal ticket-state readback verification
+16. queue ownership independent of active-work capacity
+17. active-slot release/resume while waiting
+18. authoritative negative-evidence handling
+19. client-boundary rejection
+20. persisted restart/resume behavior
 
 Do not modify unrelated production objects during testing.
 
@@ -514,7 +578,7 @@ Playbook authors/technicians may define and test the proposed autonomous safe br
 
 Document:
 
-- `autonomous_allowed`: `false`, `diagnostic_only`, or the exact bounded scope;
+- branch-level autonomy: exact allowed branches, approval-bound branches, and disruptive branches;
 - exact playbook version;
 - exact allowed capabilities;
 - explicit actions that remain approval-bound;
