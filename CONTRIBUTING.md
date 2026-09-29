@@ -89,6 +89,16 @@ Use the relevant implementation test environment for the changed component/capab
 
 The protected `repository-hygiene` check enforces current-main reconciliation and active implementation-overlap review. Use the PR template's `Integration coordination:` line to acknowledge reviewed overlapping PRs. Do not treat a successful branch-local test run as proof that the branch is safe to merge if `main` moved afterward.
 
+For trusted same-repository PRs that are ready for unattended source integration, set the PR template line `Integration automation: enabled`. The governed PR reconciler then:
+
+1. incorporates the latest protected `main` into the PR branch without force-push;
+2. reruns the protected Validate Jason checks plus security, Teams, and conversation regression workflows against the reconciled head;
+3. rechecks whether `main` moved again while validation was running;
+4. merges the PR only when every required check is green and the branch remains current; and
+5. stops safely on conflicts, failed/missing checks, drafts, forks/untrusted authors, or absent opt-in.
+
+This automation merges source only. It does not deploy production, promote runtime authority, change provider permissions, or bypass the serialized production release lane.
+
 A pull request should explain:
 
 - organizational outcome;
