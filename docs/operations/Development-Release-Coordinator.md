@@ -102,6 +102,24 @@ Normal releases remain human-approved. J-CHANGE-002 defines a narrow Autonomous 
 
 The workflow checks out trusted `main` even for pull-request-triggered refreshes. It never executes code from an unmerged PR with issue-write permission.
 
+### Governed PR source integration
+
+The evidence-only control board remains read-only. A separate host-side source-integration service, `jason-pr-integration-reconciler.timer`, runs every five minutes under the existing authenticated `al` GitHub identity.
+
+A PR is eligible only when it is open, non-draft, from the same repository, authored by an OWNER/MEMBER/COLLABORATOR, and contains the exact opt-in line `Integration automation: enabled`.
+
+For an eligible PR:
+
+1. if it is behind `main`, the host runs GitHub's native `gh pr update-branch` and performs no merge in that cycle;
+2. the native update produces the normal PR synchronize event, so protected CI runs in the PR context GitHub requires;
+3. a later cycle reads `gh pr checks --required` and separately requires configured additional security checks;
+4. immediately before merge, the host rechecks that the PR still contains current `main`;
+5. only then may it run `gh pr merge --merge`.
+
+Conflicts, failed/missing/pending checks, ambiguous identity/scope, and infrastructure errors fail closed. One blocked PR does not authorize bypass and does not prevent independent eligible PRs from being evaluated.
+
+The host reconciler is source-control automation only. It does not deploy production or grant runtime/provider authority.
+
 ## Failure behavior
 
 If authoritative evidence cannot be retrieved, the refresh fails rather than publishing invented state.

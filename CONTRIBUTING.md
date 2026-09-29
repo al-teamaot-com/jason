@@ -89,15 +89,16 @@ Use the relevant implementation test environment for the changed component/capab
 
 The protected `repository-hygiene` check enforces current-main reconciliation and active implementation-overlap review. Use the PR template's `Integration coordination:` line to acknowledge reviewed overlapping PRs. Do not treat a successful branch-local test run as proof that the branch is safe to merge if `main` moved afterward.
 
-For trusted same-repository PRs that are ready for unattended source integration, set the PR template line `Integration automation: enabled`. The governed PR reconciler then:
+For trusted same-repository PRs that are ready for unattended source integration, set the PR template line `Integration automation: enabled`. The host-side governed PR reconciler runs under Jason's existing authenticated GitHub identity and then:
 
-1. incorporates the latest protected `main` into the PR branch without force-push;
-2. reruns the protected Validate Jason checks plus security, Teams, and conversation regression workflows against the reconciled head;
-3. rechecks whether `main` moved again while validation was running;
-4. merges the PR only when every required check is green and the branch remains current; and
-5. stops safely on conflicts, failed/missing checks, drafts, forks/untrusted authors, or absent opt-in.
+1. uses GitHub's native PR branch-update operation to incorporate the latest protected `main` without force-push;
+2. stops that cycle so GitHub's normal `pull_request/synchronize` workflows run in the exact PR context required by branch protection;
+3. on a later cycle, reads GitHub's authoritative required-check view plus the governed security regression check;
+4. rechecks whether `main` moved again before merge;
+5. merges the PR only when required checks are green and the branch remains current; and
+6. stops safely on conflicts, failed/missing checks, drafts, forks/untrusted authors, or absent opt-in.
 
-This automation merges source only. It does not deploy production, promote runtime authority, change provider permissions, or bypass the serialized production release lane.
+This automation merges source only. It does not deploy production, promote runtime authority, change provider permissions, synthesize status checks, or bypass the serialized production release lane.
 
 A pull request should explain:
 
