@@ -6,6 +6,45 @@ def test_material_change_excludes_docs_and_workflow_only_changes():
     assert is_material(("tools/example.py", "docs/control/CURRENT.md"))
 
 
+def test_complete_main_history_unshallows_before_ancestry(monkeypatch):
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        if args[-1] == "--is-shallow-repository":
+            return "true"
+        return ""
+
+    monkeypatch.setattr("tools.documentation_source_reconciler.run", fake_run)
+    from tools.documentation_source_reconciler import ensure_complete_main_history
+
+    ensure_complete_main_history()
+    assert any(
+        "--unshallow" in call
+        and call[-2:] == ("origin", "main")
+        for call in calls
+    )
+
+
+def test_changed_paths_does_not_re_shallow_repository(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.ensure_revision",
+        lambda revision: calls.append(("ensure", revision)),
+    )
+
+    def fake_run(*args, **kwargs):
+        calls.append(args)
+        return "tools/a.py\ndocs/b.md"
+
+    monkeypatch.setattr("tools.documentation_source_reconciler.run", fake_run)
+    from tools.documentation_source_reconciler import changed_paths
+
+    assert changed_paths("abc") == ("tools/a.py", "docs/b.md")
+    assert ("ensure", "abc") in calls
+    assert not any("--depth=2" in call for call in calls if isinstance(call, tuple))
+
+
 def test_latest_material_success_follows_main_history_not_run_order(monkeypatch):
     monkeypatch.setattr(
         "tools.documentation_source_reconciler.successful_main_runs",
