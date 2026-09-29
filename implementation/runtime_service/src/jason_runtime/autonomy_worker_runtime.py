@@ -4452,6 +4452,7 @@ class OperationalAutonomyMaintenance:
 
         site = str(endpoint.get("site") or "").strip()
         physical_hits: set[str] = set()
+        correlated_event_times: list[int] = [incident_ms]
         active_physical_devices = 0
         ambiguous_peers = 0
         checked_peers = 0
@@ -4485,14 +4486,17 @@ class OperationalAutonomyMaintenance:
                     if not isinstance(peer_alerts, list):
                         ambiguous_peers += 1
                         continue
-                    if any(
-                        isinstance(item, Mapping)
+                    matching_times = [
+                        ts
+                        for item in peer_alerts
+                        if isinstance(item, Mapping)
                         and self._unexpected_shutdown_alert(item)
                         and (ts := self._alert_timestamp_ms(item)) is not None
                         and abs(ts - incident_ms) <= INCIDENT_WINDOW_MS
-                        for item in peer_alerts
-                    ):
+                    ]
+                    if matching_times:
                         physical_hits.add(uid)
+                        correlated_event_times.append(min(matching_times))
 
         site_classification = classify_site_scope(
             affected_physical_devices=len(physical_hits),
@@ -4500,7 +4504,7 @@ class OperationalAutonomyMaintenance:
             ambiguous_physical_devices=ambiguous_peers,
         )
         site_event = (
-            site_event_id(site, incident_ms)
+            site_event_id(site, min(correlated_event_times))
             if site_classification in {"SITE_ENVIRONMENTAL", "SITE_CORRELATED_SMALL_SITE"}
             else ""
         )
