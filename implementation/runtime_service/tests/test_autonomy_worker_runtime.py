@@ -2409,7 +2409,7 @@ def _expire_low_disk_grace(store):
     store.put(
         replace(
             current,
-            phase="low_disk_investigate",
+            phase="waiting_recheck:low_disk_investigate",
             last_reason=f"low_disk_grace_started_at={started.isoformat()}; expired",
         )
     )
