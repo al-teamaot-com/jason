@@ -32,6 +32,23 @@ class PromotionStore:
         )
 
 
+class ExactPromotionStore:
+    def __init__(self, approved_scopes=()):
+        self.approved_scopes = set(approved_scopes)
+
+    def find_scope_approved(self, **kwargs):
+        key = (
+            kwargs.get("playbook_id"),
+            kwargs.get("playbook_version"),
+        )
+        if key not in self.approved_scopes:
+            return None
+        return SimpleNamespace(
+            approval_id="approval-owner-exact",
+            allowed_capabilities=tuple(kwargs.get("required_capabilities") or ()),
+        )
+
+
 class QueueSource:
     def __init__(self, candidate):
         self.candidate = candidate
@@ -2644,6 +2661,158 @@ def vulscan_candidate():
     )
 
 
+class VulscanBranchReads(Reads):
+    def __init__(self, patch_status: str):
+        super().__init__()
+        self.patch_status = patch_status
+
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "item": {
+                            "id": 68,
+                            "companyID": 597,
+                            "isActive": True,
+                            "referenceNumber": "vul-device-1",
+                            "referenceTitle": "GAI-DT2850",
+                        }
+                    }
+                },
+            }
+        if capability == "endpoint.device.read":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": "vul-device-1",
+                        "hostname": "GAI-DT2850",
+                        "online": True,
+                        "reboot_required": False,
+                    }
+                },
+            }
+        if capability == "endpoint.patch.search":
+            kb = str(arguments["kb"])
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "patches": [
+                            {
+                                "kbArticleId": kb.replace("KB", ""),
+                                "installStatus": self.patch_status,
+                                "rebootRequired": False,
+                            }
+                        ],
+                        "match_count": 1,
+                        "exact_selector_match": True,
+                        "ambiguous": False,
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+def test_vulscan_core_scope_remains_eligible_without_client_disposition_promotion(
+    tmp_path: Path,
+):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanBranchReads("NOT_APPROVED"),
+        actions=actions,
+        store=store,
+        promotion_store=ExactPromotionStore(
+            approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(141183)
+    assert current is not None
+    assert current.phase == "waiting_patch_approval"
+    assert not any(
+        capability == "service.ticket.client.notification.create"
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
+    tmp_path: Path,
+):
+    reads = VulscanBranchReads("INSTALLED")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    promotions = ExactPromotionStore(
+        approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=promotions,
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+
+    waiting = store.get(141183)
+    assert waiting is not None
+    assert waiting.phase == "waiting_client_notification_authority"
+    assert store.list_open() == ()
+    assert not any(
+        capability == "service.ticket.client.notification.create"
+        for _, capability, _ in actions.calls
+    )
+    assert not any(
+        capability == "service.ticket.update"
+        and (args.get("payload") or {}).get("status") == "Close Pending"
+        for _, capability, args in actions.calls
+    )
+
+    promotions.approved_scopes.add(("vulscan_missing_patch", "1.1.0"))
+    worker.tick()
+
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "complete"
+
+    client_calls = [
+        args
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.client.notification.create"
+    ]
+    assert len(client_calls) == 1
+    assert client_calls[0]["workflow_id"] == "vulscan_missing_patch"
+    assert client_calls[0]["template_id"] == "vulscan-approved-or-installed-v1"
+    assert client_calls[0]["payload"] == {"ticketID": 141183}
+    assert "recipient" not in client_calls[0]
+
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert any(
+        update.get("contactID") == 30684489
+        and update.get("status") == "Close Pending"
+        for update in updates
+    )
+    store.close()
+
+
 def test_vulscan_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
@@ -3041,10 +3210,10 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
         if capability == "service.ticket.client.notification.create"
     ]
     assert len(notifications) == 1
+    assert notifications[0]["workflow_id"] == "vulscan_missing_patch"
     assert notifications[0]["template_id"] == "vulscan-approved-or-installed-v1"
-    assert "either already been installed or has been approved" in (
-        notifications[0]["payload"]["description"]
-    )
+    assert notifications[0]["payload"] == {"ticketID": 141183}
+    assert "recipient" not in notifications[0]
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
     assert len(notes) == 1
     assert "verified stale/recovered VulScan finding" in notes[0]["description"]
