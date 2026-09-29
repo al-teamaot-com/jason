@@ -48,6 +48,13 @@ from autonomous_remediation.playbook_autonomy_approval import (
 from autonomous_remediation.datto_edr_av_playbook import PLAYBOOK_VERSION as EDR_PLAYBOOK_VERSION
 from autonomous_remediation.datto_edr_av_runtime_contract import VERIFIED_COMPONENTS
 
+from .vulscan_client_policy import (
+    VULSCAN_CLIENT_NOTE_BODY,
+    VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    VULSCAN_CLIENT_NOTE_TITLE,
+    resolve_vulscan_policy,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PlaybookScope:
@@ -121,11 +128,12 @@ LOW_DISK_SCOPE = PlaybookScope(
 )
 VULSCAN_SCOPE = PlaybookScope(
     playbook_id="vulscan_missing_patch",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:vulscan_missing_patch",
     required_action_capabilities=(
         "service.ticket.note.create",
         "service.ticket.update",
+        "service.ticket.client.notification.create",
     ),
 )
 DISK_BAD_BLOCK_SCOPE = PlaybookScope(
@@ -1662,8 +1670,14 @@ class OperationalAutonomyMaintenance:
                 return
 
         if work.playbook_id == VULSCAN_SCOPE.playbook_id:
-            if work.phase == "vulscan_investigate":
+            if work.phase in {"vulscan_investigate", "vulscan_monitoring"}:
                 self._investigate_vulscan(work, ticket)
+                return
+            if work.phase == "vulscan_client_notification_verify_complete":
+                self._verify_vulscan_client_notification(work, continue_monitoring=False)
+                return
+            if work.phase == "vulscan_client_notification_verify_monitoring":
+                self._verify_vulscan_client_notification(work, continue_monitoring=True)
                 return
 
         if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
@@ -1997,6 +2011,249 @@ class OperationalAutonomyMaintenance:
             ),
         )
 
+    @staticmethod
+    def _notification_history_items(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        items = data.get("items")
+        if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+            return []
+        return [item for item in items if isinstance(item, Mapping)]
+
+    def _notification_history_max_id(self, ticket_id: int) -> int:
+        data = self._read_data(
+            "service.notification.history.search",
+            {"ticket_id": int(ticket_id), "page_size": 100},
+        )
+        ids: list[int] = []
+        for item in self._notification_history_items(data):
+            try:
+                ids.append(int(item.get("id")))
+            except (TypeError, ValueError):
+                continue
+        return max(ids, default=0)
+
+    def _gromelski_notification_copy_observed(
+        self,
+        *,
+        ticket_id: int,
+        baseline_id: int,
+    ) -> bool:
+        data = self._read_data(
+            "service.notification.history.search",
+            {"ticket_id": int(ticket_id), "page_size": 100},
+        )
+        for item in self._notification_history_items(data):
+            try:
+                item_id = int(item.get("id"))
+                item_ticket_id = int(item.get("ticketID"))
+            except (TypeError, ValueError):
+                continue
+            if item_id <= int(baseline_id) or item_ticket_id != int(ticket_id):
+                continue
+            if (
+                str(item.get("recipientEmailAddress") or "").strip().casefold()
+                == "chris.benton@e-gai.com"
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _notification_baseline_from_reason(reason: str) -> int:
+        match = re.search(r"notification_baseline_id=(\\d+)", str(reason or ""))
+        if match is None:
+            raise OperationalAutonomyError(
+                "client-notification verification has no durable baseline"
+            )
+        return int(match.group(1))
+
+    def _verify_vulscan_client_notification(
+        self,
+        work: OperationalWork,
+        *,
+        continue_monitoring: bool,
+    ) -> None:
+        baseline_id = self._notification_baseline_from_reason(work.last_reason)
+        if not self._gromelski_notification_copy_observed(
+            ticket_id=work.ticket_id,
+            baseline_id=baseline_id,
+        ):
+            # Notification workflows can be asynchronous. Keep the exact ticket
+            # in a non-terminal verification state and retry only the read.
+            return
+        self.store.put(
+            self._replace(
+                work,
+                phase="vulscan_monitoring" if continue_monitoring else "complete",
+                last_reason=(
+                    "Client-facing VulScan notification copy verified in "
+                    "Autotask Notification History."
+                ),
+            )
+        )
+
+    def _apply_vulscan_client_disposition(
+        self,
+        work: OperationalWork,
+        ticket: Mapping[str, Any],
+        *,
+        continue_monitoring: bool,
+    ) -> bool:
+        policy = resolve_vulscan_policy(
+            client_id=work.company_id,
+            site_id=ticket.get("companyLocationID"),
+            device_id=work.device_uid,
+            user_id=ticket.get("contactID"),
+            ticket_id=work.ticket_id,
+        )
+        if not policy.client_notification_required:
+            return False
+        if policy.primary_contact_id is None:
+            raise OperationalAutonomyError(
+                "client-specific VulScan policy requires a primary contact"
+            )
+
+        scope = self._scope_for_work(work)
+        desired_contact = int(policy.primary_contact_id)
+
+        if int(ticket.get("contactID") or 0) != desired_contact:
+            contact_update = self.actions.execute(
+                scope,
+                "service.ticket.update",
+                {
+                    "payload": {
+                        "id": work.ticket_id,
+                        "contactID": desired_contact,
+                    }
+                },
+            )
+            contact_data = self._action_data(contact_update)
+            verification = contact_data.get("jasonVerification")
+            verified_fields = (
+                verification.get("verifiedFields")
+                if isinstance(verification, Mapping)
+                else None
+            )
+            if (
+                not isinstance(verification, Mapping)
+                or verification.get("readbackVerified") is not True
+                or not isinstance(verified_fields, Sequence)
+                or isinstance(verified_fields, (str, bytes))
+                or "contactID" not in {str(value) for value in verified_fields}
+            ):
+                raise OperationalAutonomyError(
+                    "VulScan primary-contact association failed readback"
+                )
+
+        note_key = "Client - VulScan Approved Communication"
+        note_fingerprint = hashlib.sha256(
+            (
+                VULSCAN_CLIENT_NOTE_TEMPLATE_ID
+                + "|"
+                + VULSCAN_CLIENT_NOTE_TITLE
+                + "|"
+                + VULSCAN_CLIENT_NOTE_BODY
+            ).encode("utf-8")
+        ).hexdigest()
+        prior = self.store.last_note_fingerprint(
+            work.ticket_id,
+            work.playbook_id,
+            note_key,
+        )
+
+        baseline_id = self._notification_history_max_id(work.ticket_id)
+        if prior != note_fingerprint:
+            self.actions.execute(
+                scope,
+                "service.ticket.client.notification.create",
+                {
+                    "template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+                    "payload": {
+                        "ticketID": int(work.ticket_id),
+                        "title": VULSCAN_CLIENT_NOTE_TITLE,
+                        "description": VULSCAN_CLIENT_NOTE_BODY,
+                        "noteType": 3,
+                        "publish": 1,
+                    },
+                },
+            )
+            self.store.remember_note_fingerprint(
+                work.ticket_id,
+                work.playbook_id,
+                note_key,
+                note_fingerprint,
+            )
+
+        status_update = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "contactID": desired_contact,
+                    "status": policy.terminal_status,
+                }
+            },
+        )
+        status_data = self._action_data(status_update)
+        verification = status_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        if (
+            not isinstance(verification, Mapping)
+            or verification.get("readbackVerified") is not True
+            or not isinstance(verified_fields, Sequence)
+            or isinstance(verified_fields, (str, bytes))
+            or not {"contactID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ):
+            raise OperationalAutonomyError(
+                "VulScan Close Pending/contact readback verification failed"
+            )
+
+        if prior == note_fingerprint:
+            # The approved client communication was already created on a prior
+            # pass. Do not create a duplicate; preserve monitoring/completion.
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="vulscan_monitoring" if continue_monitoring else "complete",
+                    last_reason="Approved client VulScan communication already present.",
+                )
+            )
+            return True
+
+        if self._gromelski_notification_copy_observed(
+            ticket_id=work.ticket_id,
+            baseline_id=baseline_id,
+        ):
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="vulscan_monitoring" if continue_monitoring else "complete",
+                    last_reason=(
+                        "Close Pending, primary contact, canned note, and client "
+                        "notification copy verified."
+                    ),
+                )
+            )
+            return True
+
+        self.store.put(
+            self._replace(
+                work,
+                phase=(
+                    "vulscan_client_notification_verify_monitoring"
+                    if continue_monitoring
+                    else "vulscan_client_notification_verify_complete"
+                ),
+                last_reason=f"notification_baseline_id={baseline_id}",
+            )
+        )
+        return True
+
     def _investigate_vulscan(
         self,
         work: OperationalWork,
@@ -2098,11 +2355,21 @@ class OperationalAutonomyMaintenance:
                     "This is a verified stale/recovered VulScan finding; Jason may close "
                     "the ticket without patching, rebooting, or other endpoint mutation."
                 )
+                self._write_note(work, note, "Jason - Autonomous VulScan Resolution")
+                if self._apply_vulscan_client_disposition(
+                    work,
+                    ticket,
+                    continue_monitoring=False,
+                ):
+                    self._notify_patch_completion(
+                        work,
+                        patch_summary=patch_summary,
+                    )
+                    return
                 self._complete_verified_ticket(
                     work,
                     reason="All exact VulScan KBs verified installed with no reboot required.",
                 )
-                self._write_note(work, note, "Jason - Autonomous VulScan Resolution")
                 self._notify_patch_completion(
                     work,
                     patch_summary=patch_summary,
@@ -2118,6 +2385,13 @@ class OperationalAutonomyMaintenance:
                 "At least one exact KB is approved/pending. Patch-window timing and any "
                 "reboot action remain separately gated."
             )
+            self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
+            if self._apply_vulscan_client_disposition(
+                work,
+                ticket,
+                continue_monitoring=True,
+            ):
+                return
             reason = "VulScan diagnostic complete; approved-pending patch requires window/recheck logic."
         else:
             note += (
