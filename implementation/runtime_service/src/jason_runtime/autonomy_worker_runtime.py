@@ -1780,6 +1780,19 @@ class OperationalAutonomyMaintenance:
             if work.phase == "idle_log_off_investigate":
                 self._investigate_idle_log_off(work)
                 return
+            if work.phase == "idle_log_off_repair_dispatch":
+                self._dispatch_component(
+                    work,
+                    IDLE_LOG_OFF_SETTER_NAME,
+                    "idle_log_off_repair_wait",
+                )
+                return
+            if work.phase == "idle_log_off_repair_wait":
+                self._poll_idle_log_off_repair(work)
+                return
+            if work.phase == "idle_log_off_verify_monitor":
+                self._verify_idle_log_off_monitor(work)
+                return
 
         if work.playbook_id == SECURITY_LOG_SCOPE.playbook_id:
             if work.phase == "security_quick_dispatch":
@@ -1846,6 +1859,10 @@ class OperationalAutonomyMaintenance:
             component_uid = SECURITY_LOG_SELF_HEAL_UID
             resolved_component_name = SECURITY_LOG_SELF_HEAL_NAME
             step = "security_repair"
+        elif component_name == IDLE_LOG_OFF_SETTER_NAME:
+            component_uid = IDLE_LOG_OFF_SETTER_UID
+            resolved_component_name = IDLE_LOG_OFF_SETTER_NAME
+            step = "idle_log_off_repair"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
             component_uid = identity.uid
@@ -1877,7 +1894,7 @@ class OperationalAutonomyMaintenance:
         if not job_uid:
             raise OperationalAutonomyError("component dispatch returned no durable job UID")
         repair_attempts = work.repair_attempts + (
-            1 if step in {"repair", "security_repair"} else 0
+            1 if step in {"repair", "security_repair", "idle_log_off_repair"} else 0
         )
         self.store.put(
             self._replace(
