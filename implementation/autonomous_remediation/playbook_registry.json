@@ -177,7 +177,7 @@
     {
       "id": "low_disk_space",
       "name": "Jason - Windows Low Disk Space",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
@@ -186,25 +186,51 @@
           "Low Disk Space"
         ]
       },
-      "review_status": "diagnostic_autonomous_cleanup_gated",
+      "review_status": "root_cause_autonomous_bounded_cleanup_owner_review_required",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
           "trigger",
           "identity",
+          "autotask_cleanup_grace",
+          "current_monitor_state",
           "device_role",
           "volume_baseline",
-          "recent_activity_check",
+          "root_cause_evidence",
+          "storage_health",
           "safe_cleanup_target",
           "evidence_fresh",
           "governance_precheck",
           "autonomy_approved"
         ],
         "allowed_capabilities": [
+          "automation.component.execute",
           "service.ticket.note.create",
           "service.ticket.update"
         ],
-        "policy_id": "playbook-autonomy:low_disk_space"
+        "policy_id": "playbook-autonomy:low_disk_space",
+        "remediation": {
+          "max_cleanup_attempts_per_incident": 1,
+          "approved_targets": [
+            {
+              "component_name": "Sysmon - Clear C:\\Sysmon Folder - AOT",
+              "component_uid": "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6",
+              "precondition": "C:\\Sysmon is >=1 GiB and no active service references that path"
+            },
+            {
+              "component_name": "Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1",
+              "component_uid": "434dc4ef-6f21-442a-969c-a60e754a4435",
+              "precondition": "old SoftwareDistribution.bak_* folders total >=1 GiB"
+            }
+          ],
+          "verification": "current free space plus authoritative DRMM low-disk monitor clear"
+        },
+        "human_review": {
+          "queue": "Help Desk I",
+          "queue_id": 29682833,
+          "status": "Human Review",
+          "status_id": 37
+        }
       }
     },
     {

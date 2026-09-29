@@ -48,6 +48,25 @@ from autonomous_remediation.playbook_autonomy_approval import (
 from autonomous_remediation.datto_edr_av_playbook import PLAYBOOK_VERSION as EDR_PLAYBOOK_VERSION
 from autonomous_remediation.datto_edr_av_runtime_contract import VERIFIED_COMPONENTS
 
+from .low_disk_analysis import (
+    LARGE_FILE_COMMAND,
+    LOW_DISK_GRACE_SECONDS,
+    PHYSICAL_DISK_COMMAND,
+    RELIABILITY_COMMAND,
+    SOFTWARE_DISTRIBUTION_COMMAND,
+    SYSMON_COMMAND,
+    SYSMON_DEPENDENCY_COMMAND,
+    SYSTEM_FILE_COMMAND,
+    TOP_FOLDER_COMMAND,
+    VSS_COMMAND,
+    artifact_bytes,
+    choose_cleanup,
+    numeric,
+    parse_json_records,
+    recommendation,
+    relevant_findings,
+    storage_health_summary,
+)
 from .vulscan_client_policy import (
     VULSCAN_CLIENT_NOTE_BODY,
     VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
@@ -120,9 +139,10 @@ BACKUPIQ_SCOPE = PlaybookScope(
 )
 LOW_DISK_SCOPE = PlaybookScope(
     playbook_id="low_disk_space",
-    playbook_version="1.0.0",
+    playbook_version="1.1.0",
     policy_id="playbook-autonomy:low_disk_space",
     required_action_capabilities=(
+        "automation.component.execute",
         "service.ticket.note.create",
         "service.ticket.update",
     ),
@@ -182,6 +202,10 @@ SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
 BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
+LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
+LOW_DISK_SYSMON_CLEANUP_UID = "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6"
+LOW_DISK_SOFTWAREDIST_CLEANUP_NAME = "Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1"
+LOW_DISK_SOFTWAREDIST_CLEANUP_UID = "434dc4ef-6f21-442a-969c-a60e754a4435"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
 RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
@@ -976,8 +1000,11 @@ class OperationalAutonomyMaintenance:
                         resume_reason = (
                             existing.last_reason
                             if (
-                                existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
-                                and resume_phase == "backupiq_verify_reinstall"
+                                (
+                                    existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                                    and resume_phase == "backupiq_verify_reinstall"
+                                )
+                                or existing.playbook_id == LOW_DISK_SCOPE.playbook_id
                             )
                             else "Scheduled recheck due; resuming preserved work."
                         )
@@ -1867,6 +1894,26 @@ class OperationalAutonomyMaintenance:
             if work.phase == "low_disk_investigate":
                 self._investigate_low_disk(work)
                 return
+            if work.phase == "low_disk_sysmon_cleanup_dispatch":
+                self._dispatch_component(
+                    work,
+                    LOW_DISK_SYSMON_CLEANUP_NAME,
+                    "low_disk_cleanup_wait",
+                )
+                return
+            if work.phase == "low_disk_softwaredist_cleanup_dispatch":
+                self._dispatch_component(
+                    work,
+                    LOW_DISK_SOFTWAREDIST_CLEANUP_NAME,
+                    "low_disk_cleanup_wait",
+                )
+                return
+            if work.phase == "low_disk_cleanup_wait":
+                self._poll_low_disk_cleanup(work)
+                return
+            if work.phase == "low_disk_verify":
+                self._verify_low_disk_cleanup(work)
+                return
 
         if work.playbook_id == VULSCAN_SCOPE.playbook_id:
             if work.phase in {"vulscan_investigate", "vulscan_monitoring"}:
@@ -1975,6 +2022,14 @@ class OperationalAutonomyMaintenance:
             component_uid = BACKUPIQ_INSTALLER_UID
             resolved_component_name = BACKUPIQ_INSTALLER_NAME
             step = "backupiq_reinstall"
+        elif component_name == LOW_DISK_SYSMON_CLEANUP_NAME:
+            component_uid = LOW_DISK_SYSMON_CLEANUP_UID
+            resolved_component_name = LOW_DISK_SYSMON_CLEANUP_NAME
+            step = "low_disk_cleanup"
+        elif component_name == LOW_DISK_SOFTWAREDIST_CLEANUP_NAME:
+            component_uid = LOW_DISK_SOFTWAREDIST_CLEANUP_UID
+            resolved_component_name = LOW_DISK_SOFTWAREDIST_CLEANUP_NAME
+            step = "low_disk_cleanup"
         else:
             identity = VERIFIED_COMPONENTS[component_name]
             component_uid = identity.uid
@@ -1989,6 +2044,10 @@ class OperationalAutonomyMaintenance:
         if step == "backupiq_reinstall" and work.repair_attempts >= 1:
             raise OperationalAutonomyError(
                 "BackupIQ autonomous reinstall limit is one per incident cycle"
+            )
+        if step == "low_disk_cleanup" and work.repair_attempts >= 1:
+            raise OperationalAutonomyError(
+                "Low Disk autonomous cleanup limit is one per incident cycle"
             )
 
         output = self.actions.execute(
@@ -2017,6 +2076,7 @@ class OperationalAutonomyMaintenance:
                 "security_repair",
                 "idle_log_off_repair",
                 "backupiq_reinstall",
+                "low_disk_cleanup",
             }
             else 0
         )
@@ -3023,6 +3083,177 @@ class OperationalAutonomyMaintenance:
         self._write_note(work, note, "Jason - Autonomous VulScan Diagnostic")
         self._persist_human_review_escalation(work, reason=reason)
 
+    def _low_disk_open_alerts(self, work: OperationalWork) -> list[Mapping[str, Any]]:
+        current = self._read_data(
+            "endpoint.alert.search",
+            {"resource_id": work.device_uid, "status": "open"},
+        )
+        items = current.get("items")
+        if not isinstance(items, list):
+            items = current.get("alerts")
+        if not isinstance(items, list):
+            return []
+        return [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+            and "low disk"
+            in json.dumps(item, sort_keys=True, default=str).casefold()
+        ]
+
+    def _low_disk_powershell_records(
+        self,
+        work: OperationalWork,
+        command: str,
+        *,
+        timeout_seconds: int = 60,
+    ) -> list[dict[str, Any]]:
+        data = self._read_data(
+            "endpoint.powershell.read",
+            {
+                "device_uid": work.device_uid,
+                "command": command,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+        stdout = data.get("stdout") or data.get("text") or ""
+        return parse_json_records(stdout)
+
+    def _low_disk_collect_evidence(self, work: OperationalWork) -> dict[str, Any]:
+        reads = (
+            ("top_folders", TOP_FOLDER_COMMAND, 120),
+            ("large_files", LARGE_FILE_COMMAND, 120),
+            ("vss", VSS_COMMAND, 60),
+            ("system_files", SYSTEM_FILE_COMMAND, 60),
+            ("physical_disks", PHYSICAL_DISK_COMMAND, 60),
+            ("reliability", RELIABILITY_COMMAND, 60),
+            ("sysmon", SYSMON_COMMAND, 60),
+            ("sysmon_dependencies", SYSMON_DEPENDENCY_COMMAND, 60),
+            ("software_distribution", SOFTWARE_DISTRIBUTION_COMMAND, 90),
+        )
+        evidence: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        for name, command, timeout_seconds in reads:
+            try:
+                evidence[name] = self._low_disk_powershell_records(
+                    work,
+                    command,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception as exc:
+                evidence[name] = []
+                errors[name] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        evidence["errors"] = errors
+        return evidence
+
+    def _low_disk_prior_ticket_count(self, work: OperationalWork) -> int:
+        try:
+            data = self._read_data(
+                "service.ticket.search",
+                {"company_id": work.company_id, "page_size": 100},
+            )
+        except Exception:
+            return 0
+        items = data.get("items")
+        if not isinstance(items, list):
+            items = data.get("tickets")
+        if not isinstance(items, list):
+            return 0
+        hostname = work.hostname.casefold()
+        return sum(
+            1
+            for item in items
+            if isinstance(item, Mapping)
+            and int(item.get("id") or 0) != work.ticket_id
+            and "low disk" in str(item.get("title") or "").casefold()
+            and hostname in str(item.get("title") or "").casefold()
+        )
+
+    def _low_disk_volume_baseline(
+        self,
+        work: OperationalWork,
+    ) -> tuple[Mapping[str, Any], float, float, float, str]:
+        audit = self._read_data(
+            "endpoint.audit.read", {"resource_id": work.device_uid}
+        )
+        logical_disks = audit.get("logicalDisks")
+        if logical_disks is None and isinstance(audit.get("audit"), Mapping):
+            logical_disks = audit["audit"].get("logicalDisks")
+        if not isinstance(logical_disks, list) or not logical_disks:
+            raise OperationalAutonomyError(
+                "Low-disk endpoint audit contained no logical-disk evidence."
+            )
+        fixed = [
+            disk
+            for disk in logical_disks
+            if isinstance(disk, Mapping)
+            and str(disk.get("description") or "").casefold() == "local fixed disk"
+        ]
+        candidates = fixed or [
+            disk for disk in logical_disks if isinstance(disk, Mapping)
+        ]
+        disk = min(
+            candidates,
+            key=lambda item: (
+                (numeric(item.get("freespace")) / numeric(item.get("size")))
+                if numeric(item.get("size")) > 0
+                else 1.0
+            ),
+        )
+        size = numeric(disk.get("size"))
+        free = numeric(disk.get("freespace"))
+        free_pct = (free / size * 100.0) if size > 0 else 0.0
+        drive = str(disk.get("diskIdentifier") or "unknown")
+        return disk, size, free, free_pct, drive
+
+    def _low_disk_note(
+        self,
+        work: OperationalWork,
+        *,
+        size: float,
+        free: float,
+        free_pct: float,
+        drive: str,
+        findings: Sequence[str],
+        health_text: str,
+        recommendation_text: str,
+        prior_count: int,
+        action: str,
+        changes: str,
+        state: str,
+    ) -> str:
+        lines = [
+            "STATUS",
+            (
+                f"{drive} has {free / (1024**3):.1f} GB free of "
+                f"{size / (1024**3):.1f} GB ({free_pct:.1f}% free)."
+            ),
+            "",
+            "NEXT STEP" if changes == "None" else "RESULT / NEXT STEP",
+            recommendation_text,
+            "",
+            "KEY EVIDENCE",
+        ]
+        lines.extend(f"- {item}" for item in findings[:5])
+        if prior_count:
+            lines.append(f"- Recurrence: {prior_count} prior low-disk ticket(s) found for this endpoint.")
+        if health_text:
+            lines.extend(["", "DISK HEALTH", health_text])
+        lines.extend(
+            [
+                "",
+                "WHAT JASON DID",
+                action,
+                "",
+                "CHANGES MADE",
+                changes,
+                "",
+                "JASON STATE",
+                state,
+            ]
+        )
+        return "\n".join(lines)
+
     def _investigate_low_disk(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
             "endpoint.device.read", {"resource_id": work.device_uid}
@@ -3039,40 +3270,88 @@ class OperationalAutonomyMaintenance:
             or endpoint.get("name")
             or ""
         ).strip()
-        if endpoint_uid != work.device_uid or endpoint_hostname.casefold() != work.hostname.casefold():
+        if (
+            endpoint_uid != work.device_uid
+            or endpoint_hostname.casefold() != work.hostname.casefold()
+        ):
             self._block(work, "Low-disk device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
-            self._block(work, "Low-disk target went offline before evidence collection.")
+            self.actions.execute(
+                self._scope_for_work(work),
+                "service.ticket.update",
+                {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_device_access:low_disk_investigate",
+                    last_reason=(
+                        "Low-disk endpoint is offline; waiting for exact device access "
+                        "without consuming the active-work slot."
+                    ),
+                )
+            )
             return
 
-        audit = self._read_data(
-            "endpoint.audit.read", {"resource_id": work.device_uid}
-        )
-        logical_disks = audit.get("logicalDisks")
-        if logical_disks is None and isinstance(audit.get("audit"), Mapping):
-            logical_disks = audit["audit"].get("logicalDisks")
-        if not isinstance(logical_disks, list) or not logical_disks:
-            self._block(work, "Low-disk endpoint audit contained no logical-disk evidence.")
+        _disk, size, free, free_pct, drive = self._low_disk_volume_baseline(work)
+        current_alerts = self._low_disk_open_alerts(work)
+        if not current_alerts:
+            note = self._low_disk_note(
+                work,
+                size=size,
+                free=free,
+                free_pct=free_pct,
+                drive=drive,
+                findings=[],
+                health_text="",
+                recommendation_text=(
+                    "The current DRMM low-disk monitor is healthy. The existing "
+                    "Autotask-triggered cleanup appears to have resolved this incident."
+                ),
+                prior_count=0,
+                action=(
+                    "Verified current free space and confirmed the authoritative low-disk "
+                    "alert is no longer open."
+                ),
+                changes="None",
+                state="complete",
+            )
+            self._write_note(work, note, "Jason - Low Disk - Resolution")
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "Current low-disk monitor cleared after the existing Autotask cleanup "
+                    "opportunity; ticket completion readback succeeded."
+                ),
+            )
             return
 
-        fixed = [
-            disk for disk in logical_disks
-            if isinstance(disk, Mapping)
-            and str(disk.get("description") or "").casefold() == "local fixed disk"
-        ]
-        candidates = fixed or [disk for disk in logical_disks if isinstance(disk, Mapping)]
-        disk = min(
-            candidates,
-            key=lambda item: (
-                (float(item.get("freespace") or 0) / float(item.get("size") or 1))
-                if float(item.get("size") or 0) > 0 else 1.0
-            ),
+        grace_match = re.search(
+            r"low_disk_grace_started_at=([^;]+)",
+            str(work.last_reason or ""),
         )
-        size = float(disk.get("size") or 0)
-        free = float(disk.get("freespace") or 0)
-        free_pct = (free / size * 100.0) if size > 0 else 0.0
-        drive = str(disk.get("diskIdentifier") or "unknown")
+        grace_started = (
+            self._parse_iso_timestamp(grace_match.group(1).strip())
+            if grace_match
+            else None
+        )
+        if grace_started is None:
+            grace_started = datetime.now(timezone.utc)
+        grace_age = (datetime.now(timezone.utc) - grace_started).total_seconds()
+        if grace_age < LOW_DISK_GRACE_SECONDS:
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_recheck:low_disk_investigate",
+                    last_reason=(
+                        f"low_disk_grace_started_at={grace_started.isoformat()}; "
+                        "Waiting for the existing Autotask-triggered Disk Cleanup and "
+                        "normal monitor propagation before deeper diagnostics."
+                    ),
+                )
+            )
+            return
 
         role = endpoint.get("device_type")
         role_text = (
@@ -3081,7 +3360,8 @@ class OperationalAutonomyMaintenance:
             else str(role or "")
         )
         role_material = (
-            f"{role_text} {endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
+            f"{role_text} "
+            f"{endpoint.get('operating_system') or endpoint.get('operatingSystem') or ''}"
         ).casefold()
         protected = any(
             token in role_material
@@ -3101,13 +3381,12 @@ class OperationalAutonomyMaintenance:
         alerts = alerts_data.get("alerts")
         if not isinstance(alerts, list):
             alerts = []
-        storage_risk_hits = 0
-        for alert in alerts:
-            if not isinstance(alert, Mapping):
-                continue
-            material = json.dumps(alert, sort_keys=True, default=str).casefold()
-            if any(
-                token in material
+        storage_risk_hits = sum(
+            1
+            for alert in alerts
+            if isinstance(alert, Mapping)
+            and any(
+                token in json.dumps(alert, sort_keys=True, default=str).casefold()
                 for token in (
                     '"code":"7"',
                     '"code": "7"',
@@ -3117,39 +3396,320 @@ class OperationalAutonomyMaintenance:
                     "storage controller",
                     "smart error",
                 )
-            ):
-                storage_risk_hits += 1
-
-        note = (
-            "Jason autonomous low-disk diagnostic completed using governed read-only "
-            "endpoint audit and alert-history evidence. "
-            f"Device={work.hostname}; Drive={drive}; "
-            f"SizeGB={size / (1024**3):.2f}; FreeGB={free / (1024**3):.2f}; "
-            f"FreePercent={free_pct:.2f}; DeviceType={role_text[:180] or 'unknown'}; "
-            f"ProtectedRole={'Yes' if protected else 'No'}; "
-            f"StorageRiskEvidenceCount={storage_risk_hits}; "
-            f"RebootRequired={'Yes' if bool(endpoint.get('reboot_required')) else 'No'}. "
-            "No files were deleted, no cleanup component was run, and no service, "
-            "process, BitLocker, reboot, or other user-disruptive change was attempted. "
+            )
         )
-        if protected:
-            reason = "Low-disk diagnostic complete; protected/server role requires human review."
-            note += "Server/protected-role cleanup is intentionally not autonomous."
-        elif storage_risk_hits:
-            reason = "Low-disk diagnostic complete; storage-health evidence requires technician review."
-            note += "Storage-health evidence takes priority over space cleanup."
-        else:
-            reason = (
-                "Low-disk diagnostic complete; exact safe-cleanup target and cleanup "
-                "authority remain separately gated."
-            )
-            note += (
-                "Workstation diagnostics are complete, but cleanup remains gated until an "
-                "exact standing-safe target/action is positively identified."
+
+        evidence = self._low_disk_collect_evidence(work)
+        health_risk, health_text = storage_health_summary(
+            evidence["physical_disks"],
+            evidence["reliability"],
+            storage_risk_hits,
+        )
+        safe_sysmon = (
+            evidence["sysmon"]
+            if "sysmon" not in evidence["errors"]
+            else []
+        )
+        safe_sysmon_dependencies = evidence["sysmon_dependencies"]
+        if "sysmon_dependencies" in evidence["errors"]:
+            safe_sysmon_dependencies = [{"Name": "dependency evidence unavailable"}]
+        safe_software_distribution = (
+            evidence["software_distribution"]
+            if "software_distribution" not in evidence["errors"]
+            else []
+        )
+        cleanup_kind, cleanup_bytes = choose_cleanup(
+            sysmon=safe_sysmon,
+            sysmon_dependencies=safe_sysmon_dependencies,
+            software_distribution=safe_software_distribution,
+            storage_health_risk=health_risk,
+        )
+        artifacts = artifact_bytes(evidence["large_files"])
+        findings = relevant_findings(
+            top_folders=evidence["top_folders"],
+            large_files=evidence["large_files"],
+            vss=evidence["vss"],
+            system_files=evidence["system_files"],
+            sysmon=evidence["sysmon"],
+            software_distribution=evidence["software_distribution"],
+        )
+        prior_count = self._low_disk_prior_ticket_count(work)
+        recommendation_text = recommendation(
+            alert_still_open=True,
+            storage_health_risk=health_risk,
+            cleanup_kind=cleanup_kind if not protected else None,
+            cleanup_bytes=cleanup_bytes,
+            artifact_bytes=artifacts,
+        )
+        if evidence["errors"] and not findings:
+            recommendation_text = (
+                "Root-cause evidence was incomplete and no useful large-consumer result "
+                "was returned. Technician review is required rather than guessing."
             )
 
-        self._write_note(work, note, "Jason - Autonomous Low Disk Diagnostic")
-        self._persist_human_review_escalation(work, reason=reason)
+        if health_risk or protected or (evidence["errors"] and not findings):
+            reason = (
+                "Storage-health evidence requires technician review."
+                if health_risk
+                else "Protected/server role requires technician review."
+                if protected
+                else "Low-disk root-cause evidence was incomplete."
+            )
+            note = self._low_disk_note(
+                work,
+                size=size,
+                free=free,
+                free_pct=free_pct,
+                drive=drive,
+                findings=findings,
+                health_text=health_text,
+                recommendation_text=recommendation_text,
+                prior_count=prior_count,
+                action=(
+                    "Allowed the existing Autotask cleanup grace period, then collected "
+                    "read-only folder/file, VSS, system-file, SMART/physical-disk, "
+                    "reliability, and storage-event evidence."
+                ),
+                changes="None",
+                state="human_review",
+            )
+            self._write_note(work, note, "Jason - Low Disk - Human Review Required")
+            self._persist_human_review_escalation(work, reason=reason)
+            return
+
+        if cleanup_kind and work.repair_attempts == 0:
+            note = self._low_disk_note(
+                work,
+                size=size,
+                free=free,
+                free_pct=free_pct,
+                drive=drive,
+                findings=findings,
+                health_text=health_text,
+                recommendation_text=recommendation_text,
+                prior_count=prior_count,
+                action=(
+                    "Allowed the existing Autotask cleanup grace period and performed "
+                    "read-only root-cause analysis. One narrow approved cleanup target "
+                    "was positively identified."
+                ),
+                changes="None yet",
+                state="remediating",
+            )
+            self._write_note(work, note, "Jason - Low Disk - Diagnostic")
+            phase = (
+                "low_disk_sysmon_cleanup_dispatch"
+                if cleanup_kind == "sysmon"
+                else "low_disk_softwaredist_cleanup_dispatch"
+            )
+            self.store.put(
+                self._replace(
+                    work,
+                    phase=phase,
+                    last_reason=f"Selected approved cleanup target={cleanup_kind}.",
+                )
+            )
+            return
+
+        note = self._low_disk_note(
+            work,
+            size=size,
+            free=free,
+            free_pct=free_pct,
+            drive=drive,
+            findings=findings,
+            health_text=health_text,
+            recommendation_text=recommendation_text,
+            prior_count=prior_count,
+            action=(
+                "Allowed the existing Autotask cleanup grace period and completed "
+                "read-only root-cause analysis. No additional approved autonomous "
+                "cleanup target was identified."
+            ),
+            changes="None",
+            state="human_review",
+        )
+        self._write_note(work, note, "Jason - Low Disk - Human Review Required")
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Low-disk condition remains after the Autotask cleanup opportunity and "
+                "no further approved autonomous cleanup target applies."
+            ),
+        )
+
+    def _poll_low_disk_cleanup(self, work: OperationalWork) -> None:
+        if not work.job_uid or work.component_uid not in {
+            LOW_DISK_SYSMON_CLEANUP_UID,
+            LOW_DISK_SOFTWAREDIST_CLEANUP_UID,
+        }:
+            self._persist_human_review_escalation(
+                work,
+                reason="Low Disk cleanup job identity is incomplete or changed.",
+                clear_job=True,
+            )
+            return
+        job_data = self._read_data(
+            "automation.job.read", {"resource_id": work.job_uid}
+        )
+        job = job_data.get("job") if isinstance(job_data.get("job"), Mapping) else job_data
+        status = str(job.get("status") or "").strip().casefold()
+        if status in {"active", "running", "queued", "pending", "scheduled"}:
+            return
+        if status not in {"completed", "complete", "success", "succeeded", "finished"}:
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    f"Approved Low Disk cleanup ended with provider status "
+                    f"{status or 'unknown'}; no second cleanup was attempted."
+                ),
+                clear_job=True,
+            )
+            return
+
+        component_name = (
+            LOW_DISK_SYSMON_CLEANUP_NAME
+            if work.component_uid == LOW_DISK_SYSMON_CLEANUP_UID
+            else LOW_DISK_SOFTWAREDIST_CLEANUP_NAME
+        )
+        completed_at = datetime.now(timezone.utc)
+        self._write_note(
+            work,
+            (
+                "STATUS\nApproved narrow Low Disk cleanup completed.\n\n"
+                "NEXT STEP\nJason will independently re-read free space and the current "
+                "DRMM low-disk monitor before considering the incident resolved.\n\n"
+                f"WHAT JASON DID\nRan {component_name}; Job={work.job_uid}; "
+                f"ProviderStatus={status}.\n\n"
+                "CHANGES MADE\nOnly the exact approved cleanup target was modified. "
+                "No user documents, application data, VSS, hibernation, pagefile, "
+                "Recycle Bin, reboot, or service change was performed.\n\n"
+                "JASON STATE\nverifying"
+            ),
+            "Jason - Low Disk - Remediation",
+        )
+        self.store.put(
+            self._replace(
+                work,
+                phase="waiting_recheck:low_disk_verify",
+                job_uid=None,
+                component_uid=None,
+                last_reason=(
+                    f"low_disk_cleanup_completed_at={completed_at.isoformat()}; "
+                    f"low_disk_cleanup_component={component_name}; "
+                    "Waiting for free-space and monitor verification."
+                ),
+            )
+        )
+
+    def _verify_low_disk_cleanup(self, work: OperationalWork) -> None:
+        match = re.search(
+            r"low_disk_cleanup_completed_at=([^;]+)",
+            str(work.last_reason or ""),
+        )
+        completed_at = (
+            self._parse_iso_timestamp(match.group(1).strip())
+            if match
+            else None
+        )
+        if completed_at is None:
+            self._persist_human_review_escalation(
+                work,
+                reason="Low Disk cleanup verification timestamp is missing.",
+            )
+            return
+        _disk, size, free, free_pct, drive = self._low_disk_volume_baseline(work)
+        alerts = self._low_disk_open_alerts(work)
+        if not alerts:
+            note = self._low_disk_note(
+                work,
+                size=size,
+                free=free,
+                free_pct=free_pct,
+                drive=drive,
+                findings=[],
+                health_text="",
+                recommendation_text=(
+                    "The authoritative DRMM low-disk monitor is healthy after the one "
+                    "approved cleanup. No additional cleanup or capacity action is required "
+                    "from this incident."
+                ),
+                prior_count=0,
+                action=(
+                    "Re-read free space and independently verified the current DRMM "
+                    "low-disk alert is no longer open."
+                ),
+                changes="One approved narrow cleanup completed.",
+                state="complete",
+            )
+            self._write_note(work, note, "Jason - Low Disk - Verification")
+            self._complete_verified_ticket(
+                work,
+                reason=(
+                    "One approved Low Disk cleanup completed and the authoritative "
+                    "current monitor cleared; ticket completion readback succeeded."
+                ),
+            )
+            return
+
+        age = (datetime.now(timezone.utc) - completed_at).total_seconds()
+        if age < LOW_DISK_GRACE_SECONDS:
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_recheck:low_disk_verify",
+                    last_reason=work.last_reason,
+                    updated_at=work.updated_at,
+                )
+            )
+            return
+
+        evidence = self._low_disk_collect_evidence(work)
+        health_risk, health_text = storage_health_summary(
+            evidence["physical_disks"],
+            evidence["reliability"],
+            0,
+        )
+        findings = relevant_findings(
+            top_folders=evidence["top_folders"],
+            large_files=evidence["large_files"],
+            vss=evidence["vss"],
+            system_files=evidence["system_files"],
+            sysmon=evidence["sysmon"],
+            software_distribution=evidence["software_distribution"],
+        )
+        recommendation_text = recommendation(
+            alert_still_open=True,
+            storage_health_risk=health_risk,
+            cleanup_kind=None,
+            cleanup_bytes=0,
+            artifact_bytes=artifact_bytes(evidence["large_files"]),
+        )
+        note = self._low_disk_note(
+            work,
+            size=size,
+            free=free,
+            free_pct=free_pct,
+            drive=drive,
+            findings=findings,
+            health_text=health_text,
+            recommendation_text=recommendation_text,
+            prior_count=self._low_disk_prior_ticket_count(work),
+            action=(
+                "Verified the one approved cleanup completed, re-read free space, and "
+                "re-ran read-only root-cause evidence after the monitor propagation window."
+            ),
+            changes="One approved narrow cleanup completed; no second cleanup attempted.",
+            state="human_review",
+        )
+        self._write_note(work, note, "Jason - Low Disk - Human Review Required")
+        self._persist_human_review_escalation(
+            work,
+            reason=(
+                "Low-disk monitor remained open after the one approved cleanup and "
+                "bounded propagation window; technician review/capacity planning required."
+            ),
+        )
 
     @staticmethod
     def _parse_iso_timestamp(value: Any) -> datetime | None:
@@ -4436,7 +4996,10 @@ class OperationalAutonomyMaintenance:
         reason: str,
         clear_job: bool = False,
     ) -> None:
-        if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
+        if work.playbook_id in {
+            BACKUPIQ_SCOPE.playbook_id,
+            LOW_DISK_SCOPE.playbook_id,
+        }:
             self._handoff_to_helpdesk(work, status="Human Review")
         else:
             self._handoff_to_helpdesk(work)
