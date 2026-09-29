@@ -17,3 +17,7 @@ Acceptance succeeds only if the live repository automation:
 6. performs no production deployment or runtime/provider authority promotion.
 
 A conflict, failed/missing check, or inability to reconcile must fail closed.
+
+## Operating cadence update — 2026-09-29
+
+After production acceptance, the maintenance polling cadence was intentionally reduced from every five minutes to three scheduled runs per day: 07:00, 12:00, and 19:00 America/New_York. Manual/ad-hoc reconciliation remains available during active development. This changes polling frequency only; PR eligibility, reconciliation, validation, source-merge, and production-release governance are unchanged.
