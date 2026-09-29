@@ -1505,6 +1505,18 @@ def backupiq_candidate():
     )
 
 
+def test_backupiq_scope_is_owner_approved_version_1_1_0():
+    from jason_runtime.autonomy_worker_runtime import BACKUPIQ_SCOPE
+
+    assert BACKUPIQ_SCOPE.playbook_id == "backupiq_endpoint_backup"
+    assert BACKUPIQ_SCOPE.playbook_version == "1.1.0"
+    assert BACKUPIQ_SCOPE.policy_id == "playbook-autonomy:backupiq_endpoint_backup"
+    assert BACKUPIQ_SCOPE.required_action_capabilities == (
+        "service.ticket.note.create",
+        "service.ticket.update",
+    )
+
+
 def test_backupiq_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
