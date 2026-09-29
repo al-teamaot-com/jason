@@ -1,10 +1,10 @@
 [Unit]
-Description=Run Jason governed PR integration reconciliation every five minutes
+Description=Run Jason governed PR integration reconciliation at 7 AM, noon, and 7 PM ET
 
 [Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnCalendar=*-*-* 07:00:00 America/New_York
+OnCalendar=*-*-* 12:00:00 America/New_York
+OnCalendar=*-*-* 19:00:00 America/New_York
 Persistent=true
 Unit=jason-pr-integration-reconciler.service
 
