@@ -510,17 +510,19 @@ Escalation must state symptoms, evidence, attempted actions, job IDs, current st
 
 ## 17. Verification
 
-After repair/install:
+After autonomous repair/install:
 
-1. Wait for the setter job to reach terminal success or classify provider lifecycle evidence safely if Datto leaves a stale job state.
-2. Read stdout and stderr.
-3. Perform approved read-only endpoint verification of the installed Idle Log Off mechanism; do not attempt to run the monitor as an on-demand component.
-4. Require the verified task/mechanism to match the approved baseline: AOT_IdleLogOff, SYSTEM/Highest, expected executable, and arguments 240 60 unless an authoritative override applies.
-5. Observe the monitor's next normal DRMM evaluation when available. A fresh Compliant=False after successful mechanism verification is a monitor/policy investigation, not permission to blindly rerun the setter.
-6. If the existing alert contains only stale legacy-setter failure evidence and independent healthy-state verification is complete, resolve only that exact alert through governed alert resolution and require readback.
-7. Re-read the Autotask ticket and confirm expected completion or document a ticket-status governance blocker.
+1. Wait for the exact setter job to reach a terminal provider state.
+2. Read both stdout and stderr for that exact job/component/device binding.
+3. Require terminal provider success and empty stderr. This proves action execution only; it does not prove incident resolution.
+4. Enter `waiting_recheck:idle_log_off_verify_monitor`, release the active-work slot, and observe the exact endpoint's normal DRMM current-alert state.
+5. If the Idle Log Off alert clears during the bounded 15-minute propagation window, treat that normal monitor-clear as the authoritative healthy-state evidence for the autonomous branch.
+6. If a current Idle Log Off alert remains after the propagation window, do not rerun the setter. Route to monitor/policy investigation.
+7. Complete the Autotask ticket only after the alert-clear evidence is present and terminal ticket-status readback succeeds.
 
-Setter job success alone is not incident resolution; endpoint-state verification and alert/ticket disposition are required.
+The 2026-09-25 controlled acceptance separately proved the underlying scheduled-task mechanism and 240/60 baseline. Jason currently has no dedicated native scheduled-task-detail read capability, so the autonomous v1.1 branch does not claim to perform that direct mechanism inspection on every incident. A future dedicated read capability or standing-safe diagnostic may strengthen verification without changing this completion rule.
+
+Setter job success alone is never incident resolution.
 
 ---
 
@@ -531,12 +533,12 @@ Complete the individual incident only when:
 2. applicability is proven;
 3. diagnostics distinguish real noncompliance from monitor/plumbing failure;
 4. required repair/install succeeded, or no repair was needed;
-5. authoritative healthy-state evidence exists from the normal monitor cycle or approved independent mechanism verification;
-6. exact alert is cleared/resolved with readback;
+5. authoritative healthy-state evidence exists from the normal DRMM current-alert state;
+6. the exact Idle Log Off alert is no longer open;
 7. ticket documentation is complete;
 8. any remaining policy/governance engineering item is explicitly tracked rather than hidden.
 
-The playbook's autonomy Section Goal is separate from incident completion and remains open while the setter requires per-run approval or the DRMM policy still points to the legacy setter.
+The playbook's autonomy Section Goal is separate from incident completion and remains open until v1.1.0 source tests, provider-boundary controls, Owner promotion, and controlled production acceptance are complete.
 
 ---
 
@@ -597,8 +599,8 @@ Acceptance must prove:
 6. production-validated built-in-default handling with no legacy MyFileDestination override;
 7. exactly one bounded setter execution if the endpoint is truly noncompliant;
 8. terminal job/output readback or safe stale-job classification;
-9. approved independent mechanism verification, plus normal-cycle monitor observation when available;
-10. exact alert resolution with readback;
+9. job stdout/stderr capture followed by normal current-alert monitor-clear verification;
+10. ticket completion only after monitor-clear evidence and terminal Autotask readback;
 11. Autotask documentation/completion behavior;
 12. retry/failure handling;
 13. no reboot, immediate forced logoff, or unrelated endpoint changes;
@@ -622,7 +624,7 @@ AVMAC-1096 / ticket T20260924.0043 established:
 - the Autotask ticket description historically named DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket), but on 2026-09-25 the operator verified no current DRMM policy exists under that name. The historical ticket text therefore must not be treated as proof of a current provider object or as a required manual change.
 - a fresh governed alert read confirmed no current Idle Log Off alert remained on AVMAC-1096 after resolution.
 
-The AVMAC-1096 incident is resolved and has no remaining policy-change dependency. The broader playbook remains per-run governed because the setter has future user-session impact; no additional provider change is required for this incident.
+The AVMAC-1096 incident is resolved and has no remaining policy-change dependency. At the time of that 2026-09-25 acceptance, the broader playbook remained per-run governed because the setter has future user-session impact. The v1.1.0 design intentionally preserves the component's global per-run classification while proposing a narrower playbook-scoped autonomous authority.
 
 ---
 
@@ -631,8 +633,9 @@ The AVMAC-1096 incident is resolved and has no remaining policy-change dependenc
 The Section Goal closes when:
 - this playbook is merged into Project Jason;
 - the preferred setter and built-in-default behavior are production-validated;
-- AVMAC-1096 acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout branches;
-- the approved component-control state is documented;
+- AVMAC-1096 historical acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout mechanics;
+- v1.1.0 source acceptance proves exact playbook-scoped setter execution, provider-boundary binding, waiting/recheck behavior, and monitor-clear completion;
+- the globally per-run component-control state and the narrower playbook-scoped authority are both documented;
 - historical provider-object names are not treated as current without live verification;
 - Grafana/Project Jason operational status is updated where applicable;
 - known limitations and follow-up engineering items are recorded.
