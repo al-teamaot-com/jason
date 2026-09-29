@@ -2797,6 +2797,7 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     assert len(client_calls) == 1
     assert client_calls[0]["workflow_id"] == "vulscan_missing_patch"
     assert client_calls[0]["template_id"] == "vulscan-approved-or-installed-v1"
+    assert client_calls[0]["payload"] == {"ticketID": 141183}
     assert "recipient" not in client_calls[0]
 
     updates = [
