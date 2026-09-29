@@ -771,6 +771,45 @@ class OperationalAutonomyMaintenance:
                 governance_blocked += 1
                 continue
             existing = self.store.get(ticket_id)
+            if (
+                existing is not None
+                and existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
+                and existing.phase == "escalated"
+                and "inactive/offline endpoint"
+                in str(existing.last_reason or "").casefold()
+            ):
+                endpoint_online = self._endpoint_is_online(existing.device_uid)
+                desired_status = "In Progress" if endpoint_online else "Waiting Device Access"
+                status_label = str(
+                    item.context.get("_jason_source_status_label") or ""
+                ).strip()
+                if status_label.casefold() != desired_status.casefold():
+                    self.actions.execute(
+                        self._scope_for_work(existing),
+                        "service.ticket.update",
+                        {
+                            "payload": {
+                                "id": existing.ticket_id,
+                                "status": desired_status,
+                            }
+                        },
+                    )
+                existing = self._replace(
+                    existing,
+                    phase=(
+                        "backupiq_investigate"
+                        if endpoint_online
+                        else "waiting_device_access:backupiq_investigate"
+                    ),
+                    last_reason=(
+                        "Migrated legacy BackupIQ offline escalation into the "
+                        "resumable waiting-device lifecycle."
+                        if not endpoint_online
+                        else "Legacy BackupIQ offline escalation is online again; "
+                        "resuming backupiq_investigate."
+                    ),
+                )
+                self.store.put(existing)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 if (
                     existing.phase == "blocked"
