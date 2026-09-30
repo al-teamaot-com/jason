@@ -1598,8 +1598,108 @@ class OperationalAutonomyMaintenance:
         ):
             match = re.search(pattern, title, flags=re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                value = match.group(1).strip()
+                if re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", value):
+                    continue
+                return value
         return None
+
+    @staticmethod
+    def _normalized_mac(value: object) -> str:
+        return re.sub(r"[^0-9A-Fa-f]", "", str(value or "")).casefold()
+
+    @classmethod
+    def _ticket_identity_evidence(cls, candidate) -> Mapping[str, set[str]]:
+        material = " ".join(
+            (
+                str(candidate.context.get("title") or ""),
+                str(candidate.context.get("description") or ""),
+            )
+        )
+        ips = {
+            value
+            for value in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", material)
+            if all(0 <= int(part) <= 255 for part in value.split("."))
+        }
+        macs = {
+            cls._normalized_mac(value)
+            for value in re.findall(
+                r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b", material
+            )
+        }
+        serials = {
+            value.casefold()
+            for value in re.findall(
+                r"\bserial(?:\s+number)?\s*[:=#-]?\s*([A-Za-z0-9._-]{4,64})",
+                material,
+                flags=re.IGNORECASE,
+            )
+        }
+        tokens = {
+            value.casefold()
+            for value in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,127}\b", material)
+        }
+        return {
+            "ips": ips,
+            "macs": {value for value in macs if value},
+            "serials": serials,
+            "tokens": tokens,
+        }
+
+    @classmethod
+    def _endpoint_identity_score(
+        cls,
+        endpoint: Mapping[str, Any],
+        *,
+        hints: Sequence[str],
+        evidence: Mapping[str, set[str]],
+    ) -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+        matched: list[str] = []
+        conflicts: list[str] = []
+        hostname = str(
+            endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
+        ).strip()
+        if hostname and hostname.casefold() in {hint.casefold() for hint in hints}:
+            matched.append("hostname")
+
+        endpoint_uid = str(
+            endpoint.get("resource_id") or endpoint.get("uid") or endpoint.get("deviceUid") or ""
+        ).strip()
+        if endpoint_uid and endpoint_uid.casefold() in evidence.get("tokens", set()):
+            matched.append("device_uid")
+
+        endpoint_ips = {
+            str(endpoint.get(key) or "").strip()
+            for key in ("lan_ip", "wan_ip", "intIpAddress", "extIpAddress")
+            if str(endpoint.get(key) or "").strip()
+        }
+        if endpoint_ips & evidence.get("ips", set()):
+            matched.append("ip")
+
+        endpoint_mac = cls._normalized_mac(
+            endpoint.get("mac_address") or endpoint.get("macAddress") or endpoint.get("mac")
+        )
+        ticket_macs = evidence.get("macs", set())
+        if endpoint_mac and ticket_macs:
+            if endpoint_mac in ticket_macs:
+                matched.append("mac")
+            else:
+                conflicts.append("mac")
+
+        endpoint_serial = str(
+            endpoint.get("serial_number")
+            or endpoint.get("serialNumber")
+            or endpoint.get("serial")
+            or ""
+        ).strip().casefold()
+        ticket_serials = evidence.get("serials", set())
+        if endpoint_serial and ticket_serials:
+            if endpoint_serial in ticket_serials:
+                matched.append("serial")
+            else:
+                conflicts.append("serial")
+
+        return len(set(matched)), tuple(sorted(set(matched))), tuple(sorted(set(conflicts)))
 
     def _write_verified_ci_association(
         self, *, candidate, scope: PlaybookScope, ci_id: int
@@ -1723,11 +1823,32 @@ class OperationalAutonomyMaintenance:
                 endpoint_matches[
                     str(item.get("resource_id") or item.get("uid") or item.get("deviceUid"))
                 ] = item
-        if len(endpoint_matches) != 1:
+        if not endpoint_matches:
             raise OperationalAutonomyError(
-                "configuration item id is missing and endpoint hostname correlation is ambiguous"
+                "configuration item id is missing and endpoint hostname correlation found no exact endpoint"
             )
-        endpoint_uid, endpoint = next(iter(endpoint_matches.items()))
+        if len(endpoint_matches) == 1:
+            endpoint_uid, endpoint = next(iter(endpoint_matches.items()))
+        else:
+            evidence = self._ticket_identity_evidence(candidate)
+            scored: list[tuple[int, str, Mapping[str, Any], tuple[str, ...]]] = []
+            for uid, item in endpoint_matches.items():
+                score, matched, conflicts = self._endpoint_identity_score(
+                    item, hints=hints, evidence=evidence
+                )
+                if conflicts:
+                    continue
+                scored.append((score, uid, item, matched))
+            scored.sort(key=lambda value: (-value[0], value[1]))
+            if not scored or scored[0][0] < 2:
+                raise OperationalAutonomyError(
+                    "configuration item id is missing and endpoint correlation lacks two independent matching identifiers"
+                )
+            if len(scored) > 1 and scored[1][0] == scored[0][0]:
+                raise OperationalAutonomyError(
+                    "configuration item id is missing and endpoint correlation remains ambiguous after multi-signal scoring"
+                )
+            _, endpoint_uid, endpoint, _ = scored[0]
         hostname = str(
             endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
         ).strip()
