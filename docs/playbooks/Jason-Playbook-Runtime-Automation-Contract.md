@@ -275,6 +275,39 @@ The classification and its evidence fingerprint are persisted.
 
 ---
 
+
+## 8A. Shared Availability and Site-Presence Contract
+
+Availability is a reusable runtime concern and must not be reimplemented independently by every playbook.
+
+The runtime should represent at least these independent facts:
+
+- device_online: whether the endpoint is probably running/reachable based on current multi-source evidence;
+- device_on_site: whether current network evidence places that endpoint on the affected client site;
+- site_presence_confidence: confirmed, probable, not_confirmed, remote, or unknown;
+- site_witness: true only when device_online=true and site_presence_confidence=confirmed.
+
+Evidence may include, when available:
+- DRMM current state and last seen;
+- Datto Endpoint Backup asset status / last online;
+- VulScan recent contact or scan freshness;
+- Datto EDR/AV endpoint last contact;
+- current external/public IP;
+- current private IP/subnet/default gateway;
+- approved read-only local ping/network probes;
+- known same-site managed peer evidence;
+- network-device/site-provider evidence.
+
+Rules:
+- device_online does not imply device_on_site;
+- an online roaming laptop or remote user must not prove the office/site is healthy;
+- current network identity may override historical site assignment for site-witness purposes;
+- only confirmed same-client on-site endpoints may serve as strong site witnesses;
+- known managed peers are preferred over blind address-range scanning;
+- ping failure is not proof of offline because ICMP may be filtered;
+- cross-client evidence never satisfies site presence;
+- the runtime should expose this evidence so Low Disk, BackupIQ, EDR/AV, VulScan, patching, offline, and future playbooks can consume one consistent availability model.
+
 ## 9. Waiting Is First-Class
 
 Waiting is legitimate operational work.
