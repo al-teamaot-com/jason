@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from jason_mcp import server
@@ -53,9 +54,12 @@ def test_autonomy_work_snapshot_bounds_items_but_counts_full_state(tmp_path, mon
 
     assert snapshot["status"] == "succeeded"
     assert snapshot["items_bounded"] is True
-    assert snapshot["item_limit"] == 20
-    assert len(snapshot["items"]) == 20
+    assert snapshot["item_limit"] == 5
+    assert len(snapshot["items"]) == 5
     assert snapshot["active_count"] == 1
     assert snapshot["waiting_count"] == 2
     assert snapshot["blocked_count"] == 25
     assert snapshot["items"][0]["state"] == "ACTIVE"
+    assert all("title" not in item for item in snapshot["items"])
+    assert all("reason" not in item for item in snapshot["items"])
+    assert len(json.dumps(snapshot, separators=(",", ":"))) < 2500

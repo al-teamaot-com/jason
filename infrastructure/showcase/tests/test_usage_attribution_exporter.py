@@ -269,3 +269,51 @@ def test_missing_sources_fail_closed_without_creating_files(tmp_path):
     assert not module.MODEL_USAGE_DB.exists()
     assert not module.ORCHESTRATION_EVENTS_DB.exists()
     assert not module.IDENTITY_BINDINGS_DB.exists()
+
+
+def test_orchestration_event_load_is_bounded_to_recent_required_types(tmp_path):
+    module = load_exporter()
+    module.ORCHESTRATION_EVENTS_DB = tmp_path / "events.sqlite3"
+    create_events_db(module.ORCHESTRATION_EVENTS_DB)
+
+    connection = sqlite3.connect(module.ORCHESTRATION_EVENTS_DB)
+    connection.execute(
+        "INSERT INTO orchestration_events VALUES (?, '1.0', ?, ?, ?, 'aot', ?, ?, ?, ?, ?)",
+        (
+            "old-request",
+            "orchestration.request.received",
+            "exec-old",
+            "corr-old",
+            "user-old",
+            "endpoint.device.read",
+            "received",
+            json.dumps({"requester_kind": "human"}),
+            "2026-09-08T14:00:00+00:00",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO orchestration_events VALUES (?, '1.0', ?, ?, ?, 'aot', ?, ?, ?, ?, ?)",
+        (
+            "recent-unneeded",
+            "orchestration.capability.completed",
+            "exec-extra",
+            "corr-extra",
+            "user-extra",
+            "endpoint.device.read",
+            "completed",
+            json.dumps({"status": "succeeded"}),
+            "2026-09-09T15:30:00+00:00",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    events = module._orchestration_events(
+        datetime(2026, 9, 9, 16, 0, tzinfo=timezone.utc)
+    )
+    event_ids = {event["event_id"] for event in events}
+
+    assert "old-request" not in event_ids
+    assert "recent-unneeded" not in event_ids
+    assert {"request-mcp", "connector-mcp", "request-service", "email-attempt"} <= event_ids
+    assert {event["event_type"] for event in events} <= set(module.ORCHESTRATION_EVENT_TYPES)
