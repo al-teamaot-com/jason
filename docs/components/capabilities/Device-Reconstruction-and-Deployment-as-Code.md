@@ -17,11 +17,13 @@
 
 This component exists to make every managed device recoverable from documented, evidence-backed state rather than technician memory.
 
-The operational question is:
+The governing recovery test is:
 
-> If this device disappeared today, can a competent technician use IT Glue plus the Jason-maintained rebuild package to restore the intended machine role, connectivity, services, applications, shares, virtualization layout, and other reconstructable configuration without rediscovering the environment?
+> If this device were completely lost today — hardware, OS, local configuration and local knowledge gone — what information would a competent technician wish had been captured beforehand to restore the device and its intended role as completely and safely as possible?
 
-The component is not a generic inventory collector. It produces a recovery dossier and deployment-as-code package and keeps them current when meaningful state changes.
+Anything that materially answers that question belongs in the recovery package, subject to secret-handling and safety boundaries.
+
+The component is not a generic inventory collector and SHALL NOT depend on a large hand-maintained matrix of client, department, server-role or workstation "what if" cases. It discovers the device from evidence, determines what is operationally significant, produces a recovery dossier and deployment-as-code package, and keeps them current when meaningful state changes.
 
 ## Governing context
 
@@ -132,7 +134,66 @@ Initial sources include:
 
 PowerShell collection MUST be read-only and bounded. It SHOULD fill evidence gaps, not duplicate provider audit without reason.
 
-### 4. Reconstruction coverage
+### 4. Worst-case adaptive discovery
+
+The collector SHALL use a **discover -> interpret -> expand -> classify -> document** model.
+
+It starts from a universal baseline and automatically increases collection depth according to what it finds on the endpoint and in authoritative provider/documentation evidence.
+
+Examples:
+
+- DHCP role detected -> collect scopes, reservations, exclusions, options, bindings, policies and authorization state.
+- Hyper-V detected -> collect switches, VM definitions, storage/config/checkpoint paths, disk attachments, VLANs and replication.
+- SMB shares detected -> collect share settings, backing paths, share permissions and recovery-relevant NTFS ACLs.
+- IIS detected -> collect sites, bindings, app pools, content/config paths and certificate references.
+- Print services/shared printers detected -> collect queues, ports, drivers and share configuration.
+- Non-default scheduled tasks detected -> collect triggers, actions, arguments, run-as identity and recovery significance.
+- LOB application/service detected -> identify install source, prerequisites, service dependencies, config/data paths and recovery dependencies where evidence permits.
+- Domain Controller detected -> switch to AD-aware recovery documentation rather than treating it as a generic role reinstall.
+- Persistent mapped drives detected -> identify whether the authoritative source is local configuration, GPO, logon script or another managed source.
+- Unusual services, listeners, folders, registry settings or startup items detected -> investigate whether they are operationally significant before deciding whether to include them.
+
+Role/device understanding SHOULD use multiple corroborating signals where practical, including:
+
+- Windows roles/features;
+- services and startup configuration;
+- installed software;
+- network/listener evidence;
+- scheduled tasks;
+- storage paths;
+- registry/configuration evidence;
+- shares/printers;
+- provider metadata;
+- existing IT Glue documentation;
+- backup/recovery evidence.
+
+Jason MAY use reusable role interpreters and evidence collectors, but these are generic capability modules rather than a client-by-client decision tree.
+
+A new or unusual device SHOULD be recoverable without first writing a new playbook. If Jason discovers something it does not yet know how to reproduce safely, it MUST still capture the evidence, explain why it may matter, and classify it as a recovery dependency or manual-review item rather than silently omit it.
+
+### 5. Worst-case inclusion rule
+
+For every discovered fact, Jason asks:
+
+> Would losing this information make worst-case recovery slower, riskier, less accurate, or dependent on rediscovery?
+
+If **yes**, the fact or a safe reference to it belongs in the recovery package.
+
+If **no**, it may be omitted from the recovery package even if it is useful general inventory.
+
+This rule takes precedence over maintaining exhaustive static field lists.
+
+Jason SHALL classify recovered knowledge into:
+
+- `AUTO_REBUILD` — safely reproducible from generated code;
+- `RECOVERY_SOURCE` — must be restored/imported from an authoritative backup, secret, certificate, configuration, installer or other recovery source;
+- `MANUAL_REVIEW` — important to recovery, but evidence is insufficient or automation would be unsafe;
+- `REFERENCE_ONLY` — useful context that may help a technician but is not required to recreate intended function;
+- `VOLATILE` — runtime noise that should not drive rebuild documentation or IT Glue updates.
+
+Unknown-but-potentially-important discoveries default toward documentation/review, not omission.
+
+### 6. Reconstruction coverage
 
 #### Hardware and firmware
 Capture manufacturer, model, serial/service tag, BIOS/UEFI details, Secure Boot/TPM state, CPU, RAM, and physical storage/controller evidence where obtainable.
@@ -259,7 +320,7 @@ Capture the authoritative backup asset/source, recovery method, and what must be
 
 The package SHALL explicitly flag recovery-critical data lacking a known authoritative recovery source.
 
-### 5. Deployment-as-code generation
+### 7. Deployment-as-code generation
 
 Windows v1 generates PowerShell.
 
@@ -291,13 +352,15 @@ Recommended phases:
 11. recovery-source integration/manual dependencies;
 12. validation report.
 
-Generation MUST distinguish three classifications for every item:
+Generation MUST consume the recovery classification produced by adaptive discovery. In particular:
 
-- `AUTO_REBUILD` — safely reproducible by generated code;
-- `RECOVERY_SOURCE` — must be restored/imported from an authoritative backup/secret/config source;
-- `MANUAL_REVIEW` — evidence is insufficient or automation would be unsafe.
+- `AUTO_REBUILD` items become generated idempotent configuration logic;
+- `RECOVERY_SOURCE` items become explicit restore/import/reference steps;
+- `MANUAL_REVIEW` items become technician actions or blockers;
+- `REFERENCE_ONLY` items remain context;
+- `VOLATILE` items do not drive generated rebuild logic.
 
-### 6. Intended-state model
+### 8. Intended-state model
 
 The component SHALL maintain two distinct views:
 
@@ -317,7 +380,7 @@ Examples requiring review or corroboration:
 
 Expected, low-risk inventory changes MAY be auto-accepted under a promoted policy.
 
-### 7. Drift and refresh behavior
+### 9. Drift and refresh behavior
 
 The component runs on a governed schedule and on demand.
 
@@ -345,7 +408,7 @@ Recommended initial observation cadence:
 
 The cadence is configuration, not embedded authority.
 
-### 8. IT Glue representation
+### 10. IT Glue representation
 
 Existing AOT flexible-asset types already include:
 
@@ -362,7 +425,7 @@ If none can cleanly own the full recovery contract, create one deliberate type s
 
 A profile SHOULD provide concise technician sections plus references/attachments for generated manifest/script when IT Glue field size or structure makes embedding inappropriate.
 
-### 9. IT Glue writes
+### 11. IT Glue writes
 
 The repository currently contains an IT Glue mutation proposal implementation for:
 
@@ -390,7 +453,7 @@ Before production write activation, require:
 - deterministic client-isolation tests;
 - owner review for any autonomous update branch.
 
-### 10. Artifact placement
+### 12. Artifact placement
 
 Client-specific reconstruction data MUST remain in client-isolated approved storage, preferably IT Glue/approved operational artifact storage.
 
@@ -529,4 +592,5 @@ After acceptance testing, nominate only narrowly safe documentation-update branc
 
 ## Revision notes
 
+- 0.2 — Made worst-case recoverability the governing inclusion test and replaced static what-if logic with adaptive evidence-driven discovery.
 - 0.1 — Initial proposed recovery-documentation and deployment-as-code component specification.
