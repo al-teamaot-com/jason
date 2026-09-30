@@ -224,6 +224,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "vulscan": {
+        "logical_name": "vulscan.readonly",
+        "secret_path": "secret/data/connectors/vulscan/production/read-only",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-vulscan-read",
+        "role_name": "jason-vulscan-read",
+        "connector_identity": "vulscan-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

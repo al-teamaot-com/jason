@@ -449,6 +449,30 @@ The SaaS Alerts Reports API credential is read-only at the Jason capability laye
 
 Provisioning this secret does not activate a SaaS Alerts connector or grant provider mutation authority. Live reads still require an approved connector adapter, client-boundary model, Central Orchestrator registration, and controlled provider-backed acceptance.
 
+## VulScan read-only API credential contract
+
+Logical secret: `vulscan.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/vulscan/production/read-only`
+
+Durable OpenBao field:
+
+- `api_key`
+
+Runtime identity:
+
+- policy: `jason-vulscan-read`
+- AppRole: `jason-vulscan-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Kaseya documents a VulScan API key generated from the RapidFire Tools portal for VulScan integrations. The provider-secret profile stores only that key. API endpoint selection and request semantics remain connector configuration and must be validated separately before live provider activation.
+
+Provisioning this secret does not activate a VulScan connector or grant provider mutation authority. Live reads still require an approved connector adapter, client-boundary model, Central Orchestrator registration, and controlled provider-backed acceptance.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.

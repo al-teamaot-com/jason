@@ -96,6 +96,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "saas_alerts.readonly": (
         "secret/data/connectors/saas-alerts/production/read-only"
     ),
+    "vulscan.readonly": (
+        "secret/data/connectors/vulscan/production/read-only"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -139,6 +142,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "dnsfilter.readonly": frozenset({"api_key"}),
     "darkwebid.runtime": frozenset({"username", "password"}),
     "saas_alerts.readonly": frozenset({"api_key", "partner_id"}),
+    "vulscan.readonly": frozenset({"api_key"}),
 }
 
 

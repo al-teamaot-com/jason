@@ -211,6 +211,25 @@ def test_saas_alerts_contract_uses_canonical_readonly_path_and_fields() -> None:
     assert spec["credential_file_mode"] == 0o640
 
 
+def test_vulscan_contract_uses_canonical_readonly_path_and_fields() -> None:
+    spec = PROVIDERS["vulscan"]
+    assert spec["logical_name"] == "vulscan.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/vulscan/production/read-only"
+    )
+    assert spec["fields"] == ("api_key",)
+    assert spec["required_fields"] == ("api_key",)
+    assert spec["policy_name"] == "jason-vulscan-read"
+    assert spec["role_name"] == "jason-vulscan-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
