@@ -260,6 +260,19 @@ class OperationalAutonomyError(RuntimeError):
     pass
 
 
+class BackupIQManagedEndpointMissing(OperationalAutonomyError):
+    def __init__(self, *, company_id: int, ci_id: int, hostname: str, provider_status: str) -> None:
+        self.company_id = int(company_id)
+        self.ci_id = int(ci_id)
+        self.hostname = str(hostname)
+        self.provider_status = str(provider_status)
+        super().__init__(
+            "BackupIQ provider asset is uniquely proven but the managed DRMM endpoint is absent; "
+            f"company_id={self.company_id}; ci_id={self.ci_id}; hostname={self.hostname}; "
+            f"provider_status={self.provider_status or 'unknown'}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TicketScanSnapshot:
     cycle_id: str
@@ -2381,6 +2394,48 @@ class OperationalAutonomyMaintenance:
                 ).strip()
                 if hostname.casefold() == hint.casefold() and uid:
                     endpoints[uid] = item
+        if len(endpoints) == 0:
+            ci_matches: list[Mapping[str, Any]] = []
+            for hint in hints:
+                data = self._read_data(
+                    "service.configuration.search",
+                    {"name": hint, "page_size": 25},
+                )
+                raw_items = data.get("items")
+                if not isinstance(raw_items, list):
+                    continue
+                for item in raw_items:
+                    if not isinstance(item, Mapping) or item.get("isActive") is not True:
+                        continue
+                    if str(item.get("referenceTitle") or "").strip().casefold() != hint.casefold():
+                        continue
+                    ci_matches.append(item)
+            unique_ci = {int(item.get("id")): item for item in ci_matches if item.get("id")}
+            if len(unique_ci) == 1:
+                ci = next(iter(unique_ci.values()))
+                company_id = self._company_id(ci.get("companyID"))
+                ci_id = self._positive_int(ci.get("id"), "configuration item id")
+                hostname = str(ci.get("referenceTitle") or "").strip()
+                if company_id > 0 and hostname:
+                    asset_data = self._read_data(
+                        "backup.endpoint.asset.search",
+                        {"company_id": company_id, "name": hostname, "page_size": 25},
+                    )
+                    asset_items = asset_data.get("items")
+                    if isinstance(asset_items, list):
+                        exact_assets = [
+                            item for item in asset_items
+                            if isinstance(item, Mapping)
+                            and str(item.get("name") or "").strip().casefold() == hostname.casefold()
+                        ]
+                        if len(exact_assets) == 1:
+                            raise BackupIQManagedEndpointMissing(
+                                company_id=company_id,
+                                ci_id=ci_id,
+                                hostname=hostname,
+                                provider_status=str(exact_assets[0].get("status") or ""),
+                            )
+            return None
         if len(endpoints) != 1:
             return None
 
@@ -2412,9 +2467,10 @@ class OperationalAutonomyMaintenance:
         if company_id <= 0:
             return None
         ci_id = self._positive_int(matches[0].get("id"), "configuration item id")
-        self._write_verified_ci_association(
-            candidate=candidate, scope=scope, ci_id=ci_id
-        )
+        # The inbound BackupIQ ticket may legitimately be company 0 even when
+        # provider/CI evidence proves the client. Do not attempt a cross-company
+        # CI mutation: Autotask rejects it and the ticket field is not authority.
+        # Carry the independently proven company/CI inside governed work instead.
         return ci_id, company_id
 
     def _associate_exact_ticket_device(
@@ -6272,6 +6328,44 @@ class OperationalAutonomyMaintenance:
         # Waiting Device Access tickets, so the normal claim path restores In
         # Progress automatically as soon as the exact DRMM endpoint is online.
         message = str(error).casefold()
+        if isinstance(error, BackupIQManagedEndpointMissing):
+            ticket_id = int(candidate.resource_id)
+            context = candidate.context
+            work = OperationalWork(
+                ticket_id=ticket_id,
+                ticket_number=str(context.get("ticketNumber") or ticket_id),
+                title=str(context.get("title") or ""),
+                playbook_id=scope.playbook_id,
+                source_queue=str(candidate.source_queue),
+                company_id=error.company_id,
+                configuration_item_id=error.ci_id,
+                device_uid="",
+                hostname=error.hostname,
+                phase="escalated",
+                last_reason=str(error)[:500],
+                source_version=(str(candidate.source_version or "").strip() or None),
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self._write_note(
+                work,
+                (
+                    "Jason verified the BackupIQ provider asset and Autotask configuration, "
+                    "but the corresponding managed Datto RMM endpoint is no longer present. "
+                    f"Device={error.hostname}; AutotaskCompanyID={error.company_id}; "
+                    f"ConfigurationItemID={error.ci_id}; BackupProviderStatus={error.provider_status or 'unknown'}. "
+                    "No reinstall, backup deletion, retention change, or endpoint mutation was attempted. "
+                    "Technician review is required to determine whether the device was retired, replaced, "
+                    "or needs to be restored to managed RMM coverage."
+                ),
+                "Jason - BackupIQ - Managed Endpoint Missing",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "BackupIQ asset and Autotask CI are proven, but no managed Datto RMM endpoint exists."
+                ),
+            )
+            return
         if (
             "endpoint is not currently online" in message
             or "drmm access unavailable while deb reports endpoint online" in message
