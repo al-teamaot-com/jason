@@ -53,6 +53,7 @@ Success means:
 - device availability is determined from multiple independent sources where available;
 - device_online and device_on_site are evaluated separately;
 - only an online endpoint whose current network evidence confirms it is physically/logically on the affected site may act as a site-health witness;
+- successful governed live command execution with fresh output from a confirmed on-site fixed server is strong affirmative evidence that the site is up and should immediately eliminate the broad site-down branch for that server's reachable network path;
 - roaming laptops and remote users cannot falsely prove the office is healthy;
 - Jason uses DRMM, Datto Endpoint Backup, VulScan, Datto EDR/AV, and network evidence where available without treating any one signal as absolute;
 - neighboring managed endpoints and the local gateway are used to distinguish endpoint, segment, and site failures;
@@ -207,7 +208,23 @@ Rules:
 - Historical site assignment alone is insufficient when current network identity contradicts it.
 - Only confirmed on-site endpoints count as strong site-health witnesses.
 
-### Step 3: Select a valid network vantage point
+### Step 3: Prefer a confirmed on-site fixed server as an active witness
+
+Purpose:
+Use successful governed command execution as stronger site-health evidence than passive provider status or ICMP.
+
+If Jason can execute a read-only governed command on a confirmed on-site fixed server and retrieve fresh output:
+- server_online = true;
+- device_on_site = true, assuming current site-presence evidence remains valid;
+- site_witness = true;
+- the broad site-down branch is rejected for the network path that reaches that server;
+- use that server as the preferred local vantage point for gateway, peer, and target probes.
+
+This proves the site is not completely offline, but it does not prove every VLAN, switch, ISP path, or network segment is healthy. Continue localization if the original affected device remains unreachable.
+
+Do not use a cloud-hosted server, colocated server, remote server, or server whose site presence is uncertain as proof that the physical client site is up.
+
+### Step 4: Select a valid network vantage point
 
 Purpose:
 Run read-only local reachability tests from a machine actually on the affected network.
@@ -222,7 +239,7 @@ Preferred probe:
 
 If no valid same-site probe exists, do not invent local ping evidence. Continue with provider/site evidence and classify confidence accordingly.
 
-### Step 4: Target and infrastructure probes
+### Step 5: Target and infrastructure probes
 
 From an approved same-site probe, test:
 - affected endpoint IP if known/current;
@@ -234,7 +251,7 @@ From an approved same-site probe, test:
 
 Ping failure alone is not proof of offline because ICMP may be blocked.
 
-### Step 5: Known neighboring endpoint correlation
+### Step 6: Known neighboring endpoint correlation
 
 Use known managed peers from DRMM/IT Glue/provider inventory before considering adjacent-address probing.
 
@@ -252,9 +269,12 @@ Optional adjacent-IP probing may be used only when:
 - it is needed to answer a specific network question;
 - it does not become broad discovery/scanning.
 
-### Step 6: Classify outage scope
+### Step 7: Classify outage scope
 
 Examples:
+
+Confirmed on-site fixed server accepts a governed read-only command and returns fresh output:
+-> broad site_down=false for that reachable path; use the server as the preferred probe source and localize the remaining issue.
 
 Target responds locally, provider/RMM says offline:
 -> endpoint_online_rmm_unhealthy.
@@ -303,7 +323,7 @@ Endpoint-specific RMM-agent repair may later call a separate approved playbook r
 
 Network/site remediation requiring restart, failover, adapter reset, equipment reboot, or other disruption is human-review/approval bound.
 
-### Step 7: Rapid outage clock and early incident communication
+### Step 8: Rapid outage clock and early incident communication
 
 Purpose:
 Prevent a site outage from sitting in a long diagnostic state while technicians or clients are waiting for awareness.
@@ -517,15 +537,15 @@ Prove:
 6. target ping success does not override site-presence validation;
 7. target ping failure with healthy gateway/peers classifies endpoint-local;
 8. multiple peer failures correlate toward segment/site outage;
-9. gateway/site evidence changes outage classification;
-10. ICMP-blocked endpoint is not falsely declared powered off;
-11. probable site outage produces an early preliminary incident update without waiting for the 10-minute recheck;
-12. the early update contains current evidence/scope/next step rather than "Jason isn't done yet";
-13. unchanged 10-minute recheck creates no duplicate note;
-14. recovered endpoint completes only after authoritative verification;
-15. remote endpoints alone cannot satisfy site recovery;
-16. no disruptive action occurs;
-17. terminal ticket write/readback succeeds.
+10. gateway/site evidence changes outage classification;
+11. ICMP-blocked endpoint is not falsely declared powered off;
+12. probable site outage produces an early preliminary incident update without waiting for the 10-minute recheck;
+13. the early update contains current evidence/scope/next step rather than "Jason isn't done yet";
+14. unchanged 10-minute recheck creates no duplicate note;
+15. recovered endpoint completes only after authoritative verification;
+16. remote endpoints alone cannot satisfy site recovery;
+17. no disruptive action occurs;
+18. terminal ticket write/readback succeeds.
 
 ## 22. Section Goal Closure
 
