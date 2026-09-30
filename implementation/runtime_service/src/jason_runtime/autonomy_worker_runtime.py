@@ -81,6 +81,13 @@ from .unexpected_shutdown_analysis import (
     storage_health_risk as shutdown_storage_health_risk,
 )
 from .approved_client_messages import resolve_approved_client_message
+from autonomous_remediation.offline_ticket_augmentation import (
+    SiteContextEvidence,
+    SiteWitness,
+    classify_site_context,
+    is_offline_ticket,
+    render_site_context_note,
+)
 from .vulscan_client_policy import resolve_vulscan_policy
 
 
@@ -197,6 +204,14 @@ IDLE_LOG_OFF_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
+    playbook_id="offline_ticket_context_augmentation",
+    playbook_version="0.1.0",
+    policy_id="playbook-autonomy:offline_ticket_context_augmentation",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -208,6 +223,7 @@ PLAYBOOK_SCOPES = {
     VULSCAN_SCOPE.playbook_id: VULSCAN_SCOPE,
     DISK_BAD_BLOCK_SCOPE.playbook_id: DISK_BAD_BLOCK_SCOPE,
     IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
+    OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -230,6 +246,9 @@ RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
 VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
 VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
+OFFLINE_AUGMENTATION_RECHECK_SECONDS = 10 * 60
+OFFLINE_AUGMENTATION_NOTE_TITLE = "Jason - Offline Ticket Context"
+OFFLINE_AUGMENTATION_WITNESS_COMMAND = "Get-NetIPConfiguration"
 
 
 class OperationalAutonomyError(RuntimeError):
@@ -329,6 +348,16 @@ class SQLiteOperationalWorkStore:
         fingerprint TEXT NOT NULL,
         documented_at TEXT NOT NULL,
         PRIMARY KEY(ticket_id, playbook_id, note_title)
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_augmentation_state (
+        ticket_id INTEGER NOT NULL,
+        augmentation_id TEXT NOT NULL,
+        source_version TEXT,
+        classification TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        checked_at TEXT NOT NULL,
+        PRIMARY KEY(ticket_id, augmentation_id)
     );
 
     CREATE TABLE IF NOT EXISTS autonomy_ticket_activity (
@@ -618,6 +647,51 @@ class SQLiteOperationalWorkStore:
                 ),
             )
 
+    def augmentation_state(
+        self,
+        ticket_id: int,
+        augmentation_id: str,
+    ) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT source_version,classification,evidence_fingerprint,checked_at "
+            "FROM autonomy_ticket_augmentation_state "
+            "WHERE ticket_id=? AND augmentation_id=?",
+            (int(ticket_id), str(augmentation_id)),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def remember_augmentation_state(
+        self,
+        *,
+        ticket_id: int,
+        augmentation_id: str,
+        source_version: str | None,
+        classification: str,
+        evidence_fingerprint: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_augmentation_state(
+                    ticket_id,augmentation_id,source_version,classification,
+                    evidence_fingerprint,checked_at
+                ) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(ticket_id,augmentation_id) DO UPDATE SET
+                    source_version=excluded.source_version,
+                    classification=excluded.classification,
+                    evidence_fingerprint=excluded.evidence_fingerprint,
+                    checked_at=excluded.checked_at
+                """,
+                (
+                    int(ticket_id),
+                    str(augmentation_id),
+                    str(source_version or "") or None,
+                    str(classification),
+                    str(evidence_fingerprint),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
     def close(self) -> None:
         self._connection.close()
 
@@ -750,6 +824,296 @@ class OperationalAutonomyMaintenance:
         del reason
         self._next_due = 0.0
 
+    @staticmethod
+    def _offline_augmentation_role(
+        endpoint: Mapping[str, Any],
+    ) -> tuple[str, bool, bool]:
+        material = " ".join(
+            (
+                json.dumps(endpoint.get("device_type"), sort_keys=True, default=str),
+                str(endpoint.get("operatingSystem") or endpoint.get("operating_system") or ""),
+            )
+        ).casefold()
+        if any(token in material for token in ("laptop", "notebook", "portable")):
+            return "laptop", False, True
+        if "server" in material:
+            return "server", True, False
+        if any(token in material for token in ("desktop", "workstation", "main system chassis")):
+            return "desktop", True, False
+        return "unknown", False, False
+
+    def _offline_augmentation_due(self, candidate) -> bool:
+        ticket_id = int(candidate.resource_id)
+        state = self.store.augmentation_state(
+            ticket_id,
+            OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+        )
+        if state is None:
+            return True
+        observed_version = str(candidate.source_version or "").strip() or None
+        recorded_version = str(state.get("source_version") or "").strip() or None
+        if observed_version != recorded_version:
+            return True
+        checked = self._parse_iso_timestamp(state.get("checked_at"))
+        if checked is None:
+            return True
+        return (
+            datetime.now(timezone.utc) - checked
+        ).total_seconds() >= OFFLINE_AUGMENTATION_RECHECK_SECONDS
+
+    def _offline_augmentation_deb_online(
+        self,
+        *,
+        company_id: int,
+        hostname: str,
+    ) -> bool | None:
+        try:
+            data = self._read_data(
+                "backup.endpoint.asset.search",
+                {
+                    "company_id": company_id,
+                    "name": hostname,
+                    "page_size": 100,
+                },
+            )
+        except Exception:
+            return None
+        items = data.get("items")
+        if not isinstance(items, list):
+            return None
+        exact = [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+            and str(item.get("name") or "").strip().casefold()
+            == hostname.casefold()
+        ]
+        if len(exact) != 1:
+            return None
+        status = str(exact[0].get("status") or "").strip().casefold()
+        if status == "online":
+            return True
+        if status in {"offline", "inactive", "disconnected"}:
+            return False
+        return None
+
+    def _offline_augmentation_live_server_witness(
+        self,
+        *,
+        device_uid: str,
+    ) -> bool:
+        try:
+            data = self._read_data(
+                "endpoint.powershell.read",
+                {
+                    "device_uid": device_uid,
+                    "command": OFFLINE_AUGMENTATION_WITNESS_COMMAND,
+                    "timeout_seconds": 30,
+                },
+            )
+        except Exception:
+            return False
+        stdout = str(data.get("stdout") or data.get("text") or "").strip()
+        return bool(stdout)
+
+    def _augment_offline_ticket_context(self, candidate) -> None:
+        ticket = candidate.context
+        ticket_id = int(candidate.resource_id)
+        ci_raw = ticket.get("configurationItemID")
+        try:
+            ci_id = int(ci_raw)
+        except (TypeError, ValueError):
+            ci_id = 0
+
+        if not is_offline_ticket(
+            title=str(ticket.get("title") or ""),
+            description=str(ticket.get("description") or ""),
+            has_device_context=ci_id > 0,
+        ):
+            return
+        if not self._offline_augmentation_due(candidate):
+            return
+
+        classification = "identity_unavailable"
+        evidence_fingerprint = ""
+        try:
+            if ci_id <= 0:
+                return
+
+            company_id = self._company_id(ticket.get("companyID"))
+            ci = self._read_data(
+                "service.configuration.read",
+                {"resource_id": ci_id},
+            )
+            if isinstance(ci.get("item"), Mapping):
+                ci = dict(ci["item"])
+            if (
+                int(ci.get("id") or 0) != ci_id
+                or self._company_id(ci.get("companyID")) != company_id
+                or ci.get("isActive") is not True
+            ):
+                return
+
+            device_uid = str(ci.get("referenceNumber") or "").strip()
+            hostname = str(ci.get("referenceTitle") or "").strip()
+            if not device_uid or not hostname:
+                return
+
+            endpoint = self._read_record(
+                "endpoint.device.read",
+                {"resource_id": device_uid},
+            )
+            observed_uid = str(
+                endpoint.get("resource_id")
+                or endpoint.get("uid")
+                or endpoint.get("deviceUid")
+                or ""
+            ).strip()
+            if observed_uid != device_uid:
+                return
+            target_drmm_online = (
+                True if endpoint.get("online") is True
+                else False if endpoint.get("online") is False
+                else None
+            )
+            target_deb_online = self._offline_augmentation_deb_online(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            site = str(endpoint.get("site") or "").strip() or None
+
+            witnesses: list[SiteWitness] = []
+            live_server_found = False
+            if site:
+                site_data = self._read_data(
+                    "endpoint.device.search",
+                    {"site": site},
+                )
+                matches = site_data.get("resource_matches")
+                if isinstance(matches, list):
+                    for raw_peer in matches[:20]:
+                        if not isinstance(raw_peer, Mapping):
+                            continue
+                        peer_uid = str(
+                            raw_peer.get("resource_id")
+                            or raw_peer.get("uid")
+                            or raw_peer.get("deviceUid")
+                            or ""
+                        ).strip()
+                        if not peer_uid or peer_uid == device_uid:
+                            continue
+
+                        peer = dict(raw_peer)
+                        role, fixed, mobile = self._offline_augmentation_role(peer)
+                        peer_online = (
+                            True if peer.get("online") is True
+                            else False if peer.get("online") is False
+                            else None
+                        )
+                        if role == "unknown" or peer_online is None:
+                            try:
+                                peer = self._read_record(
+                                    "endpoint.device.read",
+                                    {"resource_id": peer_uid},
+                                )
+                            except Exception:
+                                continue
+                            role, fixed, mobile = self._offline_augmentation_role(peer)
+                            peer_online = (
+                                True if peer.get("online") is True
+                                else False if peer.get("online") is False
+                                else None
+                            )
+
+                        peer_hostname = str(
+                            peer.get("hostname")
+                            or peer.get("hostName")
+                            or peer.get("name")
+                            or peer_uid
+                        ).strip()
+                        if not peer_hostname:
+                            continue
+
+                        live_read = False
+                        site_confirmed = fixed and not mobile
+                        if (
+                            role == "server"
+                            and peer_online is True
+                            and not live_server_found
+                        ):
+                            live_read = self._offline_augmentation_live_server_witness(
+                                device_uid=peer_uid,
+                            )
+                            if live_read:
+                                live_server_found = True
+                                site_confirmed = True
+
+                        witnesses.append(
+                            SiteWitness(
+                                device_uid=peer_uid,
+                                hostname=peer_hostname,
+                                role=role,
+                                online=peer_online,
+                                fixed=fixed,
+                                mobile=mobile,
+                                site_presence_confirmed=site_confirmed,
+                                live_read_succeeded=live_read,
+                            )
+                        )
+
+            evidence = SiteContextEvidence(
+                target_hostname=hostname,
+                target_drmm_online=target_drmm_online,
+                target_deb_online=target_deb_online,
+                site_name=site,
+                witnesses=tuple(witnesses),
+            )
+            assessment = classify_site_context(evidence)
+            body = render_site_context_note(
+                assessment,
+                target_drmm_online=target_drmm_online,
+                target_deb_online=target_deb_online,
+                site_name=site,
+            )
+            evidence_fingerprint = assessment.fingerprint()
+            classification = assessment.state.value
+
+            prior = self.store.last_note_fingerprint(
+                ticket_id,
+                OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                OFFLINE_AUGMENTATION_NOTE_TITLE,
+            )
+            if prior != evidence_fingerprint:
+                self.actions.execute(
+                    OFFLINE_AUGMENTATION_SCOPE,
+                    "service.ticket.note.create",
+                    {
+                        "payload": {
+                            "ticketID": ticket_id,
+                            "title": OFFLINE_AUGMENTATION_NOTE_TITLE,
+                            "description": body,
+                            "noteType": 3,
+                            "publish": 1,
+                        }
+                    },
+                )
+                self.store.remember_note_fingerprint(
+                    ticket_id,
+                    OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                    OFFLINE_AUGMENTATION_NOTE_TITLE,
+                    evidence_fingerprint,
+                )
+        finally:
+            self.store.remember_augmentation_state(
+                ticket_id=ticket_id,
+                augmentation_id=OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                source_version=(
+                    str(candidate.source_version or "").strip() or None
+                ),
+                classification=classification,
+                evidence_fingerprint=evidence_fingerprint,
+            )
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:
@@ -763,6 +1127,24 @@ class OperationalAutonomyMaintenance:
             # A later cadence retry will reconcile again.
             return
         by_id = {int(item.resource_id): item for item in candidates}
+
+        # Ticket augmentation is deliberately independent of queue ownership and
+        # active-work capacity. It may add read-only context to a technician-owned
+        # offline ticket, but it never claims, requeues, or changes ticket status.
+        if self._scope_is_promoted(OFFLINE_AUGMENTATION_SCOPE):
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._augment_offline_ticket_context(item)
+                except Exception as exc:
+                    if self.audit is not None:
+                        self.audit.record(
+                            "autonomy.offline_ticket_augmentation.failed",
+                            {
+                                "ticket_id": int(item.resource_id),
+                                "error_type": type(exc).__name__,
+                            },
+                        )
+
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
