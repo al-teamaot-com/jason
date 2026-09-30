@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from jason_runtime.autonomous_completion_notification import (
     AutonomousCompletionTeamsInvoker,
     AutonomousDeploymentCompletionNotificationMaintenance,
+    SelfHealEscalationNotificationMaintenance,
     _render,
 )
 
@@ -107,6 +108,53 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             self.assertEqual(notifier.calls[0][0], "deployment_completed")
             self.assertTrue((root / "notifications" / "request-1.json").exists())
 
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
+    def test_self_heal_escalation_render_is_bounded_and_actionable(self):
+        event, text = _render(
+            {
+                "event_type": "self_heal_escalation",
+                "degraded_function": "jason_mcp_status",
+                "evidence_summary": "status surface failed twice",
+                "attempt_summary": "restarted jason-mcp-pilot and rechecked",
+                "owner_action": "review missing external dependency",
+            }
+        )
+        self.assertEqual(event, "self_heal_escalation")
+        self.assertIn("owner action", text.casefold())
+        self.assertIn("jason_mcp_status", text)
+
+    def test_self_heal_escalation_notifies_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            escalations = root / "escalations"
+            escalations.mkdir(parents=True)
+            fingerprint = "abc123"
+            (escalations / f"{fingerprint}.json").write_text(
+                json.dumps(
+                    {
+                        "state": "owner_action_required",
+                        "fingerprint": fingerprint,
+                        "degraded_function": "mcp status",
+                        "evidence_summary": "functional probe failed",
+                        "attempt_summary": "two bounded restarts failed",
+                        "owner_action": "review provider dependency",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            notifier = Notifier()
+            maintenance = SelfHealEscalationNotificationMaintenance(
+                notifier=notifier,
+                spool_root=root,
+                interval_seconds=30,
+                now=lambda: datetime(2026, 9, 30, 7, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertEqual(notifier.calls[0][0], "self_heal_escalation")
+            self.assertTrue((root / "notifications" / f"{fingerprint}.json").exists())
             maintenance._next_due_at = None
             self.assertFalse(maintenance.tick())
             self.assertEqual(len(notifier.calls), 1)

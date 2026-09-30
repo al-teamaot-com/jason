@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Jason full-function self-heal watchdog every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+Persistent=true
+RandomizedDelaySec=20s
+Unit=jason-self-heal-watchdog.service
+
+[Install]
+WantedBy=timers.target
