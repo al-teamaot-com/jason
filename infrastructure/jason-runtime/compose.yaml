@@ -85,6 +85,9 @@ services:
       JASON_DNSFILTER_ENABLED: ${JASON_DNSFILTER_ENABLED:-false}
       JASON_DNSFILTER_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/dnsfilter/role_id
       JASON_DNSFILTER_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/dnsfilter/secret_id
+      JASON_DARKWEBID_ENABLED: ${JASON_DARKWEBID_ENABLED:-false}
+      JASON_DARKWEBID_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/darkwebid/role_id
+      JASON_DARKWEBID_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/darkwebid/secret_id
       JASON_DNSFILTER_MCP_ENABLED: ${JASON_DNSFILTER_MCP_ENABLED:-false}
       JASON_DNSFILTER_MCP_OAUTH_DB: /var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3
       JASON_SES_REGION: us-east-1
@@ -119,6 +122,8 @@ services:
       - ${JASON_BACKUP_NET_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/secret-id}:/run/jason-secrets/openbao/backup-net/secret_id:ro
       - ${JASON_DNSFILTER_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/role-id}:/run/jason-secrets/openbao/dnsfilter/role_id:ro
       - ${JASON_DNSFILTER_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/secret-id}:/run/jason-secrets/openbao/dnsfilter/secret_id:ro
+      - ${JASON_DARKWEBID_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/role-id}:/run/jason-secrets/openbao/darkwebid/role_id:ro
+      - ${JASON_DARKWEBID_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/secret-id}:/run/jason-secrets/openbao/darkwebid/secret_id:ro
     networks:
       - openclaw
       - core
