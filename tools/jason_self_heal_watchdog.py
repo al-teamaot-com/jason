@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sqlite3
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,12 @@ HEALTH_URL = "http://127.0.0.1:9467/metrics"
 LOCAL_RECOVERY_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
 MAX_RECOVERY_ATTEMPTS = 2
 OUTCOME_CONTRACT_DIRNAME = "contracts"
+AUTONOMY_WORK_DB = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+WORKFLOW_STALE_SECONDS = {
+    "vulscan_client_notification_verify_complete": 15 * 60,
+    "vulscan_client_notification_verify_monitoring": 15 * 60,
+    "low_disk_verify": 30 * 60,
+}
 
 
 
@@ -142,6 +149,64 @@ def operational_outcome_contract_failures(root: Path) -> tuple[list[str], list[d
     return sorted(set(failures)), evidence
 
 
+def stale_operational_work_failures(
+    db_path: Path = AUTONOMY_WORK_DB,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    if not db_path.exists():
+        return [], []
+    failures: list[str] = []
+    evidence: list[dict[str, Any]] = []
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT ticket_id,ticket_number,playbook_id,phase,updated_at,last_reason "
+            "FROM autonomy_operational_work"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return ["autonomy_work_health_read_failed"], [
+            {"error_class": type(exc).__name__}
+        ]
+    finally:
+        try:
+            connection.close()
+        except (UnboundLocalError, sqlite3.Error):
+            pass
+
+    current = datetime.now(timezone.utc)
+    for row in rows:
+        phase = str(row["phase"] or "")
+        threshold = WORKFLOW_STALE_SECONDS.get(phase)
+        if threshold is None:
+            continue
+        updated = _parse_iso8601(row["updated_at"])
+        age_seconds = (
+            (current - updated).total_seconds()
+            if updated is not None
+            else None
+        )
+        record = {
+            "ticket_id": int(row["ticket_id"]),
+            "ticket_number": str(row["ticket_number"] or ""),
+            "playbook_id": str(row["playbook_id"] or ""),
+            "phase": phase,
+            "updated_at": str(row["updated_at"] or ""),
+            "age_seconds": age_seconds,
+            "last_reason": str(row["last_reason"] or "")[:300],
+        }
+        evidence.append(record)
+        if age_seconds is None or age_seconds > threshold:
+            failures.append(
+                "workflow_outcome_stale:"
+                + str(row["playbook_id"] or "unknown")[:80]
+                + ":"
+                + phase[:100]
+                + ":ticket="
+                + str(row["ticket_id"])
+            )
+    return sorted(set(failures)), evidence
+
+
 def container_running(name: str) -> bool:
     result = run(["docker", "inspect", name, "--format", "{{.State.Running}}"], timeout=10)
     return result.returncode == 0 and result.stdout.strip().casefold() == "true"
@@ -216,6 +281,10 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     outcome_failures, outcome_evidence = operational_outcome_contract_failures(root)
     evidence["operational_outcome_contracts"] = outcome_evidence
     failures.extend(outcome_failures)
+
+    workflow_failures, workflow_evidence = stale_operational_work_failures()
+    evidence["stale_operational_work"] = workflow_evidence
+    failures.extend(workflow_failures)
 
     metrics, metric_error = health_metrics()
     evidence["health_exporter_error"] = metric_error
