@@ -124,17 +124,78 @@ At the point this record was written:
 - runtime composition tests pass.
 - live provider-backed connector acceptance passes.
 
+## Production activation closure
+
+Production activation completed on 2026-09-30.
+
+### Durable authority
+
+Before adding Dark Web ID read authority, the production authority database was backed up with SQLite's online backup API:
+
+`/var/lib/jason/authority/authority.sqlite3.backup-darkwebid-read-20260930T154920Z`
+
+The backup passed `PRAGMA integrity_check` and was mode `0600`. Exactly one durable grant was then added through `tools/identity_authority_admin.py`:
+
+- grant ID: `grant-aot-darkwebid-provider-read-observe`;
+- subject: `organization:aot`;
+- capability: `provider-read:darkwebid`;
+- organization: `aot`;
+- client: none;
+- permission: `observe`;
+- approval required: false;
+- status: active.
+
+The production authority grant count changed exactly from 163 to 164. The provider-read matcher constrains this grant to active registered read-only capabilities advertised by `darkwebid`; it does not grant Dark Web ID mutation authority.
+
+### Production runtime deployment
+
+The Dark Web ID connector merged through PR #650. The production runtime was activated with:
+
+- `JASON_DARKWEBID_ENABLED=true`;
+- role-id path `/run/jason-secrets/openbao/darkwebid/role_id`;
+- secret-id path `/run/jason-secrets/openbao/darkwebid/secret_id`;
+- both AppRole artifacts mounted read-only from `/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/`.
+
+The hardened runtime deployment passed health verification and retained rollback state. A subsequent normal production refresh advanced the final running source to `d266912382e65e3061c43c87c88f254738ccb4ac`, which is a descendant of the Dark Web ID merge `aa6720bb3c5facdfe3386312e4a5761c61789464`. The Dark Web ID enablement and read-only mounts remained present after that refresh.
+
+### Central Orchestrator production acceptance
+
+A production authority context was issued for `person-al` under `grant-aot-darkwebid-provider-read-observe`, then the live runtime Central Orchestrator executed:
+
+`credential.exposure.organization.search`
+
+with `page=0`, `limit=200`, and `permission_mode=observe`.
+
+Result:
+
+- authority outcome: `allowed`;
+- provider selected: `darkwebid`;
+- orchestration status: `succeeded`;
+- reason: `capability_completed`;
+- provider attempts: 1;
+- records returned: 15;
+- secret values printed: false;
+- provider mutation attempted: false.
+
+### MCP production activation and external acceptance
+
+Because Jason MCP composes its own governed runtime application, `jason-mcp-pilot` was separately activated with the same Dark Web ID enablement flag and read-only AppRole mounts. Hardened deployment health passed and `MCP_GOVERNANCE_POSTCHECK=PASS` confirmed Central Orchestrator governance remained active with direct provider access disabled.
+
+The externally connected Jason MCP then discovered the active canonical capabilities `credential.exposure.organization.search` and `credential.exposure.organization.read`. A live `execute_read_capability` call for `credential.exposure.organization.search` completed successfully with:
+
+- provider: `darkwebid`;
+- reason: `capability_completed`;
+- records returned: 15;
+- evidence warnings: 0.
+
+Only status, provider, record count, schema shape, and warnings count were recorded during acceptance. Organization names, domains, email addresses, and credentials were not printed.
+
 ## Current operational boundary
 
-The provider credential and provider-backed connector behavior are verified on the Jason host. The feature branch has not yet been merged/deployed into the production runtime container at the time of this record. Therefore the Dark Web ID runtime provider must remain configured/pending deployment verification in the System Registry until a post-deployment Central Orchestrator read succeeds.
+Dark Web ID is now a verified production read provider for governed organization inventory. Jason may autonomously use the two registered read-only organization capabilities within their AOT-internal scope and existing authority model. No Dark Web ID create, update, delete, monitored-domain, user, notification, reporting, or other mutation capability is registered or authorized by this activation.
 
 ## Next stage
 
-After governed merge/deployment:
-
-1. enable `JASON_DARKWEBID_ENABLED=true` with the new read-only AppRole mounts;
-2. verify the runtime execution-provider registry selects Dark Web ID for the canonical organization-search capability;
-3. execute a post-deployment Central Orchestrator read and record production evidence;
-4. promote the System Registry provider lifecycle to verified;
-5. add credential-exposure/live-search resources only from exact vendor-documented endpoints and with client-boundary controls;
-6. treat all provider-supported writes as separate governed capabilities with exact execution-plan binding, authorization, idempotency where applicable, post-action readback, and explicit rollback/recovery rules.
+1. Add credential-exposure/live-search resources only from exact vendor-documented endpoints and with client-boundary controls.
+2. Correlate Dark Web ID organizations/domains to Autotask companies through the canonical entity-correlation model before exposing client-scoped compromise evidence.
+3. Treat all provider-supported writes as separate governed capabilities with exact execution-plan binding, authorization, idempotency where applicable, post-action readback, and explicit rollback/recovery rules.
