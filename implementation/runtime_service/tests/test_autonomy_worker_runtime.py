@@ -3800,6 +3800,125 @@ def test_structured_letters_only_hostname_correlates_within_company_before_datto
     store.close()
 
 
+
+def test_missing_ci_ambiguous_hostname_uses_two_signal_identity_score(tmp_path: Path):
+    class ScoredCorrelationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.10",
+                            "mac_address": "AA:BB:CC:DD:EE:01",
+                            "serial_number": "SERIAL-A",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                            "mac_address": "AA:BB:CC:DD:EE:02",
+                            "serial_number": "SERIAL-B",
+                        },
+                    ]}},
+                }
+            if capability == "service.configuration.search":
+                assert arguments == {"company_id": 507, "name": "PC-1", "page_size": 25}
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{
+                        "id": 1583,
+                        "companyID": 507,
+                        "isActive": True,
+                        "referenceNumber": "device-b",
+                        "referenceTitle": "PC-1",
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(
+        title="[Monitor] Antivirus status issue PC-1 192.168.1.20 AA:BB:CC:DD:EE:02"
+    )
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=ScoredCorrelationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    ci_id = worker._associate_exact_ticket_device(
+        candidate=item, scope=scope, company_id=507
+    )
+
+    assert ci_id == 1583
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "configurationItemID": 1583}]
+    store.close()
+
+
+def test_missing_ci_multi_signal_tie_fails_closed(tmp_path: Path):
+    class TiedCorrelationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                        },
+                    ]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(title="[Monitor] Antivirus status issue PC-1 192.168.1.20")
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=TiedCorrelationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    with pytest.raises(
+        OperationalAutonomyError,
+        match="remains ambiguous after multi-signal scoring",
+    ):
+        worker._associate_exact_ticket_device(
+            candidate=item, scope=scope, company_id=507
+        )
+    store.close()
+
+
 def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_path: Path):
     class InternalCompanyReads(Reads):
         def execute(self, capability, arguments):
