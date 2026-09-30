@@ -12,6 +12,7 @@ EXPORTER_UNITS = (
     "jason-playbook-exporter.service",
     "jason-production-health-exporter.service",
     "jason-resolution-memory-exporter.service",
+    "jason-reflection-exporter.service",
     "jason-security-control-exporter.service",
     "jason-status-exporter.service",
     "jason-usage-attribution-exporter.service",

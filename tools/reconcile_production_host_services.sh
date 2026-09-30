@@ -19,6 +19,7 @@ EXPORTER_UNITS=(
   jason-playbook-exporter.service
   jason-production-health-exporter.service
   jason-resolution-memory-exporter.service
+  jason-reflection-exporter.service
   jason-security-control-exporter.service
   jason-status-exporter.service
   jason-usage-attribution-exporter.service
@@ -45,12 +46,13 @@ EXPORTER_SCRIPTS=(
   playbook_exporter.py
   production_health_exporter.py
   resolution_memory_exporter.py
+  reflection_exporter.py
   security_control_exporter.py
   status_exporter.py
   usage_attribution_exporter_runtime.py
   usage_exporter.py
 )
-VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472)
+VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476)
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: root privileges are required for systemd reconciliation." >&2
