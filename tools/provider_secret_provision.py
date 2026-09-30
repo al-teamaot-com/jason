@@ -192,6 +192,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "bng_gateway": {
+        "logical_name": "bng_gateway.runtime",
+        "secret_path": "secret/data/connectors/bng-gateway/production/runtime",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-bng-gateway-secret-read",
+        "role_name": "jason-bng-gateway-secret-read",
+        "connector_identity": "bng-gateway",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/bng-gateway-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

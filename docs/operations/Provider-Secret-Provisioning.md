@@ -362,6 +362,39 @@ This first foundation is read-only. It uses organization-scoped network, policy,
 
 Source review is complete. Production REST activation remains gated on the dedicated provider API key, OpenBao provisioning, exact client-boundary records, explicit read authority, and controlled provider-backed acceptance.
 
+## BNG Gateway API contract
+
+Lifecycle provider key: `bng_gateway`
+
+Logical secret: `bng_gateway.runtime`
+
+Approved provider path:
+
+`secret/data/connectors/bng-gateway/production/runtime`
+
+Durable OpenBao field:
+
+- `api_key`
+
+Runtime identity:
+
+- policy: `jason-bng-gateway-secret-read`
+- AppRole: `jason-bng-gateway-secret-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/bng-gateway-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+The OpenBao runtime identity may read only this one encrypted BNG credential record and may self-revoke its short-lived service token. This secret registration does not by itself authorize any BNG payment, refund, void, recurring-billing, vault, or other provider operation. External BNG capabilities remain subject to Jason capability registration, governance, execution-plan binding, and provider-side permission review.
+
+Provision and verify with the canonical lifecycle:
+
+```bash
+clear
+cd /home/al/projects/jason
+sudo python3 tools/provider_secret.py create bng_gateway
+sudo python3 tools/provider_secret.py verify bng_gateway
+```
+
 ## DNSFilter MCP OAuth session
 
 DNSFilter MCP does not reuse the REST API key. It uses the provider-supported per-user OAuth flow for `https://mcp.dnsfilter.com/mcp`.

@@ -172,6 +172,26 @@ def test_dnsfilter_contract_uses_canonical_readonly_path_and_fields() -> None:
     assert spec["credential_file_mode"] == 0o640
 
 
+def test_bng_gateway_contract_uses_canonical_runtime_path_and_fields() -> None:
+    spec = PROVIDERS["bng_gateway"]
+    assert spec["logical_name"] == "bng_gateway.runtime"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/bng-gateway/production/runtime"
+    )
+    assert spec["fields"] == ("api_key",)
+    assert spec["required_fields"] == ("api_key",)
+    assert spec["policy_name"] == "jason-bng-gateway-secret-read"
+    assert spec["role_name"] == "jason-bng-gateway-secret-read"
+    assert spec["connector_identity"] == "bng-gateway"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/bng-gateway-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
@@ -276,6 +296,7 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert '"kyocera_kfs.readonly"' in source
     assert '"backup_net.readonly"' in source
     assert '"backup_net.fullaccess"' in source
+    assert '"bng_gateway.runtime"' in source
     assert '"aws_ses.sendmail"' in source
 
 
