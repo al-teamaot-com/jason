@@ -1252,6 +1252,51 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Begin with Draft Assist only. Review promotion only after sufficient real-ticket Proposed Reply history demonstrates recipient accuracy, evidence quality, low edit/reject rates, no information leakage, correct stale-draft handling, and reliable communication-class decisions.
 
+### TODO-COMM-005 — Customer outcome, resolution-signal, and sentiment review
+
+- **Priority:** P1
+- **Status:** Proposed
+- **Risk level:** Moderate
+- **Idea:** Add a governed process that reviews customer-facing Autotask tickets and related approved correspondence for two related signals: **(1) whether the customer is indicating that the reported issue is resolved, and (2) the customer's current satisfaction/sentiment and how it is trending over time.**
+- **Why it matters:** Many client-facing tickets remain open after the technical work is complete because no technician notices a simple closing reply such as “everything’s great,” “that fixed it,” or “we’re all set.” The same correspondence also contains useful service-quality signals: frustration, confusion, confidence, appreciation, urgency, or declining satisfaction. Capturing both can improve queue hygiene, follow-up quality, account awareness, and client experience.
+- **Core resolution rule:** A positive client reply is **resolution evidence**, not blind closure authority. Jason must review the full current ticket state and authoritative technical evidence before concluding the issue is resolved.
+- **Core sentiment rule:** Sentiment is a **service-quality indicator**, not a statement of fact about the customer and not authority to close, escalate, bill, discipline, or make personnel decisions. The meter should be evidence-backed, confidence-bounded, and trend-oriented rather than pretending emotional tone can be measured perfectly.
+- **Initial resolution behavior:**
+  1. Detect new client replies on customer-facing tickets regardless of current queue/status.
+  2. Classify the reply as `explicitly_resolved`, `positive_but_ambiguous`, `not_resolved`, `new_issue_introduced`, or `unrelated`.
+  3. Bind the reply to the original issue/question rather than treating generic politeness alone as proof of resolution.
+  4. Re-read current ticket state, recent technician/Jason notes, open monitoring/security alerts, pending jobs/rechecks, and any playbook-specific completion criteria that are available.
+  5. If the client explicitly confirms success and no authoritative evidence contradicts that conclusion, mark the ticket as a candidate for resolved/complete disposition.
+  6. If technical evidence still shows an unresolved condition, do not close; document the contradiction and continue/escalate the existing workflow.
+  7. If the reply introduces a new symptom or request, preserve the original resolution state and route the new issue appropriately rather than silently closing or expanding scope.
+  8. Suppress duplicate processing of the same client reply and require post-write readback for any eventual ticket-status change.
+- **Initial sentiment behavior:**
+  1. Analyze only approved customer-facing correspondence tied to the authenticated client/contact/ticket context.
+  2. Produce a bounded sentiment state such as `very_positive`, `positive`, `neutral`, `concerned`, or `negative`, plus a confidence indicator and the specific textual/service signals supporting the classification.
+  3. Track **trend** separately from point-in-time tone: `improving`, `stable`, `declining`, or `insufficient_history`.
+  4. Distinguish satisfaction with the **issue outcome**, the **support interaction**, and the **overall relationship** when evidence allows; do not collapse these into one conclusion without support.
+  5. Aggregate carefully at ticket, contact, and client/account level. A single frustrated email must not redefine the entire account.
+  6. Surface meaningful changes such as repeated negative interactions, a sharp decline after multiple tickets, or sustained positive feedback for account-management awareness.
+  7. Preserve the underlying evidence references so technicians can inspect why Jason classified the sentiment that way.
+- **Examples of strong completion signals:** “Everything’s great, thank you”; “That fixed it”; “Working now”; “We’re all set”; “You can close this”; “Problem solved.”
+- **Examples that are insufficient by themselves:** “Thanks”; “Looks better”; “I think it’s okay”; “I’ll let you know”; “No problem”; reactions/emojis without context.
+- **Sentiment safeguards:**
+  - never infer protected traits, health, intent, or personality from tone;
+  - never treat punctuation, capitalization, or short replies alone as reliable dissatisfaction;
+  - account for technical frustration that may be directed at the problem rather than AOT;
+  - do not use sentiment as an employee performance score without a separately approved policy and stronger evidence;
+  - store confidence and evidence, not just a naked numeric score;
+  - allow technician correction when Jason misreads tone;
+  - preserve client isolation and minimum-necessary data use.
+- **Suggested meter:** Internally expose both a human-readable state and an optional normalized service-sentiment index for dashboards, for example **-2 to +2** (`very_negative` to `very_positive`). The numeric value is for aggregation/trending only; the underlying categorical state, confidence, evidence, and trend remain authoritative.
+- **Potential dashboard views:** current client sentiment, 30/90-day trend, number of positive/negative interactions, unresolved tickets with declining sentiment, recently resolved tickets with explicit positive confirmation, and clients whose satisfaction trend changed materially.
+- **Closure safeguard:** Security incidents, backup failures, patch/reboot-dependent work, monitoring alerts, or any ticket with unresolved verification requirements must still satisfy their playbook-specific authoritative completion criteria even when the client reports success.
+- **Recommended rollout:** Start as a **resolution-candidate + sentiment-observation / technician-assist** function. Jason should add an internal recommendation or surface likely-resolved tickets and sentiment changes on a dashboard. Only after real-ticket acceptance proves reliable classification should any narrow class be promoted to autonomous ticket closure.
+- **Prerequisites:** governed customer-facing ticket/reply reads; exact client/contact binding; reliable reply chronology; playbook-specific completion-state reads; durable duplicate suppression; communication classification; evidence/citation storage; technician correction/feedback capture; dashboard/telemetry support; and governed Autotask status update/readback for any later autonomous closure.
+- **Acceptance test:** Run against a bounded historical/controlled set containing explicit resolution confirmations, polite-but-ambiguous replies, unresolved complaints, newly introduced issues, mixed sentiment, and changes from negative to positive after remediation. Require high precision on autonomous-resolution candidates, prove unresolved technical evidence overrides positive language, prove sentiment trend is evidence-backed and correctable, and prove no cross-client leakage.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Begin design after client-reply detection and customer-facing communication evidence are reliably available. Promote closure authority only after enough real-ticket evidence demonstrates safe resolution classification and low false-close risk.
+
 ### TODO-OPS-005 — Client Security/Posture Review
 
 - **Priority:** P1
