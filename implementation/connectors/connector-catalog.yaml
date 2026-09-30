@@ -237,6 +237,29 @@ connectors:
       - Network and policy reads must prove the mapped organization relationship where the provider response exposes it.
       - Roaming-agent reads are organization-filtered collections; direct agent-by-ID reads remain unregistered until response scope can be independently proven.
       - REST is the unattended posture/evidence plane; no DNSFilter REST mutation capability is registered.
+  darkwebid:
+    status: live_read_acceptance_passed
+    priority: 12
+    mode: governed_read_first
+    secret: darkwebid.runtime
+    api_host: https://secure.darkwebid.com
+    capabilities:
+      - darkwebid.organization.search
+      - darkwebid.organization.read
+    canonical_mappings:
+      credential.exposure.organization.search: darkwebid.organization.search
+      credential.exposure.organization.read: darkwebid.organization.read
+    live_enablement_gate:
+      - dedicated_partner_api_user
+      - web_services_access_enabled
+      - jason_public_ipv4_allowlisted
+      - openbao_secret_provisioning
+      - controlled_read_only_acceptance
+    notes:
+      - Live HTTP Basic authentication was validated from Jason using the dedicated integration identity without printing credentials.
+      - The initial connector exposes organization inventory reads only; no Dark Web ID create, update, delete, monitor, user, notification, or reporting mutation is registered.
+      - Provider-side write permission never grants Jason mutation authority; later writes require separate governed capabilities and execution-plan binding.
+      - The reserved ID Agent credential_exposure resource family should converge onto this Dark Web ID implementation as exposure-search endpoints are added from verified vendor documentation.
   dnsfilter_mcp:
     status: foundation_built_oauth_pending
     priority: 11

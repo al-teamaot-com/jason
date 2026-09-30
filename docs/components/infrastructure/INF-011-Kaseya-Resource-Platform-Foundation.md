@@ -19,7 +19,7 @@ Examples:
 - VulScan exposes vulnerability and asset-exposure resources.
 - Graphus exposes email-detection resources.
 - BullPhish exposes campaign and training-state resources.
-- ID Agent exposes credential-exposure resources.
+- Dark Web ID (formerly represented in this catalog as ID Agent) exposes credential-exposure resources; the first governed provider implementation is the Dark Web ID organization-inventory read connector.
 
 These names describe Jason's canonical resource model. They do not assert that every provider API is already deployed or that every vendor supports the same fields.
 
@@ -71,7 +71,7 @@ The resource catalog reserves governed families for:
 - VulScan
 - Graphus
 - BullPhish
-- ID Agent
+- Dark Web ID (ID Agent credential-exposure family)
 
 Provider adapters are implemented only when an approved API, authentication contract, and client-boundary model have been verified. Jason must not invent endpoints or scrape unsupported interfaces to satisfy the catalog.
 
@@ -98,6 +98,6 @@ Future IT Glue document/checklist updates, Datto RMM component execution, Autota
 
 ## Deployment status
 
-**Repository foundation built; provider convergence and live adapters pending host validation.**
+**Repository foundation built. Dark Web ID is the first credential-exposure provider with a provider-backed read adapter validated on the Jason host; production runtime deployment verification is pending. Other reserved provider families remain subject to their own implementation and acceptance gates.**
 
-No new credential, provider request, or mutation is introduced by this foundation.
+The Dark Web ID implementation introduces a dedicated governed credential and read-only organization-inventory provider request path. It introduces no Dark Web ID mutation authority.

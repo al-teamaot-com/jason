@@ -192,6 +192,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "darkwebid": {
+        "logical_name": "darkwebid.runtime",
+        "secret_path": "secret/data/connectors/darkwebid/production/runtime",
+        "fields": ("username", "password"),
+        "required_fields": ("username", "password"),
+        "policy_name": "jason-darkwebid-secret-read",
+        "role_name": "jason-darkwebid-secret-read",
+        "connector_identity": "darkwebid",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/darkwebid-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
     "saas_alerts": {
         "logical_name": "saas_alerts.readonly",
         "secret_path": "secret/data/connectors/saas-alerts/production/read-only",

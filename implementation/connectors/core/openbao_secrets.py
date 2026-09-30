@@ -90,6 +90,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "dnsfilter.readonly": (
         "secret/data/connectors/dnsfilter/production/read-only"
     ),
+    "darkwebid.runtime": (
+        "secret/data/connectors/darkwebid/production/runtime"
+    ),
     "saas_alerts.readonly": (
         "secret/data/connectors/saas-alerts/production/read-only"
     ),
@@ -134,6 +137,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "backup_net.readonly": frozenset({"client_id", "client_secret"}),
     "backup_net.fullaccess": frozenset({"client_id", "client_secret"}),
     "dnsfilter.readonly": frozenset({"api_key"}),
+    "darkwebid.runtime": frozenset({"username", "password"}),
     "saas_alerts.readonly": frozenset({"api_key", "partner_id"}),
 }
 
