@@ -362,6 +362,41 @@ This first foundation is read-only. It uses organization-scoped network, policy,
 
 Source review is complete. Production REST activation remains gated on the dedicated provider API key, OpenBao provisioning, exact client-boundary records, explicit read authority, and controlled provider-backed acceptance.
 
+## Kaseya Quote Manager read-only API contract
+
+Lifecycle provider key: `kqm`
+
+Logical secret: `kqm.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/kqm/production/read-only`
+
+Durable OpenBao field:
+
+- `api_key`
+
+Runtime identity:
+
+- policy: `jason-kqm-read`
+- AppRole: `jason-kqm-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/kqm-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Kaseya documents the Kaseya Quote Manager API as read-only. The production API base is `https://api.kaseyaquotemanager.com`; requests use the provider-issued API key as the documented `apiKey`/`apikey` query parameter. Page numbers start at 1 with up to 100 records per page. Kaseya documents limits of 60 calls per minute and 20,000 calls per rolling 24-hour period, with HTTP 429 returned when throttled. Large result sets should use `modifiedAfter` for incremental retrieval.
+
+This credential registration authorizes only secret resolution. Jason must not infer any KQM mutation capability from the API key because the documented public API is read-only.
+
+Provision and verify with the canonical lifecycle:
+
+```bash
+clear
+cd /home/al/projects/jason
+sudo python3 tools/provider_secret.py create kqm
+sudo python3 tools/provider_secret.py verify kqm
+```
+
 ## DNSFilter MCP OAuth session
 
 DNSFilter MCP does not reuse the REST API key. It uses the provider-supported per-user OAuth flow for `https://mcp.dnsfilter.com/mcp`.

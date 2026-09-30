@@ -192,6 +192,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "kqm": {
+        "logical_name": "kqm.readonly",
+        "secret_path": "secret/data/connectors/kqm/production/read-only",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-kqm-read",
+        "role_name": "jason-kqm-read",
+        "connector_identity": "kqm-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/kqm-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
