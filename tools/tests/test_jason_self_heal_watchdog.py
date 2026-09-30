@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 
@@ -71,3 +72,59 @@ def test_escalation_payload_requires_owner_action(tmp_path):
     assert payload["attempts"] == 2
     assert "Owner action" not in payload["owner_action"]
     assert payload["owner_action"]
+
+
+def test_outcome_contract_overdue_is_detected(tmp_path):
+    contracts = tmp_path / module.OUTCOME_CONTRACT_DIRNAME
+    contracts.mkdir(parents=True)
+    payload = {
+        "contract_id": "notify-123",
+        "function": "client_notification",
+        "state": "pending",
+        "verify_by": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "evidence_summary": "ticket note created; NotificationHistory not yet verified",
+    }
+    (contracts / "notify-123.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    failures, evidence = module.operational_outcome_contract_failures(tmp_path)
+
+    assert failures == [
+        "outcome_contract_overdue:client_notification:notify-123"
+    ]
+    assert evidence[0]["contract_id"] == "notify-123"
+    assert evidence[0]["state"] == "pending"
+
+
+def test_verified_outcome_contract_is_healthy(tmp_path):
+    contracts = tmp_path / module.OUTCOME_CONTRACT_DIRNAME
+    contracts.mkdir(parents=True)
+    payload = {
+        "contract_id": "notify-verified",
+        "function": "client_notification",
+        "state": "verified",
+        "verify_by": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
+        "evidence_summary": "NotificationHistory readback confirmed recipient/send",
+    }
+    (contracts / "notify-verified.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    failures, evidence = module.operational_outcome_contract_failures(tmp_path)
+
+    assert failures == []
+    assert evidence[0]["state"] == "verified"
+
+
+def test_failed_jason_units_are_detected(monkeypatch):
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "jason-provider-health-canary.service loaded failed failed x\n"
+                "unrelated.service loaded failed failed x\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(module, "run", fake_run)
+    assert module.failed_jason_user_units() == [
+        "jason-provider-health-canary.service"
+    ]
