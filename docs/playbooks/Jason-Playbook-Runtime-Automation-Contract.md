@@ -308,6 +308,30 @@ Rules:
 - cross-client evidence never satisfies site presence;
 - the runtime should expose this evidence so Low Disk, BackupIQ, EDR/AV, VulScan, patching, offline, and future playbooks can consume one consistent availability model.
 
+## 8B. Response Urgency and Time-to-Awareness Contract
+
+Diagnosis completeness and incident awareness are separate concerns.
+
+A playbook may declare a response-urgency policy when delaying communication would materially affect service, safety, security, or business operations.
+
+The runtime should support separate clocks for:
+- time to first useful classification;
+- time to technician/operations awareness;
+- time to full diagnosis;
+- time to remediation;
+- time to authoritative resolution.
+
+Rules:
+- a high-impact incident must not remain silent solely because Jason is still collecting evidence;
+- early communication should state the current evidence, probable scope, confidence, next step, and whether human action is required;
+- preliminary classification must be explicitly updateable as new evidence arrives;
+- "investigation not complete" is context, not an acceptable substitute for a useful current status;
+- early notification never expands execution authority or bypasses disruption/approval gates;
+- approved client-facing communication remains separately governed from internal AOT notification;
+- timers and thresholds are declared by the individual playbook or service policy rather than hard-coded globally.
+
+This contract is especially applicable to site outages, security incidents, backup infrastructure failures, and other conditions where time-to-awareness matters independently of time-to-resolution.
+
 ## 9. Waiting Is First-Class
 
 Waiting is legitimate operational work.
