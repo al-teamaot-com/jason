@@ -282,6 +282,50 @@ class OfflineReads(Reads):
         return super().execute(capability, arguments)
 
 
+class DebOnlineWhileDrmmOfflineReads(OfflineReads):
+    def execute(self, capability, arguments):
+        if capability == "backup.endpoint.asset.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "deb-current",
+                                "name": "PC-1",
+                                "status": "online",
+                                "backupEnabled": True,
+                                "lastSuccessfulBackupTimestamp": "2026-09-30T17:20:00Z",
+                            }
+                        ]
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+class DebOfflineWhileDrmmOfflineReads(OfflineReads):
+    def execute(self, capability, arguments):
+        if capability == "backup.endpoint.asset.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "deb-offline",
+                                "name": "PC-1",
+                                "status": "offline",
+                                "backupEnabled": True,
+                                "lastOnlineTimestamp": "2026-09-29T17:20:00Z",
+                            }
+                        ]
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
 def test_recoverable_block_is_retried_after_backoff(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
@@ -4350,6 +4394,114 @@ def test_dispatched_job_resumes_same_job_when_endpoint_returns_online(tmp_path: 
     ]
     assert updates == [{"id": 140933, "status": "In Progress"}]
     assert not any(capability == "automation.component.execute" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_waiting_job_uses_deb_online_to_poll_existing_job_without_redispatch(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    reads = DebOnlineWhileDrmmOfflineReads()
+    reads.job_status = "active"
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "health_wait"
+    assert current.job_uid == "job-existing"
+    assert "DEB independently reports the endpoint online" in current.last_reason
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "status": "In Progress"}]
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(notes) == 1
+    assert notes[0]["title"] == "Jason - Device Availability - DRMM Access"
+    assert "DEB online state=Yes" in notes[0]["description"]
+    assert not any(
+        capability == "automation.component.execute"
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_waiting_device_access_is_corroborated_when_drmm_and_deb_are_offline(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=DebOfflineWhileDrmmOfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "waiting_device_access:health_wait"
+    assert "availability=offline_corroborated" in current.last_reason
+    assert store.list_open() == ()
+    assert actions.calls == []
+    store.close()
+
+
+def test_waiting_device_access_records_unconfirmed_when_deb_is_unavailable(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "waiting_device_access:health_wait"
+    assert "availability=drmm_offline_unconfirmed" in current.last_reason
+    assert actions.calls == []
     store.close()
 
 
