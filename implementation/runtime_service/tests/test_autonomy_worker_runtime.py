@@ -5078,3 +5078,81 @@ def test_operational_work_store_appends_ticket_activity_and_seeds_existing_state
     assert [(row["phase"], row["reason"], row["occurred_at"]) for row in seeded] == [
         ("complete", "verified complete", "2026-09-29T01:05:00+00:00")
     ]
+
+
+def _owned_vulscan_candidate(*, status_label: str = "New") -> QueueCandidate:
+    return QueueCandidate(
+        resource_id="149001",
+        priority=100,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 149001,
+            "ticketNumber": "T20260930.9001",
+            "title": "Vulnerability Detected by VulScan - PC-1",
+            "companyID": 507,
+            "configurationItemID": 1583,
+            "_jason_source_status_label": status_label,
+        },
+    )
+
+
+class InactiveConfigurationReads(Reads):
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            result = super().execute(capability, arguments)
+            result["evidence"]["data"]["item"]["isActive"] = False
+            return result
+        return super().execute(capability, arguments)
+
+
+def test_owned_nonretryable_admission_block_hands_off_instead_of_staying_new(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_vulscan_candidate()),
+        reads=InactiveConfigurationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        interval_seconds=60,
+    )
+
+    worker.tick()
+
+    persisted = store.get(149001)
+    assert persisted is not None
+    assert persisted.phase == "escalated"
+    updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
+    assert {"id": 149001, "queueID": "Help Desk I", "status": "Human Review"} in updates
+    assert any(call[1] == "service.ticket.note.create" for call in actions.calls)
+
+
+class Provider500ConfigurationReads(Reads):
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            return {"status": "failed", "error_code": "PROVIDER_HTTP_STATUS_500"}
+        return super().execute(capability, arguments)
+
+
+def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jason(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_vulscan_candidate()),
+        reads=Provider500ConfigurationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        interval_seconds=60,
+    )
+
+    worker.tick()
+
+    persisted = store.get(149001)
+    assert persisted is not None
+    assert persisted.phase == "blocked"
+    updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
+    assert {"id": 149001, "status": "In Progress"} in updates
+    assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
