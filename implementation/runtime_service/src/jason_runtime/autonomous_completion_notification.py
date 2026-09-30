@@ -54,6 +54,7 @@ _ALLOWED_EVENTS = frozenset(
         "patch_completed",
         "deployment_completed",
         "support_item_resolved",
+        "self_heal_escalation",
     }
 )
 
@@ -275,6 +276,10 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
         "hostname",
         "patch_summary",
         "resolution_summary",
+        "degraded_function",
+        "evidence_summary",
+        "attempt_summary",
+        "owner_action",
     }
     unknown = set(arguments) - allowed
     if unknown:
@@ -294,6 +299,18 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
         text = (
             "Jason autonomous deployment completed successfully. "
             f"Support item {support}; live revision {candidate[:12]}… verified healthy."
+        )
+        return event, text
+
+    if event == "self_heal_escalation":
+        degraded = _bounded(arguments.get("degraded_function"), "degraded_function", 160)
+        evidence = _bounded(arguments.get("evidence_summary"), "evidence_summary", 400)
+        attempts = _bounded(arguments.get("attempt_summary"), "attempt_summary", 400)
+        owner_action = _bounded(arguments.get("owner_action"), "owner_action", 300)
+        text = (
+            "Jason needs owner action to restore full functionality. "
+            f"Degraded function: {degraded}. Evidence: {evidence}. "
+            f"Recovery attempted: {attempts}. Owner action required: {owner_action}."
         )
         return event, text
 
@@ -578,6 +595,87 @@ def build_deployment_notification_maintenance(
     if notifier is None:
         return None
     return AutonomousDeploymentCompletionNotificationMaintenance(
+        notifier=notifier,
+        spool_root=spool_root,
+    )
+
+
+@dataclass(slots=True)
+class SelfHealEscalationNotificationMaintenance:
+    notifier: GovernedAutonomousCompletionNotifier
+    spool_root: Path = Path("/var/lib/jason/openclaw/self-heal")
+    interval_seconds: int = 60
+    now: Any = None
+    _next_due_at: Any = None
+
+    def __post_init__(self) -> None:
+        if self.interval_seconds < 30:
+            raise ValueError("self-heal notification interval must be at least 30 seconds")
+        if self.now is None:
+            from datetime import datetime, timezone
+            self.now = lambda: datetime.now(timezone.utc)
+
+    def tick(self) -> bool:
+        from datetime import timedelta
+        current = self.now()
+        if self._next_due_at is not None and current < self._next_due_at:
+            return False
+        self._next_due_at = current + timedelta(seconds=self.interval_seconds)
+
+        escalations = self.spool_root / "escalations"
+        notified = self.spool_root / "notifications"
+        if not escalations.exists():
+            return False
+        notified.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        handled = False
+        for path in sorted(escalations.glob("*.json"), key=lambda item: item.stat().st_mtime):
+            marker = notified / path.name
+            if marker.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if payload.get("state") != "owner_action_required":
+                continue
+            fingerprint = str(payload.get("fingerprint") or "").strip()
+            if not fingerprint or path.stem != fingerprint:
+                continue
+            self.notifier.send(
+                "self_heal_escalation",
+                degraded_function=str(payload.get("degraded_function") or ""),
+                evidence_summary=str(payload.get("evidence_summary") or ""),
+                attempt_summary=str(payload.get("attempt_summary") or ""),
+                owner_action=str(payload.get("owner_action") or ""),
+            )
+            temp = marker.with_suffix(marker.suffix + ".tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "event_type": "self_heal_escalation",
+                        "fingerprint": fingerprint,
+                        "notified_at": current.isoformat(),
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            os.chmod(temp, 0o600)
+            os.replace(temp, marker)
+            handled = True
+        return handled
+
+
+def build_self_heal_escalation_notification_maintenance(
+    *,
+    notifier: GovernedAutonomousCompletionNotifier | None,
+    spool_root: Path = Path("/var/lib/jason/openclaw/self-heal"),
+):
+    if notifier is None:
+        return None
+    return SelfHealEscalationNotificationMaintenance(
         notifier=notifier,
         spool_root=spool_root,
     )

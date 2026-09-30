@@ -40,6 +40,14 @@ IDENTITY_BINDINGS_DB = Path(
     )
 )
 MAX_RECENT_EVENT_SERIES = int(os.environ.get("JASON_ATTRIBUTION_MAX_RECENT_EVENTS", "250"))
+ORCHESTRATION_EVENT_WINDOW_HOURS = 25
+ORCHESTRATION_EVENT_TYPES = (
+    "orchestration.request.received",
+    "connector.requested",
+    "email.send.attempted",
+    "identity.directory.requested",
+    "identity.directory.completed",
+)
 
 
 def _escape(value: object) -> str:
@@ -165,18 +173,23 @@ def _model_entries() -> list[dict]:
     return result
 
 
-def _orchestration_events() -> list[dict]:
+def _orchestration_events(now: datetime | None = None) -> list[dict]:
+    resolved = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = (resolved - timedelta(hours=ORCHESTRATION_EVENT_WINDOW_HOURS)).isoformat()
+    placeholders = ",".join("?" for _ in ORCHESTRATION_EVENT_TYPES)
     connection = _connect_readonly(ORCHESTRATION_EVENTS_DB)
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT event_id, event_type, execution_id, correlation_id,
                    principal_id, capability_name, payload, occurred_at
             FROM orchestration_events
             WHERE organization_id = ?
+              AND occurred_at >= ?
+              AND event_type IN ({placeholders})
             ORDER BY occurred_at, event_id
             """,
-            (ORGANIZATION_ID,),
+            (ORGANIZATION_ID, cutoff, *ORCHESTRATION_EVENT_TYPES),
         ).fetchall()
     finally:
         connection.close()
@@ -456,7 +469,7 @@ def render_metrics(now: datetime | None = None) -> str:
     orchestration_rows: list[dict] = []
     orchestration_available = 0
     try:
-        orchestration_rows = _orchestration_events()
+        orchestration_rows = _orchestration_events(now)
         orchestration_available = 1
     except (OSError, sqlite3.Error, ValueError):
         pass

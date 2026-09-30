@@ -5316,12 +5316,20 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         connection.execute("PRAGMA query_only = ON")
         rows = connection.execute(
             """
-            SELECT ticket_id,ticket_number,title,playbook_id,phase,
-                   updated_at,last_reason
+            SELECT ticket_id,ticket_number,playbook_id,phase,updated_at
             FROM autonomy_operational_work
             WHERE phase NOT IN ('complete','escalated')
-            ORDER BY updated_at,ticket_id
-            LIMIT 50
+            ORDER BY
+                CASE
+                    WHEN phase NOT LIKE 'waiting_device_access:%'
+                         AND phase NOT IN ('approval_pending','blocked') THEN 0
+                    WHEN phase LIKE 'waiting_device_access:%'
+                         OR phase = 'approval_pending' THEN 1
+                    ELSE 2
+                END,
+                updated_at DESC,
+                ticket_id DESC
+            LIMIT 5
             """
         ).fetchall()
     except (sqlite3.Error, OSError) as error:
@@ -5348,20 +5356,51 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             {
                 "ticket_id": int(row["ticket_id"]),
                 "ticket_number": str(row["ticket_number"] or ""),
-                "title": str(row["title"] or ""),
                 "playbook": str(row["playbook_id"] or ""),
                 "phase": phase,
                 "state": state,
                 "updated_at": str(row["updated_at"] or ""),
-                "reason": str(row["last_reason"] or ""),
             }
         )
+    counts = connection = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{path}?mode=ro",
+            uri=True,
+            timeout=2.0,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        counts = connection.execute(
+            """
+            SELECT
+                SUM(CASE
+                    WHEN phase NOT LIKE 'waiting_device_access:%'
+                         AND phase NOT IN ('approval_pending','blocked','complete','escalated')
+                    THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE
+                    WHEN phase LIKE 'waiting_device_access:%'
+                         OR phase = 'approval_pending'
+                    THEN 1 ELSE 0 END) AS waiting_count,
+                SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
+            FROM autonomy_operational_work
+            WHERE phase NOT IN ('complete','escalated')
+            """
+        ).fetchone()
+    except (sqlite3.Error, OSError):
+        counts = None
+    finally:
+        if connection is not None:
+            connection.close()
+
     return {
         "status": "succeeded",
         "items": items,
-        "active_count": sum(1 for item in items if item["state"] == "ACTIVE"),
-        "waiting_count": sum(1 for item in items if item["state"] == "WAITING"),
-        "blocked_count": sum(1 for item in items if item["state"] == "BLOCKED"),
+        "items_bounded": True,
+        "item_limit": 5,
+        "active_count": int((counts["active_count"] if counts is not None else None) or 0),
+        "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
+        "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
     }
 
 

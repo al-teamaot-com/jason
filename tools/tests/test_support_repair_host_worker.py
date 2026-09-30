@@ -116,3 +116,17 @@ def test_support_issue_intersection_fails_closed_on_stale_rows():
 def test_support_id_from_title_is_exact_and_case_normalized():
     assert worker.support_id_from_title('SUPPORT-OPS-028 — active status') == 'SUPPORT-OPS-028'
     assert worker.support_id_from_title('unrelated issue') is None
+
+
+def test_load_self_heal_incidents_returns_repair_required_items(tmp_path):
+    root = tmp_path / 'self-heal'
+    incidents = root / 'incidents'
+    incidents.mkdir(parents=True)
+    (incidents / 'abc.json').write_text(
+        '{"state":"repair_required","support_item":"SUPPORT-AUTO-ABCDEF123456","priority":"P1","title":"degraded","evidence":"failed","acceptance":"restore"}',
+        encoding='utf-8',
+    )
+    items = worker.load_self_heal_incidents(root)
+    assert len(items) == 1
+    assert items[0]['id'] == 'SUPPORT-AUTO-ABCDEF123456'
+    assert items[0]['acceptance'] == 'restore'
