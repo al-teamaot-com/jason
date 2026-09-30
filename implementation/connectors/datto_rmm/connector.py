@@ -1197,6 +1197,18 @@ class DattoRmmConnector(ConnectorBase):
         hostname = cls._first_scalar(record, "hostname", "name")
         site = cls._first_scalar(record, "siteName", "site_name")
         site_uid = cls._first_scalar(record, "siteUid", "site_uid")
+        serial_number = cls._first_scalar(
+            record, "serialNumber", "serial_number", "serial"
+        )
+        mac_address = cls._first_scalar(
+            record, "macAddress", "mac_address", "mac"
+        )
+        lan_ip = cls._first_scalar(
+            record, "intIpAddress", "internalIpAddress", "lanIpAddress", "lan_ip"
+        )
+        wan_ip = cls._first_scalar(
+            record, "extIpAddress", "externalIpAddress", "wanIpAddress", "wan_ip"
+        )
         if resource_id:
             match["resource_id"] = resource_id
         if hostname:
@@ -1205,6 +1217,14 @@ class DattoRmmConnector(ConnectorBase):
             match["site"] = site
         if site_uid:
             match["site_id"] = site_uid
+        if serial_number:
+            match["serial_number"] = serial_number
+        if mac_address:
+            match["mac_address"] = mac_address
+        if lan_ip:
+            match["lan_ip"] = lan_ip
+        if wan_ip:
+            match["wan_ip"] = wan_ip
         return match
 
     @staticmethod

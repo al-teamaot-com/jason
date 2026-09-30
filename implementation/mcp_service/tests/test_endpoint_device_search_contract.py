@@ -52,3 +52,36 @@ def test_endpoint_search_projects_incomplete_zero_match_as_indeterminate():
         evidence["search"]["incomplete_reason"]
         == "page_limit_reached"
     )
+
+
+def test_endpoint_search_projects_bounded_identity_evidence():
+    evidence = server._project_endpoint_search(
+        {
+            "provider": "datto_rmm",
+            "provider_capability": "datto_rmm.device.search",
+            "data": {
+                "resource_matches": [{
+                    "resource_id": "device-1",
+                    "hostname": "PC-1",
+                    "site": "Client A",
+                    "site_id": "site-1",
+                    "serial_number": "SERIAL-1",
+                    "mac_address": "AA:BB:CC:DD:EE:FF",
+                    "lan_ip": "192.168.1.10",
+                    "wan_ip": "203.0.113.10",
+                }],
+                "provider_data": {
+                    "discovery_mode": "hostname_local_enumeration",
+                    "hostname_reference": "PC-1",
+                    "pages": [],
+                },
+                "discovery_complete": True,
+            },
+        }
+    )
+
+    match = evidence["resource_matches"][0]
+    assert match["serial_number"] == "SERIAL-1"
+    assert match["mac_address"] == "AA:BB:CC:DD:EE:FF"
+    assert match["lan_ip"] == "192.168.1.10"
+    assert match["wan_ip"] == "203.0.113.10"
