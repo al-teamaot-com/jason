@@ -5333,9 +5333,17 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             ORDER BY
                 CASE
                     WHEN phase NOT LIKE 'waiting_device_access:%'
-                         AND phase NOT IN ('approval_pending','blocked') THEN 0
+                         AND phase NOT LIKE 'waiting_recheck:%'
+                         AND phase NOT IN (
+                             'approval_pending','blocked','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         ) THEN 0
                     WHEN phase LIKE 'waiting_device_access:%'
-                         OR phase = 'approval_pending' THEN 1
+                         OR phase LIKE 'waiting_recheck:%'
+                         OR phase IN (
+                             'approval_pending','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         ) THEN 1
                     ELSE 2
                 END,
                 updated_at DESC,
@@ -5356,10 +5364,17 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
     items = []
     for row in rows:
         phase = str(row["phase"] or "")
-        if phase.startswith("waiting_device_access:") or phase in {
-            "approval_pending",
-            "blocked",
-        }:
+        if (
+            phase.startswith("waiting_device_access:")
+            or phase.startswith("waiting_recheck:")
+            or phase in {
+                "approval_pending",
+                "waiting_patch_approval",
+                "waiting_patch_window",
+                "waiting_client_notification_authority",
+                "blocked",
+            }
+        ):
             state = "WAITING" if phase != "blocked" else "BLOCKED"
         else:
             state = "ACTIVE"
@@ -5387,11 +5402,20 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             SELECT
                 SUM(CASE
                     WHEN phase NOT LIKE 'waiting_device_access:%'
-                         AND phase NOT IN ('approval_pending','blocked','complete','escalated')
+                         AND phase NOT LIKE 'waiting_recheck:%'
+                         AND phase NOT IN (
+                             'approval_pending','blocked','complete','escalated',
+                             'waiting_patch_approval','waiting_patch_window',
+                             'waiting_client_notification_authority'
+                         )
                     THEN 1 ELSE 0 END) AS active_count,
                 SUM(CASE
                     WHEN phase LIKE 'waiting_device_access:%'
-                         OR phase = 'approval_pending'
+                         OR phase LIKE 'waiting_recheck:%'
+                         OR phase IN (
+                             'approval_pending','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         )
                     THEN 1 ELSE 0 END) AS waiting_count,
                 SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
             FROM autonomy_operational_work

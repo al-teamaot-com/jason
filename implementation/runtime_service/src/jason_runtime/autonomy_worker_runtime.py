@@ -1451,6 +1451,19 @@ class OperationalAutonomyMaintenance:
                 ):
                     self.store.delete(ticket_id)
                     existing = None
+                elif existing.phase == "blocked":
+                    try:
+                        self._synchronize_blocked_ticket_lifecycle(existing, item)
+                    except Exception as exc:
+                        if self.audit is not None:
+                            self.audit.record(
+                                "autonomy.blocked_ticket_lifecycle_sync.failed",
+                                {
+                                    "ticket_id": ticket_id,
+                                    "error_type": type(exc).__name__,
+                                },
+                            )
+                    existing = self.store.get(ticket_id)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 observed_version = str(item.source_version or "").strip() or None
                 # A human-review handoff remains terminal while it stays outside
@@ -2018,24 +2031,70 @@ class OperationalAutonomyMaintenance:
         )
         return True
 
-    def _recoverable_block_retry_due(self, work: OperationalWork) -> bool:
+    @staticmethod
+    def _block_is_retryable(work: OperationalWork) -> bool:
         reason = str(work.last_reason or "").casefold()
-        retryable = any(
+        return any(
             token in reason
             for token in (
                 "governed read failed",
                 "database is locked",
                 "execution_plan_authorization_rejected",
                 "datto_component_autonomy_requires_standing_safe",
+                "provider_http_status_500",
+                "provider_http_status_502",
+                "provider_http_status_503",
+                "provider_http_status_504",
             )
         )
-        if not retryable:
+
+    def _recoverable_block_retry_due(self, work: OperationalWork) -> bool:
+        if not self._block_is_retryable(work):
             return False
         updated = self._parse_iso_timestamp(work.updated_at)
         if updated is None:
             return False
         age = (datetime.now(timezone.utc) - updated).total_seconds()
         return age >= RECOVERABLE_BLOCK_RETRY_SECONDS
+
+    def _synchronize_blocked_ticket_lifecycle(self, work: OperationalWork, candidate) -> None:
+        if str(candidate.source_queue).strip().casefold() != "jason":
+            return
+        status_label = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip()
+        if self._block_is_retryable(work):
+            if status_label.casefold() == "new":
+                self.actions.execute(
+                    self._scope_for_work(work),
+                    "service.ticket.update",
+                    {
+                        "payload": {
+                            "id": work.ticket_id,
+                            "status": "In Progress",
+                        }
+                    },
+                )
+            return
+
+        self._write_note(
+            work,
+            (
+                "Jason cannot safely continue this ticket automatically. "
+                f"Blocker: {work.last_reason}. "
+                "The ticket is being returned to Help Desk I for technician review "
+                "instead of remaining untriaged in the Jason queue."
+            ),
+            "Jason - Human Review Required",
+        )
+        self._handoff_to_helpdesk(work, status="Human Review")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=work.last_reason,
+            )
+        )
 
     def _classify_persisted_work(self, ticket_id: int) -> tuple[str, str]:
         current = self.store.get(ticket_id)
@@ -6426,6 +6485,17 @@ class OperationalAutonomyMaintenance:
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
         self.store.put(work)
+        try:
+            self._synchronize_blocked_ticket_lifecycle(work, candidate)
+        except Exception as exc:
+            if self.audit is not None:
+                self.audit.record(
+                    "autonomy.blocked_ticket_lifecycle_sync.failed",
+                    {
+                        "ticket_id": ticket_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
     def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
         normalized_title = " ".join(str(title).split())

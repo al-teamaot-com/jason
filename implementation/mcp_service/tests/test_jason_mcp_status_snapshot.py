@@ -39,6 +39,10 @@ def test_autonomy_work_snapshot_bounds_items_but_counts_full_state(tmp_path, mon
         [
             (2001, "TW1", "waiting", "test", "waiting_device_access:check", "2026-09-30T02:00:00+00:00", "waiting"),
             (2002, "TW2", "approval", "test", "approval_pending", "2026-09-30T02:01:00+00:00", "waiting"),
+            (2003, "TW3", "patch approval", "test", "waiting_patch_approval", "2026-09-30T02:02:00+00:00", "waiting"),
+            (2004, "TW4", "patch window", "test", "waiting_patch_window", "2026-09-30T02:03:00+00:00", "waiting"),
+            (2005, "TW5", "authority", "test", "waiting_client_notification_authority", "2026-09-30T02:04:00+00:00", "waiting"),
+            (2006, "TW6", "recheck", "test", "waiting_recheck:provider", "2026-09-30T02:05:00+00:00", "waiting"),
             (3001, "TA1", "active", "test", "diagnosing", "2026-09-30T03:00:00+00:00", "active"),
         ]
     )
@@ -57,7 +61,7 @@ def test_autonomy_work_snapshot_bounds_items_but_counts_full_state(tmp_path, mon
     assert snapshot["item_limit"] == 5
     assert len(snapshot["items"]) == 5
     assert snapshot["active_count"] == 1
-    assert snapshot["waiting_count"] == 2
+    assert snapshot["waiting_count"] == 6
     assert snapshot["blocked_count"] == 25
     assert snapshot["items"][0]["state"] == "ACTIVE"
     assert all("title" not in item for item in snapshot["items"])
