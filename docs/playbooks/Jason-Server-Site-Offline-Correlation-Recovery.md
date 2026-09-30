@@ -1,6 +1,6 @@
 # Jason Playbook: Server / Site Offline Correlation & Recovery
 
-Version: 0.1.0-design
+Version: 0.2.0-design
 Playbook ID: server_site_offline
 Status: Owner-approved design direction; source-controlled draft only. No autonomous remediation authority is granted by this document.
 
@@ -9,7 +9,7 @@ Status: Owner-approved design direction; source-controlled draft only. No autono
 playbook:
   id: server_site_offline
   name: Jason - Server / Site Offline Correlation & Recovery
-  version: 0.1.0-design
+  version: 0.2.0-design
   owner: AOT IT Operations
   target_type: ticket
   trigger:
@@ -22,7 +22,7 @@ playbook:
     max_remediation_attempts: 0
   recheck:
     enabled: true
-    cadence: 10 minutes during initial outage confirmation, then policy-driven
+    cadence: rapid incident clock for probable site outage; otherwise 10 minutes during ordinary endpoint confirmation, then policy-driven
     stale_after: role-dependent
   verification:
     authoritative_source: multi-source availability evidence plus originating monitor
@@ -58,7 +58,9 @@ Success means:
 - neighboring managed endpoints and the local gateway are used to distinguish endpoint, segment, and site failures;
 - recovered alerts are independently verified before completion;
 - site-wide incidents are correlated rather than treated as unrelated endpoint failures;
-- no disruptive recovery action occurs without separate explicit authority.
+- no disruptive recovery action occurs without separate explicit authority;
+- a probable site outage produces a useful preliminary incident notification quickly, without waiting for the entire diagnostic workflow to finish;
+- continued investigation enriches the incident after notification rather than delaying awareness.
 
 ## 2. Trigger
 
@@ -301,9 +303,38 @@ Endpoint-specific RMM-agent repair may later call a separate approved playbook r
 
 Network/site remediation requiring restart, failover, adapter reset, equipment reboot, or other disruption is human-review/approval bound.
 
+### Step 7: Rapid outage clock and early incident communication
+
+Purpose:
+Prevent a site outage from sitting in a long diagnostic state while technicians or clients are waiting for awareness.
+
+A site outage is time-sensitive. Jason must separate:
+- time to first useful incident classification;
+- time to full diagnosis;
+- time to remediation.
+
+Jason must not wait for the full playbook to finish before surfacing a probable site outage.
+
+Default design clock:
+- T+0: trigger received; immediately begin identity, peer correlation, and multi-source availability checks.
+- By approximately T+2 minutes: if evidence already shows multiple same-site fixed/infrastructure endpoints unavailable, publish a preliminary AOT incident update such as "Probable site outage - investigation in progress" with the evidence known so far.
+- By approximately T+5 minutes: if the probable site-outage classification remains, route/escalate it as an active site incident with the current best classification, affected-device count, known site-presence evidence, and next diagnostic step.
+- T+10 minutes: perform the ordinary confirmation/recovery recheck, but do not delay the earlier incident notification waiting for this timer.
+
+The timer is an operational response target, not proof of root cause. Jason may state that classification is preliminary while continuing diagnostics.
+
+Communication rules:
+- Never use "Jason isn't done yet" as the operative status for a probable site outage.
+- State what is known now, the current probable scope, what Jason is checking next, and whether human action is required.
+- Technician/AOT notification may occur before final root cause is known.
+- Client-facing notification requires an approved external communication workflow/template; if that authority is unavailable, notify AOT staff immediately rather than delaying the incident internally.
+- If later evidence narrows the event from site outage to a single endpoint or monitoring fault, update the incident classification rather than treating the preliminary notice as an error.
+- Early communication does not authorize disruptive remediation.
+
 ## 10. Retry Policy
 
-- Initial outage confirmation: one 10-minute wait/recheck cycle unless severity/role requires faster handling.
+- Ordinary single-endpoint confirmation: one 10-minute wait/recheck cycle unless severity/role requires faster handling.
+- Probable site outage: do not wait 10 minutes before notification/escalation; use the rapid outage clock in Step 7.
 - Read failures: bounded same-read retry.
 - Ping: small bounded sample; no continuous flood.
 - No remediation retries in v0.1 because this playbook does not autonomously remediate infrastructure.
@@ -311,7 +342,9 @@ Network/site remediation requiring restart, failover, adapter reset, equipment r
 
 ## 11. Periodic Rechecks
 
-Initial recheck: 10 minutes.
+Initial ordinary endpoint recheck: 10 minutes.
+
+Probable site outages use the rapid outage clock for awareness/escalation first, followed by the 10-minute confirmation/recovery recheck.
 
 Recheck:
 - originating monitor;
@@ -399,7 +432,7 @@ Absence of one source does not invalidate other sources, but Jason must state co
 
 Escalate / Human Review when:
 - critical server remains offline after initial confirmation;
-- multiple same-site systems indicate likely site outage;
+- multiple same-site systems indicate likely site outage; this condition is time-sensitive and must enter the rapid outage clock rather than wait for full diagnostics;
 - network/power infrastructure action is required;
 - evidence conflicts materially;
 - endpoint/site identity is uncertain;
@@ -486,11 +519,13 @@ Prove:
 8. multiple peer failures correlate toward segment/site outage;
 9. gateway/site evidence changes outage classification;
 10. ICMP-blocked endpoint is not falsely declared powered off;
-11. unchanged 10-minute recheck creates no duplicate note;
-12. recovered endpoint completes only after authoritative verification;
-13. remote endpoints alone cannot satisfy site recovery;
-14. no disruptive action occurs;
-15. terminal ticket write/readback succeeds.
+11. probable site outage produces an early preliminary incident update without waiting for the 10-minute recheck;
+12. the early update contains current evidence/scope/next step rather than "Jason isn't done yet";
+13. unchanged 10-minute recheck creates no duplicate note;
+14. recovered endpoint completes only after authoritative verification;
+15. remote endpoints alone cannot satisfy site recovery;
+16. no disruptive action occurs;
+17. terminal ticket write/readback succeeds.
 
 ## 22. Section Goal Closure
 
@@ -500,6 +535,7 @@ Close after:
 - provider capability gaps are bound explicitly;
 - controlled test proves remote-laptop rejection and valid site-witness behavior;
 - peer/site correlation works;
+- rapid site-outage notification/escalation timing is proven;
 - 10-minute wait/recheck and duplicate suppression are proven;
 - recovered closure is proven;
 - Grafana/Project Jason status is updated;
@@ -516,6 +552,7 @@ Approved design principles:
 - remote/roaming laptops must not prove office health;
 - multi-source availability evidence is preferred to DRMM-only status;
 - known managed peers are preferred to blind subnet scanning;
-- read-only ping/network probes are diagnostic evidence, not remediation.
+- read-only ping/network probes are diagnostic evidence, not remediation;
+- probable site outages require early useful communication/escalation before full diagnostics complete.
 
 This design approval does not by itself grant unattended production execution authority. Autonomous branches require source-controlled implementation, acceptance evidence, and exact durable promotion under Jason governance.
