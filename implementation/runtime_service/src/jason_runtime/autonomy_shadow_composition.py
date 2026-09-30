@@ -53,6 +53,7 @@ def build_autonomy_shadow_maintenance(
     interval_seconds: int = 1800,
     failure_retry_seconds: int = 300,
     targeted_wake_retry_seconds: int = 300,
+    process_targeted_wakes: bool = True,
 ):
     """Build read-only shadow autonomy or return None with no side effects."""
 
@@ -97,6 +98,8 @@ def build_autonomy_shadow_maintenance(
         interval_seconds=interval_seconds,
         failure_retry_seconds=failure_retry_seconds,
     )
+    if not process_targeted_wakes:
+        return shadow
     targeted_store = SQLiteTargetedWakeStore(targeted_wake_db)
     targeted_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,

@@ -745,6 +745,11 @@ class OperationalAutonomyMaintenance:
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
 
+    def request_reconcile(self, reason: str) -> None:
+        """Request a full queue reconciliation on the next maintenance tick."""
+        del reason
+        self._next_due = 0.0
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:

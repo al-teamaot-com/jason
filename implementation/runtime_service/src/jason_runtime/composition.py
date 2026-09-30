@@ -1991,6 +1991,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+        process_targeted_wakes=not settings.autonomy_worker_enabled,
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,
@@ -2039,9 +2040,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         orchestrator=orchestrator,
         work_db=settings.autonomy_worker_db,
         promotion_db=settings.autonomy_promotion_db,
+        targeted_wake_db=settings.autonomy_targeted_wake_db,
         owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
         max_active_work_items=settings.autonomy_max_active_work_items,
         interval_seconds=settings.autonomy_worker_interval_seconds,
+        targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
         audit=reflection_audit,
         completion_notifier=autonomous_completion_notifier,
     )
