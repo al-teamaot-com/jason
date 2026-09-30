@@ -334,6 +334,44 @@ Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jas
 
 For the controlled acceptance case, Autotask company search independently resolved **Deborah Gittens Virtuol Designs LLC** to company ID **1627**. Ticket `T20260922.0063` itself currently reports `companyID=0`, so the ticket field must not be used as the Backup.net boundary source.
 
+## Dark Web ID API credential contract
+
+Lifecycle provider key: `darkwebid`
+
+Logical secret: `darkwebid.runtime`
+
+Approved provider path:
+
+`secret/data/connectors/darkwebid/production/runtime`
+
+Durable OpenBao fields:
+
+- `username`
+- `password`
+
+Runtime secret identity:
+
+- policy: `jason-darkwebid-secret-read`
+- AppRole: `jason-darkwebid-secret-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Dark Web ID authenticates its External API with HTTP Basic Authentication using a partner-user email address and that user's Dark Web ID-specific password. API access additionally requires `Permit access to web services` and the calling system's static public IPv4 address in the user's IP Address whitelist. The approved production API base is `https://secure.darkwebid.com/`.
+
+The credential contract is intentionally named `runtime` rather than `readonly` because the current Dark Web ID v2 API includes organization/domain provisioning operations in addition to read/search operations. Provider-side credential permission does not grant Jason mutation authority. Initial Jason connector activation remains read-only; provisioning or other write capabilities require separate governed capability registration, exact target/payload binding, authorization, and post-action verification.
+
+For the dedicated AOT integration identity, use `jason@teamaot.com` with its Dark Web ID-specific API password. Never use the KaseyaOne password or paste the Dark Web ID password into chat, Git, command arguments, logs, or evidence.
+
+Provision and verify with the canonical lifecycle:
+
+```bash
+clear
+cd /home/al/projects/jason
+sudo python3 tools/provider_secret.py create darkwebid
+sudo python3 tools/provider_secret.py verify darkwebid
+```
+
 ## DNSFilter read-only API contract
 
 Logical secret: `dnsfilter.readonly`
