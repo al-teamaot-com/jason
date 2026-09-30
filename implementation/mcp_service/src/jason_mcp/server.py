@@ -685,7 +685,16 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
 
         match: dict[str, Any] = {}
 
-        for key in ("resource_id", "hostname", "site", "site_id"):
+        for key in (
+            "resource_id",
+            "hostname",
+            "site",
+            "site_id",
+            "serial_number",
+            "mac_address",
+            "lan_ip",
+            "wan_ip",
+        ):
             value = item.get(key)
             if value is not None and str(value).strip():
                 match[key] = _safe(value)
@@ -780,8 +789,10 @@ def _project_endpoint_read(output: Mapping[str, Any]) -> dict[str, Any]:
         ("site", ("site", "siteName")),
         ("site_id", ("site_id", "siteUid", "siteId")),
         ("device_type", ("deviceType",)),
-        ("lan_ip", ("intIpAddress", "lan_ip")),
-        ("wan_ip", ("extIpAddress", "wan_ip")),
+        ("serial_number", ("serialNumber", "serial_number", "serial")),
+        ("mac_address", ("macAddress", "mac_address", "mac")),
+        ("lan_ip", ("intIpAddress", "internalIpAddress", "lanIpAddress", "lan_ip")),
+        ("wan_ip", ("extIpAddress", "externalIpAddress", "wanIpAddress", "wan_ip")),
         ("operating_system", ("operatingSystem", "operating_system")),
         ("last_logged_in_user", ("lastLoggedInUser", "last_logged_in_user")),
         ("domain", ("domain",)),
