@@ -208,6 +208,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "saas_alerts": {
+        "logical_name": "saas_alerts.readonly",
+        "secret_path": "secret/data/connectors/saas-alerts/production/read-only",
+        "fields": ("api_key", "partner_id"),
+        "required_fields": ("api_key", "partner_id"),
+        "policy_name": "jason-saas-alerts-read",
+        "role_name": "jason-saas-alerts-read",
+        "connector_identity": "saas-alerts-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/saas-alerts-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
