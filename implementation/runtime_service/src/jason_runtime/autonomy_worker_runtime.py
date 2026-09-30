@@ -1006,7 +1006,7 @@ class OperationalAutonomyMaintenance:
         if state == "offline_corroborated":
             return (
                 "availability=offline_corroborated; DRMM and DEB independently "
-                "report the endpoint offline; waiting for device access; "
+                "report the endpoint offline; waiting for exact endpoint access; "
                 f"deb_asset={deb.selected_asset_id or 'unknown'}; "
                 f"deb_activity={activity}."
             )
@@ -1623,8 +1623,22 @@ class OperationalAutonomyMaintenance:
                             )
                     else:
                         reason = self._device_wait_reason(access_state, deb)
-                        if reason != existing.last_reason:
-                            existing = self._replace(existing, last_reason=reason)
+                        prior_reason = str(existing.last_reason or "").strip()
+                        prior_prefix = (
+                            prior_reason.split("availability=", 1)[0].strip(" ;")
+                            if "availability=" in prior_reason
+                            else prior_reason
+                        )
+                        combined_reason = (
+                            f"{prior_prefix}; {reason}"
+                            if prior_prefix
+                            else reason
+                        )
+                        if combined_reason != existing.last_reason:
+                            existing = self._replace(
+                                existing,
+                                last_reason=combined_reason,
+                            )
                             self.store.put(existing)
                         reason_code = (
                             "drmm_access_unavailable_device_online_deb"
